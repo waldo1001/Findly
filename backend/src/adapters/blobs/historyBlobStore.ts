@@ -111,12 +111,43 @@ async function listDeviceIds(container: ContainerClient, familyId: string, userI
   return deviceIds.sort();
 }
 
-/** Deletes every blob under `prefix` in `container` (`deleteIfExists` is itself
- * not-found-tolerant, so no try/catch is needed here — 002 §4.2 idempotency idiom). */
-async function deletePrefix(container: ContainerClient, prefix: string): Promise<void> {
-  for await (const blob of container.listBlobsFlat({ prefix })) {
-    await container.getBlobClient(blob.name).deleteIfExists();
+// 002 §4.2 "Bounding and the retry contract" — erasure walks are unbounded in principle
+// (history spans up to the full retention per device; the events rewrite inspects every
+// events/{familyId}/ day-blob for the family's lifetime), so these MUST run with bounded
+// parallelism rather than one-at-a-time sequential round-trips, or a long-lived family risks
+// the Functions request timeout. Not unbounded Promise.all either — that would open one
+// connection per blob at once, which for a very large family could itself exhaust resources.
+const ERASURE_CONCURRENCY = 16;
+
+/** Runs `fn` over `items` with at most `concurrency` in flight at once — a plain worker-pool
+ * (no external dependency): each of `concurrency` workers pulls the next item off a shared
+ * cursor until the list is exhausted. A single item's rejection propagates (via `Promise.all`
+ * on the workers), same fail-fast behavior as a sequential loop would have had. */
+async function mapWithConcurrency<T>(items: T[], concurrency: number, fn: (item: T) => Promise<void>): Promise<void> {
+  let cursor = 0;
+  async function worker(): Promise<void> {
+    while (cursor < items.length) {
+      const index = cursor;
+      cursor += 1;
+      await fn(items[index] as T);
+    }
   }
+  const workers = Array.from({ length: Math.min(concurrency, items.length) }, () => worker());
+  await Promise.all(workers);
+}
+
+/** Deletes every blob under `prefix` in `container` (`deleteIfExists` is itself
+ * not-found-tolerant, so no try/catch is needed here — 002 §4.2 idempotency idiom).
+ * Bounded-parallel (002 §4.2) — a family's full history/events prefix can span thousands of
+ * day blobs across every member/device. */
+async function deletePrefix(container: ContainerClient, prefix: string): Promise<void> {
+  const blobNames: string[] = [];
+  for await (const blob of container.listBlobsFlat({ prefix })) {
+    blobNames.push(blob.name);
+  }
+  await mapWithConcurrency(blobNames, ERASURE_CONCURRENCY, async (blobName) => {
+    await container.getBlobClient(blobName).deleteIfExists();
+  });
 }
 
 export class BlobHistoryStore implements HistoryStore {
@@ -307,9 +338,12 @@ export class BlobHistoryStore implements HistoryStore {
     for await (const blob of this.eventsContainer.listBlobsFlat({ prefix })) {
       blobPaths.push(blob.name);
     }
-    for (const blobPath of blobPaths) {
+    // Bounded-parallel (002 §4.2): a long-lived family's events/ prefix has one day-blob per
+    // day of family lifetime, and every one of them must be inspected (the subject's lines
+    // may be in any of them) — sequential one-at-a-time round-trips risk the request timeout.
+    await mapWithConcurrency(blobPaths, ERASURE_CONCURRENCY, async (blobPath) => {
       await eraseSubjectFromEventDayBlob(this.eventsContainer, blobPath, userId);
-    }
+    });
   }
 }
 
