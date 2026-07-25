@@ -21,7 +21,7 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
-        android:name=".WaldoApplication"
+        android:name=".FindlyApplication"
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
@@ -29,27 +29,27 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:label="@string/app_name"
         android:networkSecurityConfig="@xml/network_security_config"
-        android:theme="@style/Theme.Waldo">
+        android:theme="@style/Theme.Findly">
 
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:theme="@style/Theme.Waldo">
+            android:theme="@style/Theme.Findly">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
             <!-- A5 (specs/005-temporary-groups.md, specs/003-android-client.md §12.2): the
-                 app's first and only external deep link, waldo://group-join?code=XXXXXXXX. A
+                 app's first and only external deep link, findly://group-join?code=XXXXXXXX. A
                  custom scheme (not an android:autoVerify https App Link), so no digital-asset-
                  links verification is needed; the `code` query param is untrusted input and is
-                 sanitized in WaldoNavHost/GroupJoinCodeSanitizer before any network call. -->
+                 sanitized in FindlyNavHost/GroupJoinCodeSanitizer before any network call. -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="waldo" android:host="group-join" />
+                <data android:scheme="findly" android:host="group-join" />
             </intent-filter>
 
             <!-- A6 (specs/007-public-join-links.md, specs/003-android-client.md §12.3): the
@@ -58,13 +58,13 @@
                  §3, using the same SHA-256 signing fingerprints as the Firebase/App Check
                  registration). ${joinLinkHost} is a Gradle manifest placeholder sourced from the
                  same JOIN_LINK_HOST build-config value (app/build.gradle.kts) so the two can
-                 never drift apart. Unlike the waldo:// filter above, the join code lives in the
+                 never drift apart. Unlike the findly:// filter above, the join code lives in the
                  URL FRAGMENT (007 §1) — irrelevant to this intent-filter's own host/path matching
-                 (and, unlike the waldo:// filter's `code` query param, never delivered to a
+                 (and, unlike the findly:// filter's `code` query param, never delivered to a
                  server/CDN/proxy at all) — so it is read directly off the delivered Uri and
-                 sanitized in MainActivity/WaldoNavHost via GroupJoinHttpsLinkParser, the same
+                 sanitized in MainActivity/FindlyNavHost via GroupJoinHttpsLinkParser, the same
                  whitelist gate as the filter above. A wrong host or path is ignored, never
-                 mis-routed (007 §4); the waldo:// filter above remains supported unchanged (007
+                 mis-routed (007 §4); the findly:// filter above remains supported unchanged (007
                  §1: backward compatibility). -->
             <intent-filter android:autoVerify="true">
                 <action android:name="android.intent.action.VIEW" />

@@ -19,11 +19,11 @@ fail=0
 
 echo "== checking $FILE =="
 
-# 1. No URI-scheme reference other than the in-app waldo:// deep link — this is the
+# 1. No URI-scheme reference other than the in-app findly:// deep link — this is the
 #    single allowed exception (specs/007 §2's "Open in the app" affordance). Anything
 #    else with a "scheme://" shape (http, https, ftp, protocol-relative-looking tokens,
 #    a CDN URL, etc.) is a spec violation.
-external_urls=$(grep -oE '[A-Za-z][A-Za-z0-9+.-]*://[^"'"'"'[:space:]<>]*' "$FILE" | grep -vi '^waldo://' || true)
+external_urls=$(grep -oE '[A-Za-z][A-Za-z0-9+.-]*://[^"'"'"'[:space:]<>]*' "$FILE" | grep -vi '^findly://' || true)
 if [[ -n "$external_urls" ]]; then
   echo "FAIL: external URL reference(s) found:" >&2
   echo "$external_urls" >&2

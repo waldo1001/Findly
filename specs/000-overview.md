@@ -1,4 +1,4 @@
-# 000 — Where's waldo: product overview (canonical)
+# 000 — Findly: product overview (canonical)
 
 ## Goal
 
@@ -82,7 +82,7 @@ See [`specs/README.md`](README.md). Summary: spec-driven (no code before spec), 
 | O7 | **Privacy / GDPR** | Children's location data, EU users: family-delete + per-member data-export endpoints need a numbered spec **before any public release**. Retention policy (002 §4) is the first step. **Triggered (2026-07-22):** the convention plan (007 + store distribution) makes this the pre-launch critical path — the export/delete spec must be authored before any store release (gate tracked in `docs/store-readiness.md`). |
 | O8 | **Notification localization** | v1 pushes carry server-composed English text plus structured data; clients MAY re-render locally. Proper i18n later. |
 | O9 | **Geofences above 20** | iOS caps monitored regions at 20/app — hence `maxGeofences: 20`. A paid tier above 20 would need client-side nearest-region rotation. |
-| O10 | **Trademark** | "Where's Waldo/Wally" is the book franchise's mark. Fine private; revisit before public store branding. **Escalated (2026-07-22):** printed convention QR materials + store listings make the naming decision a pre-launch gate (H7, `docs/store-readiness.md`); it also decides any future custom join-link domain (007 §6). |
+| O10 | **Trademark → RESOLVED 2026-07-25** | "Where's Waldo/Wally" is the book franchise's registered mark — unsafe for public store branding. **Decision:** renamed to **Findly** (public store/product name **and** every internal identifier; bundle ids `com.findly.ios` / `com.findly.android`). This also settles any future custom join-link domain (007 §6). Remaining under H7: the legal half (privacy policy + ToS). |
 | O11 | **Phone-number surfacing** | The ID token's `phone_number` claim is deliberately unused in v1 (006 §2). Showing numbers on rosters later is additive (`VerifiedToken` gains an optional field) but is a children's-PII decision — bundle with O7. |
 | O12 | **Number change / account linking** | v1: a changed phone number = a new account, re-invite to family/groups (006 §1). If that ever hurts, an account-linking flow (verify old + new number, remap or re-key) needs its own numbered spec. |
 | O13 | **Per-group sharing pause** | v1: `trackingEnabled` is device-global (a paused device reports nowhere); "stop sharing with this group" = leave and rejoin later (005 §3). A per-(device, group) pause would need its own settings rows + piggyback changes — spec it only if leaving proves too blunt. |

@@ -65,14 +65,14 @@ jobs:
           {
             "project_info": {
               "project_number": "000000000000",
-              "project_id": "waldo-ci-placeholder",
-              "storage_bucket": "waldo-ci-placeholder.appspot.com"
+              "project_id": "findly-ci-placeholder",
+              "storage_bucket": "findly-ci-placeholder.appspot.com"
             },
             "client": [
               {
                 "client_info": {
                   "mobilesdk_app_id": "1:000000000000:android:0000000000000000000000",
-                  "android_client_info": { "package_name": "com.whereswaldo.android" }
+                  "android_client_info": { "package_name": "com.findly.android" }
                 },
                 "oauth_client": [],
                 "api_key": [{ "current_key": "CI-PLACEHOLDER-NOT-A-REAL-API-KEY" }],

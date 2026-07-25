@@ -2,7 +2,7 @@
 
 ## Goal
 
-The complete, normative wire contract for the Where's waldo backend. Backend, Android, and iOS sessions build against this document independently; **any shape not defined here does not exist**. Storage layouts live in [002](002-storage-schema.md); product context in [000](000-overview.md).
+The complete, normative wire contract for the Findly backend. Backend, Android, and iOS sessions build against this document independently; **any shape not defined here does not exist**. Storage layouts live in [002](002-storage-schema.md); product context in [000](000-overview.md).
 
 RFC 2119 keywords (MUST/SHOULD/MAY) are used normatively.
 

@@ -1,16 +1,16 @@
-# Design-generation prompt — Where's waldo (iOS + Android)
+# Design-generation prompt — Findly (iOS + Android)
 
-> **How to use this file.** Paste everything under the `--- PROMPT START ---` line into your design tool (Claude, a design-generation model, or a designer brief). It produces **one** cohesive visual design, expressed as concrete values for the **exact design-token contract** both apps already ship. The output drops into each app's swappable `DesignSystem` layer with **zero logic changes** — that layer is the only place styling lives (Android: `mobile/android/app/.../ui/designsystem/`; iOS: `mobile/ios/WaldoKit/Sources/WaldoKit/DesignSystem/`).
+> **How to use this file.** Paste everything under the `--- PROMPT START ---` line into your design tool (Claude, a design-generation model, or a designer brief). It produces **one** cohesive visual design, expressed as concrete values for the **exact design-token contract** both apps already ship. The output drops into each app's swappable `DesignSystem` layer with **zero logic changes** — that layer is the only place styling lives (Android: `mobile/android/app/.../ui/designsystem/`; iOS: `mobile/ios/FindlyKit/Sources/FindlyKit/DesignSystem/`).
 >
 > The two apps currently ship *placeholder* token values that even diverge slightly between platforms (e.g. Android `primary #2962FF` vs iOS `#2F6FED`). The whole point of this pass is to replace them with **one** designed, unified set. Token **names** are already identical across platforms and MUST NOT change (renaming needs a spec PR to `specs/003-android-client.md` §4.1 and `specs/004-ios-client.md` §2.1).
 
 --- PROMPT START ---
 
-You are a senior product designer. Design the complete visual system for **Where's waldo**, a private family location-tracking app, and return it as concrete values for a fixed design-token contract plus component and screen guidance. The design must work **natively on both iOS (SwiftUI) and Android (Jetpack Compose / Material 3)** from a single shared token vocabulary.
+You are a senior product designer. Design the complete visual system for **Findly**, a private family location-tracking app, and return it as concrete values for a fixed design-token contract plus component and screen guidance. The design must work **natively on both iOS (SwiftUI) and Android (Jetpack Compose / Material 3)** from a single shared token vocabulary.
 
 ## 1. Product & audience
 
-Where's waldo is a **private, family-only** location app: parents and their kids (and partners) see each other on a live map, get geofence arrival/departure alerts (e.g. "Noor arrived at Home"), can request an on-demand "locate now", and browse location history. It is explicitly **not** a surveillance product and not social — there is one small trusted circle, no feed, no ads, no strangers.
+Findly is a **private, family-only** location app: parents and their kids (and partners) see each other on a live map, get geofence arrival/departure alerts (e.g. "Noor arrived at Home"), can request an on-demand "locate now", and browse location history. It is explicitly **not** a surveillance product and not social — there is one small trusted circle, no feed, no ads, no strangers.
 
 **Emotional tone: calm, warm, trustworthy, reassuring.** It should feel like a caring family utility, not a tracking dashboard or a security console. Avoid alarm-red-heavy, "command center", or spy aesthetics. Think approachable, legible-at-a-glance, and quietly premium. Kids may use it too, so it should be friendly without being childish.
 
@@ -45,16 +45,16 @@ Produce a value for **every** token below, for **both** light and dark, as **one
 
 Give visual guidance (fills, text roles, radius, elevation, states: default/pressed/disabled/focused) for each, in terms of the tokens above:
 
-- **Button** (`WaldoButton`) — primary and secondary variants.
-- **Card** (`WaldoCard`) — the standard raised container.
-- **List row** (`WaldoListRow`) — a member/device/history/geofence row.
-- **Status chip** (`WaldoStatusChip` / `StatusChip`) — states: **online**, **stale**, **paused**, **danger** (colorblind-safe: color + icon/shape + label).
-- **Map marker bubble** (`WaldoMapMarkerBubble` / `MapMarkerBubble`) — a member's avatar/initial + status ring over map tiles; must read on light and dark maps; include the "stale" and "no location yet" treatments.
-- **Top/nav bar** (`WaldoTopBar` / `WaldoNavBar`).
-- **Empty / loading / error states** (`WaldoEmptyState`/`EmptyStateView`, `WaldoLoadingState`/`LoadingStateView`, `WaldoErrorState`/`ErrorStateView`) — friendly, reassuring copy tone; error state shows a friendly message (never raw server text).
-- **Text field** (`WaldoTextField`) — labeled single-line input (geofence name/icon, invite code, display name).
-- **Toggle row** (`WaldoSwitchRow` / `WaldoToggleRow`) — label + optional subtitle + trailing switch (device pause / tracking, geofence notify-on-enter/exit).
-- **Section header** (`WaldoSectionHeader`, Android) — a titled group label.
+- **Button** (`FindlyButton`) — primary and secondary variants.
+- **Card** (`FindlyCard`) — the standard raised container.
+- **List row** (`FindlyListRow`) — a member/device/history/geofence row.
+- **Status chip** (`FindlyStatusChip` / `StatusChip`) — states: **online**, **stale**, **paused**, **danger** (colorblind-safe: color + icon/shape + label).
+- **Map marker bubble** (`FindlyMapMarkerBubble` / `MapMarkerBubble`) — a member's avatar/initial + status ring over map tiles; must read on light and dark maps; include the "stale" and "no location yet" treatments.
+- **Top/nav bar** (`FindlyTopBar` / `FindlyNavBar`).
+- **Empty / loading / error states** (`FindlyEmptyState`/`EmptyStateView`, `FindlyLoadingState`/`LoadingStateView`, `FindlyErrorState`/`ErrorStateView`) — friendly, reassuring copy tone; error state shows a friendly message (never raw server text).
+- **Text field** (`FindlyTextField`) — labeled single-line input (geofence name/icon, invite code, display name).
+- **Toggle row** (`FindlySwitchRow` / `FindlyToggleRow`) — label + optional subtitle + trailing switch (device pause / tracking, geofence notify-on-enter/exit).
+- **Section header** (`FindlySectionHeader`, Android) — a titled group label.
 
 ## 5. Screens to design (layout + hierarchy, composed from the components above)
 
@@ -76,7 +76,7 @@ For each, describe layout, hierarchy, key states, and any screen-specific visual
 4. **Per-component** styling notes (§4) in token terms.
 5. **Per-screen** layout notes (§5).
 6. **Two platform notes** — one paragraph each on how to keep the shared tokens feeling native on Android (Material 3) vs iOS (HIG).
-7. Optionally, a ready-to-paste block per platform: Kotlin `LightWaldoColors`/`DarkWaldoColors` values and Swift `ColorTokens.light`/`.dark` values, using the exact token names above.
+7. Optionally, a ready-to-paste block per platform: Kotlin `LightFindlyColors`/`DarkFindlyColors` values and Swift `ColorTokens.light`/`.dark` values, using the exact token names above.
 
 Keep every value concrete (hex, numbers) — no "TBD". Prefer a restrained, cohesive palette (one brand hue + one accent + functional success/warning/danger + neutrals) over a rainbow. Optimize for glanceable clarity outdoors and a calm, trustworthy family feel.
 
@@ -84,6 +84,6 @@ Keep every value concrete (hex, numbers) — no "TBD". Prefer a restrained, cohe
 
 ## Applying the result
 
-- Drop the generated color values into **Android** `ui/designsystem/token/` (`LightWaldoColors`, `DarkWaldoColors`, and the typography/spacing/corner/elevation singletons) and **iOS** `DesignSystem/Tokens/` (`ColorTokens.light`/`.dark`, `TypographyTokens.standard`, etc.). Nothing outside `DesignSystem/` should need to change — that is the design-swappable seam both apps were built around (specs/003 §4, specs/004 §2).
-- Re-run each app's design-seam grep to confirm no screen introduced a hardcoded value: Android `grep -rn "Color(" app/src/main/.../ui | grep -v designsystem`; iOS `grep -rn "Color(\|\.font(\.system" WaldoKit/Sources | grep -v DesignSystem`.
+- Drop the generated color values into **Android** `ui/designsystem/token/` (`LightFindlyColors`, `DarkFindlyColors`, and the typography/spacing/corner/elevation singletons) and **iOS** `DesignSystem/Tokens/` (`ColorTokens.light`/`.dark`, `TypographyTokens.standard`, etc.). Nothing outside `DesignSystem/` should need to change — that is the design-swappable seam both apps were built around (specs/003 §4, specs/004 §2).
+- Re-run each app's design-seam grep to confirm no screen introduced a hardcoded value: Android `grep -rn "Color(" app/src/main/.../ui | grep -v designsystem`; iOS `grep -rn "Color(\|\.font(\.system" FindlyKit/Sources | grep -v DesignSystem`.
 - The Android `ComponentGalleryPreview.kt` (and iOS component `#Preview`s, once a full Xcode toolchain is present) render every component in light+dark — use them as the visual regression check after swapping tokens.

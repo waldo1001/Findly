@@ -48,7 +48,7 @@ val hasReleaseSigningMaterial: Boolean =
 
 // A6 (specs/007-public-join-links.md §1, specs/003-android-client.md §12.3): the public join-link
 // host is a deployment constant recorded at provisioning time (H4, docs/azure-setup.md §7) — the
-// join-link SWA (`swa-whereiswaldo`, resource group WhereIsWaldo) was provisioned 2026-07-22; this
+// join-link SWA (`swa-findly`, resource group Findly) was provisioned 2026-07-22; this
 // is its real default hostname. Read into BOTH BuildConfig.JOIN_LINK_HOST (Kotlin code, AppConfig)
 // and the manifest's ${joinLinkHost} placeholder (AndroidManifest.xml's https intent-filter) from
 // this single value so the two can never drift apart. Debug and release intentionally share one
@@ -56,11 +56,11 @@ val hasReleaseSigningMaterial: Boolean =
 val joinLinkHost: String = "gentle-hill-0fae42f03.7.azurestaticapps.net"
 
 android {
-    namespace = "com.whereswaldo.android"
+    namespace = "com.findly.android"
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.whereswaldo.android"
+        applicationId = "com.findly.android"
         minSdk = 26
         targetSdk = 36
         versionCode = 1
@@ -92,7 +92,7 @@ android {
             // cleartext carve-out, and specs/003-android-client.md §13 for the H1 hand-off.
             buildConfigField("String", "BASE_URL", "\"http://10.0.2.2:7071/api/\"")
             buildConfigField("String", "AUTH_MODE", "\"insecure-local\"")
-            buildConfigField("String", "FIREBASE_PROJECT_ID", "\"waldo-dev-placeholder\"")
+            buildConfigField("String", "FIREBASE_PROJECT_ID", "\"findly-dev-placeholder\"")
             buildConfigField("String", "MAPS_API_KEY", "\"$mapsApiKey\"")
             buildConfigField("String", "JOIN_LINK_HOST", "\"$joinLinkHost\"")
             manifestPlaceholders["joinLinkHost"] = joinLinkHost

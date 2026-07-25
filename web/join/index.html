@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Join a Where's waldo group</title>
+<title>Join a Findly group</title>
 <!--
   specs/007-public-join-links.md §2 — the join-link landing page.
 
@@ -161,7 +161,7 @@
 </head>
 <body>
 <main>
-  <h1>Join a Where's waldo group</h1>
+  <h1>Join a Findly group</h1>
   <p class="tagline">A private, temporary location-sharing group for your event.</p>
 
   <section id="code-section" hidden>
@@ -182,7 +182,7 @@
   </section>
 
   <section>
-    <a class="btn btn-primary" id="open-app-link" href="waldo://group-join?code=">Open in the app</a>
+    <a class="btn btn-primary" id="open-app-link" href="findly://group-join?code=">Open in the app</a>
   </section>
 
   <section>
@@ -196,7 +196,7 @@
   <section>
     <p class="code-label">Don't have the app yet?</p>
     <ol>
-      <li>Install Where's waldo once it's available on your app store.</li>
+      <li>Install Findly once it's available on your app store.</li>
       <li>Open the app and re-scan the group's QR code, or enter the code shown above.</li>
     </ol>
   </section>
@@ -260,14 +260,14 @@
     if (!code) {
       codeSection.hidden = true;
       noCodeSection.hidden = false;
-      openAppLink.setAttribute("href", "waldo://group-join?code=");
+      openAppLink.setAttribute("href", "findly://group-join?code=");
       return;
     }
 
     noCodeSection.hidden = true;
     codeSection.hidden = false;
     document.getElementById("code-display").textContent = toDisplayForm(code);
-    openAppLink.setAttribute("href", "waldo://group-join?code=" + code);
+    openAppLink.setAttribute("href", "findly://group-join?code=" + code);
   }
 
   document.getElementById("copy-button").addEventListener("click", function () {

@@ -3,7 +3,7 @@
     "relation": ["delegate_permission/common.handle_all_urls"],
     "target": {
       "namespace": "android_app",
-      "package_name": "com.whereswaldo.android",
+      "package_name": "com.findly.android",
       "sha256_cert_fingerprints": [
         "CHANGE-ME:DEBUG:SHA256:FINGERPRINT:NOT:YET:REGISTERED:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00",
         "CHANGE-ME:RELEASE:SHA256:FINGERPRINT:NOT:YET:REGISTERED:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00"

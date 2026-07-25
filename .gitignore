@@ -14,5 +14,5 @@ Thumbs.db
 # dev-loop git worktrees (created inside the repo by the orchestrator; never committed)
 .claude/worktrees/
 
-# Raw design uploads (keep the extracted design/waldo-design-system/ instead)
+# Raw design uploads (keep the extracted design/findly-design-system/ instead)
 design/*.zip

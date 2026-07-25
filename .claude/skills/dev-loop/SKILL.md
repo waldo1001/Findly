@@ -1,6 +1,6 @@
 ---
 name: dev-loop
-description: Work the Where's waldo backlog (docs/implementation-handoff.md) with strict TDD plus a mandatory code + security review gate per task. "parallel N" runs up to N isolated coding agents concurrently while respecting task dependencies; a task ID (e.g. B2) runs only that task; no args = sequential loop. Use when the user invokes /dev-loop or asks to work through / implement the backlog tasks.
+description: Work the Findly backlog (docs/implementation-handoff.md) with strict TDD plus a mandatory code + security review gate per task. "parallel N" runs up to N isolated coding agents concurrently while respecting task dependencies; a task ID (e.g. B2) runs only that task; no args = sequential loop. Use when the user invokes /dev-loop or asks to work through / implement the backlog tasks.
 argument-hint: "[parallel N] [taskId ...]"
 ---
 
@@ -44,7 +44,7 @@ Both must return an explicit **"approve"** or a findings list — silence is not
 
 ## 5. Coding-agent prompt (fill {…}, include verbatim)
 
-> You are implementing task **{ID}** — {scope} — of the Where's waldo backlog, alone, in an isolated git worktree. **First thing: `git checkout -b devloop/{ID}`** so your branch name is deterministic — the orchestrator merges and messages you by it; do all work there and never touch `main`.
+> You are implementing task **{ID}** — {scope} — of the Findly backlog, alone, in an isolated git worktree. **First thing: `git checkout -b devloop/{ID}`** so your branch name is deterministic — the orchestrator merges and messages you by it; do all work there and never touch `main`.
 > Read in order: `CLAUDE.md`, your task's row and any per-task checklist in `docs/implementation-handoff.md`, then every spec section your task references ({spec refs}). The specs are the contract: if anything is ambiguous or contradictory, STOP and report the ambiguity instead of guessing — the orchestrator will resolve it via a spec fix.
 > Non-negotiable process: strict TDD. Write failing tests first, RUN them and capture the red output, implement minimally, refactor. All of `npm test`, `npm run mutation`, `npm run build` must pass in `backend/` before you finish. Never commit secrets or realistic-looking placeholder credentials (`docs/security-review-checklist.md` — your diff will be security-reviewed against it). Do not touch anything outside your task's scope.
 > Commit in small, spec-referencing commits on your branch; leave zero uncommitted changes.

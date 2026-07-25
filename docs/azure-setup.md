@@ -7,10 +7,10 @@ Everything the cloud side needs before the first deploy. Run by a human with `az
 ```bash
 # ---- adjust these ----
 LOCATION=westeurope
-RG=rg-whereswaldo
-STORAGE=stwhereswaldo          # must be globally unique, 3-24 lowercase alphanumerics
-FUNCAPP=func-whereswaldo       # must be globally unique
-GITHUB_REPO=<owner>/WhereIsWaldo
+RG=rg-findly
+STORAGE=stfindly          # must be globally unique, 3-24 lowercase alphanumerics
+FUNCAPP=func-findly       # must be globally unique
+GITHUB_REPO=<owner>/Findly
 FIREBASE_PROJECT_ID=<your-firebase-project-id>
 # ----------------------
 
@@ -57,7 +57,7 @@ az functionapp config appsettings set -n $FUNCAPP -g $RG --settings \
 
 ```bash
 # App registration used ONLY by GitHub Actions to deploy
-APP_ID=$(az ad app create --display-name gh-whereswaldo-deploy --query appId -o tsv)
+APP_ID=$(az ad app create --display-name gh-findly-deploy --query appId -o tsv)
 az ad sp create --id $APP_ID
 
 # Federated credential: trust pushes to main of this repo
@@ -87,13 +87,13 @@ Then set **repository variables** (Settings → Secrets and variables → Action
 
 Normative requirements in specs/006 §6; this is the click-path. Sign-in is **phone-number-only** (specs/006) — there is no email/password step anymore.
 
-1. Create a Firebase project at console.firebase.google.com; note the **project ID** → `FIREBASE_PROJECT_ID`. *(Done 2026-07-20: `whereiswaldo-30e9c`.)*
+1. Create a Firebase project at console.firebase.google.com; note the **project ID** → `FIREBASE_PROJECT_ID`. *(Done 2026-07-20: `findly-REPLACEME`.)*
 2. **Upgrade to the Blaze plan** (pay-as-you-go) — Phone Auth SMS sending requires it — and set a **Cloud Billing budget alert** (e.g. €5/month). Cost reality: SMS verifications bill per message (~US$0.01 US, ~US$0.06+ Belgium/EU); sign-ins are rare (Firebase refresh tokens keep a device signed in until sign-out/uninstall), so family-scale cost is cents/month — the "few euros/month" target is unaffected. The region allowlist (step 4) is the cost/abuse guardrail.
 3. **Authentication → Sign-in method: enable Phone.** Email/Password and every other provider stay **disabled** (specs/006 §1).
 4. **Authentication → Settings → SMS region policy** — two operating modes since 2026-07-22 (normative: specs/006 §6.3). **Family mode** (now): allow-list only the countries of real users (currently BE, NL); add a country only when a real user actually has a number there. **Open mode** (convention operation, task H8): all regions — allowed **only after** App Check (step 6) is *enforced* on both platforms, together with raising the budget alert (step 2) to €25/month. Never open regions while App Check is still in monitor mode; if the budget alert ever fires, re-narrow to family mode first and investigate (006 §7 runbook).
 5. **Test phone numbers** (Authentication → Sign-in method → Phone → "Phone numbers for testing"): add fictional numbers with fixed OTPs for dev/E2E/store review. The enabled number+code pairs live **only in the console** — an enabled test pair is a working credential; never commit one (docs/tests use obviously fictional `+3247000000x` placeholders). CI is unaffected (unit tests never touch Firebase; the placeholder `google-services.json` stays as-is).
 6. **App Check:** register both apps — Android: **Play Integrity** (requires the debug + release **SHA-256 fingerprints** on the Firebase Android app registration; re-download `google-services.json` afterwards); iOS: **App Attest** (DeviceCheck fallback). Leave enforcement for Authentication in **monitor** mode until both apps demonstrably sign in, then enforce (specs/006 §6.5).
-7. **Android app:** register package id (e.g. `be.wauters.whereswaldo`) **including the step-6 SHA-256s**, download `google-services.json` → `mobile/android/app/` (gitignored).
+7. **Android app:** register package id (e.g. `be.wauters.findly`) **including the step-6 SHA-256s**, download `google-services.json` → `mobile/android/app/` (gitignored).
 8. **iOS app:** register bundle id, download `GoogleService-Info.plist` → gitignored; upload the **APNs auth key** (from the Apple Developer account) into Firebase Cloud Messaging settings. **The APNs key is a phone-auth prerequisite** (silent-push app verification, specs/006 §6.6), not just FCM routing — without it, on-device sign-in falls back to reCAPTCHA, which additionally needs the `REVERSED_CLIENT_ID` custom URL scheme in the app target's Info.plist. Simulator development uses test phone numbers (step 5) and needs neither.
 9. **FCM sending credential** (the system's only stored key — specs/000 §O6): Project settings → Service accounts → *Generate new private key*, then:
    ```bash
@@ -123,21 +123,21 @@ GitHub → Settings → Branches → protect `main`: require the status checks *
 
 One Azure Static Web App (Free tier) hosts the public join-link landing page, the `.well-known` App/Universal Links files (deployed by W1's workflow), and later the legal pages (H7). No secrets: deploys authenticate via the existing OIDC app registration.
 
-*(Done 2026-07-22: `swa-whereiswaldo` in resource group `WhereIsWaldo`, subscription "Visual Studio Enterprise Subscription". **`JOIN_LINK_HOST` = `gentle-hill-0fae42f03.7.azurestaticapps.net`** — recorded in `mobile/android/app/build.gradle.kts`'s `joinLinkHost` val and `mobile/ios/WaldoKit/.../AppConfig.swift`'s `defaultJoinLinkHost`. RBAC granted to `gh-whereiswaldo-deploy` (`722f3f16-…`) — Contributor on the SWA resource. Repo variables `AZURE_STATICWEBAPP_NAME`/`AZURE_STATICWEBAPP_RESOURCE_GROUP` (step 2b) both set.)*
+*(Done 2026-07-22: `swa-findly` in resource group `Findly`, subscription "Visual Studio Enterprise Subscription". **`JOIN_LINK_HOST` = `gentle-hill-0fae42f03.7.azurestaticapps.net`** — recorded in `mobile/android/app/build.gradle.kts`'s `joinLinkHost` val and `mobile/ios/FindlyKit/.../AppConfig.swift`'s `defaultJoinLinkHost`. RBAC granted to `gh-findly-deploy` (`722f3f16-…`) — Contributor on the SWA resource. Repo variables `AZURE_STATICWEBAPP_NAME`/`AZURE_STATICWEBAPP_RESOURCE_GROUP` (step 2b) both set.)*
 
 ```bash
-az staticwebapp create -n swa-whereiswaldo -g WhereIsWaldo -l westeurope --sku Free
-az staticwebapp show   -n swa-whereiswaldo -g WhereIsWaldo --query defaultHostname -o tsv
+az staticwebapp create -n swa-findly -g Findly -l westeurope --sku Free
+az staticwebapp show   -n swa-findly -g Findly --query defaultHostname -o tsv
 ```
 
 1. Record the returned hostname as **`JOIN_LINK_HOST`** (specs/007 §1) — it goes into both apps' build config (003 §13 / 004 §8) and is effectively permanent once QR codes are printed.
 2. Grant the CI principal access so the workflow can fetch the deployment token **at run time** (no stored secret — specs/007 §5):
    ```bash
    az role assignment create --assignee $AZURE_CLIENT_ID --role Contributor \
-     --scope $(az staticwebapp show -n swa-whereiswaldo -g WhereIsWaldo --query id -o tsv)
+     --scope $(az staticwebapp show -n swa-findly -g Findly --query id -o tsv)
    ```
    2b. **The W1 workflow (`.github/workflows/web-join.yml`) also needs two GitHub repo variables** (Settings → Secrets and variables → Actions → Variables) before its `deploy` job will run — it's a no-op until both exist:
-   - `AZURE_STATICWEBAPP_NAME` = `swa-whereiswaldo`
-   - `AZURE_STATICWEBAPP_RESOURCE_GROUP` = `WhereIsWaldo`
+   - `AZURE_STATICWEBAPP_NAME` = `swa-findly`
+   - `AZURE_STATICWEBAPP_RESOURCE_GROUP` = `Findly`
 3. After W1 merges and deploys: verify `https://$JOIN_LINK_HOST/g` renders the landing page, and both `/.well-known/assetlinks.json` and `/.well-known/apple-app-site-association` return JSON with `Content-Type: application/json` and **no redirect** (007 §3).
 4. Custom domain (optional, later — after the O10 naming decision): `az staticwebapp hostname set` + DNS; free managed cert. Old printed QR codes on the default hostname keep working (007 §1).

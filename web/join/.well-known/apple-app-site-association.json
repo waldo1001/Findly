@@ -3,7 +3,7 @@
     "apps": [],
     "details": [
       {
-        "appIDs": ["CHANGE-ME-TEAMID.com.whereswaldo.ios"],
+        "appIDs": ["CHANGE-ME-TEAMID.com.findly.ios"],
         "components": [{ "/": "/g" }]
       }
     ]

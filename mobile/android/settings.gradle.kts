@@ -15,5 +15,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "wheres-waldo-android"
+rootProject.name = "findly-android"
 include(":app")

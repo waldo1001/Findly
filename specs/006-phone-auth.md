@@ -16,7 +16,7 @@ RFC 2119 keywords (MUST/SHOULD/MAY) are used normatively.
 ## 2. Identity
 
 - `userId` remains the opaque Firebase `uid` (001 §1.4). The ID token's `phone_number` claim is **not read, returned, or stored** server-side in v1 — no endpoint needs it (display identity comes from `displayName`; invites/joins use codes, not phone lookup), and phone numbers — including children's — are new PII with GDPR surface (000 §O7) for zero v1 feature benefit. Surfacing it later is purely additive (`VerifiedToken` gains an optional field; no wire change until an endpoint uses it) — tracked in 000 §Open Items.
-- Phone numbers are **PII handled only by the Firebase SDK on-device**: clients MUST NOT send the phone number to the Where's waldo backend, log it, or persist it outside what the Firebase SDK itself stores.
+- Phone numbers are **PII handled only by the Firebase SDK on-device**: clients MUST NOT send the phone number to the Findly backend, log it, or persist it outside what the Firebase SDK itself stores.
 
 ## 3. Phone-number normalization (E.164)
 
@@ -116,7 +116,7 @@ Note: the `emailHint` field on family invites (001 §3.3) deliberately keeps its
 
 ## 9. Error cases
 
-No new 001 §10 error codes: the sign-in flow fails **client-side against Firebase**, before any Where's waldo API call. The closed client-side error set is §4.2. Backend auth errors (`AUTH_MISSING_TOKEN`, `AUTH_INVALID_TOKEN`, `AUTH_TOKEN_EXPIRED`) keep their existing 001 §10 semantics and client handling (refresh-and-retry-once, 001 §2.1).
+No new 001 §10 error codes: the sign-in flow fails **client-side against Firebase**, before any Findly API call. The closed client-side error set is §4.2. Backend auth errors (`AUTH_MISSING_TOKEN`, `AUTH_INVALID_TOKEN`, `AUTH_TOKEN_EXPIRED`) keep their existing 001 §10 semantics and client handling (refresh-and-retry-once, 001 §2.1).
 
 ## 10. Test checklist (conforming clients — pure-logic tests, no Firebase SDK in unit tests)
 

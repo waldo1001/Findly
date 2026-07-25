@@ -1,8 +1,8 @@
 {
-  "name": "whereswaldo-backend",
+  "name": "findly-backend",
   "version": "0.1.0",
   "private": true,
-  "description": "Where's waldo — Azure Functions backend (TypeScript, Node 20, v4 programming model)",
+  "description": "Findly — Azure Functions backend (TypeScript, Node 20, v4 programming model)",
   "main": "dist/src/functions/*.js",
   "engines": {
     "node": ">=20"
