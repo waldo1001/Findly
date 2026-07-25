@@ -213,12 +213,20 @@ Both operations run **synchronously in the request**, are **idempotent** (every 
 
 **Family deletion (`DELETE /families/me`), in order:**
 
-1. Every **other** member's `Users` profile: `familyId`/`role` → null — the auth boundary (001 §1.5) now routes their reports family-less (no history appends) and their family reads to `FAMILY_NOT_FOUND`.
+1. Every **other** member's `Users` profile: `familyId`/`role` → null — the auth boundary (001 §1.5) now routes **newly-arriving** reports family-less (no history appends) and their family reads to `FAMILY_NOT_FOUND`. This closes new requests only; requests already past their auth resolution are handled by the write-time guard below.
 2. `Families` `member:` + `invite:` rows; each `invite:` row's canonical `Invites` row (§2.3) deleted with it.
 3. `Entitlements`, `Usage` partition, `LocateRequests` partition.
 4. Blob prefixes: `history/{familyId}/`, `events/{familyId}/`, `config/{familyId}/`.
 5. `Families` `meta`.
 6. The **caller's** profile flip (`familyId`/`role` → null) **last** — they must remain a parent-with-`familyId` so a retry can re-enter §1.6's role check and resume by `familyId` value (steps 2–5 proceed against a possibly-already-gone meta).
+
+**Write-time family-existence guard (normative — closes the in-flight-request race).** Flipping profiles in step 1 stops *new* requests, but a request that already resolved its auth context (001 §1.5) still holds the old `familyId` and keeps executing. Because the history append is create-if-not-exists, such an in-flight `POST /locations` (001 §5.1) can land **after** the blob prefixes are wiped and silently recreate location coordinates under a family that was just erased — and since privacy deletion is deliberately one-shot with no sweeper (008 §1.2), that remnant would be permanent. It is reachable by any ordinary member with a batch in flight, and it contradicts the erasure guarantee of 008 §1.2/§2.
+
+Therefore: **before the family-scoped history append and the family-keyed usage increment, the ingest path MUST re-verify that the family still exists**, rather than trusting the auth-context snapshot taken at request start. If it has been deleted mid-request, the caller is treated exactly as **family-less** for the remainder of that request (001 §5.1): last-known and group fan-out still apply, the history append is skipped, and usage is recorded under the caller's own `uid` partition. This reuses an existing point read (no new port) and costs one extra transaction per batch on the ingest path — negligible against §5's cost model, and the correct trade for an erasure guarantee.
+
+The guard narrows but cannot mathematically eliminate the window (any check-then-write has one); combined with step 1's flip and the ordering above, the residual is a single in-flight batch, and no unbounded remnant can accumulate.
+
+**Known, accepted edge (self-recoverable):** an invite accepted in the window between step 2's roster snapshot and step 5's meta deletion can leave that new member with a profile pointing at a deleted family plus an orphaned `member:` row. It cannot resurrect the family (001 §3.4 fails closed) and is reachable only via the deleting parent's own concurrent second session; the member self-recovers with `DELETE /users/me` (008 §4.1 is a no-op-safe idempotent path). Not worth a distributed lock.
 
 **Events filtered rewrite (per-subject erasure from interleaved `events/` blobs):** for each `events/{familyId}/{y}/{M}/{d}.jsonl` blob: read all lines + capture the ETag; if no line carries the subject's `userId`, skip; else delete the blob with `If-Match` (a `412` — concurrent append — re-reads and retries, bounded like the §2.9 loop), recreate via create-if-not-exists (swallowing `409` — a §3.2 writer may have recreated it first), and re-append the filtered lines. No line of any *other* member is ever lost: the recreate-race unions the concurrent writer's fresh lines with the re-appended filtered history, and readers already sort (§3.2). Only the current UTC day-blob can race at all — past days are append-dead.
 
