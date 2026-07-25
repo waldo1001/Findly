@@ -86,4 +86,24 @@ export class TableUsageRepo implements UsageRepo {
     }
     return rows;
   }
+
+  /** Wipes every row in the family's partition — every metric, every date (002 §4.2 step 3,
+   * B19). No rowkey filter needed: every row in this partition belongs to familyId by
+   * construction (same idiom as devicesTableRepo.deleteDevicesByOwner). Idempotent. */
+  async deletePartition(familyId: string): Promise<void> {
+    const entities = this.client.listEntities({
+      queryOptions: { filter: odata`PartitionKey eq ${familyId}` },
+    });
+    const rowKeys: string[] = [];
+    for await (const entity of entities) {
+      rowKeys.push(String(entity.rowKey));
+    }
+    await Promise.all(
+      rowKeys.map((rk) =>
+        this.client.deleteEntity(familyId, rk).catch((err) => {
+          if (!isNotFound(err)) throw err;
+        }),
+      ),
+    );
+  }
 }

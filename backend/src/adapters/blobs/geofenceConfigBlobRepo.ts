@@ -93,4 +93,10 @@ export class BlobGeofenceConfigRepo implements GeofenceConfigRepo {
       throw err;
     }
   }
+
+  /** Idempotent (002 §4.2 step 4 — family deletion, B19). */
+  async deleteConfig(familyId: string): Promise<void> {
+    const client = this.container.getBlockBlobClient(this.blobPath(familyId));
+    await client.deleteIfExists();
+  }
 }

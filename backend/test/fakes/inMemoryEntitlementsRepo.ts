@@ -16,4 +16,8 @@ export class InMemoryEntitlementsRepo implements EntitlementsRepo {
     const record = this.records.get(familyId);
     return record ? { ...record } : null;
   }
+
+  async delete(familyId: string): Promise<void> {
+    this.records.delete(familyId);
+  }
 }

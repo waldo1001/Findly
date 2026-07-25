@@ -96,6 +96,14 @@ async function listDeviceIds(container: ContainerClient, familyId: string, userI
   return deviceIds.sort();
 }
 
+/** Deletes every blob under `prefix` in `container` (`deleteIfExists` is itself
+ * not-found-tolerant, so no try/catch is needed here — 002 §4.2 idempotency idiom). */
+async function deletePrefix(container: ContainerClient, prefix: string): Promise<void> {
+  for await (const blob of container.listBlobsFlat({ prefix })) {
+    await container.getBlobClient(blob.name).deleteIfExists();
+  }
+}
+
 export class BlobHistoryStore implements HistoryStore {
   private readonly historyContainer = createContainerClient("history");
   private readonly eventsContainer = createContainerClient("events");
@@ -260,5 +268,12 @@ export class BlobHistoryStore implements HistoryStore {
     }
 
     return { items: results, nextCursor };
+  }
+
+  /** Wipes the whole `history/{familyId}/` and `events/{familyId}/` blob prefixes — family
+   * deletion (001 §13.3, 002 §4.2 step 4, B19). Idempotent. */
+  async deleteFamilyPrefix(familyId: string): Promise<void> {
+    await deletePrefix(this.historyContainer, `${familyId}/`);
+    await deletePrefix(this.eventsContainer, `${familyId}/`);
   }
 }

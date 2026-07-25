@@ -26,4 +26,13 @@ export class InMemoryUsageRepo implements UsageRepo {
     }
     return rows;
   }
+
+  async deletePartition(familyId: string): Promise<void> {
+    const prefix = `${familyId}|`;
+    for (const key of [...this.counts.keys()]) {
+      if (key.startsWith(prefix)) {
+        this.counts.delete(key);
+      }
+    }
+  }
 }

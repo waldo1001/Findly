@@ -55,11 +55,15 @@ export async function acceptInvite(input: AcceptInviteInput, deps: AcceptInviteD
     throw new AppError("INVITE_EXPIRED", "invite code expired");
   }
 
-  // Validate the target family is fully set up before consuming the single-use code,
-  // so an internal-data problem never burns the invite (defense-in-depth, 001 §3.4).
+  // Fail-closed on deleted families (008 §5.3, 001 §3.4): a straggler invite row can
+  // outlive its family (a partial family-deletion failure leaves the canonical Invites row
+  // behind after the meta row is already gone, 002 §2.1). Verify the family still exists
+  // BEFORE consuming the single-use code, and — deliberately — report the exact same
+  // INVITE_INVALID an unknown code would get, so a deleted family can never be resurrected
+  // or even detected through this endpoint.
   const familyMeta = await deps.familyRepo.getFamilyMeta(invite.familyId);
   if (!familyMeta) {
-    throw new AppError("INTERNAL_ERROR", "invite references a missing family");
+    throw new AppError("INVITE_INVALID", "invite references a family that no longer exists");
   }
   const entitlements = await deps.entitlementsRepo.get(invite.familyId);
   if (!entitlements) {

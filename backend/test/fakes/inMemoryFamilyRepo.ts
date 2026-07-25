@@ -1,8 +1,19 @@
-import type { FamilyMember, FamilyMeta, FamilyRepo } from "../../src/ports/repositories";
+import type { FamilyInviteIndexEntry, FamilyMember, FamilyMeta, FamilyRepo } from "../../src/ports/repositories";
 
 export class InMemoryFamilyRepo implements FamilyRepo {
   private readonly meta = new Map<string, FamilyMeta>();
   private readonly members = new Map<string, Map<string, FamilyMember>>();
+  private readonly inviteIndex = new Map<string, Map<string, FamilyInviteIndexEntry>>();
+
+  /** Synchronous test-setup helper (mirrors InMemoryEntitlementsRepo.seed) — bypasses the
+   * conditional-insert semantics of createFamily so callers can seed synchronously inside a
+   * non-async buildDeps(). */
+  seed(meta: FamilyMeta): void {
+    this.meta.set(meta.familyId, { ...meta });
+    if (!this.members.has(meta.familyId)) {
+      this.members.set(meta.familyId, new Map());
+    }
+  }
 
   async createFamily(meta: FamilyMeta): Promise<void> {
     if (this.meta.has(meta.familyId)) {
@@ -56,6 +67,25 @@ export class InMemoryFamilyRepo implements FamilyRepo {
    * without a real storage-level partial-failure race.
    */
   deleteMetaOnlyForTest(familyId: string): void {
+    this.meta.delete(familyId);
+  }
+
+  async addInviteIndexEntry(familyId: string, entry: FamilyInviteIndexEntry): Promise<void> {
+    const index = this.inviteIndex.get(familyId) ?? new Map();
+    index.set(entry.code, { ...entry });
+    this.inviteIndex.set(familyId, index);
+  }
+
+  async listInviteIndexEntries(familyId: string): Promise<FamilyInviteIndexEntry[]> {
+    const index = this.inviteIndex.get(familyId);
+    return index ? [...index.values()].map((e) => ({ ...e })) : [];
+  }
+
+  async removeInviteIndexEntry(familyId: string, code: string): Promise<void> {
+    this.inviteIndex.get(familyId)?.delete(code);
+  }
+
+  async deleteFamilyMeta(familyId: string): Promise<void> {
     this.meta.delete(familyId);
   }
 }

@@ -188,18 +188,35 @@ describe("domain/family/acceptInvite", () => {
     expect(members).toHaveLength(2);
   });
 
-  it("throws INTERNAL_ERROR when the invite references a family with no meta record", async () => {
+  it("fails closed with INVITE_INVALID when the invite references a family with no meta record (deleted family, 008 §5.3/001 §3.4)", async () => {
     const deps = buildDeps();
     // Entitlements ARE seeded (isolating this check from the separate entitlements-missing
     // one below) but familyRepo.createFamily was deliberately never called for FAMILY_ID —
-    // getFamilyMeta returns null even though the invite points at this familyId.
+    // getFamilyMeta returns null even though the invite points at this familyId. This is
+    // exactly the "straggler invite row survives a partially-failed family deletion"
+    // scenario (002 §2.1): acceptance MUST behave identically to an unknown code, never
+    // resurrecting a deleted family and never leaking that the family once existed.
     deps.entitlementsRepo.seed(FAMILY_ID, { subscriptionStatus: "free", updatedAt: "2026-07-19T08:00:00Z" });
     await deps.inviteRepo.createInvite(baseInvite());
 
     await expectAppError(
       acceptInvite({ uid: "u2", familyId: null, body: { inviteCode: INVITE_CODE, displayName: "Noor" } }, deps),
-      "INTERNAL_ERROR",
+      "INVITE_INVALID",
     );
+  });
+
+  it("does not consume the invite code when failing closed on a deleted family", async () => {
+    const deps = buildDeps();
+    deps.entitlementsRepo.seed(FAMILY_ID, { subscriptionStatus: "free", updatedAt: "2026-07-19T08:00:00Z" });
+    await deps.inviteRepo.createInvite(baseInvite());
+
+    await expectAppError(
+      acceptInvite({ uid: "u2", familyId: null, body: { inviteCode: INVITE_CODE, displayName: "Noor" } }, deps),
+      "INVITE_INVALID",
+    );
+
+    const stillUnconsumed = await deps.inviteRepo.getInvite(INVITE_CODE);
+    expect(stillUnconsumed?.usedBy).toBeUndefined();
   });
 
   it("throws INTERNAL_ERROR when the family has no Entitlements record", async () => {

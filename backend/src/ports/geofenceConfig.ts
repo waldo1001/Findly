@@ -48,4 +48,7 @@ export interface GeofenceConfigRepo {
     document: GeofenceConfigDocument,
     ifMatch: string,
   ): Promise<ReplaceGeofenceConfigOutcome>;
+  /** Deletes the `config/{familyId}/geofences.json` blob — family deletion (001 §13.3, 002
+   * §4.2 step 4, B19). Idempotent. */
+  deleteConfig(familyId: string): Promise<void>;
 }

@@ -42,4 +42,8 @@ export class InMemoryLocateRequestRepo implements LocateRequestRepo {
       .filter((record) => record.status === "pending" && record.targetDeviceId === targetDeviceId)
       .map((record) => ({ ...record }));
   }
+
+  async deletePartition(familyId: string): Promise<void> {
+    this.records.delete(familyId);
+  }
 }

@@ -60,4 +60,8 @@ export class InMemoryGeofenceConfigRepo implements GeofenceConfigRepo {
     });
     return { outcome: "ok", etag: newEtag };
   }
+
+  async deleteConfig(familyId: string): Promise<void> {
+    this.configs.delete(familyId);
+  }
 }

@@ -73,4 +73,13 @@ export class TableInviteRepo implements InviteRepo {
       throw err;
     }
   }
+
+  /** Idempotent (002 §4.2 step 2 — family deletion's invite revocation, B19). */
+  async deleteInvite(inviteCode: string): Promise<void> {
+    try {
+      await this.client.deleteEntity(inviteCode, INVITE_ROW_KEY);
+    } catch (err) {
+      if (!isNotFound(err)) throw err;
+    }
+  }
 }

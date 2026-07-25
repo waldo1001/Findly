@@ -76,6 +76,7 @@ app.http("reportLocations", {
           geofenceConfigRepo,
           entitlementsRepo,
           userRepo,
+          familyRepo,
           groupRepo,
           groupLastKnownRepo,
           clock,

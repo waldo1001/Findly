@@ -59,4 +59,7 @@ export interface HistoryStore {
     limit: number,
     cursor: string | null,
   ): Promise<HistoryPage<EventLine>>;
+  /** Wipes the whole `history/{familyId}/` and `events/{familyId}/` blob prefixes — family
+   * deletion (001 §13.3, 002 §4.2 step 4, B19). Idempotent. */
+  deleteFamilyPrefix(familyId: string): Promise<void>;
 }

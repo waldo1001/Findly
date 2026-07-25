@@ -28,4 +28,8 @@ export class InMemoryInviteRepo implements InviteRepo {
     this.invites.set(inviteCode, { ...invite, usedBy, usedAt });
     return "ok";
   }
+
+  async deleteInvite(inviteCode: string): Promise<void> {
+    this.invites.delete(inviteCode);
+  }
 }
