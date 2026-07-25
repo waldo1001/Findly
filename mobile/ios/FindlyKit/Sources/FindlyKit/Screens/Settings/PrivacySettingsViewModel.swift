@@ -13,6 +13,14 @@ public final class PrivacySettingsViewModel: ObservableObject {
         case error(String)
     }
 
+    /// specs/008-privacy-endpoints.md §4.4 (review finding #3) — the Screen's own entries, one per
+    /// settings row.
+    public enum PrivacySettingsEntry: Hashable {
+        case export
+        case deleteAccount
+        case deleteFamily
+    }
+
     @Published public private(set) var state: State = .loading
 
     private let apiClient: FindlyAPIClient
@@ -33,5 +41,21 @@ public final class PrivacySettingsViewModel: ObservableObject {
                 state = .error(userFacingMessage(for: error))
             }
         }
+    }
+
+    /// specs/008-privacy-endpoints.md §4.4 (review finding #3) — a pure, independently-testable
+    /// mapping from `state` to which entries the Screen renders. Export and Delete-account are
+    /// UNCONDITIONAL — present for `.loading` and `.error` exactly as for `.loaded`, since a
+    /// `GET /families/me` failure (5xx, timeout, offline — anything the family-less handling in
+    /// `load()` doesn't already downgrade to `.loaded(isParent: false)`) MUST NOT remove the only
+    /// way to reach account deletion (a store requirement: reachable without contacting support).
+    /// Delete-family is the one entry that genuinely depends on a confirmed `isParent` and is
+    /// gated on `.loaded(isParent: true)` only.
+    public var visibleEntries: Set<PrivacySettingsEntry> {
+        var entries: Set<PrivacySettingsEntry> = [.export, .deleteAccount]
+        if case .loaded(true) = state {
+            entries.insert(.deleteFamily)
+        }
+        return entries
     }
 }

@@ -33,30 +33,32 @@ public struct PrivacySettingsScreen: View {
         .task { await viewModel.load() }
     }
 
+    /// specs/008-privacy-endpoints.md §4.4 (review finding #3) — Export and Delete-account are
+    /// driven by `viewModel.visibleEntries`, which is unconditional for those two regardless of
+    /// `state` (a `GET /families/me` failure MUST NOT hide account deletion). Only the
+    /// family-fetch error message is state-dependent, shown as a non-blocking note rather than
+    /// replacing the whole screen the way the old `.loading`/`.error`/`.loaded` switch did.
     @ViewBuilder
     private var content: some View {
-        switch viewModel.state {
-        case .loading:
-            LoadingStateView(message: "Loading…")
-        case .error(let message):
-            ErrorStateView(message: message) {
-                Task { await viewModel.load() }
-            }
-        case .loaded(let isParent):
-            list(isParent: isParent)
-        }
-    }
-
-    private func list(isParent: Bool) -> some View {
         ScrollView {
             VStack(spacing: theme.spacing.md) {
-                FindlyListRow(title: "Export my data", subtitle: "Download everything Findly holds about you") {
-                    FindlyButton("Export", style: .secondary) { onSelectExport() }
+                if case .error(let message) = viewModel.state {
+                    ErrorStateView(message: message) {
+                        Task { await viewModel.load() }
+                    }
                 }
-                FindlyListRow(title: "Delete account", subtitle: "Permanently erase your account and its data") {
-                    FindlyButton("Delete", style: .secondary) { onSelectDeleteAccount() }
+                let entries = viewModel.visibleEntries
+                if entries.contains(.export) {
+                    FindlyListRow(title: "Export my data", subtitle: "Download everything Findly holds about you") {
+                        FindlyButton("Export", style: .secondary) { onSelectExport() }
+                    }
                 }
-                if isParent {
+                if entries.contains(.deleteAccount) {
+                    FindlyListRow(title: "Delete account", subtitle: "Permanently erase your account and its data") {
+                        FindlyButton("Delete", style: .secondary) { onSelectDeleteAccount() }
+                    }
+                }
+                if entries.contains(.deleteFamily) {
                     FindlyListRow(title: "Delete family", subtitle: "Permanently erase the whole family for everyone") {
                         FindlyButton("Delete", style: .secondary) { onSelectDeleteFamily() }
                     }
