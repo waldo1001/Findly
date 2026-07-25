@@ -1,0 +1,714 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+  *{box-sizing:border-box;}
+  body{margin:0;}
+  ::selection{background:#00696E;color:#fff;}
+</style>
+</helmet>
+<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,system-ui,sans-serif;background:#FAFAF7;color:#1B1D1C;min-height:100vh;-webkit-font-smoothing:antialiased;padding:0 0 96px;">
+
+  <!-- ============ HERO ============ -->
+  <header style="max-width:1120px;margin:0 auto;padding:72px 40px 40px;">
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:28px;">
+      <div style="width:34px;height:34px;border-radius:11px;background:#00696E;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 4px rgba(0,50,50,.18);">
+        <div style="width:11px;height:11px;border-radius:50%;background:#fff;box-shadow:0 0 0 3px rgba(255,255,255,.35);"></div>
+      </div>
+      <span style="font-size:15px;font-weight:600;letter-spacing:.2px;">Findly</span>
+      <span style="font-size:12px;font-weight:500;letter-spacing:.4px;color:#5C5F5C;background:#EEEEE9;border:1px solid #C9C8C2;padding:3px 9px;border-radius:999px;">DESIGN SYSTEM v1.0</span>
+    </div>
+    <h1 style="font-size:44px;line-height:1.05;font-weight:700;letter-spacing:-.02em;margin:0 0 20px;max-width:760px;text-wrap:pretty;">A calm, trustworthy visual system for a private family map.</h1>
+    <p style="font-size:18px;line-height:1.55;font-weight:400;color:#3A3D3A;max-width:680px;margin:0 0 28px;text-wrap:pretty;">One shared token vocabulary, rendered natively on iOS (SwiftUI) and Android (Material 3). Light and dark are both first-class. Every text pairing meets WCAG&nbsp;2.1&nbsp;AA — this is a safety utility used outdoors, in sunlight, sometimes in a hurry.</p>
+    <div style="display:flex;flex-wrap:wrap;gap:10px;">
+      <span style="font-size:13px;font-weight:500;color:#00514F;background:#E1EFEE;border:1px solid #B9DAD8;padding:6px 12px;border-radius:999px;">Map-first</span>
+      <span style="font-size:13px;font-weight:500;color:#00514F;background:#E1EFEE;border:1px solid #B9DAD8;padding:6px 12px;border-radius:999px;">Colorblind-safe status</span>
+      <span style="font-size:13px;font-weight:500;color:#00514F;background:#E1EFEE;border:1px solid #B9DAD8;padding:6px 12px;border-radius:999px;">≥44pt touch targets</span>
+      <span style="font-size:13px;font-weight:500;color:#00514F;background:#E1EFEE;border:1px solid #B9DAD8;padding:6px 12px;border-radius:999px;">System fonts only</span>
+    </div>
+  </header>
+
+  <!-- ============ PALETTE RATIONALE ============ -->
+  <section style="max-width:1120px;margin:0 auto;padding:24px 40px;">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;">
+      <div style="background:#fff;border:1px solid #E7E7E1;border-radius:20px;padding:28px 30px;box-shadow:0 2px 4px rgba(20,25,20,.05);">
+        <div style="font-size:12px;font-weight:600;letter-spacing:.6px;color:#00696E;text-transform:uppercase;margin-bottom:12px;">Palette rationale</div>
+        <p style="font-size:16px;line-height:1.6;margin:0 0 14px;color:#2A2C2A;">The brand hue is a deep <strong>teal (#00696E)</strong> — blue's trust and calm with a warmer, more human, less "corporate-security" cast than a pure navy. It reads as a caring utility, not a surveillance console.</p>
+        <p style="font-size:16px;line-height:1.6;margin:0;color:#2A2C2A;">A single <strong>indigo accent (#4C5FD5)</strong> handles secondary actions without ever competing with the functional colors. Red is reserved strictly for danger, green for arrivals/online, amber for "stale — attention, not error". One brand hue, one accent, three functional colors, warm neutrals. No rainbow.</p>
+      </div>
+      <div style="display:grid;grid-template-rows:1fr 1fr;gap:20px;">
+        <div style="background:#00696E;border-radius:20px;padding:22px 26px;color:#fff;display:flex;flex-direction:column;justify-content:space-between;box-shadow:0 4px 12px rgba(0,60,60,.18);">
+          <span style="font-size:13px;font-weight:500;opacity:.85;">Primary — brand / actions / selected</span>
+          <span style="font-size:26px;font-weight:700;letter-spacing:-.01em;">#00696E</span>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;">
+          <div style="background:#4C5FD5;border-radius:16px;padding:14px;color:#fff;display:flex;flex-direction:column;justify-content:flex-end;min-height:78px;"><span style="font-size:11px;opacity:.85;">Secondary</span><span style="font-size:13px;font-weight:600;">#4C5FD5</span></div>
+          <div style="background:#1E7D46;border-radius:16px;padding:14px;color:#fff;display:flex;flex-direction:column;justify-content:flex-end;"><span style="font-size:11px;opacity:.85;">Success</span><span style="font-size:13px;font-weight:600;">#1E7D46</span></div>
+          <div style="background:#C0362C;border-radius:16px;padding:14px;color:#fff;display:flex;flex-direction:column;justify-content:flex-end;"><span style="font-size:11px;opacity:.85;">Danger</span><span style="font-size:13px;font-weight:600;">#C0362C</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ COLOR TOKENS ============ -->
+  <section style="max-width:1120px;margin:0 auto;padding:40px 40px 0;">
+    <div style="display:flex;align-items:baseline;gap:14px;margin-bottom:6px;">
+      <span style="font-size:13px;font-weight:700;color:#00696E;font-variant-numeric:tabular-nums;">01</span>
+      <h2 style="font-size:30px;font-weight:700;letter-spacing:-.015em;margin:0;">Color tokens</h2>
+    </div>
+    <p style="font-size:15px;line-height:1.55;color:#5C5F5C;margin:0 0 28px;max-width:640px;">11 semantic roles, one set of names on both platforms. Contrast ratios are computed for the pairings the contract requires; every text/essential pairing clears AA.</p>
+
+    <!-- LIGHT TABLE -->
+    <div style="background:#fff;border:1px solid #E7E7E1;border-radius:20px;overflow:hidden;box-shadow:0 2px 4px rgba(20,25,20,.05);margin-bottom:24px;">
+      <div style="padding:16px 24px;border-bottom:1px solid #EEEEE9;display:flex;align-items:center;gap:10px;">
+        <span style="width:14px;height:14px;border-radius:4px;background:#FAFAF7;border:1px solid #C9C8C2;"></span>
+        <span style="font-size:15px;font-weight:600;">Light theme</span>
+      </div>
+      <div style="display:grid;grid-template-columns:52px 1.3fr 1fr 2.2fr 1.1fr;gap:0;font-size:12px;font-weight:600;letter-spacing:.4px;text-transform:uppercase;color:#8A8D8A;padding:12px 24px;border-bottom:1px solid #F0F0EB;">
+        <span></span><span>Token</span><span>Hex</span><span>Role</span><span style="text-align:right;">Contrast</span>
+      </div>
+      <sc-for list="{{ lightRows }}" as="row" hint-placeholder-count="11">
+        <div style="display:grid;grid-template-columns:52px 1.3fr 1fr 2.2fr 1.1fr;gap:0;align-items:center;padding:11px 24px;border-bottom:1px solid #F5F5F0;">
+          <span style="width:30px;height:30px;border-radius:9px;background:{{ row.hexStyle }};border:1px solid rgba(0,0,0,.12);"></span>
+          <span style="font-size:14px;font-weight:600;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;">{{ row.token }}</span>
+          <span style="font-size:13px;color:#5C5F5C;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;">{{ row.hex }}</span>
+          <span style="font-size:14px;color:#3A3D3A;">{{ row.role }}</span>
+          <span style="text-align:right;font-size:13px;font-weight:600;color:{{ row.crColor }};">{{ row.cr }}</span>
+        </div>
+      </sc-for>
+    </div>
+
+    <!-- DARK TABLE -->
+    <div style="background:#17181A;border:1px solid #2A2C30;border-radius:20px;overflow:hidden;box-shadow:0 6px 18px rgba(0,0,0,.22);">
+      <div style="padding:16px 24px;border-bottom:1px solid #24262A;display:flex;align-items:center;gap:10px;">
+        <span style="width:14px;height:14px;border-radius:4px;background:#17181A;border:1px solid #3A3D42;"></span>
+        <span style="font-size:15px;font-weight:600;color:#ECECE6;">Dark theme</span>
+      </div>
+      <div style="display:grid;grid-template-columns:52px 1.3fr 1fr 2.2fr 1.1fr;gap:0;font-size:12px;font-weight:600;letter-spacing:.4px;text-transform:uppercase;color:#7C807E;padding:12px 24px;border-bottom:1px solid #24262A;">
+        <span></span><span>Token</span><span>Hex</span><span>Role</span><span style="text-align:right;">Contrast</span>
+      </div>
+      <sc-for list="{{ darkRows }}" as="row" hint-placeholder-count="11">
+        <div style="display:grid;grid-template-columns:52px 1.3fr 1fr 2.2fr 1.1fr;gap:0;align-items:center;padding:11px 24px;border-bottom:1px solid #202225;">
+          <span style="width:30px;height:30px;border-radius:9px;background:{{ row.hexStyle }};border:1px solid rgba(255,255,255,.16);"></span>
+          <span style="font-size:14px;font-weight:600;color:#ECECE6;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;">{{ row.token }}</span>
+          <span style="font-size:13px;color:#9A9E9C;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;">{{ row.hex }}</span>
+          <span style="font-size:14px;color:#C4C7C4;">{{ row.role }}</span>
+          <span style="text-align:right;font-size:13px;font-weight:600;color:{{ row.crColor }};">{{ row.cr }}</span>
+        </div>
+      </sc-for>
+    </div>
+    <p style="font-size:13px;line-height:1.5;color:#8A8D8A;margin:14px 2px 0;">Contrast column shows the required pairing for each row: <code style="font-family:ui-monospace,monospace;">onPrimary·primary</code>, <code style="font-family:ui-monospace,monospace;">onSurface·surface</code> &amp; <code style="font-family:ui-monospace,monospace;">·surfaceVariant</code>, <code style="font-family:ui-monospace,monospace;">onDanger·danger</code>, and <code style="font-family:ui-monospace,monospace;">success/warning/danger</code> as text on <code style="font-family:ui-monospace,monospace;">surface</code>. <code style="font-family:ui-monospace,monospace;">outline</code> is a decorative divider/stroke (1.6:1) — never the sole carrier of meaning; essential status always adds icon + label.</p>
+  </section>
+
+  <!-- ============ TYPOGRAPHY ============ -->
+  <section style="max-width:1120px;margin:0 auto;padding:56px 40px 0;">
+    <div style="display:flex;align-items:baseline;gap:14px;margin-bottom:6px;">
+      <span style="font-size:13px;font-weight:700;color:#00696E;">02</span>
+      <h2 style="font-size:30px;font-weight:700;letter-spacing:-.015em;margin:0;">Typography</h2>
+    </div>
+    <p style="font-size:15px;line-height:1.55;color:#5C5F5C;margin:0 0 28px;max-width:640px;">Platform system font — <strong>SF&nbsp;Pro</strong> on iOS, <strong>Roboto</strong> on Android. Sizes are pt on iOS / sp on Android (identical numbers). Weights map to system Regular/Medium/Semibold/Bold.</p>
+    <div style="background:#fff;border:1px solid #E7E7E1;border-radius:20px;overflow:hidden;box-shadow:0 2px 4px rgba(20,25,20,.05);">
+      <sc-for list="{{ typeRows }}" as="t" hint-placeholder-count="6">
+        <div style="display:grid;grid-template-columns:1.2fr 2fr 1.4fr;gap:20px;align-items:center;padding:20px 28px;border-bottom:1px solid #F5F5F0;">
+          <div>
+            <div style="font-size:14px;font-weight:600;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;">{{ t.token }}</div>
+            <div style="font-size:12px;color:#8A8D8A;margin-top:3px;">{{ t.use }}</div>
+          </div>
+          <div style="font-size:{{ t.px }};font-weight:{{ t.weight }};line-height:{{ t.lh }};letter-spacing:{{ t.ls }};color:#1B1D1C;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ t.sample }}</div>
+          <div style="text-align:right;font-size:13px;color:#5C5F5C;font-family:ui-monospace,monospace;">{{ t.spec }}</div>
+        </div>
+      </sc-for>
+    </div>
+  </section>
+
+  <!-- ============ SCALES: SPACING / RADIUS / ELEVATION ============ -->
+  <section style="max-width:1120px;margin:0 auto;padding:56px 40px 0;">
+    <div style="display:flex;align-items:baseline;gap:14px;margin-bottom:28px;">
+      <span style="font-size:13px;font-weight:700;color:#00696E;">03</span>
+      <h2 style="font-size:30px;font-weight:700;letter-spacing:-.015em;margin:0;">Spacing · Radius · Elevation</h2>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;">
+
+      <!-- spacing -->
+      <div style="background:#fff;border:1px solid #E7E7E1;border-radius:20px;padding:24px 26px;box-shadow:0 2px 4px rgba(20,25,20,.05);">
+        <div style="font-size:15px;font-weight:600;margin-bottom:4px;">Spacing scale <span style="color:#8A8D8A;font-weight:400;font-size:13px;">— pt / dp</span></div>
+        <div style="font-size:12px;color:#8A8D8A;margin-bottom:18px;font-family:ui-monospace,monospace;">4 · 8 · 12 · 16 · 24 · 32</div>
+        <sc-for list="{{ spacing }}" as="s" hint-placeholder-count="6">
+          <div style="display:flex;align-items:center;gap:16px;margin-bottom:12px;">
+            <span style="width:44px;font-size:13px;font-weight:600;font-family:ui-monospace,monospace;">{{ s.token }}</span>
+            <span style="width:40px;font-size:13px;color:#5C5F5C;font-family:ui-monospace,monospace;">{{ s.val }}</span>
+            <span style="height:16px;border-radius:5px;background:#00696E;width:{{ s.barW }};"></span>
+          </div>
+        </sc-for>
+      </div>
+
+      <!-- radius -->
+      <div style="background:#fff;border:1px solid #E7E7E1;border-radius:20px;padding:24px 26px;box-shadow:0 2px 4px rgba(20,25,20,.05);">
+        <div style="font-size:15px;font-weight:600;margin-bottom:4px;">Corner radius <span style="color:#8A8D8A;font-weight:400;font-size:13px;">— pt / dp</span></div>
+        <div style="font-size:12px;color:#8A8D8A;margin-bottom:18px;font-family:ui-monospace,monospace;">8 · 12 · 20 · full</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:14px;">
+          <sc-for list="{{ radii }}" as="r" hint-placeholder-count="4">
+            <div style="display:flex;flex-direction:column;align-items:center;gap:9px;">
+              <div style="width:100%;height:58px;background:#E1EFEE;border:1.5px solid #00696E;border-radius:{{ r.css }};border-bottom-left-radius:0;border-top-right-radius:{{ r.css }};"></div>
+              <span style="font-size:12px;font-weight:600;font-family:ui-monospace,monospace;">{{ r.token }}</span>
+              <span style="font-size:11px;color:#8A8D8A;font-family:ui-monospace,monospace;">{{ r.val }}</span>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+
+      <!-- elevation -->
+      <div style="grid-column:1 / -1;background:#fff;border:1px solid #E7E7E1;border-radius:20px;padding:24px 26px;box-shadow:0 2px 4px rgba(20,25,20,.05);">
+        <div style="font-size:15px;font-weight:600;margin-bottom:4px;">Elevation <span style="color:#8A8D8A;font-weight:400;font-size:13px;">— Material dp (Android) &amp; shadow spec (iOS)</span></div>
+        <div style="font-size:13px;color:#8A8D8A;margin-bottom:20px;">A card looks identical on both platforms: same optical depth, expressed twice.</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:22px;">
+          <sc-for list="{{ elevation }}" as="e" hint-placeholder-count="4">
+            <div style="display:flex;flex-direction:column;align-items:center;gap:14px;padding:8px 0 4px;">
+              <div style="width:76px;height:76px;border-radius:16px;background:#fff;border:1px solid #EEEEE9;box-shadow:{{ e.css }};"></div>
+              <div style="text-align:center;">
+                <div style="font-size:13px;font-weight:600;font-family:ui-monospace,monospace;">{{ e.token }}</div>
+                <div style="font-size:12px;color:#00696E;font-weight:600;margin-top:4px;">{{ e.dp }}</div>
+                <div style="font-size:11px;color:#8A8D8A;margin-top:2px;font-family:ui-monospace,monospace;">{{ e.shadow }}</div>
+              </div>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ COMPONENTS ============ -->
+  <section style="max-width:1120px;margin:0 auto;padding:56px 40px 0;">
+    <div style="display:flex;align-items:baseline;gap:14px;margin-bottom:6px;">
+      <span style="font-size:13px;font-weight:700;color:#00696E;">04</span>
+      <h2 style="font-size:30px;font-weight:700;letter-spacing:-.015em;margin:0;">Components</h2>
+    </div>
+    <p style="font-size:15px;line-height:1.55;color:#5C5F5C;margin:0 0 28px;max-width:660px;">Every component is stateless and token-only. Specimens below are rendered with the real tokens — light on the left, dark on the right where color carries meaning.</p>
+
+    <!-- BUTTONS -->
+    <div style="border:1px solid #E7E7E1;border-radius:20px;overflow:hidden;margin-bottom:22px;box-shadow:0 2px 4px rgba(20,25,20,.05);">
+      <div style="display:grid;grid-template-columns:1fr 1fr;">
+        <!-- light -->
+        <div style="background:#FAFAF7;padding:26px 28px;border-right:1px solid #E7E7E1;">
+          <div style="font-size:14px;font-weight:600;margin-bottom:2px;">FindlyButton</div>
+          <div style="font-size:12px;color:#8A8D8A;margin-bottom:20px;">Primary · Secondary · Disabled · Pressed</div>
+          <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:center;">
+            <span style="display:inline-flex;align-items:center;justify-content:center;min-height:44px;padding:0 22px;border-radius:12px;background:#00696E;color:#fff;font-size:16px;font-weight:600;box-shadow:0 2px 4px rgba(0,50,50,.14);">Locate now</span>
+            <span style="display:inline-flex;align-items:center;justify-content:center;min-height:44px;padding:0 22px;border-radius:12px;background:transparent;color:#00514F;font-size:16px;font-weight:600;border:1.5px solid #00696E;">Add zone</span>
+            <span style="display:inline-flex;align-items:center;justify-content:center;min-height:44px;padding:0 22px;border-radius:12px;background:#EEEEE9;color:#A9ABA7;font-size:16px;font-weight:600;">Disabled</span>
+            <span style="display:inline-flex;align-items:center;justify-content:center;min-height:44px;padding:0 22px;border-radius:12px;background:#00514F;color:#fff;font-size:16px;font-weight:600;">Pressed</span>
+          </div>
+        </div>
+        <!-- dark -->
+        <div style="background:#17181A;padding:26px 28px;">
+          <div style="font-size:14px;font-weight:600;margin-bottom:2px;color:#ECECE6;">Dark</div>
+          <div style="font-size:12px;color:#7C807E;margin-bottom:20px;">Primary tint inverts; label stays high-contrast</div>
+          <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:center;">
+            <span style="display:inline-flex;align-items:center;justify-content:center;min-height:44px;padding:0 22px;border-radius:12px;background:#4CD4D9;color:#00312F;font-size:16px;font-weight:700;">Locate now</span>
+            <span style="display:inline-flex;align-items:center;justify-content:center;min-height:44px;padding:0 22px;border-radius:12px;background:transparent;color:#4CD4D9;font-size:16px;font-weight:600;border:1.5px solid #4CD4D9;">Add zone</span>
+            <span style="display:inline-flex;align-items:center;justify-content:center;min-height:44px;padding:0 22px;border-radius:12px;background:#24262A;color:#5E625F;font-size:16px;font-weight:600;">Disabled</span>
+          </div>
+        </div>
+      </div>
+      <div style="padding:16px 28px;background:#fff;border-top:1px solid #E7E7E1;font-size:13px;line-height:1.55;color:#5C5F5C;">
+        <strong style="color:#2A2C2A;">Tokens.</strong> Primary fill <code style="font-family:ui-monospace,monospace;">primary</code> + <code style="font-family:ui-monospace,monospace;">onPrimary</code>, radius <code style="font-family:ui-monospace,monospace;">md</code>, elevation <code style="font-family:ui-monospace,monospace;">level1</code>. Secondary is an outline in <code style="font-family:ui-monospace,monospace;">primary</code> over <code style="font-family:ui-monospace,monospace;">surface</code>. Pressed darkens fill ~8% (Android adds ripple). Disabled = <code style="font-family:ui-monospace,monospace;">surfaceVariant</code> fill + muted <code style="font-family:ui-monospace,monospace;">onSurface</code> at 38%. Focused adds a 2px <code style="font-family:ui-monospace,monospace;">primary</code> ring. Min height 48 (≥44 target).
+      </div>
+    </div>
+
+    <!-- STATUS CHIPS -->
+    <div style="border:1px solid #E7E7E1;border-radius:20px;overflow:hidden;margin-bottom:22px;box-shadow:0 2px 4px rgba(20,25,20,.05);">
+      <div style="display:grid;grid-template-columns:1fr 1fr;">
+        <div style="background:#FAFAF7;padding:26px 28px;border-right:1px solid #E7E7E1;">
+          <div style="font-size:14px;font-weight:600;margin-bottom:2px;">StatusChip</div>
+          <div style="font-size:12px;color:#8A8D8A;margin-bottom:20px;">Colorblind-safe: color <em>+</em> icon-shape <em>+</em> label</div>
+          <div style="display:flex;flex-wrap:wrap;gap:10px;">
+            <span style="display:inline-flex;align-items:center;gap:7px;height:30px;padding:0 12px 0 10px;border-radius:999px;background:#E4F1E8;border:1px solid #1E7D46;color:#0F5B30;font-size:13px;font-weight:600;"><span style="width:9px;height:9px;border-radius:50%;background:#1E7D46;"></span>Online</span>
+            <span style="display:inline-flex;align-items:center;gap:7px;height:30px;padding:0 12px 0 10px;border-radius:999px;background:#F5ECDA;border:1px solid #8A5A00;color:#6E4700;font-size:13px;font-weight:600;"><span style="width:0;height:0;border-left:5px solid transparent;border-right:5px solid transparent;border-bottom:9px solid #8A5A00;"></span>Stale · 2h</span>
+            <span style="display:inline-flex;align-items:center;gap:7px;height:30px;padding:0 12px 0 10px;border-radius:999px;background:#EEEEE9;border:1px solid #6C6F6B;color:#3A3D3A;font-size:13px;font-weight:600;"><span style="display:inline-flex;gap:2px;"><span style="width:3px;height:9px;background:#3A3D3A;"></span><span style="width:3px;height:9px;background:#3A3D3A;"></span></span>Paused</span>
+            <span style="display:inline-flex;align-items:center;gap:7px;height:30px;padding:0 12px 0 10px;border-radius:999px;background:#F7E3E1;border:1px solid #C0362C;color:#8F2019;font-size:13px;font-weight:600;"><span style="width:9px;height:9px;background:#C0362C;transform:rotate(45deg);border-radius:1px;"></span>Danger</span>
+          </div>
+        </div>
+        <div style="background:#17181A;padding:26px 28px;">
+          <div style="font-size:14px;font-weight:600;margin-bottom:2px;color:#ECECE6;">Dark</div>
+          <div style="font-size:12px;color:#7C807E;margin-bottom:20px;">Same shapes, dark-theme fills</div>
+          <div style="display:flex;flex-wrap:wrap;gap:10px;">
+            <span style="display:inline-flex;align-items:center;gap:7px;height:30px;padding:0 12px 0 10px;border-radius:999px;background:#16301F;border:1px solid #5FD08A;color:#5FD08A;font-size:13px;font-weight:600;"><span style="width:9px;height:9px;border-radius:50%;background:#5FD08A;"></span>Online</span>
+            <span style="display:inline-flex;align-items:center;gap:7px;height:30px;padding:0 12px 0 10px;border-radius:999px;background:#332813;border:1px solid #E4B44C;color:#E4B44C;font-size:13px;font-weight:600;"><span style="width:0;height:0;border-left:5px solid transparent;border-right:5px solid transparent;border-bottom:9px solid #E4B44C;"></span>Stale · 2h</span>
+            <span style="display:inline-flex;align-items:center;gap:7px;height:30px;padding:0 12px 0 10px;border-radius:999px;background:#24262A;border:1px solid #8A8D8A;color:#C4C7C4;font-size:13px;font-weight:600;"><span style="display:inline-flex;gap:2px;"><span style="width:3px;height:9px;background:#C4C7C4;"></span><span style="width:3px;height:9px;background:#C4C7C4;"></span></span>Paused</span>
+            <span style="display:inline-flex;align-items:center;gap:7px;height:30px;padding:0 12px 0 10px;border-radius:999px;background:#3A1512;border:1px solid #F2867B;color:#F2867B;font-size:13px;font-weight:600;"><span style="width:9px;height:9px;background:#F2867B;transform:rotate(45deg);border-radius:1px;"></span>Danger</span>
+          </div>
+        </div>
+      </div>
+      <div style="padding:16px 28px;background:#fff;border-top:1px solid #E7E7E1;font-size:13px;line-height:1.55;color:#5C5F5C;">
+        <strong style="color:#2A2C2A;">Tokens.</strong> Radius <code style="font-family:ui-monospace,monospace;">pill</code>, no elevation. Online=<code style="font-family:ui-monospace,monospace;">success</code>+dot, Stale=<code style="font-family:ui-monospace,monospace;">warning</code>+triangle, Paused=neutral <code style="font-family:ui-monospace,monospace;">outline</code>+pause-bars, Danger=<code style="font-family:ui-monospace,monospace;">danger</code>+diamond. Each state has a <em>distinct glyph</em> so it survives any color vision — never hue alone. Text always present.
+      </div>
+    </div>
+
+    <!-- CARD + LIST ROW + MARKERS -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:22px;margin-bottom:22px;">
+      <!-- card & rows -->
+      <div style="border:1px solid #E7E7E1;border-radius:20px;background:#FAFAF7;padding:26px 28px;box-shadow:0 2px 4px rgba(20,25,20,.05);">
+        <div style="font-size:14px;font-weight:600;margin-bottom:2px;">FindlyCard · FindlyListRow</div>
+        <div style="font-size:12px;color:#8A8D8A;margin-bottom:18px;">Raised container + member/device rows</div>
+        <div style="background:#fff;border:1px solid #EEEEE9;border-radius:20px;box-shadow:0 4px 8px rgba(20,25,20,.10);overflow:hidden;">
+          <div style="display:flex;align-items:center;gap:14px;padding:14px 18px;border-bottom:1px solid #F5F5F0;min-height:64px;">
+            <div style="width:44px;height:44px;border-radius:50%;background:#00696E;color:#fff;font-size:17px;font-weight:600;display:flex;align-items:center;justify-content:center;flex:none;">N</div>
+            <div style="flex:1;min-width:0;">
+              <div style="font-size:16px;font-weight:600;">Noor</div>
+              <div style="font-size:14px;color:#5C5F5C;">Home · 2 min ago</div>
+            </div>
+            <span style="display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 11px 0 9px;border-radius:999px;background:#E4F1E8;border:1px solid #1E7D46;color:#0F5B30;font-size:12px;font-weight:600;flex:none;"><span style="width:8px;height:8px;border-radius:50%;background:#1E7D46;"></span>Online</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:14px;padding:14px 18px;min-height:64px;">
+            <div style="width:44px;height:44px;border-radius:50%;background:#4C5FD5;color:#fff;font-size:17px;font-weight:600;display:flex;align-items:center;justify-content:center;flex:none;">S</div>
+            <div style="flex:1;min-width:0;">
+              <div style="font-size:16px;font-weight:600;">Sam</div>
+              <div style="font-size:14px;color:#5C5F5C;">Oakwood School · 41 min ago</div>
+            </div>
+            <span style="display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 11px 0 9px;border-radius:999px;background:#F5ECDA;border:1px solid #8A5A00;color:#6E4700;font-size:12px;font-weight:600;flex:none;"><span style="width:0;height:0;border-left:4px solid transparent;border-right:4px solid transparent;border-bottom:8px solid #8A5A00;"></span>Stale</span>
+          </div>
+        </div>
+        <div style="font-size:13px;line-height:1.55;color:#5C5F5C;margin-top:16px;"><strong style="color:#2A2C2A;">Tokens.</strong> Card = <code style="font-family:ui-monospace,monospace;">surface</code> fill, radius <code style="font-family:ui-monospace,monospace;">lg</code>, <code style="font-family:ui-monospace,monospace;">level2</code>. Row = 64pt min, avatar 44, leading title <code style="font-family:ui-monospace,monospace;">titleMedium</code>, subtitle <code style="font-family:ui-monospace,monospace;">bodyMedium</code>/<code style="font-family:ui-monospace,monospace;">onSurface</code>@70%, trailing chip. Pressed = <code style="font-family:ui-monospace,monospace;">surfaceVariant</code> overlay; dividers <code style="font-family:ui-monospace,monospace;">outline</code>.</div>
+      </div>
+
+      <!-- markers over map -->
+      <div style="border:1px solid #E7E7E1;border-radius:20px;overflow:hidden;box-shadow:0 2px 4px rgba(20,25,20,.05);">
+        <div style="padding:20px 24px 14px;background:#FAFAF7;">
+          <div style="font-size:14px;font-weight:600;margin-bottom:2px;">MapMarkerBubble</div>
+          <div style="font-size:12px;color:#8A8D8A;">Reads on light &amp; dark map tiles · status ring · stale · no-location</div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;">
+          <!-- light map -->
+          <div style="padding:24px;background-color:#E9EDE7;background-image:repeating-linear-gradient(135deg,rgba(0,0,0,.035) 0 12px,transparent 12px 24px);border-right:1px solid #E7E7E1;display:flex;gap:18px;justify-content:center;align-items:center;flex-wrap:wrap;">
+            <div style="display:flex;flex-direction:column;align-items:center;gap:8px;">
+              <div style="width:48px;height:48px;border-radius:50%;background:#00696E;border:3px solid #fff;box-shadow:0 3px 8px rgba(0,0,0,.28);color:#fff;font-size:18px;font-weight:600;display:flex;align-items:center;justify-content:center;position:relative;">N<span style="position:absolute;left:50%;bottom:-9px;transform:translateX(-50%);width:0;height:0;border-left:6px solid transparent;border-right:6px solid transparent;border-top:9px solid #fff;"></span></div>
+              <span style="font-size:11px;font-weight:600;color:#0F5B30;background:#fff;border-radius:6px;padding:2px 6px;box-shadow:0 1px 2px rgba(0,0,0,.15);">online</span>
+            </div>
+            <div style="display:flex;flex-direction:column;align-items:center;gap:8px;">
+              <div style="width:48px;height:48px;border-radius:50%;background:#B7A26A;border:3px dashed #fff;box-shadow:0 3px 8px rgba(0,0,0,.28);color:#fff;font-size:18px;font-weight:600;display:flex;align-items:center;justify-content:center;">S</div>
+              <span style="font-size:11px;font-weight:600;color:#6E4700;background:#fff;border-radius:6px;padding:2px 6px;box-shadow:0 1px 2px rgba(0,0,0,.15);">stale</span>
+            </div>
+          </div>
+          <!-- dark map -->
+          <div style="padding:24px;background-color:#2A2E33;background-image:repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0 12px,transparent 12px 24px);display:flex;gap:18px;justify-content:center;align-items:center;flex-wrap:wrap;">
+            <div style="display:flex;flex-direction:column;align-items:center;gap:8px;">
+              <div style="width:48px;height:48px;border-radius:50%;background:#4CD4D9;border:3px solid #17181A;box-shadow:0 3px 8px rgba(0,0,0,.5);color:#00312F;font-size:18px;font-weight:700;display:flex;align-items:center;justify-content:center;">N</div>
+              <span style="font-size:11px;font-weight:600;color:#5FD08A;background:#17181A;border-radius:6px;padding:2px 6px;">online</span>
+            </div>
+            <div style="display:flex;flex-direction:column;align-items:center;gap:8px;">
+              <div style="width:48px;height:48px;border-radius:50%;background:#3A3D42;border:3px dashed #6C6F6B;box-shadow:0 3px 8px rgba(0,0,0,.5);color:#9A9E9C;font-size:15px;font-weight:600;display:flex;align-items:center;justify-content:center;">?</div>
+              <span style="font-size:11px;font-weight:600;color:#9A9E9C;background:#17181A;border-radius:6px;padding:2px 6px;">no fix</span>
+            </div>
+          </div>
+        </div>
+        <div style="padding:16px 24px;background:#fff;border-top:1px solid #E7E7E1;font-size:13px;line-height:1.55;color:#5C5F5C;">44–48pt bubble, 3px ring in <code style="font-family:ui-monospace,monospace;">surface</code> so it pops on either map. <strong style="color:#2A2C2A;">Online</strong> solid + <code style="font-family:ui-monospace,monospace;">success</code> tail; <strong style="color:#2A2C2A;">stale</strong> desaturates + dashed ring; <strong style="color:#2A2C2A;">no-location</strong> = neutral "?" chip, never placed on the map falsely.</div>
+      </div>
+    </div>
+
+    <!-- TOPBAR / TEXTFIELD / TOGGLE / SECTION HEADER -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:22px;margin-bottom:22px;">
+      <div style="border:1px solid #E7E7E1;border-radius:20px;background:#FAFAF7;padding:26px 28px;box-shadow:0 2px 4px rgba(20,25,20,.05);">
+        <div style="font-size:14px;font-weight:600;margin-bottom:18px;">FindlyTopBar · SectionHeader</div>
+        <div style="background:#fff;border:1px solid #EEEEE9;border-radius:14px;overflow:hidden;">
+          <div style="display:flex;align-items:center;gap:12px;padding:0 12px;height:56px;border-bottom:1px solid #F0F0EB;">
+            <div style="width:40px;height:40px;border-radius:10px;display:flex;align-items:center;justify-content:center;color:#00696E;font-size:22px;">‹</div>
+            <div style="flex:1;font-size:17px;font-weight:600;">Geofences</div>
+            <div style="width:40px;height:40px;border-radius:10px;background:#E1EFEE;display:flex;align-items:center;justify-content:center;color:#00514F;font-size:20px;font-weight:600;">＋</div>
+          </div>
+          <div style="padding:16px 16px 6px;font-size:12px;font-weight:600;letter-spacing:.5px;text-transform:uppercase;color:#8A8D8A;">Notifications</div>
+          <div style="padding:6px 16px 14px;font-size:14px;color:#5C5F5C;">Section groups on Android use a <code style="font-family:ui-monospace,monospace;">labelSmall</code>-derived caption over the group.</div>
+        </div>
+        <div style="font-size:13px;line-height:1.55;color:#5C5F5C;margin-top:14px;">TopBar sits on <code style="font-family:ui-monospace,monospace;">surface</code> (iOS: hairline; Android: <code style="font-family:ui-monospace,monospace;">level0→level2</code> on scroll). Title <code style="font-family:ui-monospace,monospace;">titleLarge</code>. Actions are 44pt hit areas.</div>
+      </div>
+
+      <div style="border:1px solid #E7E7E1;border-radius:20px;background:#FAFAF7;padding:26px 28px;box-shadow:0 2px 4px rgba(20,25,20,.05);">
+        <div style="font-size:14px;font-weight:600;margin-bottom:18px;">FindlyTextField · FindlySwitchRow</div>
+        <div style="margin-bottom:16px;">
+          <label style="font-size:13px;font-weight:600;color:#3A3D3A;display:block;margin-bottom:6px;">Zone name</label>
+          <div style="height:48px;border:1.5px solid #00696E;border-radius:12px;background:#fff;display:flex;align-items:center;padding:0 14px;font-size:16px;color:#1B1D1C;">Home<span style="width:2px;height:22px;background:#00696E;margin-left:1px;"></span></div>
+          <div style="font-size:12px;color:#8A8D8A;margin-top:5px;">Focused — 1.5px <code style="font-family:ui-monospace,monospace;">primary</code> border + caret</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:14px;background:#fff;border:1px solid #EEEEE9;border-radius:12px;padding:12px 16px;min-height:60px;">
+          <div style="flex:1;">
+            <div style="font-size:16px;font-weight:600;">Notify on arrival</div>
+            <div style="font-size:13px;color:#5C5F5C;">Alert when someone enters this zone</div>
+          </div>
+          <div style="width:52px;height:32px;border-radius:999px;background:#00696E;position:relative;flex:none;"><span style="position:absolute;top:3px;left:23px;width:26px;height:26px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.3);"></span></div>
+        </div>
+        <div style="font-size:13px;line-height:1.55;color:#5C5F5C;margin-top:14px;">Field: <code style="font-family:ui-monospace,monospace;">outline</code> at rest → <code style="font-family:ui-monospace,monospace;">primary</code> focused, <code style="font-family:ui-monospace,monospace;">danger</code> on error with helper text. Switch ON = <code style="font-family:ui-monospace,monospace;">primary</code> track (iOS pill / Android M3 thumb).</div>
+      </div>
+    </div>
+
+    <!-- EMPTY / LOADING / ERROR -->
+    <div style="border:1px solid #E7E7E1;border-radius:20px;background:#FAFAF7;padding:26px 28px;box-shadow:0 2px 4px rgba(20,25,20,.05);">
+      <div style="font-size:14px;font-weight:600;margin-bottom:2px;">FindlyEmptyState · LoadingState · ErrorState</div>
+      <div style="font-size:12px;color:#8A8D8A;margin-bottom:20px;">Friendly, reassuring — never raw server text</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;">
+        <div style="background:#fff;border:1px solid #EEEEE9;border-radius:16px;padding:28px 22px;text-align:center;">
+          <div style="width:52px;height:52px;border-radius:16px;background:#E1EFEE;margin:0 auto 14px;display:flex;align-items:center;justify-content:center;color:#00696E;font-size:24px;">◎</div>
+          <div style="font-size:16px;font-weight:600;margin-bottom:6px;">No zones yet</div>
+          <div style="font-size:14px;line-height:1.5;color:#5C5F5C;">Add a place like Home or School to get gentle arrival alerts.</div>
+        </div>
+        <div style="background:#fff;border:1px solid #EEEEE9;border-radius:16px;padding:28px 22px;text-align:center;">
+          <div style="width:52px;height:52px;border-radius:50%;border:4px solid #EEEEE9;border-top-color:#00696E;margin:0 auto 14px;"></div>
+          <div style="font-size:16px;font-weight:600;margin-bottom:6px;">Finding everyone…</div>
+          <div style="font-size:14px;line-height:1.5;color:#5C5F5C;">Getting the latest locations. This only takes a moment.</div>
+        </div>
+        <div style="background:#fff;border:1px solid #F0D6D3;border-radius:16px;padding:28px 22px;text-align:center;">
+          <div style="width:52px;height:52px;border-radius:16px;background:#F7E3E1;margin:0 auto 14px;display:flex;align-items:center;justify-content:center;color:#C0362C;font-size:24px;font-weight:700;">!</div>
+          <div style="font-size:16px;font-weight:600;margin-bottom:6px;">We couldn't reach the server</div>
+          <div style="font-size:14px;line-height:1.5;color:#5C5F5C;margin-bottom:14px;">Check your connection and try again — your family's data is safe.</div>
+          <span style="display:inline-flex;align-items:center;justify-content:center;min-height:40px;padding:0 18px;border-radius:12px;background:#00696E;color:#fff;font-size:15px;font-weight:600;">Retry</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ MAP SCREEN MOCKUPS ============ -->
+  <section style="max-width:1120px;margin:0 auto;padding:56px 40px 0;">
+    <div style="display:flex;align-items:baseline;gap:14px;margin-bottom:6px;">
+      <span style="font-size:13px;font-weight:700;color:#00696E;">05</span>
+      <h2 style="font-size:30px;font-weight:700;letter-spacing:-.015em;margin:0;">The map, in context</h2>
+    </div>
+    <p style="font-size:15px;line-height:1.55;color:#5C5F5C;margin:0 0 32px;max-width:660px;">The live map is home. Below, the key surfaces at device scale — light &amp; dark, tokens applied. Map tiles are shown as placeholders; real MapKit / Maps SDK tiles slot in behind the same markers.</p>
+
+    <div style="display:flex;flex-wrap:wrap;gap:28px;justify-content:center;">
+
+      <!-- PHONE 1: LIVE MAP (light) -->
+      <div style="width:300px;">
+        <div style="position:relative;width:300px;height:620px;border-radius:44px;background:#111;padding:10px;box-shadow:0 18px 40px rgba(20,25,20,.22);">
+          <div style="position:relative;width:100%;height:100%;border-radius:36px;overflow:hidden;background:#FAFAF7;">
+            <!-- map surface -->
+            <div style="position:absolute;inset:0;background-color:#E4EAE2;background-image:repeating-linear-gradient(90deg,rgba(0,0,0,.04) 0 1px,transparent 1px 44px),repeating-linear-gradient(0deg,rgba(0,0,0,.04) 0 1px,transparent 1px 44px);">
+              <!-- roads -->
+              <div style="position:absolute;top:120px;left:-10px;width:340px;height:14px;background:#F3F1EC;transform:rotate(-8deg);"></div>
+              <div style="position:absolute;top:300px;left:-10px;width:340px;height:10px;background:#F3F1EC;transform:rotate(6deg);"></div>
+              <div style="position:absolute;top:60px;left:150px;width:12px;height:420px;background:#F3F1EC;"></div>
+              <!-- geofence circle -->
+              <div style="position:absolute;top:150px;left:70px;width:120px;height:120px;border-radius:50%;background:rgba(0,105,110,.10);border:2px solid rgba(0,105,110,.55);"></div>
+              <!-- status bar -->
+              <div style="position:relative;display:flex;justify-content:space-between;align-items:center;padding:14px 22px 0;font-size:13px;font-weight:600;color:#1B1D1C;">
+                <span>9:41</span><span style="letter-spacing:1px;">● ● ●  ▮</span>
+              </div>
+              <!-- title pill -->
+              <div style="position:absolute;top:52px;left:16px;right:16px;display:flex;align-items:center;gap:10px;background:#fff;border-radius:16px;padding:10px 14px;box-shadow:0 2px 8px rgba(20,25,20,.14);">
+                <div style="width:34px;height:34px;border-radius:10px;background:#00696E;display:flex;align-items:center;justify-content:center;"><div style="width:9px;height:9px;border-radius:50%;background:#fff;box-shadow:0 0 0 3px rgba(255,255,255,.35);"></div></div>
+                <div style="flex:1;"><div style="font-size:15px;font-weight:600;">The Haddads</div><div style="font-size:12px;color:#5C5F5C;">3 people · all safe</div></div>
+                <div style="width:32px;height:32px;border-radius:50%;background:#EEEEE9;display:flex;align-items:center;justify-content:center;color:#00514F;font-size:16px;">⌕</div>
+              </div>
+              <!-- markers -->
+              <div style="position:absolute;top:180px;left:104px;width:44px;height:44px;border-radius:50%;background:#00696E;border:3px solid #fff;box-shadow:0 3px 8px rgba(0,0,0,.3);color:#fff;font-size:17px;font-weight:600;display:flex;align-items:center;justify-content:center;">N</div>
+              <div style="position:absolute;top:290px;left:190px;width:44px;height:44px;border-radius:50%;background:#4C5FD5;border:3px solid #fff;box-shadow:0 3px 8px rgba(0,0,0,.3);color:#fff;font-size:17px;font-weight:600;display:flex;align-items:center;justify-content:center;">S</div>
+              <div style="position:absolute;top:230px;left:52px;width:44px;height:44px;border-radius:50%;background:#B7A26A;border:3px dashed #fff;box-shadow:0 3px 8px rgba(0,0,0,.3);color:#fff;font-size:17px;font-weight:600;display:flex;align-items:center;justify-content:center;">L</div>
+            </div>
+            <!-- locate now FAB -->
+            <div style="position:absolute;right:16px;bottom:212px;display:inline-flex;align-items:center;gap:8px;height:48px;padding:0 18px;border-radius:24px;background:#00696E;color:#fff;font-size:15px;font-weight:600;box-shadow:0 4px 10px rgba(0,60,60,.3);"><span style="width:12px;height:12px;border-radius:50%;border:2px solid #fff;"></span>Locate now</div>
+            <!-- bottom sheet -->
+            <div style="position:absolute;left:0;right:0;bottom:0;background:#fff;border-radius:22px 22px 0 0;box-shadow:0 -4px 16px rgba(20,25,20,.12);padding:10px 16px 20px;">
+              <div style="width:38px;height:5px;border-radius:3px;background:#D8D8D2;margin:2px auto 12px;"></div>
+              <div style="display:flex;align-items:center;gap:12px;padding:8px 4px;border-bottom:1px solid #F5F5F0;">
+                <div style="width:40px;height:40px;border-radius:50%;background:#00696E;color:#fff;font-size:15px;font-weight:600;display:flex;align-items:center;justify-content:center;flex:none;">N</div>
+                <div style="flex:1;min-width:0;"><div style="font-size:15px;font-weight:600;">Noor</div><div style="font-size:12px;color:#5C5F5C;">Home · 2 min ago</div></div>
+                <span style="display:inline-flex;align-items:center;gap:5px;height:26px;padding:0 10px 0 8px;border-radius:999px;background:#E4F1E8;border:1px solid #1E7D46;color:#0F5B30;font-size:11px;font-weight:600;flex:none;"><span style="width:7px;height:7px;border-radius:50%;background:#1E7D46;"></span>Online</span>
+              </div>
+              <div style="display:flex;align-items:center;gap:12px;padding:8px 4px;">
+                <div style="width:40px;height:40px;border-radius:50%;background:#B7A26A;color:#fff;font-size:15px;font-weight:600;display:flex;align-items:center;justify-content:center;flex:none;">L</div>
+                <div style="flex:1;min-width:0;"><div style="font-size:15px;font-weight:600;">Lena</div><div style="font-size:12px;color:#5C5F5C;">Oakwood School · 41 min ago</div></div>
+                <span style="display:inline-flex;align-items:center;gap:5px;height:26px;padding:0 10px 0 8px;border-radius:999px;background:#F5ECDA;border:1px solid #8A5A00;color:#6E4700;font-size:11px;font-weight:600;flex:none;"><span style="width:0;height:0;border-left:4px solid transparent;border-right:4px solid transparent;border-bottom:7px solid #8A5A00;"></span>Stale</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div style="text-align:center;font-size:13px;font-weight:600;color:#5C5F5C;margin-top:14px;">Live map · light</div>
+      </div>
+
+      <!-- PHONE 2: LIVE MAP (dark) -->
+      <div style="width:300px;">
+        <div style="position:relative;width:300px;height:620px;border-radius:44px;background:#000;padding:10px;box-shadow:0 18px 40px rgba(20,25,20,.28);">
+          <div style="position:relative;width:100%;height:100%;border-radius:36px;overflow:hidden;background:#17181A;">
+            <div style="position:absolute;inset:0;background-color:#23272C;background-image:repeating-linear-gradient(90deg,rgba(255,255,255,.03) 0 1px,transparent 1px 44px),repeating-linear-gradient(0deg,rgba(255,255,255,.03) 0 1px,transparent 1px 44px);">
+              <div style="position:absolute;top:120px;left:-10px;width:340px;height:14px;background:#2E333A;transform:rotate(-8deg);"></div>
+              <div style="position:absolute;top:300px;left:-10px;width:340px;height:10px;background:#2E333A;transform:rotate(6deg);"></div>
+              <div style="position:absolute;top:60px;left:150px;width:12px;height:420px;background:#2E333A;"></div>
+              <div style="position:absolute;top:150px;left:70px;width:120px;height:120px;border-radius:50%;background:rgba(76,212,217,.10);border:2px solid rgba(76,212,217,.5);"></div>
+              <div style="position:relative;display:flex;justify-content:space-between;align-items:center;padding:14px 22px 0;font-size:13px;font-weight:600;color:#ECECE6;">
+                <span>9:41</span><span style="letter-spacing:1px;">● ● ●  ▮</span>
+              </div>
+              <div style="position:absolute;top:52px;left:16px;right:16px;display:flex;align-items:center;gap:10px;background:#1F2124;border:1px solid #2A2C30;border-radius:16px;padding:10px 14px;box-shadow:0 4px 12px rgba(0,0,0,.4);">
+                <div style="width:34px;height:34px;border-radius:10px;background:#4CD4D9;display:flex;align-items:center;justify-content:center;"><div style="width:9px;height:9px;border-radius:50%;background:#00312F;"></div></div>
+                <div style="flex:1;"><div style="font-size:15px;font-weight:600;color:#ECECE6;">The Haddads</div><div style="font-size:12px;color:#9A9E9C;">3 people · all safe</div></div>
+                <div style="width:32px;height:32px;border-radius:50%;background:#24262A;display:flex;align-items:center;justify-content:center;color:#4CD4D9;font-size:16px;">⌕</div>
+              </div>
+              <div style="position:absolute;top:180px;left:104px;width:44px;height:44px;border-radius:50%;background:#4CD4D9;border:3px solid #17181A;box-shadow:0 3px 8px rgba(0,0,0,.5);color:#00312F;font-size:17px;font-weight:700;display:flex;align-items:center;justify-content:center;">N</div>
+              <div style="position:absolute;top:290px;left:190px;width:44px;height:44px;border-radius:50%;background:#A9B4FF;border:3px solid #17181A;box-shadow:0 3px 8px rgba(0,0,0,.5);color:#141a3a;font-size:17px;font-weight:700;display:flex;align-items:center;justify-content:center;">S</div>
+              <div style="position:absolute;top:230px;left:52px;width:44px;height:44px;border-radius:50%;background:#3A3D42;border:3px dashed #6C6F6B;box-shadow:0 3px 8px rgba(0,0,0,.5);color:#9A9E9C;font-size:17px;font-weight:600;display:flex;align-items:center;justify-content:center;">L</div>
+            </div>
+            <div style="position:absolute;right:16px;bottom:212px;display:inline-flex;align-items:center;gap:8px;height:48px;padding:0 18px;border-radius:24px;background:#4CD4D9;color:#00312F;font-size:15px;font-weight:700;box-shadow:0 4px 12px rgba(0,0,0,.5);"><span style="width:12px;height:12px;border-radius:50%;border:2px solid #00312F;"></span>Locate now</div>
+            <div style="position:absolute;left:0;right:0;bottom:0;background:#1F2124;border:1px solid #2A2C30;border-bottom:none;border-radius:22px 22px 0 0;box-shadow:0 -4px 16px rgba(0,0,0,.4);padding:10px 16px 20px;">
+              <div style="width:38px;height:5px;border-radius:3px;background:#3A3D42;margin:2px auto 12px;"></div>
+              <div style="display:flex;align-items:center;gap:12px;padding:8px 4px;border-bottom:1px solid #24262A;">
+                <div style="width:40px;height:40px;border-radius:50%;background:#4CD4D9;color:#00312F;font-size:15px;font-weight:700;display:flex;align-items:center;justify-content:center;flex:none;">N</div>
+                <div style="flex:1;min-width:0;"><div style="font-size:15px;font-weight:600;color:#ECECE6;">Noor</div><div style="font-size:12px;color:#9A9E9C;">Home · 2 min ago</div></div>
+                <span style="display:inline-flex;align-items:center;gap:5px;height:26px;padding:0 10px 0 8px;border-radius:999px;background:#16301F;border:1px solid #5FD08A;color:#5FD08A;font-size:11px;font-weight:600;flex:none;"><span style="width:7px;height:7px;border-radius:50%;background:#5FD08A;"></span>Online</span>
+              </div>
+              <div style="display:flex;align-items:center;gap:12px;padding:8px 4px;">
+                <div style="width:40px;height:40px;border-radius:50%;background:#3A3D42;color:#9A9E9C;font-size:15px;font-weight:600;display:flex;align-items:center;justify-content:center;flex:none;">L</div>
+                <div style="flex:1;min-width:0;"><div style="font-size:15px;font-weight:600;color:#ECECE6;">Lena</div><div style="font-size:12px;color:#9A9E9C;">Oakwood School · 41 min ago</div></div>
+                <span style="display:inline-flex;align-items:center;gap:5px;height:26px;padding:0 10px 0 8px;border-radius:999px;background:#332813;border:1px solid #E4B44C;color:#E4B44C;font-size:11px;font-weight:600;flex:none;"><span style="width:0;height:0;border-left:4px solid transparent;border-right:4px solid transparent;border-bottom:7px solid #E4B44C;"></span>Stale</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div style="text-align:center;font-size:13px;font-weight:600;color:#5C5F5C;margin-top:14px;">Live map · dark</div>
+      </div>
+
+      <!-- PHONE 3: LOCATE-TO-REQUEST + GEOFENCE -->
+      <div style="width:300px;">
+        <div style="position:relative;width:300px;height:620px;border-radius:44px;background:#111;padding:10px;box-shadow:0 18px 40px rgba(20,25,20,.22);">
+          <div style="position:relative;width:100%;height:100%;border-radius:36px;overflow:hidden;background:#FAFAF7;">
+            <!-- top: locate-to-request state -->
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:14px 22px 0;font-size:13px;font-weight:600;color:#1B1D1C;"><span>9:41</span><span style="letter-spacing:1px;">● ● ●  ▮</span></div>
+            <div style="display:flex;align-items:center;gap:12px;padding:14px 18px 10px;">
+              <div style="width:40px;height:40px;border-radius:10px;display:flex;align-items:center;justify-content:center;color:#00696E;font-size:22px;">‹</div>
+              <div style="font-size:20px;font-weight:600;">Locate Lena</div>
+            </div>
+            <div style="margin:0 16px;background:#fff;border:1px solid #EEEEE9;border-radius:18px;box-shadow:0 4px 8px rgba(20,25,20,.08);padding:18px;">
+              <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">
+                <span style="width:10px;height:10px;border-radius:50%;background:#8A5A00;"></span>
+                <span style="font-size:13px;font-weight:600;color:#6E4700;">Last known · 41 min ago</span>
+              </div>
+              <div style="height:96px;border-radius:12px;background-color:#E4EAE2;background-image:repeating-linear-gradient(135deg,rgba(0,0,0,.04) 0 10px,transparent 10px 20px);position:relative;margin-bottom:14px;">
+                <div style="position:absolute;top:26px;left:120px;width:36px;height:36px;border-radius:50%;background:#B7A26A;border:3px dashed #fff;color:#fff;font-size:14px;font-weight:600;display:flex;align-items:center;justify-content:center;">L</div>
+              </div>
+              <div style="display:inline-flex;align-items:center;gap:8px;height:34px;padding:0 14px;border-radius:999px;background:#E1EFEE;color:#00514F;font-size:13px;font-weight:600;"><span style="width:12px;height:12px;border-radius:50%;border:2px solid #00696E;border-top-color:transparent;"></span>Updating… asking Lena's phone</div>
+            </div>
+
+            <!-- divider label -->
+            <div style="padding:22px 20px 6px;font-size:12px;font-weight:600;letter-spacing:.5px;text-transform:uppercase;color:#8A8D8A;">Geofence editor</div>
+            <!-- geofence editor card -->
+            <div style="margin:0 16px;background:#fff;border:1px solid #EEEEE9;border-radius:18px;overflow:hidden;box-shadow:0 4px 8px rgba(20,25,20,.08);">
+              <div style="height:88px;background-color:#E4EAE2;background-image:repeating-linear-gradient(135deg,rgba(0,0,0,.04) 0 10px,transparent 10px 20px);position:relative;">
+                <div style="position:absolute;top:14px;left:96px;width:96px;height:96px;border-radius:50%;background:rgba(0,105,110,.12);border:2px solid rgba(0,105,110,.6);"></div>
+                <div style="position:absolute;top:52px;left:138px;width:14px;height:14px;border-radius:50%;background:#00696E;border:2px solid #fff;"></div>
+              </div>
+              <div style="padding:14px 16px;">
+                <div style="height:44px;border:1.5px solid #00696E;border-radius:12px;background:#fff;display:flex;align-items:center;padding:0 12px;font-size:15px;font-weight:500;margin-bottom:12px;">🏠 Home</div>
+                <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+                  <span style="font-size:13px;color:#5C5F5C;width:52px;">Radius</span>
+                  <div style="flex:1;height:4px;border-radius:2px;background:#EEEEE9;position:relative;"><div style="position:absolute;left:0;top:0;height:4px;width:55%;border-radius:2px;background:#00696E;"></div><div style="position:absolute;left:calc(55% - 9px);top:-7px;width:18px;height:18px;border-radius:50%;background:#00696E;box-shadow:0 1px 3px rgba(0,0,0,.3);"></div></div>
+                  <span style="font-size:13px;font-weight:600;width:44px;text-align:right;">150 m</span>
+                </div>
+                <div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-top:1px solid #F5F5F0;">
+                  <div style="flex:1;font-size:14px;font-weight:500;">Notify on arrival</div>
+                  <div style="width:46px;height:28px;border-radius:999px;background:#00696E;position:relative;flex:none;"><span style="position:absolute;top:3px;left:21px;width:22px;height:22px;border-radius:50%;background:#fff;"></span></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div style="text-align:center;font-size:13px;font-weight:600;color:#5C5F5C;margin-top:14px;">Locate request · Geofence editor</div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ============ SCREENS ============ -->
+  <section style="max-width:1120px;margin:0 auto;padding:56px 40px 0;">
+    <div style="display:flex;align-items:baseline;gap:14px;margin-bottom:6px;">
+      <span style="font-size:13px;font-weight:700;color:#00696E;">06</span>
+      <h2 style="font-size:30px;font-weight:700;letter-spacing:-.015em;margin:0;">Screens</h2>
+    </div>
+    <p style="font-size:15px;line-height:1.55;color:#5C5F5C;margin:0 0 28px;max-width:660px;">Layout, hierarchy and key states — composed entirely from the components above. You style only; view models supply plain state.</p>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px;">
+      <sc-for list="{{ screens }}" as="sc" hint-placeholder-count="7">
+        <div style="background:#fff;border:1px solid #E7E7E1;border-radius:18px;padding:24px 26px;box-shadow:0 2px 4px rgba(20,25,20,.05);">
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+            <span style="width:26px;height:26px;border-radius:8px;background:#E1EFEE;color:#00514F;font-size:13px;font-weight:700;display:flex;align-items:center;justify-content:center;flex:none;">{{ sc.n }}</span>
+            <span style="font-size:16px;font-weight:600;">{{ sc.title }}</span>
+          </div>
+          <p style="font-size:14px;line-height:1.6;color:#3A3D3A;margin:0 0 12px;">{{ sc.body }}</p>
+          <div style="display:flex;flex-wrap:wrap;gap:7px;">
+            <sc-for list="{{ sc.states }}" as="st" hint-placeholder-count="3">
+              <span style="font-size:12px;font-weight:500;color:#5C5F5C;background:#F5F5F0;border:1px solid #EAEAE4;border-radius:999px;padding:4px 10px;">{{ st }}</span>
+            </sc-for>
+          </div>
+        </div>
+      </sc-for>
+    </div>
+  </section>
+
+  <!-- ============ PLATFORM NOTES ============ -->
+  <section style="max-width:1120px;margin:0 auto;padding:56px 40px 0;">
+    <div style="display:flex;align-items:baseline;gap:14px;margin-bottom:28px;">
+      <span style="font-size:13px;font-weight:700;color:#00696E;">07</span>
+      <h2 style="font-size:30px;font-weight:700;letter-spacing:-.015em;margin:0;">Keeping shared tokens native</h2>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;">
+      <div style="background:#fff;border:1px solid #E7E7E1;border-radius:20px;padding:28px 30px;box-shadow:0 2px 4px rgba(20,25,20,.05);">
+        <div style="font-size:15px;font-weight:600;margin-bottom:12px;display:flex;align-items:center;gap:9px;"><span style="width:20px;height:20px;border-radius:6px;background:#3DDC84;"></span>Android · Material 3</div>
+        <p style="font-size:14px;line-height:1.65;color:#3A3D3A;margin:0;">Map the semantic tokens onto an M3 <code style="font-family:ui-monospace,monospace;">ColorScheme</code> (<code style="font-family:ui-monospace,monospace;">primary/onPrimary/surface/surfaceVariant/error</code>). Elevation is real dp with tonal overlay; buttons ripple on press; shapes use the M3 <code style="font-family:ui-monospace,monospace;">large/medium/small</code> families keyed to our radius scale. Type is Roboto via <code style="font-family:ui-monospace,monospace;">Typography</code>. SectionHeader is a genuine M3 list subheader. Switches, sliders and the FAB-style "locate now" follow M3 anatomy — the tokens just supply the color.</p>
+      </div>
+      <div style="background:#fff;border:1px solid #E7E7E1;border-radius:20px;padding:28px 30px;box-shadow:0 2px 4px rgba(20,25,20,.05);">
+        <div style="font-size:15px;font-weight:600;margin-bottom:12px;display:flex;align-items:center;gap:9px;"><span style="width:20px;height:20px;border-radius:6px;background:#1B1D1C;"></span>iOS · HIG</div>
+        <p style="font-size:14px;line-height:1.65;color:#3A3D3A;margin:0;">Same tokens drive a SwiftUI theme, but depth comes from the shadow-spec form of each elevation level (no Material overlay). Use SF&nbsp;Symbols for status glyphs and nav chevrons, Dynamic Type from the SF Pro sizes, and HIG spacing (16pt gutters, grouped-inset lists for rows/settings). The bottom sheet on the map is a native detent sheet; toggles are UISwitch-style pills. Pressed states dim rather than ripple.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ CODE ============ -->
+  <section style="max-width:1120px;margin:0 auto;padding:56px 40px 0;">
+    <div style="display:flex;align-items:baseline;gap:14px;margin-bottom:28px;">
+      <span style="font-size:13px;font-weight:700;color:#00696E;">08</span>
+      <h2 style="font-size:30px;font-weight:700;letter-spacing:-.015em;margin:0;">Ready-to-paste tokens</h2>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;">
+      <div style="background:#17181A;border:1px solid #2A2C30;border-radius:18px;overflow:hidden;">
+        <div style="padding:13px 20px;border-bottom:1px solid #24262A;font-size:13px;font-weight:600;color:#ECECE6;display:flex;align-items:center;gap:8px;"><span style="width:14px;height:14px;border-radius:4px;background:#3DDC84;"></span>Kotlin — FindlyColors</div>
+        <pre style="margin:0;padding:20px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;line-height:1.7;color:#C9CDCB;overflow-x:auto;">{{ kotlin }}</pre>
+      </div>
+      <div style="background:#17181A;border:1px solid #2A2C30;border-radius:18px;overflow:hidden;">
+        <div style="padding:13px 20px;border-bottom:1px solid #24262A;font-size:13px;font-weight:600;color:#ECECE6;display:flex;align-items:center;gap:8px;"><span style="width:14px;height:14px;border-radius:4px;background:#0A84FF;"></span>Swift — ColorTokens</div>
+        <pre style="margin:0;padding:20px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;line-height:1.7;color:#C9CDCB;overflow-x:auto;">{{ swift }}</pre>
+      </div>
+    </div>
+    <p style="font-size:13px;line-height:1.55;color:#8A8D8A;margin:22px 2px 0;">Drop into Android <code style="font-family:ui-monospace,monospace;">ui/designsystem/token/</code> and iOS <code style="font-family:ui-monospace,monospace;">DesignSystem/Tokens/</code>. Nothing outside <code style="font-family:ui-monospace,monospace;">DesignSystem/</code> changes — the design-swappable seam. Re-run each app's grep guard and the component gallery previews (light + dark) as the regression check.</p>
+  </section>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  renderVals() {
+    const ok = '#1E7D46', muted = '#8A8D8A';
+    const okD = '#5FD08A', mutedD = '#7C807E';
+    const lightRows = [
+      ['primary','#00696E','Brand · main actions · selected','6.47:1 ✓',ok],
+      ['onPrimary','#FFFFFF','Content on primary','—',muted],
+      ['secondary','#4C5FD5','Accent · secondary actions','5.14:1 ✓',ok],
+      ['surface','#FAFAF7','Default background','—',muted],
+      ['onSurface','#1B1D1C','Default text & icons','16.2:1 ✓',ok],
+      ['surfaceVariant','#EEEEE9','Cards · rows · wells','14.6:1 ✓',ok],
+      ['danger','#C0362C','Destructive & error','5.28:1 ✓',ok],
+      ['onDanger','#FFFFFF','Content on danger','5.52:1 ✓',ok],
+      ['success','#1E7D46','Arrivals · healthy · online','4.93:1 ✓',ok],
+      ['warning','#8A5A00','Stale · attention','5.67:1 ✓',ok],
+      ['outline','#C9C8C2','Borders · dividers · strokes','decorative',muted],
+    ].map(r => ({token:r[0],hex:r[1],hexStyle:r[1],role:r[2],cr:r[3],crColor:r[4]}));
+    const darkRows = [
+      ['primary','#4CD4D9','Brand · main actions · selected','7.92:1 ✓',okD],
+      ['onPrimary','#00312F','Content on primary','—',mutedD],
+      ['secondary','#A9B4FF','Accent · secondary actions','9.02:1 ✓',okD],
+      ['surface','#17181A','Default background','—',mutedD],
+      ['onSurface','#ECECE6','Default text & icons','15.0:1 ✓',okD],
+      ['surfaceVariant','#24262A','Cards · rows · wells','12.8:1 ✓',okD],
+      ['danger','#F2867B','Destructive & error','7.17:1 ✓',okD],
+      ['onDanger','#490A05','Content on danger','6.37:1 ✓',okD],
+      ['success','#5FD08A','Arrivals · healthy · online','9.20:1 ✓',okD],
+      ['warning','#E4B44C','Stale · attention','9.25:1 ✓',okD],
+      ['outline','#3A3D42','Borders · dividers · strokes','decorative',mutedD],
+    ].map(r => ({token:r[0],hex:r[1],hexStyle:r[1],role:r[2],cr:r[3],crColor:r[4]}));
+
+    const typeRows = [
+      ['displayLarge','First-run headlines','34px','700','40px','-0.02em','Where\u2019s your family?','34 / Bold / 40'],
+      ['titleLarge','Screen & nav titles','22px','600','28px','-0.01em','Live map','22 / Semibold / 28'],
+      ['titleMedium','Row & card titles','17px','600','22px','normal','Noor \u00b7 Home','17 / Semibold / 22'],
+      ['bodyLarge','Primary reading text','17px','400','24px','normal','Noor arrived at Home','17 / Regular / 24'],
+      ['bodyMedium','Secondary / subtitles','15px','400','20px','normal','Last seen 2 minutes ago','15 / Regular / 20'],
+      ['labelSmall','Chips, captions, overlines','12px','500','16px','0.4px','ONLINE','12 / Medium / 16'],
+    ].map(r => ({token:r[0],use:r[1],px:r[2],weight:r[3],lh:r[4],ls:r[5],sample:r[6],spec:r[7]}));
+
+    const spacing = [
+      ['xs','4pt','12px'],['sm','8pt','24px'],['md','12pt','40px'],
+      ['lg','16pt','56px'],['xl','24pt','84px'],['xxl','32pt','112px'],
+    ].map(s => ({token:s[0],val:s[1],barW:s[2]}));
+
+    const radii = [
+      ['sm','8pt','8px'],['md','12pt','12px'],['lg','20pt','20px'],['pill','full','999px'],
+    ].map(r => ({token:r[0],val:r[1],css:r[2]}));
+
+    const elevation = [
+      ['level0','0 dp','none','none'],
+      ['level1','1 dp','{2,1,.08}','0 1px 2px rgba(20,25,20,.08)'],
+      ['level2','3 dp','{4,2,.12}','0 2px 4px rgba(20,25,20,.12)'],
+      ['level3','6 dp','{8,4,.16}','0 4px 8px rgba(20,25,20,.16)'],
+    ].map(e => ({token:e[0],dp:e[1],shadow:e[2],css:e[3]}));
+
+    const screens = [
+      ['1','Sign-in / onboarding','Calm centered stack on plain surface: wordmark, email + password fields, primary "Sign in" button, and a bordered "Continue with Google". First-run flows into a staged permission explainer that says why before the OS prompt — Android fine\u2192background, iOS When-In-Use\u2192Always upgrade rationale, each with a reassuring one-liner.',['first run','permission rationale','error inline']],
+      ['2','Live map (home)','Full-bleed map is the surface; member MapMarkerBubbles float on it. A draggable bottom sheet lists members & devices with avatar, last-seen and a StatusChip. A large primary "Locate now" sits above the sheet, always reachable one-handed. Handles "device has no location yet" and "member has no devices" with inline hints, not blanks.',['no location yet','no devices','sheet expanded']],
+      ['3','History','Member/device picker + date-range control pinned at top. Below, a paginated list of past points (time, place, dwell) that can flip to a map trail. Loading appends a spinner row; empty state reassures that history builds over time.',['trail view','paginating','empty']],
+      ['4','Geofences','List of zones (icon, name, radius). Editor opens over a small map preview showing the live circle: name TextField, icon picker, radius slider, notify-on-enter/exit SwitchRows. A save-conflict banner ("someone else changed the zones \u2014 refresh") protects concurrent edits.',['editor','radius drag','save conflict']],
+      ['5','Locate-to-request','Instant last-known shown immediately with its age, then a live "updating\u2026" pill polls until fulfilled or timed out. Terminal states are explicit and calm: fresh fix (success) or "couldn\u2019t reach the device \u2014 showing last known" (warning, never a scary error).',['last-known','updating\u2026','timed out']],
+      ['6','Device & family settings','Grouped lists via SectionHeaders: per-device sync-interval + pause/tracking SwitchRows (parent-editable), then member management (roles, remove, step-down / leave). Friendly guardrails block the last-parent from leaving with a warm explanation, not a hard error.',['owner scope','last-parent guard','confirm remove']],
+      ['7','Invites','Parent creates an invite: a big monospaced code card + native share affordance. Accept flow pastes/deep-links a code, enters a display name, and joins. Invalid or expired codes surface friendly inline guidance.',['create & share','accept','invalid code']],
+    ].map(s => ({n:s[0],title:s[1],body:s[2],states:s[3]}));
+
+    const kotlin = `val LightFindlyColors = FindlyColors(
+  primary        = Color(0xFF00696E),
+  onPrimary      = Color(0xFFFFFFFF),
+  secondary      = Color(0xFF4C5FD5),
+  surface        = Color(0xFFFAFAF7),
+  onSurface      = Color(0xFF1B1D1C),
+  surfaceVariant = Color(0xFFEEEEE9),
+  danger         = Color(0xFFC0362C),
+  onDanger       = Color(0xFFFFFFFF),
+  success        = Color(0xFF1E7D46),
+  warning        = Color(0xFF8A5A00),
+  outline        = Color(0xFFC9C8C2),
+)
+
+val DarkFindlyColors = FindlyColors(
+  primary        = Color(0xFF4CD4D9),
+  onPrimary      = Color(0xFF00312F),
+  secondary      = Color(0xFFA9B4FF),
+  surface        = Color(0xFF17181A),
+  onSurface      = Color(0xFFECECE6),
+  surfaceVariant = Color(0xFF24262A),
+  danger         = Color(0xFFF2867B),
+  onDanger       = Color(0xFF490A05),
+  success        = Color(0xFF5FD08A),
+  warning        = Color(0xFFE4B44C),
+  outline        = Color(0xFF3A3D42),
+)`;
+
+    const swift = `extension ColorTokens {
+  static let light = ColorTokens(
+    primary:        Color(hex: 0x00696E),
+    onPrimary:      Color(hex: 0xFFFFFF),
+    secondary:      Color(hex: 0x4C5FD5),
+    surface:        Color(hex: 0xFAFAF7),
+    onSurface:      Color(hex: 0x1B1D1C),
+    surfaceVariant: Color(hex: 0xEEEEE9),
+    danger:         Color(hex: 0xC0362C),
+    onDanger:       Color(hex: 0xFFFFFF),
+    success:        Color(hex: 0x1E7D46),
+    warning:        Color(hex: 0x8A5A00),
+    outline:        Color(hex: 0xC9C8C2))
+
+  static let dark = ColorTokens(
+    primary:        Color(hex: 0x4CD4D9),
+    onPrimary:      Color(hex: 0x00312F),
+    secondary:      Color(hex: 0xA9B4FF),
+    surface:        Color(hex: 0x17181A),
+    onSurface:      Color(hex: 0xECECE6),
+    surfaceVariant: Color(hex: 0x24262A),
+    danger:         Color(hex: 0xF2867B),
+    onDanger:       Color(hex: 0x490A05),
+    success:        Color(hex: 0x5FD08A),
+    warning:        Color(hex: 0xE4B44C),
+    outline:        Color(hex: 0x3A3D42))
+}`;
+
+    return { lightRows, darkRows, typeRows, spacing, radii, elevation, screens, kotlin, swift };
+  }
+}
+</script>
+</body>
+</html>

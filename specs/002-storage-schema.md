@@ -6,7 +6,7 @@ The complete, normative storage design: one Azure Storage account, Table Storage
 
 ## 1. Account & access
 
-- One storage account (e.g. `stwhereswaldo`, see `docs/azure-setup.md`).
+- One storage account (e.g. `stfindly`, see `docs/azure-setup.md`).
 - The Function App's **system-assigned managed identity** holds `Storage Table Data Contributor` + `Storage Blob Data Contributor` on the account. No connection strings/keys in code or settings (except local Azurite).
 - Local dev: Azurite; endpoints via `TABLES_ENDPOINT` / `BLOB_ENDPOINT` app settings (see `backend/local.settings.json.example`). Adapters MUST select credentials by endpoint host: `AzureNamedKeyCredential` with the well-known `devstoreaccount1` name/key when the host is `127.0.0.1`/`localhost`, `DefaultAzureCredential` otherwise.
 

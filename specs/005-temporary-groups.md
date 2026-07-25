@@ -101,7 +101,7 @@ A **daily timer-triggered function** (the project's first; domain logic pure and
 - **Group push notifications** (member joined / ending soon) — deferred; type names reserved in 001 §8.7 (000 §O14). The sweeper's daily run is the natural future emitter for "ending soon".
 - **Per-group pause** — 000 §O13; v1 answer is *leave*.
 - **Ownership transfer** — 000 §O15; v1 answer: the owner ends or deletes the group (`ownerCannotLeave`, 001 §12.8).
-- **HTTPS universal join links** — *promoted out of non-goals (2026-07-22):* spec'd in [007](007-public-join-links.md) (`https://{JOIN_LINK_HOST}/g#CODE`, static landing page, App Links / Universal Links, on-device QR). The in-app `waldo://group-join?code=…` deep link remains valid. Still deferred to the future web spec: the web map/viz app itself.
+- **HTTPS universal join links** — *promoted out of non-goals (2026-07-22):* spec'd in [007](007-public-join-links.md) (`https://{JOIN_LINK_HOST}/g#CODE`, static landing page, App Links / Universal Links, on-device QR). The in-app `findly://group-join?code=…` deep link remains valid. Still deferred to the future web spec: the web map/viz app itself.
 
 ## 6. Error cases
 

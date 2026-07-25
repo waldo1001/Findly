@@ -7,7 +7,7 @@ The convention use case (specs/007, 000 §D15/D16) requires strangers to *instal
 | Gate | Why | Tracked as |
 |---|---|---|
 | **Privacy policy + Terms** authored and hosted (`https://{JOIN_LINK_HOST}/privacy`, `/terms`) | Both stores require a privacy policy URL for location apps; GDPR requires it for EU users regardless | H7 (hosting needs H4/W1) |
-| **Naming / trademark decision** | "Where's Waldo/Wally" is the book franchise's mark (000 §O10) — store listings and printed QR materials are public branding; decide rename-or-risk **before** any listing or printed material exists | H7 |
+| **Naming / trademark decision — DONE 2026-07-25** | "Where's Waldo/Wally" is the book franchise's mark (000 §O10). **Decided:** public name = **Findly**; bundle ids `com.findly.*`. Removes the franchise-branding risk for store listings + printed QR | H7 (legal half — privacy/ToS — still open) |
 | **Privacy endpoints spec** (data export + account/family delete) | 000 §O7 says "before any public release" — and Google Play's account-deletion policy *requires* a deletion path for apps with sign-in. Needs its own numbered spec (008 candidate), then backend/client tasks | next design session |
 | **App Check enforced** on both platforms | Precondition for open-mode SMS (006 §6.3); also the right posture before strangers hold the app | H8 (after H2) |
 | **Release signing** (Android) | Play requires a signed release; the release SHA-256 also feeds Firebase/App Check (006 §6.5) and `assetlinks.json` (007 §3) | A7 (wiring) + H5 (keystore) |

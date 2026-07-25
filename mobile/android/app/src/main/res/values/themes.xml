@@ -1,7 +1,7 @@
 <resources>
     <!-- Minimal manifest-level theme for the pre-Compose window chrome only — all real theming
-         (color/typography/shape) is Compose-side via ui/designsystem/WaldoTheme.kt. Built-in
+         (color/typography/shape) is Compose-side via ui/designsystem/FindlyTheme.kt. Built-in
          platform parent on purpose: no AppCompat/Material-Components dependency is needed since
          every screen is Compose + Material3. -->
-    <style name="Theme.Waldo" parent="android:Theme.Material.Light.NoActionBar" />
+    <style name="Theme.Findly" parent="android:Theme.Material.Light.NoActionBar" />
 </resources>

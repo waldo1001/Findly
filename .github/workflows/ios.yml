@@ -9,14 +9,14 @@ on:
 
 jobs:
   package:
-    # WaldoKit (specs/004-ios-client.md) — the SPM package holding ALL iOS logic + the design
+    # FindlyKit (specs/004-ios-client.md) — the SPM package holding ALL iOS logic + the design
     # system — builds & tests on a real macOS/Xcode runner. This is real CI (not a structure
     # check): a genuine `swift build` + `swift test` gate for every PR touching mobile/ios/.
     name: ios-package
     runs-on: macos-14
     defaults:
       run:
-        working-directory: mobile/ios/WaldoKit
+        working-directory: mobile/ios/FindlyKit
     steps:
       - uses: actions/checkout@v4
       # H1 CI note (2026-07-20): this runner's default active developer directory can select
@@ -48,27 +48,27 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      # Structure check only — the WheresWaldo.xcodeproj app target does not exist yet (specs/004
+      # Structure check only — the Findly.xcodeproj app target does not exist yet (specs/004
       # §1.1: hand-authoring a project.pbxproj with no Xcode available to validate it is worse
-      # than not shipping one; create it in Xcode once available). The WaldoKit package itself is
+      # than not shipping one; create it in Xcode once available). The FindlyKit package itself is
       # real-CI-tested by the `package` job above.
       - name: structure check
         run: |
           test -f mobile/ios/README.md
           test -f mobile/ios/.gitignore
-          test -f mobile/ios/WaldoKit/Package.swift
-          test -f mobile/ios/WheresWaldo/WheresWaldoApp.swift
-          test -f mobile/ios/WheresWaldo/RootView.swift
-          test -f mobile/ios/WheresWaldo/Info.plist
-          echo "ios scaffold OK (WaldoKit package is real-CI-tested by the 'package' job; no Xcode project yet)"
+          test -f mobile/ios/FindlyKit/Package.swift
+          test -f mobile/ios/Findly/FindlyApp.swift
+          test -f mobile/ios/Findly/RootView.swift
+          test -f mobile/ios/Findly/Info.plist
+          echo "ios scaffold OK (FindlyKit package is real-CI-tested by the 'package' job; no Xcode project yet)"
       # TODO(session-ios): replace the structure check with the real app-target build once the
       # Xcode project exists. Runs on macos-14. Expected shape:
       #
       # - name: unit tests
-      #   run: xcodebuild test -scheme WheresWaldo -destination 'platform=iOS Simulator,name=iPhone 15'
+      #   run: xcodebuild test -scheme Findly -destination 'platform=iOS Simulator,name=iPhone 15'
       #   working-directory: mobile/ios
       # - name: archive + sign (main only)
-      #   run: xcodebuild archive -scheme WheresWaldo ...
+      #   run: xcodebuild archive -scheme Findly ...
       #   env:
       #     CERT_P12_BASE64: ${{ secrets.IOS_CERT_P12_BASE64 }}
       #     CERT_PASSWORD: ${{ secrets.IOS_CERT_PASSWORD }}

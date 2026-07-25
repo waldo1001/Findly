@@ -12,7 +12,7 @@ This project is **spec-driven**: no implementation code is written before (a) a 
 | [`001-api-contract.md`](001-api-contract.md) | **Single source of truth for every wire shape**: endpoints, request/response JSON, push payloads, error codes, auth |
 | [`002-storage-schema.md`](002-storage-schema.md) | Table/blob layouts, JSON schemas, concurrency rules, retention |
 | [`003-android-client.md`](003-android-client.md) | Android client: networking, auth provider, design-swappable UX layer, screens |
-| [`004-ios-client.md`](004-ios-client.md) | iOS client: `WaldoKit` SPM package, auth provider, design-swappable UX layer, screens |
+| [`004-ios-client.md`](004-ios-client.md) | iOS client: `FindlyKit` SPM package, auth provider, design-swappable UX layer, screens |
 | [`005-temporary-groups.md`](005-temporary-groups.md) | Temporary groups: concept, lifecycle/expiry policies, privacy guarantees, limits |
 | [`006-phone-auth.md`](006-phone-auth.md) | Phone-number-only sign-in: flow, normalization, dev mode, Firebase requirements, abuse/cost posture |
 

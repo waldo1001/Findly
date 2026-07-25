@@ -2,7 +2,7 @@
 
 ## Goal
 
-The normative design for the native iOS app: a headless-testable **Swift Package (`WaldoKit`)** holding all logic and the design system, plus a thin SwiftUI app target that wires it to the OS. Builds against [`specs/001-api-contract.md`](001-api-contract.md) (wire contract, complete) and [`specs/002-storage-schema.md`](002-storage-schema.md) (context only — the client never talks to storage directly) and [`specs/000-overview.md`](000-overview.md) (product, esp. **§Open Items O1–O4, O9**). This spec is scoped to **I1 — foundation**: networking, auth abstraction, device registration, the offline fix-queue, navigation scaffold, one proof screen, and — the key architectural requirement — a **design-swappable UX layer**. Feature screens (map, history, geofences editor, locate, settings, invites) are **I2**, out of scope here.
+The normative design for the native iOS app: a headless-testable **Swift Package (`FindlyKit`)** holding all logic and the design system, plus a thin SwiftUI app target that wires it to the OS. Builds against [`specs/001-api-contract.md`](001-api-contract.md) (wire contract, complete) and [`specs/002-storage-schema.md`](002-storage-schema.md) (context only — the client never talks to storage directly) and [`specs/000-overview.md`](000-overview.md) (product, esp. **§Open Items O1–O4, O9**). This spec is scoped to **I1 — foundation**: networking, auth abstraction, device registration, the offline fix-queue, navigation scaffold, one proof screen, and — the key architectural requirement — a **design-swappable UX layer**. Feature screens (map, history, geofences editor, locate, settings, invites) are **I2**, out of scope here.
 
 ---
 
@@ -12,29 +12,29 @@ The normative design for the native iOS app: a headless-testable **Swift Package
 
 ```
 mobile/ios/
-├── WaldoKit/                  ← Swift Package, iOS 16 + macOS 13 platforms
+├── FindlyKit/                  ← Swift Package, iOS 16 + macOS 13 platforms
 │   ├── Package.swift
-│   ├── Sources/WaldoKit/      ← ALL logic + design system (no app lifecycle code)
-│   └── Tests/WaldoKitTests/   ← Swift Testing (see §9), runs via `swift test` on any host
+│   ├── Sources/FindlyKit/      ← ALL logic + design system (no app lifecycle code)
+│   └── Tests/FindlyKitTests/   ← Swift Testing (see §9), runs via `swift test` on any host
 │                                  (incl. this macOS session, headlessly — no simulator needed)
-└── WheresWaldo/                ← thin SwiftUI app-target SOURCE FILES (WheresWaldoApp.swift,
-                                   RootView.swift, Info.plist, WheresWaldo.entitlements) — App
+└── Findly/                ← thin SwiftUI app-target SOURCE FILES (FindlyApp.swift,
+                                   RootView.swift, Info.plist, Findly.entitlements) — App
                                    lifecycle + environment wiring ONLY, zero business logic;
-                                   depends on WaldoKit as a local package.
+                                   depends on FindlyKit as a local package.
 ```
 
-**No `.xcodeproj` is committed by this session.** Wrapping the sources above into an actual Xcode project is a mechanical, low-risk step *in Xcode* (File → New → Project → App, point sources at `WheresWaldo/`, add `WaldoKit` as a local Swift Package dependency) — but hand-authoring a `project.pbxproj` in a text editor, with no Xcode available to validate the result (this session has Command Line Tools only; `xcodebuild` fails with "requires Xcode" here, and there is no tool here that can validate a `.pbxproj`'s object graph beyond plist syntax), risks shipping a project file that looks plausible but doesn't actually open — worse than no project file at all. The source files themselves ARE verified: they type-check cleanly against the real built `WaldoKit` module (`swiftc -typecheck` against `WaldoKit`'s `.build` products, this session). Creating the `.xcodeproj` is deferred to whichever session first has real Xcode (H1-era or later).
+**No `.xcodeproj` is committed by this session.** Wrapping the sources above into an actual Xcode project is a mechanical, low-risk step *in Xcode* (File → New → Project → App, point sources at `Findly/`, add `FindlyKit` as a local Swift Package dependency) — but hand-authoring a `project.pbxproj` in a text editor, with no Xcode available to validate the result (this session has Command Line Tools only; `xcodebuild` fails with "requires Xcode" here, and there is no tool here that can validate a `.pbxproj`'s object graph beyond plist syntax), risks shipping a project file that looks plausible but doesn't actually open — worse than no project file at all. The source files themselves ARE verified: they type-check cleanly against the real built `FindlyKit` module (`swiftc -typecheck` against `FindlyKit`'s `.build` products, this session). Creating the `.xcodeproj` is deferred to whichever session first has real Xcode (H1-era or later).
 
-**Rule (MUST):** any line of business logic, networking, persistence, or design-system code lives in `WaldoKit`. The app target MAY contain only: `@main App` struct, scene/window wiring, `Info.plist`/entitlements, and passing the OS lifecycle (scene phase, push-registration callbacks, `BGTaskScheduler` registration) into `WaldoKit` types through their public protocols. This split is what makes `swift build`/`swift test` run green on a plain macOS host with no Xcode project involved — the thing this session can actually verify.
+**Rule (MUST):** any line of business logic, networking, persistence, or design-system code lives in `FindlyKit`. The app target MAY contain only: `@main App` struct, scene/window wiring, `Info.plist`/entitlements, and passing the OS lifecycle (scene phase, push-registration callbacks, `BGTaskScheduler` registration) into `FindlyKit` types through their public protocols. This split is what makes `swift build`/`swift test` run green on a plain macOS host with no Xcode project involved — the thing this session can actually verify.
 
-**Platform gating (MUST):** `WaldoKit`'s `Package.swift` declares `platforms: [.iOS(.v16), .macOS(.v13)]`. Any file that imports an iOS-only framework (`CoreLocation`'s background APIs, `UIKit`, `BackgroundTasks`) MUST gate the import and the real implementation behind `#if os(iOS)` / `#if canImport(...)`, with a platform-agnostic protocol + a fake/no-op implementation available on all platforms so the package compiles and its tests run on macOS. Real device behavior (GPS fixes, background scheduling) is exercised only when the app runs on-device/in-simulator — out of scope for this session's verification, called out per-component below.
+**Platform gating (MUST):** `FindlyKit`'s `Package.swift` declares `platforms: [.iOS(.v16), .macOS(.v13)]`. Any file that imports an iOS-only framework (`CoreLocation`'s background APIs, `UIKit`, `BackgroundTasks`) MUST gate the import and the real implementation behind `#if os(iOS)` / `#if canImport(...)`, with a platform-agnostic protocol + a fake/no-op implementation available on all platforms so the package compiles and its tests run on macOS. Real device behavior (GPS fixes, background scheduling) is exercised only when the app runs on-device/in-simulator — out of scope for this session's verification, called out per-component below.
 
-### 1.2 Module layout inside `WaldoKit`
+### 1.2 Module layout inside `FindlyKit`
 
 | Folder | Owns |
 |---|---|
 | `Config/` | `AppConfig` — base URL, auth mode; the one place H1-dependent values are injected |
-| `Networking/` | `Envelope<T>`, `APIErrorCode`, `APIErrorBody`, `JSONValue`, `WaldoAPIClient` protocol + `URLSessionAPIClient`, one file per endpoint group (`FamiliesEndpoints`, `DevicesEndpoints`, `LocationsEndpoints`, `LocateEndpoints`, `GeofencesEndpoints`) holding that group's request/response DTOs + client methods |
+| `Networking/` | `Envelope<T>`, `APIErrorCode`, `APIErrorBody`, `JSONValue`, `FindlyAPIClient` protocol + `URLSessionAPIClient`, one file per endpoint group (`FamiliesEndpoints`, `DevicesEndpoints`, `LocationsEndpoints`, `LocateEndpoints`, `GeofencesEndpoints`) holding that group's request/response DTOs + client methods |
 | `Auth/` | `AuthProviding` protocol, `StubAuthProvider` (dev), token-refresh plumbing |
 | `Device/` | `DeviceIdProviding` (+ `UserDefaultsDeviceIdProvider`), `DeviceRegistrationService`, `PushTokenProviding` (+ stub) |
 | `Locations/` | `LocationFix`, `FixQueue` (batch/idempotency model), `FixStoring` (+ in-memory impl) |
@@ -52,7 +52,7 @@ The visual design MUST be fully replaceable later without touching any logic, na
 
 ### 2.1 Token vocabulary (normative — identical names to the Android client, `specs/003-android-client.md`, for one design → both platforms)
 
-**Colors** (`ColorTokens`, one instance per scheme) — "Waldo — Family Location Design System" (2026-07-20, `design/waldo-design-system/`); WCAG 2.1 AA verified (ratios in that README):
+**Colors** (`ColorTokens`, one instance per scheme) — "Findly — Family Location Design System" (2026-07-20, `design/findly-design-system/`); WCAG 2.1 AA verified (ratios in that README):
 
 | Token | Light (default) | Dark (default) |
 |---|---|---|
@@ -103,7 +103,7 @@ Injected via a custom `EnvironmentKey` (`\.theme`), defaulting to `.light`; the 
 
 ### 2.3 Components (stateless, presentational, `DesignSystem/Components/`)
 
-`WaldoButton` (primary/secondary style), `WaldoCard`, `WaldoListRow`, `StatusChip` (e.g. online/stale/paused), `MapMarkerBubble`, `WaldoNavBar`, `EmptyStateView`, `LoadingStateView`, `ErrorStateView`, plus two I2 additions needed by the feature-screen forms: `WaldoTextField` (a labeled single-line text input) and `WaldoToggleRow` (a label/subtitle row with a trailing themed toggle, e.g. device pause/`trackingEnabled`, geofence `notifyOnEnter`/`notifyOnExit`). Each:
+`FindlyButton` (primary/secondary style), `FindlyCard`, `FindlyListRow`, `StatusChip` (e.g. online/stale/paused), `MapMarkerBubble`, `FindlyNavBar`, `EmptyStateView`, `LoadingStateView`, `ErrorStateView`, plus two I2 additions needed by the feature-screen forms: `FindlyTextField` (a labeled single-line text input) and `FindlyToggleRow` (a label/subtitle row with a trailing themed toggle, e.g. device pause/`trackingEnabled`, geofence `notifyOnEnter`/`notifyOnExit`). Each:
 
 - Reads `@Environment(\.theme)` only — **MUST NOT** declare a literal `Color(...)`, `.font(.system(size:))`, or hardcoded point size.
 - Takes content/state via parameters (strings, an enum for chip status, a boolean for loading, etc.) — zero knowledge of view models, networking, or navigation.
@@ -117,7 +117,7 @@ Screens (`Screens/*/*.swift`) compose `DesignSystem.Components` and read state f
 
 ## 3. Networking — full 001 client
 
-`URLSession` + `Codable`, `async`/`await`. One `WaldoAPIClient` protocol (mockable in tests) + `URLSessionAPIClient` (real). Every call sets `Authorization: Bearer <token>` (from `AuthProviding`) and `Content-Type: application/json; charset=utf-8`; device-originated calls additionally set `X-Device-Id` (§1.2 of 001). Base URL from `AppConfig` (§6).
+`URLSession` + `Codable`, `async`/`await`. One `FindlyAPIClient` protocol (mockable in tests) + `URLSessionAPIClient` (real). Every call sets `Authorization: Bearer <token>` (from `AuthProviding`) and `Content-Type: application/json; charset=utf-8`; device-originated calls additionally set `X-Device-Id` (§1.2 of 001). Base URL from `AppConfig` (§6).
 
 ### 3.1 Envelope & error decoding
 
@@ -132,7 +132,7 @@ public struct APIErrorEnvelope: Decodable { public let error: APIErrorBody }
 
 ### 3.2 Endpoint → client method mapping (complete — every row of 001 §1.6)
 
-| 001 § | Method & path | `WaldoAPIClient` method |
+| 001 § | Method & path | `FindlyAPIClient` method |
 |---|---|---|
 | 3.1 | `POST /families` | `createFamily(familyName:displayName:)` |
 | 3.2 | `GET /families/me` | `getMyFamily()` |
@@ -166,7 +166,7 @@ public struct APIErrorEnvelope: Decodable { public let error: APIErrorBody }
 
 ### 3.4 Groups screens (specs/005; wire shapes 001 §12)
 
-Screen inventory and behavior mirror the Android spec **exactly** — see [003 §12.2](003-android-client.md) (groups list = family-less home, create sheet with the 005 §2.1 policy copy, detail + share-sheet code + owner controls per the 005 §2.3 state matrix, join with code entry, group map through the existing map seam, position-only markers). iOS specifics: new `AppRoute` cases (`groups`, `groupDetail`, `groupJoin`, `groupMap`) in `AppCoordinator`; the `waldo://group-join?code=…` deep link is parsed **in WaldoKit** (pure, testable — same as the invites deep-link validation) and forwarded by the app target's `onOpenURL`; group DTOs carry no battery/device fields, by construction.
+Screen inventory and behavior mirror the Android spec **exactly** — see [003 §12.2](003-android-client.md) (groups list = family-less home, create sheet with the 005 §2.1 policy copy, detail + share-sheet code + owner controls per the 005 §2.3 state matrix, join with code entry, group map through the existing map seam, position-only markers). iOS specifics: new `AppRoute` cases (`groups`, `groupDetail`, `groupJoin`, `groupMap`) in `AppCoordinator`; the `findly://group-join?code=…` deep link is parsed **in FindlyKit** (pure, testable — same as the invites deep-link validation) and forwarded by the app target's `onOpenURL`; group DTOs carry no battery/device fields, by construction.
 
 All request/response field names match 001 verbatim (`camelCase`, identical keys). `syncIntervalMinutes` request validation (allowed set, floor) is **not** duplicated client-side beyond what the UI needs for a sane picker (I2 concern) — the server is the source of truth; the client surfaces `VALIDATION_FAILED`/`LIMIT_EXCEEDED` as returned.
 
@@ -174,8 +174,8 @@ All request/response field names match 001 verbatim (`camelCase`, identical keys
 
 - `AppConfig` (§8) gains **`joinLinkHost`** — the 007 §1 deployment constant (recorded at H4).
 - **Associated Domains** entitlement `applinks:{JOIN_LINK_HOST}` on the app target — requires a paid Apple Developer membership: **prepared now, activated at H6** (the AASA file's `{TEAMID}.{bundleId}` appID is likewise completed server-side at H6, 007 §3 — no app change needed then).
-- SwiftUI delivers universal links through the existing `.onOpenURL`; `GroupCodeParsing` (WaldoKit, pure/testable) gains the https form — `{JOIN_LINK_HOST}` host + `/g` path + **fragment-carried code** (007 §1), same charset whitelist and hyphen tolerance as the `waldo://` form; wrong host/path rejected; valid link without a usable fragment routes to `GroupJoinScreen` with an empty prefill.
-- Sharing: `ShareLink` switches to the 007 §1 https link; the detail screen renders a **QR of that link generated on-device** (CoreImage `CIQRCodeGenerator` — never a networked QR service, 007 §4). The `waldo://` deep link stays supported.
+- SwiftUI delivers universal links through the existing `.onOpenURL`; `GroupCodeParsing` (FindlyKit, pure/testable) gains the https form — `{JOIN_LINK_HOST}` host + `/g` path + **fragment-carried code** (007 §1), same charset whitelist and hyphen tolerance as the `findly://` form; wrong host/path rejected; valid link without a usable fragment routes to `GroupJoinScreen` with an empty prefill.
+- Sharing: `ShareLink` switches to the 007 §1 https link; the detail screen renders a **QR of that link generated on-device** (CoreImage `CIQRCodeGenerator` — never a networked QR service, 007 §4). The `findly://` deep link stays supported.
 
 ### 3.3 Token-expiry retry (001 §2.1)
 
@@ -201,20 +201,20 @@ public protocol AuthProviding: AnyObject {
     func confirmCode(_ code: String) async throws
 }
 
-// The closed error set of 006 §4.2; messages in PhoneAuthUserMessage (pure, WaldoKit)
+// The closed error set of 006 §4.2; messages in PhoneAuthUserMessage (pure, FindlyKit)
 public enum PhoneAuthError: Error, Equatable {
     case invalidPhoneNumber, tooManyRequests, smsQuotaExceeded,
          appVerificationFailed, invalidCode, codeExpired, network, unknown
 }
 ```
 
-iOS has no instant verification, so plain `async` methods suffice — no event stream (the Android `Flow` shape, 003 §7, is not mirrored). `PhoneNumberNormalizer` (pure, WaldoKit) implements 006 §3 with rules identical to Android's.
+iOS has no instant verification, so plain `async` methods suffice — no event stream (the Android `Flow` shape, 003 §7, is not mirrored). `PhoneNumberNormalizer` (pure, FindlyKit) implements 006 §3 with rules identical to Android's.
 
 `StubAuthProvider` (dev, `AuthMode == .stubLocal`) implements the two-step phone shape per 006 §5: `startPhoneVerification` records the normalized number; `confirmCode` accepts any non-blank code and sets `currentUserId = <normalized E.164 number>`. Its token is corrected to a **real unsigned JWT** — base64url JSON header/payload carrying `iss`/`aud`/`sub`/`iat`/`exp` (`sub` = the E.164 uid) with an empty signature, like Android's `DevAuthProvider` — because the previous `"stub-header.…"` shape cannot be parsed by the backend's `AUTH_MODE=insecure-local` verifier (its payload isn't base64url JSON), so the iOS dev build never actually worked against a local backend. The fake `iss`/`aud` come from `AppConfig.firebaseProjectId` (§8).
 
 ### 4.1 Phone sign-in flow
 
-- **`FirebaseAuthProvider` — the first real `AuthProviding` implementation — lives in the app target (`WheresWaldo/`), not WaldoKit**, keeping WaldoKit Firebase-SDK-free so `swift test` keeps running headless on macOS. It is swapped in at the existing composition-root seam (`RootView`, `AuthMode == .firebase`). Internals: `PhoneAuthProvider.provider().verifyPhoneNumber(_:uiDelegate:nil)` → store the `verificationID` (in-memory + `UserDefaults`, per Firebase guidance — the app may be backgrounded while the SMS arrives); `confirmCode` → `PhoneAuthProvider.provider().credential(withVerificationID:verificationCode:)` + `Auth.auth().signIn(with:)`. SDK failures map onto `PhoneAuthError` per the 006 §4.2 table; raw SDK text never reaches a screen.
+- **`FirebaseAuthProvider` — the first real `AuthProviding` implementation — lives in the app target (`Findly/`), not FindlyKit**, keeping FindlyKit Firebase-SDK-free so `swift test` keeps running headless on macOS. It is swapped in at the existing composition-root seam (`RootView`, `AuthMode == .firebase`). Internals: `PhoneAuthProvider.provider().verifyPhoneNumber(_:uiDelegate:nil)` → store the `verificationID` (in-memory + `UserDefaults`, per Firebase guidance — the app may be backgrounded while the SMS arrives); `confirmCode` → `PhoneAuthProvider.provider().credential(withVerificationID:verificationCode:)` + `Auth.auth().signIn(with:)`. SDK failures map onto `PhoneAuthError` per the 006 §4.2 table; raw SDK text never reaches a screen.
 - **APNs is a phone-auth prerequisite (006 §6.6):** Firebase verifies the iOS app via **silent APNs push** — requires the Push Notifications capability + remote-notification background mode on the app target, the APNs auth key uploaded to Firebase, and thin app-delegate forwarding (`Auth.auth().setAPNSToken(_:type:)`, `Auth.auth().canHandleNotification(_:)`) — app-target lifecycle wiring, allowed by §1.1's rule. **Fallback:** without APNs (simulator; key not yet uploaded) Firebase falls back to reCAPTCHA in a web sheet, which requires the `REVERSED_CLIENT_ID` custom URL scheme in Info.plist plus `Auth.auth().canHandle(url)`. Dev/E2E on the simulator uses **Firebase test phone numbers** (006 §6.4), which need neither.
 - **`SignInViewModel`** implements the 006 §4.1 state machine (minus the Android-only instant-verification arrows), with a 30 s resend cooldown driven by injected virtual-time-testable ticking:
 
@@ -228,7 +228,7 @@ public enum SignInState: Equatable {
 }
 ```
 
-  (`signedIn` is kept — iOS navigates via the existing `onSignedIn` callback from `RootView`, unlike Android's authState-observing nav.) `SignInScreen` renders phone entry or code entry from the state using existing components (`WaldoTextField`, `WaldoButton`, `ErrorStateView`) — one screen, two steps.
+  (`signedIn` is kept — iOS navigates via the existing `onSignedIn` callback from `RootView`, unlike Android's authState-observing nav.) `SignInScreen` renders phone entry or code entry from the state using existing components (`FindlyTextField`, `FindlyButton`, `ErrorStateView`) — one screen, two steps.
 
 **Push-token refresh → re-registration (001 §4.1, 000 §O4):** `PushTokenProviding` exposes an `AsyncStream<String>` of push-token values (FCM/APNs token). `DeviceRegistrationService` subscribes and calls `POST /devices` with the new `pushToken` on every emission — this is what satisfies "re-`POST /devices` on token refresh"; it is **not** triggered by Firebase ID-token refresh (that's §3.3's concern, a different token, a different reason).
 
@@ -236,9 +236,9 @@ public enum SignInState: Equatable {
 
 ## 5. Device registration (001 §4.1)
 
-`DeviceIdProviding` persists a client-generated **UUIDv4** `deviceId` keyed by `currentUserId`, generating a **fresh** id whenever the signed-in user changes (001 §1.4: "clients MUST generate a fresh `deviceId` when the signed-in user changes"). `DeviceRegistrationService.registerOrUpdate()` builds a `RegisterDeviceRequest{ deviceId, platform: "ios", model, appVersion, pushToken?, locationPushToken?, deviceName? }` from `DeviceIdProviding` + `UIDevice`/`Bundle` info (gated `#if canImport(UIKit)`, with a fake device-info source for macOS/test builds) and calls `registerDevice`. Triggers (MUST, per 001 §4.1 + the task's runtime wiring, executed by the app target through `WaldoKit`'s public API): first launch after sign-in; every push-token refresh (§4); every app update (compare stored vs. running `appVersion`).
+`DeviceIdProviding` persists a client-generated **UUIDv4** `deviceId` keyed by `currentUserId`, generating a **fresh** id whenever the signed-in user changes (001 §1.4: "clients MUST generate a fresh `deviceId` when the signed-in user changes"). `DeviceRegistrationService.registerOrUpdate()` builds a `RegisterDeviceRequest{ deviceId, platform: "ios", model, appVersion, pushToken?, locationPushToken?, deviceName? }` from `DeviceIdProviding` + `UIDevice`/`Bundle` info (gated `#if canImport(UIKit)`, with a fake device-info source for macOS/test builds) and calls `registerDevice`. Triggers (MUST, per 001 §4.1 + the task's runtime wiring, executed by the app target through `FindlyKit`'s public API): first launch after sign-in; every push-token refresh (§4); every app update (compare stored vs. running `appVersion`).
 
-Push tokens are **write-only** (never read back, 001 §4.1/§4.2) — `WaldoKit`'s `Device` response models simply have no `pushToken`/`locationPushToken` fields, by construction, not by filtering.
+Push tokens are **write-only** (never read back, 001 §4.1/§4.2) — `FindlyKit`'s `Device` response models simply have no `pushToken`/`locationPushToken` fields, by construction, not by filtering.
 
 ---
 
@@ -259,8 +259,8 @@ Push tokens are **write-only** (never read back, 001 §4.1/§4.2) — `WaldoKit`
 - **Sync:** `LocationProviding` protocol (foreground high-accuracy fix + background significant-change monitoring); `SystemLocationProvider` (`#if os(iOS)`) wraps `CLLocationManager` with staged authorization (When-In-Use → Always upgrade prompt) — implementation body is scaffolded with `// TODO(I2 or on-device session):` markers for the actual `CLLocationManagerDelegate` wiring, since it cannot be exercised without a device/simulator. `BackgroundSyncScheduling` (`#if os(iOS) && canImport(BackgroundTasks)`) scaffolds `BGAppRefreshTask` registration the same way. Both conform to protocols with fully-tested fakes so `FixQueue`/`DeviceRegistrationService` consumers are unit-testable without either framework.
 - **Interval honesty (000 §O2):** the UI (I2) must present the configured interval as a *target*; this spec's models carry `syncIntervalMinutes` verbatim from the server — no client-side reinterpretation.
 - **"1 day" interval (000 §O3):** scheduling semantics (first opportunistic fix per device-local calendar day) belong to the on-device scheduler (I2/runtime), not to any I1 type; noted here so the eventual scheduler implementation has a normative pointer.
-- **Push-to-locate reliability (000 §O1 — the #1 platform risk):** `LocationPushTokenHandling` scaffolds capture of the APNs Location Push token (`CLLocationManager.startMonitoringLocationPushes`, `#if os(iOS)`) and its plumbing into `RegisterDeviceRequest.locationPushToken` (§5 above) — the token is captured and sent the moment it's available, exactly like `pushToken`. **The `com.apple.developer.location.push` entitlement itself is a human/Apple-account action** (Apple Developer Program enrollment, $99/yr, then a formal entitlement request) — **apply immediately**; it is explicitly **not** blocking I1/I2 coding. Until granted, the client relies on the FCM data-only `LOCATE_REQUEST` push (001 §8.1) exactly as normatively specified, with UI (I2) falling back to "last known, updating…" per 000 §O1. The Location Push Service Extension **target** itself (a second app extension target using the entitlement) is not created in I1 — it has no code to write until the entitlement exists; adding it later is purely additive (a new Xcode target, no changes to `WaldoKit`).
-- **Geofencing (000 §O9):** out of scope for I1 (I2 builds the editor + `CLCircularRegion` registration); `WaldoKit`'s `GeofencesEndpoints` client methods exist now so I2 has them ready.
+- **Push-to-locate reliability (000 §O1 — the #1 platform risk):** `LocationPushTokenHandling` scaffolds capture of the APNs Location Push token (`CLLocationManager.startMonitoringLocationPushes`, `#if os(iOS)`) and its plumbing into `RegisterDeviceRequest.locationPushToken` (§5 above) — the token is captured and sent the moment it's available, exactly like `pushToken`. **The `com.apple.developer.location.push` entitlement itself is a human/Apple-account action** (Apple Developer Program enrollment, $99/yr, then a formal entitlement request) — **apply immediately**; it is explicitly **not** blocking I1/I2 coding. Until granted, the client relies on the FCM data-only `LOCATE_REQUEST` push (001 §8.1) exactly as normatively specified, with UI (I2) falling back to "last known, updating…" per 000 §O1. The Location Push Service Extension **target** itself (a second app extension target using the entitlement) is not created in I1 — it has no code to write until the entitlement exists; adding it later is purely additive (a new Xcode target, no changes to `FindlyKit`).
+- **Geofencing (000 §O9):** out of scope for I1 (I2 builds the editor + `CLCircularRegion` registration); `FindlyKit`'s `GeofencesEndpoints` client methods exist now so I2 has them ready.
 
 ---
 
@@ -275,13 +275,13 @@ public struct AppConfig {
 public enum AuthMode { case stubLocal, firebase }
 ```
 
-Default `baseURL` is `https://api.wheres-waldo.invalid/api/v1` — the `.invalid` TLD (RFC 2606) makes it obviously non-resolving and non-real, so no third-party/production host is ever hardcoded. H1 supplies the real Azure Functions base URL (and a `.firebase` `AuthMode` backed by `FirebaseAuthProvider`) via the app target's build configuration (e.g. an `.xcconfig` per environment) — no `WaldoKit` code changes. `GoogleService-Info.plist` stays **absent and gitignored** (already covered by `mobile/ios/.gitignore`) until H1; the app target's Firebase SDK integration itself is also an H1 follow-up (adding the SDK now, with no config file, would crash at launch).
+Default `baseURL` is `https://api.findly.invalid/api/v1` — the `.invalid` TLD (RFC 2606) makes it obviously non-resolving and non-real, so no third-party/production host is ever hardcoded. H1 supplies the real Azure Functions base URL (and a `.firebase` `AuthMode` backed by `FirebaseAuthProvider`) via the app target's build configuration (e.g. an `.xcconfig` per environment) — no `FindlyKit` code changes. `GoogleService-Info.plist` stays **absent and gitignored** (already covered by `mobile/ios/.gitignore`) until H1; the app target's Firebase SDK integration itself is also an H1 follow-up (adding the SDK now, with no config file, would crash at launch).
 
 ---
 
 ## 9. Testing strategy
 
-**Framework note (environment-driven, decided this session):** `Tests/WaldoKitTests/` uses **Swift Testing** (`import Testing`, `@Test`, `#expect`) rather than XCTest. This session's host has only Xcode Command Line Tools installed (no `Xcode.app`), and no `XCTest.framework` exists anywhere on it — `import XCTest` cannot compile here. `Testing.framework` (Swift Testing, XCTest's first-party successor, part of the Swift toolchain since Swift 6) IS present under the Command Line Tools install, but `swift test` doesn't add its framework/plugin search paths automatically in a CLT-only setup; `WaldoKit/Package.swift`'s `WaldoKitTests` target pins them explicitly via `unsafeFlags` (harmless on a full-Xcode host, where these exact paths won't exist and are simply unused) so plain `swift test` works everywhere, including this session. On a full Xcode install (H1-era CI, `macos-14` runners) either framework works fine; Swift Testing was chosen because it is what this session could actually run and verify.
+**Framework note (environment-driven, decided this session):** `Tests/FindlyKitTests/` uses **Swift Testing** (`import Testing`, `@Test`, `#expect`) rather than XCTest. This session's host has only Xcode Command Line Tools installed (no `Xcode.app`), and no `XCTest.framework` exists anywhere on it — `import XCTest` cannot compile here. `Testing.framework` (Swift Testing, XCTest's first-party successor, part of the Swift toolchain since Swift 6) IS present under the Command Line Tools install, but `swift test` doesn't add its framework/plugin search paths automatically in a CLT-only setup; `FindlyKit/Package.swift`'s `FindlyKitTests` target pins them explicitly via `unsafeFlags` (harmless on a full-Xcode host, where these exact paths won't exist and are simply unused) so plain `swift test` works everywhere, including this session. On a full Xcode install (H1-era CI, `macos-14` runners) either framework works fine; Swift Testing was chosen because it is what this session could actually run and verify.
 
 Runs via `swift test` on any host (this session: macOS, headless, no simulator). Coverage (see §10 checklist for the full list): envelope success/error decoding; all 27 `APIErrorCode` cases decode to their case (plus one forward-compat `unknown` case); request-building for every one of the 29 methods in §3.2 (URL, HTTP method, headers incl. `X-Device-Id` only where required, JSON body shape); device-registration request construction (first-registration defaults are the server's job, but the client's *request* omits fields it doesn't have, and never sends role/entitlement data); `FixQueue` batch/idempotency behavior (freeze, retry-same-id, split >100, definitive-rejection new-id, transient-failure same-id); token-refresh triggers (push-token refresh ⇒ re-register call recorded; `AUTH_TOKEN_EXPIRED` ⇒ refresh + retry-once observed on a mock client); design-system `Theme` (light/dark both defined, all token fields present); `SignInViewModel` state transitions per the 006 §4.1 machine (§4.1) against a fake `AuthProviding`. The Xcode app-target build (and any `xcodebuild`/simulator run) is explicitly **not** part of this session's verification — noted, not attempted, since only Command Line Tools (no Xcode.app) are present here.
 
@@ -294,7 +294,7 @@ Runs via `swift test` on any host (this session: macOS, headless, no simulator).
 - One request-building test per §3.2 row (29 methods) asserting method, path, headers, and body against a 001 example.
 - `X-Device-Id` header present only on `reportLocations`, `reportGeofenceEvents`, `fulfillLocateRequest`; absent elsewhere.
 - The bare-`204` methods (`removeMember`, `deleteGroup`, `leaveGroup`, `removeGroupMember`) and a `304` `getGeofences` response are handled without attempting envelope decode.
-- Groups (005 §7 client side): view-model logic for list/create/join/detail/map against a fake client — state chips from `state`, countdown from `endsAt`, 005 §2.1 policy copy shown at create, `waldo://group-join` deep-link parsing (valid/invalid/rotated-code shapes), grace/archived rendering per the 005 §2.3 matrix; group DTOs contain no battery/device fields.
+- Groups (005 §7 client side): view-model logic for list/create/join/detail/map against a fake client — state chips from `state`, countdown from `endsAt`, 005 §2.1 policy copy shown at create, `findly://group-join` deep-link parsing (valid/invalid/rotated-code shapes), grace/archived rendering per the 005 §2.3 matrix; group DTOs contain no battery/device fields.
 - `DeviceIdProviding` issues a stable id per user and a fresh one when the user changes.
 - `DeviceRegistrationService` builds a request with `platform: "ios"` and omits absent optional token fields (never sends empty-string tokens).
 - `FixQueue`: enqueue→freeze→same-batch-on-retry; accept clears queue; definitive rejection drops + issues new id on next send; queue > 100 splits into sequential batches.

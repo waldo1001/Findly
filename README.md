@@ -1,4 +1,4 @@
-# Where's waldo
+# Findly
 
 A private, family-only location tracking app ("Find My Family" style) for Android and iOS phones/tablets. Every family member sees every other member on a live map, devices report their position on a battery-friendly configurable interval, anyone can request a live fix of anyone ("push-to-locate"), movements and geofence events are stored as replayable history, and geofence enter/exit events notify the rest of the family's devices.
 
@@ -70,4 +70,4 @@ npm run dev         # local Functions host (requires Azurite + Azure Functions C
 - Azure / GitHub / Firebase provisioning (one-time, manual): [`docs/azure-setup.md`](docs/azure-setup.md)
 - Current implementation status and next tasks: [`docs/implementation-handoff.md`](docs/implementation-handoff.md)
 
-> Naming note: "Where's Waldo/Wally" is an existing trademark of the book franchise. Fine for a private family app; revisit branding before any public store listing.
+> Naming note: renamed from "Where's Waldo" to **Findly** (2026-07-25). "Where's Waldo/Wally" is the book franchise's registered trademark — unsafe for a public store listing, so the public name and all internal identifiers are now **Findly** (bundle ids `com.findly.ios` / `com.findly.android`). See 000 §O10.

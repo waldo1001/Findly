@@ -1,4 +1,4 @@
-# Where's waldo — web visualization (optional, not started)
+# Findly — web visualization (optional, not started)
 
 Reserved for the optional map/history visualization: **Leaflet** (OpenStreetMap tiles) on an **Azure Static Web App (free tier)**, consuming the same API as the mobile apps ([`specs/001-api-contract.md`](../specs/001-api-contract.md) — notably `GET /locations/latest`, `GET /locations/history`, `GET /geofence-events`).
 

@@ -15,14 +15,14 @@ https://{JOIN_LINK_HOST}/g#{CODE}
 - `{CODE}` is the group join code (001 §1.4 format), accepted in canonical (`7F3K9QRZ`) or hyphenated display form (`7f3k-9qrz`) — consumers apply the same normalization as 001 §12.6 (uppercase, strip hyphens) before use.
 - The code travels in the **URL fragment**, never in the path or query. Fragments are not sent by browsers to the server, so the capability **never appears in any server, CDN, or proxy log** by construction. This is the load-bearing privacy property of the whole design; a path- or query-carried code is a spec violation.
 - `JOIN_LINK_HOST` is a **deployment constant** (like the API base URL): v1 value is the Static Web App's default hostname, recorded at provisioning (H4, `docs/azure-setup.md` §7) and baked into client build config (003 §13, 004 §8). A custom domain later is **additive** — the SWA serves both hosts, old printed QR codes keep working; new prints use the new host. Changing the host is a client-release event (intent filters / entitlements name it), acceptable pre-launch.
-- The existing in-app deep link `waldo://group-join?code={CODE}` (003/004) **remains valid** unchanged. Once this spec ships, the https form is the canonical one for sharing and QR; the `waldo://` form remains as the landing page's "open the app" affordance and for backward compatibility.
+- The existing in-app deep link `findly://group-join?code={CODE}` (003/004) **remains valid** unchanged. Once this spec ships, the https form is the canonical one for sharing and QR; the `findly://` form remains as the landing page's "open the app" affordance and for backward compatibility.
 
 ## 2. Landing page — `GET /g`
 
 A single static HTML page (inline CSS/JS, no framework), served for `/g` regardless of fragment. Behavior:
 
 1. Client-side JS reads `location.hash`, normalizes it (§1), and if it parses as a plausible code, displays it in hyphenated display form with a copy-to-clipboard button.
-2. Offers, in order: an **"Open in the app"** link (`waldo://group-join?code={CODE}` — works when the app is installed but the OS didn't intercept, e.g. in-browser navigation); **store badges** (Play / App Store — hidden or "coming soon" until the listings exist, H5/H6); and the instruction to install, then re-scan the QR or type the displayed code.
+2. Offers, in order: an **"Open in the app"** link (`findly://group-join?code={CODE}` — works when the app is installed but the OS didn't intercept, e.g. in-browser navigation); **store badges** (Play / App Store — hidden or "coming soon" until the listings exist, H5/H6); and the instruction to install, then re-scan the QR or type the displayed code.
 3. No fragment / unparsable fragment → the same page without the code block ("scan the group's QR code or ask for the code").
 
 **Security invariants (normative):**
@@ -45,8 +45,8 @@ Serving rules (normative): both files MUST be served over HTTPS with no redirect
 
 ## 4. Client integration (contract here; platform detail in 003 §12.3 / 004 §3.5)
 
-- **Android:** a second intent filter on the existing entry activity — `https` / `{JOIN_LINK_HOST}` / path `/g`, `android:autoVerify="true"`. The delivered URI's fragment goes through the **same whitelist sanitizer** as the `waldo://` path (`GroupJoinCodeSanitizer`); wrong host or path is ignored, never mis-routed.
-- **iOS:** Associated Domains entitlement `applinks:{JOIN_LINK_HOST}` — **requires a paid Apple Developer membership**; prepared now, activated at H6. SwiftUI delivers universal links through the existing `.onOpenURL`; `GroupCodeParsing` gains the https form (host + `/g` path + fragment) alongside the `waldo://` form, same charset whitelist, wrong host/path rejected.
+- **Android:** a second intent filter on the existing entry activity — `https` / `{JOIN_LINK_HOST}` / path `/g`, `android:autoVerify="true"`. The delivered URI's fragment goes through the **same whitelist sanitizer** as the `findly://` path (`GroupJoinCodeSanitizer`); wrong host or path is ignored, never mis-routed.
+- **iOS:** Associated Domains entitlement `applinks:{JOIN_LINK_HOST}` — **requires a paid Apple Developer membership**; prepared now, activated at H6. SwiftUI delivers universal links through the existing `.onOpenURL`; `GroupCodeParsing` gains the https form (host + `/g` path + fragment) alongside the `findly://` form, same charset whitelist, wrong host/path rejected.
 - **Share & QR:** the share-sheet text switches to the §1 https link (code in fragment). The group detail screen renders a **QR code of that link, generated on-device** — using a networked QR service would leak the capability and is a spec violation. Both platforms MUST generate locally (iOS: CoreImage `CIQRCodeGenerator`; Android: a local generator library, reviewed as a new dependency).
 - A link with a valid host/path but no usable fragment opens the join screen with an empty code field (no error).
 
@@ -66,7 +66,7 @@ Serving rules (normative): both files MUST be served over HTTPS with no redirect
 
 ## 7. Test checklist (conforming implementations)
 
-- **Link parsing (both clients):** accepts `https://{host}/g#7F3K9QRZ` and `#7f3k-9qrz` (normalized identically to 001 §12.6); rejects wrong host, wrong path, empty/garbage fragment (→ join screen without prefill, no error state); `waldo://group-join?code=…` behavior unchanged; parsing is whitelist-based (no bypass via encoding tricks).
+- **Link parsing (both clients):** accepts `https://{host}/g#7F3K9QRZ` and `#7f3k-9qrz` (normalized identically to 001 §12.6); rejects wrong host, wrong path, empty/garbage fragment (→ join screen without prefill, no error state); `findly://group-join?code=…` behavior unchanged; parsing is whitelist-based (no bypass via encoding tricks).
 - **QR:** content is exactly the §1 link; generation is local (no network call in the QR path — assert no URL-loading in unit tests / dependency review).
 - **Landing page:** contains zero `fetch`/XHR/external resource references (statically assertable); renders the code block only for a plausible fragment; renders identically for existing vs. nonexistent codes (no oracle).
 - **Association files:** valid JSON, correct content types, no redirects (verified against the live host at H4/H5/H6 as fingerprints/TeamID land).
