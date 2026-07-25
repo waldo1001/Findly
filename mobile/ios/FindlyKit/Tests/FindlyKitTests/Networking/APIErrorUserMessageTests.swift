@@ -49,4 +49,29 @@ struct APIErrorUserMessageTests {
         struct SomeOtherError: Error {}
         #expect(userFacingMessage(for: SomeOtherError()) == "Something went wrong. Please try again.")
     }
+
+    /// specs/004-ios-client.md §3.6, specs/008-privacy-endpoints.md §3 — `402 LIMIT_EXCEEDED` with
+    /// `details.limit: "exportsPerDay"` gets a friendly, export-specific retry-tomorrow message,
+    /// distinct from the generic plan-limit message every other `LIMIT_EXCEEDED` still gets.
+    @Test func limitExceeded_exportsPerDay_getsAFriendlyExportSpecificMessage() {
+        let error = APIError.server(
+            APIErrorBody(code: .limitExceeded, message: "x", details: ["limit": .string("exportsPerDay")], requestId: "r1"),
+            httpStatus: 402
+        )
+        #expect(error.userFacingMessage.lowercased().contains("export"))
+        #expect(error.userFacingMessage.lowercased().contains("tomorrow"))
+    }
+
+    @Test func limitExceeded_otherLimits_keepTheGenericMessage() {
+        let error = APIError.server(
+            APIErrorBody(code: .limitExceeded, message: "x", details: ["limit": .string("maxDevices")], requestId: "r1"),
+            httpStatus: 402
+        )
+        #expect(error.userFacingMessage == "You've reached a plan limit.")
+    }
+
+    @Test func limitExceeded_noDetails_keepsTheGenericMessage() {
+        let error = APIError.server(APIErrorBody(code: .limitExceeded, message: "x", details: nil, requestId: "r1"), httpStatus: 402)
+        #expect(error.userFacingMessage == "You've reached a plan limit.")
+    }
 }

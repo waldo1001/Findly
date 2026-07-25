@@ -68,4 +68,12 @@ public actor FixQueue {
         store.remove(fixIds: idsToDrop)
         self.inFlight = nil
     }
+
+    /// specs/008-privacy-endpoints.md §4.4, specs/004-ios-client.md §3.6 — account deletion's
+    /// local-state wipe. Drops every queued fix AND any frozen in-flight batch, so a stale batch
+    /// can never resurface a since-deleted user's fixes on the next `nextBatchToSend` call.
+    public func clearAll() {
+        store.remove(fixIds: Set(store.loadAll().map(\.fixId)))
+        inFlight = nil
+    }
 }

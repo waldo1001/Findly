@@ -30,7 +30,8 @@ public final class URLSessionAPIClient: FindlyAPIClient {
         deviceId: String? = nil,
         queryItems: [URLQueryItem] = [],
         body: Encodable? = nil,
-        extraHeaders: [String: String] = [:]
+        extraHeaders: [String: String] = [:],
+        cachePolicy: URLRequest.CachePolicy = .useProtocolCachePolicy
     ) async throws -> URLRequest {
         var url = baseURL.appendingPathComponent(path)
         if !queryItems.isEmpty {
@@ -39,7 +40,7 @@ public final class URLSessionAPIClient: FindlyAPIClient {
             url = components.url!
         }
 
-        var request = URLRequest(url: url)
+        var request = URLRequest(url: url, cachePolicy: cachePolicy)
         request.httpMethod = method.rawValue
         request.setValue("application/json; charset=utf-8", forHTTPHeaderField: "Content-Type")
 
@@ -121,6 +122,36 @@ public final class URLSessionAPIClient: FindlyAPIClient {
             return try await retry()
         }
         throw APIError.server(decodedError, httpStatus: httpStatus)
+    }
+
+    /// Sends a request expecting a RAW, unenveloped 2xx body (specs/001 §13.1 — the one exception
+    /// to the §3.1 `{data,features}` envelope: `GET /export`'s success body is the export document
+    /// itself). Error responses still decode through the standard `{error:{...}}` envelope, incl.
+    /// the retry-once-on-`AUTH_TOKEN_EXPIRED` path — only the SUCCESS shape is special-cased here.
+    /// `cachePolicy` defaults to the platform default for every other caller of this method, but
+    /// `exportData` (specs/008-privacy-endpoints.md §3.1 rule 5, review finding #6) passes
+    /// `.reloadIgnoringLocalAndRemoteCacheData` explicitly — the server's `Cache-Control: no-store`
+    /// (001 §13.1) isn't sufficient on its own; a client-local HTTP cache would otherwise become a
+    /// third on-disk copy of the subject's full location history outside the app's own file
+    /// handling (the exact copy §3.1 exists to prevent).
+    func sendRawData(
+        method: HTTPMethod,
+        path: String,
+        queryItems: [URLQueryItem] = [],
+        cachePolicy: URLRequest.CachePolicy = .useProtocolCachePolicy,
+        allowRetry: Bool = true
+    ) async throws -> Data {
+        let request = try await makeRequest(method: method, path: path, queryItems: queryItems, cachePolicy: cachePolicy)
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw APIError.transport("response was not an HTTPURLResponse")
+        }
+        if (200...299).contains(http.statusCode) {
+            return data
+        }
+        return try await handleErrorAndMaybeRetry(data: data, httpStatus: http.statusCode, allowRetry: allowRetry) {
+            try await self.sendRawData(method: method, path: path, queryItems: queryItems, cachePolicy: cachePolicy, allowRetry: false)
+        }
     }
 
     /// Sends a request whose success path needs the raw `HTTPURLResponse` (specs/001 §7.1/§7.2 —

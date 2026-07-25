@@ -15,6 +15,16 @@ struct FindlyApp: App {
         let config = AppConfig()
         self.config = config
         _coordinator = StateObject(wrappedValue: AppCoordinator(joinLinkHost: config.joinLinkHost))
+        // specs/008-privacy-endpoints.md §3.1 rule 2(b) — the one-shot cold-start cleanup: removes
+        // any export artifact left behind by a previous process (e.g. killed mid-export, before
+        // the next export's own defensive clear or the account-deletion wipe ever ran). `App.init`
+        // is guaranteed by SwiftUI to run exactly once per process launch — unlike `RootView`'s
+        // init, which SwiftUI may re-invoke as `coordinator` publishes changes — so this is the one
+        // place in the app target where "cold start" is unambiguous. A throwaway store instance is
+        // fine here: `FileManagerExportArtifactStore.removeCurrentArtifact()` is a directory scan
+        // matched by filename pattern, not in-memory state, so it finds exactly what `RootView`'s
+        // separately-constructed instance (same default directory) would.
+        FileManagerExportArtifactStore().removeCurrentArtifact()
     }
 
     var body: some Scene {

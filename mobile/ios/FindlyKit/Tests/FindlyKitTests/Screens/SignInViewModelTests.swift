@@ -181,9 +181,28 @@ final class FakeAuthProviding: AuthProviding {
     private(set) var confirmCodeCalls: [String] = []
     private var lastPhoneNumber: String?
 
+    /// specs/008-privacy-endpoints.md §1.3 — `DeleteAccountViewModelTests` configures this to
+    /// simulate the Firebase SDK's "requires a recent sign-in" failure (§1.3: sign-out-then-retry
+    /// is the only valid recovery — a bare retry is a trap).
+    var deleteCurrentUserResult: Result<Void, Error> = .success(())
+    private(set) var deleteCurrentUserCallCount = 0
+    /// Configurable so a test can prove `clearStoredSession()` runs even when `signOut()` itself
+    /// fails (review finding #5 — the Keychain clear must be unconditional, not a side effect of
+    /// `signOut()`'s internal ordering).
+    var signOutResult: Result<Void, Error> = .success(())
+    var signOutCallCount = 0
+    private(set) var clearStoredSessionCallCount = 0
+
     func currentIDToken() async throws -> String { "fake-token" }
     func refreshIDToken() async throws -> String { "fake-token" }
-    func signOut() throws { currentUserId = nil }
+    func signOut() throws { signOutCallCount += 1; try signOutResult.get(); currentUserId = nil }
+    func clearStoredSession() { clearStoredSessionCallCount += 1 }
+
+    func deleteCurrentUser() async throws {
+        deleteCurrentUserCallCount += 1
+        try deleteCurrentUserResult.get()
+        currentUserId = nil
+    }
 
     func startPhoneVerification(phoneNumberE164: String) async throws {
         if let gate = startPhoneVerificationGate {

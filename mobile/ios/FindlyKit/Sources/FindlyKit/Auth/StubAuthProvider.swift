@@ -45,6 +45,21 @@ public final class StubAuthProvider: AuthProviding {
         pendingPhoneNumber = nil
     }
 
+    /// specs/008-privacy-endpoints.md §1.3 — dev/test shape: just clears local sign-in state, like
+    /// `signOut()`. The real Firebase step lives in `FirebaseAuthProvider` (app target).
+    public func deleteCurrentUser() async throws {
+        guard currentUserId != nil else { throw AuthError.notSignedIn }
+        currentUserId = nil
+        pendingPhoneNumber = nil
+    }
+
+    /// specs/008-privacy-endpoints.md §1.3 — dev/test shape: no Keychain-backed state exists here
+    /// to clear, so this just mirrors `signOut()`'s local-state clear, unconditionally and without
+    /// throwing.
+    public func clearStoredSession() {
+        pendingPhoneNumber = nil
+    }
+
     public func startPhoneVerification(phoneNumberE164: String) async throws {
         // Defensive re-check (callers — `SignInViewModel` — are expected to already have
         // normalized the number, 006 §3): matches Android's DevAuthProvider.

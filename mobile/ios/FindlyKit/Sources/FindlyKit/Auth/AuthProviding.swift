@@ -18,6 +18,21 @@ public protocol AuthProviding: AnyObject {
     /// Confirms the code for the in-flight verification; on success `currentUserId != nil`.
     /// Throws `PhoneAuthError`.
     func confirmCode(_ code: String) async throws
+    /// specs/008-privacy-endpoints.md §1.3 — deletes the Firebase Auth user client-side, called
+    /// ONLY after `DELETE /users/me` (specs/001 §13.2) returns `204` — never before (an orphaned
+    /// Firebase user with no Findly data is harmless; the reverse orphan would be an erasure
+    /// failure). May throw if the SDK requires a recent sign-in; callers (`DeleteAccountViewModel`)
+    /// surface the 008 §1.3 sign-out-then-retry recovery rather than treating this as fatal (a
+    /// bare retry is a trap — `requires-recent-login` never clears on its own).
+    func deleteCurrentUser() async throws
+    /// specs/004-ios-client.md §3.6, specs/008-privacy-endpoints.md §1.3 — removes any
+    /// locally-stored session material (the Keychain-backed phone-verification session id, I7) as
+    /// its OWN unconditional step. Deliberately NOT a side effect of `signOut()`'s internal
+    /// ordering: `signOut()` can throw (e.g. on Keychain-access failure) and, if the clear were
+    /// nested inside it, leave the entry behind. MUST NOT throw — implementations swallow their
+    /// own storage errors, since callers invoke this during an already-in-progress irreversible
+    /// account wipe where there is no meaningful failure recovery left to offer.
+    func clearStoredSession()
 }
 
 public enum AuthError: Error, Equatable {

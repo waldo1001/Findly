@@ -1,3 +1,4 @@
+import Foundation
 @testable import FindlyKit
 
 /// A `FindlyAPIClient` test double. `registerDevice` keeps its original I1 `Result`-based shape
@@ -199,5 +200,28 @@ final class FakeAPIClient: FindlyAPIClient {
     func getGroupLatestLocations(groupId: String) async throws -> Envelope<GroupLatestLocationsResponse> {
         getGroupLatestLocationsCalls.append(groupId)
         return try await getGroupLatestLocationsHandler(groupId)
+    }
+
+    // MARK: - §13 Privacy (specs/008; wire shapes 001 §13)
+
+    private(set) var exportDataCalls: [String?] = []
+    var exportDataHandler: (String?) async throws -> Data = { _ in fatalError("not configured") }
+    func exportData(userId: String?) async throws -> Data {
+        exportDataCalls.append(userId)
+        return try await exportDataHandler(userId)
+    }
+
+    private(set) var deleteAccountCallCount = 0
+    var deleteAccountHandler: () async throws -> Void = { fatalError("not configured") }
+    func deleteAccount() async throws {
+        deleteAccountCallCount += 1
+        try await deleteAccountHandler()
+    }
+
+    private(set) var deleteFamilyCallCount = 0
+    var deleteFamilyHandler: () async throws -> Void = { fatalError("not configured") }
+    func deleteFamily() async throws {
+        deleteFamilyCallCount += 1
+        try await deleteFamilyHandler()
     }
 }
