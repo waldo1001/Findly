@@ -21,6 +21,11 @@ import com.findly.android.queue.FixQueueStore
 import com.findly.android.queue.InMemoryFixQueueStore
 import com.findly.android.ui.map.MapRenderer
 import com.findly.android.ui.map.PlaceholderMapRenderer
+import com.findly.android.ui.settings.ColdStartExportCleanup
+import com.findly.android.ui.settings.DefaultLocalStateWiper
+import com.findly.android.ui.settings.ExportArtifactCleaner
+import com.findly.android.ui.settings.ExportFileWriter
+import com.findly.android.ui.settings.LocalStateWiper
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -68,7 +73,8 @@ class AppContainer(context: Context) {
     private val findlyApiService = RetrofitFactory.create(appConfig.baseUrl, authProvider)
     val findlyApiClient: FindlyApiClient = FindlyApiClient(findlyApiService, authProvider)
 
-    private val deviceIdProvider = DeviceIdProvider(SharedPreferencesDeviceIdStore(context))
+    private val deviceIdStore = SharedPreferencesDeviceIdStore(context)
+    private val deviceIdProvider = DeviceIdProvider(deviceIdStore)
     private val deviceInfoProvider = AndroidDeviceInfoProvider()
     val deviceRegistrar: DeviceRegistrar =
         DeviceRegistrar(findlyApiClient, deviceIdProvider, deviceInfoProvider)
@@ -76,6 +82,26 @@ class AppContainer(context: Context) {
     /** Offline fix-queue (specs/003 §10) — not yet drained by anything; `LocationSyncWorker`
      * wiring is A2/H1 scope (§10.5). */
     val fixQueueStore: FixQueueStore = InMemoryFixQueueStore()
+
+    /** The one `Context`-touching implementation of [ExportArtifactCleaner], shared by both of
+     * 008 §3.1 rule 2 (amended)'s non-racing cleanup triggers: [localStateWiper]'s
+     * account-deletion wipe, and [coldStartExportCleanup]'s process-restart wipe. */
+    private val exportArtifactCleaner = ExportArtifactCleaner { ExportFileWriter.clearArtifacts(context) }
+
+    /** A8 (specs/008-privacy-endpoints.md §4.4/§3.1; specs/003-android-client.md §12.4): wipes
+     * local state — fix queue, deviceId, and export artifacts — after a successful account
+     * deletion. See [DefaultLocalStateWiper]'s doc for the current scope. */
+    val localStateWiper: LocalStateWiper = DefaultLocalStateWiper(
+        fixQueueStore = fixQueueStore,
+        deviceIdStore = deviceIdStore,
+        exportArtifactCleaner = exportArtifactCleaner,
+    )
+
+    /** 008 §3.1 rule 2 (amended)'s cold-start trigger — see [ColdStartExportCleanup]'s doc for why
+     * a process restart is one of only two safe cleanup triggers left, now that share-sheet
+     * return/dismissal and screen teardown are both forbidden (they can race a lazily-reading
+     * share target). Run once, below, from `init`. */
+    private val coldStartExportCleanup = ColdStartExportCleanup(exportArtifactCleaner)
 
     /** A2's live-map tile renderer seam (`ui/map/MapRenderer.kt`) — [PlaceholderMapRenderer] is
      * the only implementation until H1 provisions a real Maps API key (`appConfig.mapsApiKey`). */
@@ -94,5 +120,10 @@ class AppContainer(context: Context) {
                 }
             }
         }
+
+        // 008 §3.1 rule 2 (amended): an export artifact must never survive a process restart.
+        // `AppContainer` is constructed exactly once per process, in `FindlyApplication.onCreate`
+        // (never per-Activity/per-screen), so this is the one true "next app cold start" hook.
+        coldStartExportCleanup.run()
     }
 }

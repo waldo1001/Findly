@@ -209,4 +209,21 @@ interface FindlyApiService {
     suspend fun getGroupLatestLocations(
         @Path("groupId") groupId: String,
     ): Response<Envelope<GroupLatestLocationsResponseDto>>
+
+    // ---- §13 Privacy: export & deletion (specs/008-privacy-endpoints.md) ----
+
+    /** The one unenveloped response in the API (001 §13.1) — `ResponseBody` is Retrofit's
+     * built-in identity converter (same rationale as the bare-204 endpoints above), except here
+     * the body is non-empty and is deliberately never run through the `Envelope<T>` JSON
+     * converter (specs/003 §12.4). */
+    @GET("v1/export")
+    suspend fun exportData(@Query("userId") userId: String? = null): Response<ResponseBody>
+
+    /** Bare 204 (001 §13.2) — permitted even without a profile (§1.5.3's idempotent no-op). */
+    @DELETE("v1/users/me")
+    suspend fun deleteAccount(): Response<ResponseBody>
+
+    /** Bare 204 (001 §13.3, parent-only). */
+    @DELETE("v1/families/me")
+    suspend fun deleteFamily(): Response<ResponseBody>
 }

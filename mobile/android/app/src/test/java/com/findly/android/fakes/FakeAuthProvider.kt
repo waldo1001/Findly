@@ -34,8 +34,23 @@ class FakeAuthProvider(
         return currentToken
     }
 
+    var signOutCallCount = 0
+        private set
+
     override suspend fun signOut() {
+        signOutCallCount++
         state.value = AuthState.SignedOut
+    }
+
+    /** Scripted outcome of the next [deleteCurrentUser] call (specs/008-privacy-endpoints.md
+     * §1.3) — defaults to success. */
+    var deleteCurrentUserResult: Boolean = true
+    var deleteCurrentUserCallCount = 0
+        private set
+
+    override suspend fun deleteCurrentUser(): Boolean {
+        deleteCurrentUserCallCount++
+        return deleteCurrentUserResult
     }
 
     /** Scripted event(s) emitted as soon as the next [startPhoneVerification] call's flow is

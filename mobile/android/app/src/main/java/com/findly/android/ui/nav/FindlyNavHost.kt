@@ -53,6 +53,8 @@ import com.findly.android.ui.locate.LocateViewModelFactory
 import com.findly.android.ui.map.MapRoute
 import com.findly.android.ui.map.MapViewModel
 import com.findly.android.ui.map.MapViewModelFactory
+import com.findly.android.ui.settings.PrivacyViewModel
+import com.findly.android.ui.settings.PrivacyViewModelFactory
 import com.findly.android.ui.settings.SettingsRoute
 import com.findly.android.ui.settings.SettingsViewModel
 import com.findly.android.ui.settings.SettingsViewModelFactory
@@ -126,6 +128,19 @@ fun FindlyNavHost(
         if (authState is AuthState.SignedIn && navController.currentDestination?.route == Destinations.SignIn.route) {
             navController.popBackStack()
         }
+        // A8 (specs/008-privacy-endpoints.md §4.4; specs/003 §12.4): a successful account
+        // deletion calls AuthProvider.signOut() after wiping local state, which flips authState
+        // to SignedOut — clear the whole back stack and land on Home, which renders its own
+        // sign-in prompt for a SignedOut caller (HomeScreen.kt). The `currentRoute != Home` guard
+        // makes this a no-op on cold start (NavHost's own start destination is already Home by
+        // the time this effect can run) and for any future explicit sign-out from Home itself.
+        val currentRoute = navController.currentDestination?.route
+        if (authState is AuthState.SignedOut && currentRoute != null && currentRoute != Destinations.Home.route) {
+            navController.navigate(Destinations.Home.route) {
+                popUpTo(Destinations.Home.route) { inclusive = true }
+                launchSingleTop = true
+            }
+        }
     }
 
     // A6 (specs/007 §4, specs/003 §12.3): one-time navigation to GroupJoin when this composition
@@ -196,7 +211,18 @@ fun FindlyNavHost(
             val settingsViewModel: SettingsViewModel = viewModel(
                 factory = SettingsViewModelFactory(container.findlyApiClient, container.findlyApiClient),
             )
-            SettingsRoute(viewModel = settingsViewModel)
+            // A8 (specs/008-privacy-endpoints.md; specs/003 §12.4): a separate ViewModel/
+            // StateHolder, deliberately decoupled from settingsViewModel's family/device load —
+            // see SettingsScreen.kt's doc for why.
+            val privacyViewModel: PrivacyViewModel = viewModel(
+                factory = PrivacyViewModelFactory(
+                    privacyApi = container.findlyApiClient,
+                    familyApi = container.findlyApiClient,
+                    authProvider = container.authProvider,
+                    localStateWiper = container.localStateWiper,
+                ),
+            )
+            SettingsRoute(viewModel = settingsViewModel, privacyViewModel = privacyViewModel)
         }
 
         composable(Destinations.Invites.route) {

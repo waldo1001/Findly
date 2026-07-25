@@ -26,6 +26,13 @@ class ApiErrorUserMessageTest {
     }
 
     @Test
+    fun `LIMIT_EXCEEDED with exportsPerDay maps to a friendly retry-tomorrow message (specs 008)`() {
+        val error = ApiError.LimitExceeded(limit = "exportsPerDay", message = rawServerMessage, requestId = "r_1")
+
+        assertEquals("You've reached today's export limit — please try again tomorrow.", error.userMessage())
+    }
+
+    @Test
     fun `LIMIT_EXCEEDED with an unrecognized limit key still gets a generic friendly fallback`() {
         val error = ApiError.LimitExceeded(limit = "somethingNew", message = rawServerMessage, requestId = "r_1")
 

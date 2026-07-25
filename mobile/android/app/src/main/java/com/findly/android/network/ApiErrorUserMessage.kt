@@ -70,6 +70,7 @@ fun ApiError.userMessage(): String = when (this) {
         "minSyncIntervalMinutes" -> "That sync interval isn't available on your plan."
         "maxActiveGroups" -> "You've reached your active-group limit for this plan."
         "maxGroupDurationDays" -> "That end date is further out than your plan allows."
+        "exportsPerDay" -> "You've reached today's export limit — please try again tomorrow."
         else -> "You've reached your plan limit."
     }
 

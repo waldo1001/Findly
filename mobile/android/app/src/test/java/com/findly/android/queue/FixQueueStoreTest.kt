@@ -112,6 +112,19 @@ class FixQueueStoreTest {
     }
 
     @Test
+    fun `clearAll drops every pending and in-flight fix (specs 008 §4_4 local-state wipe)`() = runTest {
+        val store = InMemoryFixQueueStore()
+        store.enqueue(fix("a"))
+        store.enqueue(fix("b"))
+        store.nextBatch(maxSize = 1) // freeze "a" in-flight, leave "b" pending
+
+        store.clearAll()
+
+        assertEquals(0, store.pendingCount())
+        assertNull(store.nextBatch())
+    }
+
+    @Test
     fun `markBatchAccepted with a mismatched batchId throws`() = runTest {
         val store = InMemoryFixQueueStore()
         store.enqueue(fix("a"))

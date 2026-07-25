@@ -27,6 +27,16 @@ interface AuthProvider {
     suspend fun signOut()
 
     /**
+     * Deletes the signed-in Firebase Auth user (specs/008-privacy-endpoints.md §1.3;
+     * specs/003-android-client.md §12.4). Called only **after** `DELETE /users/me` has returned
+     * `204` — never before (008 §1.3's ordering rationale: an orphaned Firebase user with no
+     * Findly data is harmless, the reverse orphan would be an erasure failure). Returns `true` on
+     * success; `false` if the SDK call failed (e.g. `requires-recent-login`) — callers MUST then
+     * offer a retry path (re-authenticate → retry), never throws.
+     */
+    suspend fun deleteCurrentUser(): Boolean
+
+    /**
      * Starts SMS verification for [phoneNumberE164] (already normalized per 006 §3 —
      * `PhoneNumberNormalizer`; this function never re-rejects malformed input, callers MUST
      * normalize first). Calling this again with the **same number** while a verification is

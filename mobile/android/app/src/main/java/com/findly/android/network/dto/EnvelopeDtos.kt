@@ -37,9 +37,10 @@ data class FeaturesDto(
 )
 
 /** `maxActiveGroups`/`maxGroupMembers`/`maxGroupDurationDays`/`groupGraceDays` are the
- * specs/005-temporary-groups.md additions to 001 §9 — defaulted to `null` so decoding still
- * succeeds against any envelope fixture predating groups (`ignoreUnknownKeys` handles the
- * reverse: an older client seeing these new fields for the first time). */
+ * specs/005-temporary-groups.md additions to 001 §9; `exportsPerDay` is the specs/008-privacy-
+ * endpoints.md addition (001 §9/§13.1) — all defaulted to `null` so decoding still succeeds
+ * against any envelope fixture predating them (`ignoreUnknownKeys` handles the reverse: an older
+ * client seeing these new fields for the first time). */
 @Serializable
 data class PlanLimitsDto(
     val maxDevices: Int,
@@ -51,6 +52,7 @@ data class PlanLimitsDto(
     val maxGroupMembers: Int? = null,
     val maxGroupDurationDays: Int? = null,
     val groupGraceDays: Int? = null,
+    val exportsPerDay: Int? = null,
 )
 
 @Serializable

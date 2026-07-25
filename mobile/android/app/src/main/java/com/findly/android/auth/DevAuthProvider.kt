@@ -62,6 +62,16 @@ class DevAuthProvider(
         pendingPhoneNumber = null
     }
 
+    /** Dev/stub shape (specs/008-privacy-endpoints.md §1.3): there is no real Firebase user to
+     * delete here, so this just signs the in-memory dev session out and reports success — always
+     * `true`, matching a real deletion's happy path so the delete-account flow is exercisable
+     * against `AUTH_MODE=insecure-local` without the Firebase console setup (H2). */
+    override suspend fun deleteCurrentUser(): Boolean {
+        state.value = AuthState.SignedOut
+        pendingPhoneNumber = null
+        return true
+    }
+
     /** Dev-mode two-step shape (006 §5): re-validates [phoneNumberE164] against §3 (defensive —
      * callers are expected to already have normalized it) and immediately emits `CodeSent`; no
      * SMS, no Firebase. An unnormalizable number fails client-side with `INVALID_PHONE_NUMBER`
