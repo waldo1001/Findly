@@ -40,6 +40,11 @@ struct ExportArtifactStoringTests {
         #expect(ExportArtifactNaming.isExportArtifactFileName(ExportArtifactNaming.fileName()))
         #expect(!ExportArtifactNaming.isExportArtifactFileName("not-an-export.json"))
         #expect(!ExportArtifactNaming.isExportArtifactFileName("findly-export-2026-07-25-abc12345.txt"), "wrong extension must not match")
+        // The scan runs unconditionally at every cold start against the SHARED system temp
+        // directory (not a dedicated subdirectory) — a prefix-and-suffix-only check would also
+        // match an unrelated file that merely shares both, so the predicate must check the full
+        // generated shape (date + 8 lowercase-hex segment), not just its bookends.
+        #expect(!ExportArtifactNaming.isExportArtifactFileName("findly-export-anything-whatsoever.json"), "right prefix and suffix, wrong middle shape, must not match")
     }
 
     // MARK: - InMemoryExportArtifactStore (dev/test fake)
@@ -159,13 +164,21 @@ struct ExportArtifactStoringTests {
     @Test func fileManagerStore_removeCurrentArtifact_leavesUnrelatedFilesInTheSameDirectoryAlone() throws {
         let directory = try Self.makeScratchDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
-        let unrelatedURL = directory.appendingPathComponent("not-an-export.txt")
-        try Data("unrelated".utf8).write(to: unrelatedURL)
+        let differentEverything = directory.appendingPathComponent("not-an-export.txt")
+        try Data("unrelated".utf8).write(to: differentEverything)
+        // Load-bearing fixture: same extension as the real artifact, different prefix. A
+        // suffix-only predicate (`hasSuffix(".json")`, no prefix check at all) would still pass
+        // `differentEverything` above (it differs in BOTH prefix and extension) while wrongly
+        // deleting this one — this is the only fixture that actually exercises the prefix half of
+        // the match at the directory-scan level.
+        let sameExtensionDifferentPrefix = directory.appendingPathComponent("unrelated-cache.json")
+        try Data("also unrelated".utf8).write(to: sameExtensionDifferentPrefix)
         let store = FileManagerExportArtifactStore(directory: directory)
 
         store.removeCurrentArtifact()
 
-        #expect(FileManager.default.fileExists(atPath: unrelatedURL.path), "must only match the export-artifact naming pattern")
+        #expect(FileManager.default.fileExists(atPath: differentEverything.path), "must only match the export-artifact naming pattern")
+        #expect(FileManager.default.fileExists(atPath: sameExtensionDifferentPrefix.path), "same extension, different prefix — must still survive")
     }
 
     /// Rule 4 — backup exclusion is requested explicitly, not left to inherited defaults. (File

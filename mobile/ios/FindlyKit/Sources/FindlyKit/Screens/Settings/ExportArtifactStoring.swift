@@ -45,13 +45,21 @@ public enum ExportArtifactNaming {
         return "\(prefix)\(formatter.string(from: generatedAt))-\(randomSuffix)\(suffix)"
     }
 
-    /// specs/008-privacy-endpoints.md §3.1 rule 2(b) — whether `fileName` matches the pattern this
-    /// type generates. `FileManagerExportArtifactStore`'s cold-start cleanup uses this to find a
-    /// stale artifact by filesystem scan rather than by any in-memory record of what was written —
-    /// a fresh process has none. Matching by pattern (not an exact remembered name) also means the
-    /// scan can never be fooled by an unrelated file that merely happens to share a directory.
+    /// specs/008-privacy-endpoints.md §3.1 rule 2(b) — whether `fileName` matches the FULL shape
+    /// this type generates (`findly-export-<yyyy>-<MM>-<dd>-<8 lowercase hex>.json`), not merely
+    /// its prefix/suffix. `FileManagerExportArtifactStore`'s cold-start cleanup runs
+    /// UNCONDITIONALLY at every app launch against `directory`, which by default is the SHARED
+    /// system temp directory, not a dedicated subdirectory — so this predicate is deliberately as
+    /// narrow as the exact thing `fileName` generates, not merely "looks export-shaped." A looser
+    /// prefix-and-suffix-only check would also match e.g. `findly-export-notes.json`, an unrelated
+    /// file that happens to share both. `ExportArtifactNaming` stays the one place that both
+    /// generates and recognises the name, so the two cannot drift apart.
     public static func isExportArtifactFileName(_ fileName: String) -> Bool {
-        fileName.hasPrefix(prefix) && fileName.hasSuffix(suffix)
+        // findly-export- + yyyy + - + MM + - + dd + - + 8 lowercase hex chars + .json
+        let pattern = "^\(NSRegularExpression.escapedPattern(for: prefix))"
+            + "\\d{4}-\\d{2}-\\d{2}-[0-9a-f]{8}"
+            + "\(NSRegularExpression.escapedPattern(for: suffix))$"
+        return fileName.range(of: pattern, options: .regularExpression) != nil
     }
 }
 
