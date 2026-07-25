@@ -123,7 +123,7 @@ GitHub → Settings → Branches → protect `main`: require the status checks *
 
 One Azure Static Web App (Free tier) hosts the public join-link landing page, the `.well-known` App/Universal Links files (deployed by W1's workflow), and later the legal pages (H7). No secrets: deploys authenticate via the existing OIDC app registration.
 
-*(Done 2026-07-22: `swa-findly` in resource group `Findly`, subscription "Visual Studio Enterprise Subscription". **`JOIN_LINK_HOST` = `gentle-hill-0fae42f03.7.azurestaticapps.net`** — recorded in `mobile/android/app/build.gradle.kts`'s `joinLinkHost` val and `mobile/ios/FindlyKit/.../AppConfig.swift`'s `defaultJoinLinkHost`. RBAC granted to `gh-findly-deploy` (`722f3f16-…`) — Contributor on the SWA resource. Repo variables `AZURE_STATICWEBAPP_NAME`/`AZURE_STATICWEBAPP_RESOURCE_GROUP` (step 2b) both set.)*
+*(Done 2026-07-22: `swa-findly` in resource group `Findly`, subscription "Visual Studio Enterprise Subscription". **`JOIN_LINK_HOST` = `kind-plant-0fb99b003.7.azurestaticapps.net`** — recorded in `mobile/android/app/build.gradle.kts`'s `joinLinkHost` val and `mobile/ios/FindlyKit/.../AppConfig.swift`'s `defaultJoinLinkHost`. RBAC granted to `gh-findly-deploy` (`722f3f16-…`) — Contributor on the SWA resource. Repo variables `AZURE_STATICWEBAPP_NAME`/`AZURE_STATICWEBAPP_RESOURCE_GROUP` (step 2b) both set.)*
 
 ```bash
 az staticwebapp create -n swa-findly -g Findly -l westeurope --sku Free

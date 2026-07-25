@@ -39,7 +39,7 @@ public struct AppConfig: Equatable {
     /// in resource group Findly, provisioned 2026-07-22). Mirrors Android's equivalent
     /// `joinLinkHost` val in `app/build.gradle.kts` (specs/003 §12.3) — same host, single source of
     /// truth per platform until a custom domain is added later (specs/007 §6).
-    public static let defaultJoinLinkHost = "gentle-hill-0fae42f03.7.azurestaticapps.net"
+    public static let defaultJoinLinkHost = "kind-plant-0fb99b003.7.azurestaticapps.net"
 }
 
 public enum AuthMode: Equatable {

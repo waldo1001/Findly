@@ -4,8 +4,10 @@ on:
   push:
     branches: [main]
     paths: ["mobile/ios/**", ".github/workflows/ios.yml"]
+  # Deliberately NO path filter on pull_request: ios-package + ios-build are required checks
+  # on main, and a path-filtered workflow never reports its checks on non-matching PRs — every
+  # non-mobile PR would hang on "Expected — waiting for status" (same fix as backend.yml).
   pull_request:
-    paths: ["mobile/ios/**", ".github/workflows/ios.yml"]
 
 jobs:
   package:

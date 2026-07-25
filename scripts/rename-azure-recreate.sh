@@ -101,17 +101,61 @@ az functionapp config appsettings set -n "$FUNCAPP" -g "$RG" --settings \
 # ---------------------------------------------------------------------------
 APP_ID=$(az ad app create --display-name "$APP_REG" --query appId -o tsv)
 az ad sp create --id "$APP_ID"
+SP_OID=$(az ad sp show --id "$APP_ID" --query id -o tsv)
 
-cat > /tmp/fedcred.json <<EOF
+# A brand-new service principal takes a bit to propagate through Entra; role assignments made
+# too soon silently no-op (the assignee isn't found yet). Wait, then assign by object-id with a
+# short retry. (Without this, the OIDC app ends up with NO role assignments and every CI deploy
+# fails — exactly what happened on the first live run of this script.)
+echo "waiting ~30s for the service principal to propagate before role assignments..."
+sleep 30
+assign_role() {  # assign_role <role> <scope>
+  for attempt in 1 2 3 4 5; do
+    if az role assignment create --assignee-object-id "$SP_OID" --assignee-principal-type ServicePrincipal \
+         --role "$1" --scope "$2" >/dev/null 2>&1; then
+      echo "  role '$1' assigned"; return 0
+    fi
+    echo "  role '$1' not applied yet (attempt $attempt) — retrying in 15s..."; sleep 15
+  done
+  echo "  WARN: role '$1' could not be assigned on $2 — assign it manually."
+}
+
+# GitHub Actions federated credentials. TWO are created:
+#   1. the standard name-based subject (works for repos that were never renamed);
+#   2. the immutable-ID subject GitHub emits AFTER an owner/repo rename (a resurrection-attack
+#      protection): repo:<owner>@<ownerId>/<repo>@<repoId>:...  Since this script exists to
+#      support a rename, #2 is the one that actually matches — creating both is harmless and
+#      future-proof. (Missing #2 is why the first live deploy failed with AADSTS700213.)
+OWNER="${GITHUB_REPO%%/*}"; REPO="${GITHUB_REPO##*/}"
+cat > /tmp/fedcred-name.json <<EOF
 { "name": "github-main",
   "issuer": "https://token.actions.githubusercontent.com",
   "subject": "repo:${GITHUB_REPO}:ref:refs/heads/main",
   "audiences": ["api://AzureADTokenExchange"] }
 EOF
-az ad app federated-credential create --id "$APP_ID" --parameters @/tmp/fedcred.json
+az ad app federated-credential create --id "$APP_ID" --parameters @/tmp/fedcred-name.json
+if command -v gh >/dev/null 2>&1; then
+  OWNER_ID=$(gh api "users/${OWNER}" --jq .id 2>/dev/null || true)
+  REPO_ID=$(gh api "repos/${GITHUB_REPO}" --jq .id 2>/dev/null || true)
+  if [ -n "${OWNER_ID:-}" ] && [ -n "${REPO_ID:-}" ]; then
+    cat > /tmp/fedcred-immutable.json <<EOF
+{ "name": "github-main-immutable",
+  "issuer": "https://token.actions.githubusercontent.com",
+  "subject": "repo:${OWNER}@${OWNER_ID}/${REPO}@${REPO_ID}:ref:refs/heads/main",
+  "audiences": ["api://AzureADTokenExchange"] }
+EOF
+    az ad app federated-credential create --id "$APP_ID" --parameters @/tmp/fedcred-immutable.json
+  else
+    echo "WARN: couldn't fetch GitHub numeric IDs; if a deploy fails with AADSTS700213, add a fed"
+    echo "      cred with subject repo:${OWNER}@<ownerId>/${REPO}@<repoId>:ref:refs/heads/main"
+  fi
+else
+  echo "WARN: gh CLI not found — skipped the immutable-ID fed cred. If a deploy fails with"
+  echo "      AADSTS700213 (renamed repo), add repo:${OWNER}@<ownerId>/${REPO}@<repoId>:ref:refs/heads/main"
+fi
 
 FUNCAPP_ID=$(az functionapp show -n "$FUNCAPP" -g "$RG" --query id -o tsv)
-az role assignment create --assignee "$APP_ID" --role "Website Contributor" --scope "$FUNCAPP_ID"
+assign_role "Website Contributor" "$FUNCAPP_ID"
 
 # ---------------------------------------------------------------------------
 # 4. RECREATE — Static Web App for join links (mirrors §7)
@@ -119,7 +163,7 @@ az role assignment create --assignee "$APP_ID" --role "Website Contributor" --sc
 az staticwebapp create -n "$SWA" -g "$RG" -l "$LOCATION" --sku Free
 NEW_JOIN_HOST=$(az staticwebapp show -n "$SWA" -g "$RG" --query defaultHostname -o tsv)
 SWA_ID=$(az staticwebapp show -n "$SWA" -g "$RG" --query id -o tsv)
-az role assignment create --assignee "$APP_ID" --role Contributor --scope "$SWA_ID"
+assign_role "Contributor" "$SWA_ID"
 
 TENANT_ID=$(az account show --query tenantId -o tsv)
 SUB_ID=$(az account show --query id -o tsv)
