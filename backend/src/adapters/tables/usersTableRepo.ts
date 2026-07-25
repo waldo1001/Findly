@@ -7,9 +7,17 @@ import type { GroupMembershipIndexEntry, GroupRole, Role, UserProfile, UserRepo 
 
 const PROFILE_ROW_KEY = "profile";
 const GROUP_PREFIX = "group:";
+// clearFamilyMembership's guarded-Replace retry budget — same bound as the Usage
+// increment loop (002 §2.9, usageTableRepo.ts), the only other read -> guarded-write ->
+// bounded-retry idiom in this codebase.
+const MAX_RETRIES = 3;
 
 function isNotFound(err: unknown): boolean {
   return err instanceof RestError && err.statusCode === 404;
+}
+
+function isPreconditionFailed(err: unknown): boolean {
+  return err instanceof RestError && (err.statusCode === 412 || err.statusCode === 409);
 }
 
 export class TableUserRepo implements UserRepo {
@@ -58,15 +66,50 @@ export class TableUserRepo implements UserRepo {
   }
 
   /** Idempotent (002 §4.2 steps 1/6 — family deletion's re-call needs every step to
-   * swallow not-found, same idiom as TableFamilyRepo.removeMember). */
+   * swallow not-found, same idiom as TableFamilyRepo.removeMember).
+   *
+   * B21: Table Storage's Merge has no `null` type — the SDK silently drops null-valued
+   * properties from a Merge payload instead of clearing them, so a plain
+   * `updateEntity({ familyId: null, role: null }, "Merge")` is a server-side no-op that
+   * never actually cleared anything. `Replace` DOES drop omitted properties, but it
+   * replaces the *whole* entity with exactly what's given, so it must be seeded with every
+   * field that must survive (displayName) and none of the two that must not
+   * (familyId/role, simply omitted here).
+   *
+   * Read -> Replace-with-preserved-displayName, ETag-guarded, bounded retry on conflict —
+   * same idiom as the Usage increment loop (002 §2.9) and the sweeper's
+   * assertGroupMetaUnchanged ETag-recheck (002 §4.1) — because a concurrent updateProfile
+   * (001 §3.5, e.g. a displayName change) could race this read/write pair. */
   async clearFamilyMembership(userId: string): Promise<void> {
-    try {
-      await this.client.updateEntity(
-        { partitionKey: userId, rowKey: PROFILE_ROW_KEY, familyId: null, role: null },
-        "Merge",
-      );
-    } catch (err) {
-      if (!isNotFound(err)) throw err;
+    for (let attempt = 0; attempt < MAX_RETRIES; attempt += 1) {
+      let entity;
+      try {
+        entity = await this.client.getEntity(userId, PROFILE_ROW_KEY);
+      } catch (err) {
+        if (isNotFound(err)) return; // nothing left to clear.
+        throw err;
+      }
+
+      try {
+        await this.client.updateEntity(
+          { partitionKey: userId, rowKey: PROFILE_ROW_KEY, displayName: entity.displayName },
+          "Replace",
+          { etag: entity.etag },
+        );
+        return;
+      } catch (err) {
+        // The row got deleted between our read and write (e.g. a concurrent account
+        // deletion, or DELETE /families/me/members/{userId}, 001 §3.6) — nothing left to
+        // clear, same idempotency contract as the initial read's not-found.
+        if (isNotFound(err)) return;
+        if (isPreconditionFailed(err) && attempt < MAX_RETRIES - 1) continue;
+        // Exhausted retries. Unlike Usage's increment loop (002 §2.9), which is telemetry
+        // and deliberately logs-and-drops on exhaustion, clearing family membership is the
+        // correctness guarantee 002 §4.2 / 008 §4.2/§5.2 depend on (family deletion and the
+        // account-deletion cascade both rely on this actually clearing) — so exhaustion
+        // here MUST throw, not silently leave a stale familyId/role in place.
+        throw err;
+      }
     }
   }
 
