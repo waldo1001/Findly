@@ -181,9 +181,22 @@ final class FakeAuthProviding: AuthProviding {
     private(set) var confirmCodeCalls: [String] = []
     private var lastPhoneNumber: String?
 
+    /// specs/008-privacy-endpoints.md §1.3 — `DeleteAccountViewModelTests` configures this to
+    /// simulate the Firebase SDK's "requires a recent sign-in" failure and a subsequent successful
+    /// retry (§1.3: "Clients MUST surface a retry path when the Firebase step fails").
+    var deleteCurrentUserResult: Result<Void, Error> = .success(())
+    private(set) var deleteCurrentUserCallCount = 0
+    var signOutCallCount = 0
+
     func currentIDToken() async throws -> String { "fake-token" }
     func refreshIDToken() async throws -> String { "fake-token" }
-    func signOut() throws { currentUserId = nil }
+    func signOut() throws { signOutCallCount += 1; currentUserId = nil }
+
+    func deleteCurrentUser() async throws {
+        deleteCurrentUserCallCount += 1
+        try deleteCurrentUserResult.get()
+        currentUserId = nil
+    }
 
     func startPhoneVerification(phoneNumberE164: String) async throws {
         if let gate = startPhoneVerificationGate {

@@ -81,6 +81,28 @@ struct FixQueueTests {
         #expect(next?.fixes.map(\.fixId) == ["good-fix"])
     }
 
+    /// specs/008-privacy-endpoints.md §4.4, specs/004-ios-client.md §3.6 — account deletion wipes
+    /// ALL local state, incl. the offline fix-queue, both queued fixes and any frozen in-flight
+    /// batch (otherwise a stale batch could resurface a since-deleted user's fixes on the very next
+    /// `nextBatchToSend` call after re-sign-in with a fresh account).
+    @Test func clearAll_removesQueuedFixesAndTheInFlightBatch() async {
+        var counter = 0
+        let queue = FixQueue(generateBatchId: { counter += 1; return "batch-\(counter)" })
+        await queue.enqueue(makeFix("f1"))
+        await queue.enqueue(makeFix("f2"))
+        _ = await queue.nextBatchToSend() // freeze f1/f2 as an in-flight batch
+        await queue.enqueue(makeFix("f3")) // queued but not yet frozen
+
+        await queue.clearAll()
+
+        #expect(await queue.queuedCount() == 0)
+        // No stale in-flight batch either: the next freeze must start from a clean slate.
+        await queue.enqueue(makeFix("f4"))
+        let next = await queue.nextBatchToSend()
+        #expect(next?.batchId == "batch-2")
+        #expect(next?.fixes.map(\.fixId) == ["f4"])
+    }
+
     @Test func queueLargerThanMaxBatchSize_splitsAcrossSequentialBatches() async {
         var counter = 0
         let queue = FixQueue(generateBatchId: { counter += 1; return "batch-\(counter)" })

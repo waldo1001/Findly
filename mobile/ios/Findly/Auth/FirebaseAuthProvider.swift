@@ -61,6 +61,17 @@ final class FirebaseAuthProvider: AuthProviding {
         verificationID = nil
     }
 
+    /// specs/008-privacy-endpoints.md §1.3 — called by `DeleteAccountViewModel` ONLY after
+    /// `DELETE /users/me` returns `204`. May throw `requiresRecentLogin` if the SDK demands a
+    /// fresh sign-in for this sensitive operation; the ViewModel surfaces a retry path rather than
+    /// treating that as fatal (§1.3: "Clients MUST surface a retry path when the Firebase step
+    /// fails"). Deliberately does NOT also call `signOut()`/clear the Keychain — the ViewModel does
+    /// that itself, uniformly, once the whole flow (this call + the local-state wipe) completes.
+    func deleteCurrentUser() async throws {
+        guard let user = Auth.auth().currentUser else { throw AuthError.notSignedIn }
+        try await user.delete()
+    }
+
     func startPhoneVerification(phoneNumberE164: String) async throws {
         do {
             verificationID = try await PhoneAuthProvider.provider().verifyPhoneNumber(phoneNumberE164, uiDelegate: nil)
@@ -116,6 +127,7 @@ final class FirebaseAuthProvider: AuthProviding {
     func currentIDToken() async throws -> String { throw AuthError.notSignedIn }
     func refreshIDToken() async throws -> String { throw AuthError.notSignedIn }
     func signOut() throws {}
+    func deleteCurrentUser() async throws { throw AuthError.notSignedIn }
     func startPhoneVerification(phoneNumberE164: String) async throws { throw PhoneAuthError.unknown }
     func confirmCode(_ code: String) async throws { throw PhoneAuthError.unknown }
 #endif

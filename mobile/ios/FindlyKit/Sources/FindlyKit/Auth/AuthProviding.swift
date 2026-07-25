@@ -18,6 +18,12 @@ public protocol AuthProviding: AnyObject {
     /// Confirms the code for the in-flight verification; on success `currentUserId != nil`.
     /// Throws `PhoneAuthError`.
     func confirmCode(_ code: String) async throws
+    /// specs/008-privacy-endpoints.md §1.3 — deletes the Firebase Auth user client-side, called
+    /// ONLY after `DELETE /users/me` (specs/001 §13.2) returns `204` — never before (an orphaned
+    /// Firebase user with no Findly data is harmless; the reverse orphan would be an erasure
+    /// failure). May throw if the SDK requires a recent sign-in; callers (`DeleteAccountViewModel`)
+    /// surface a retry path rather than treating this as fatal.
+    func deleteCurrentUser() async throws
 }
 
 public enum AuthError: Error, Equatable {
