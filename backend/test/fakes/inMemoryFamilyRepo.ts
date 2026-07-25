@@ -5,6 +5,16 @@ export class InMemoryFamilyRepo implements FamilyRepo {
   private readonly members = new Map<string, Map<string, FamilyMember>>();
   private readonly inviteIndex = new Map<string, Map<string, FamilyInviteIndexEntry>>();
 
+  /** Synchronous test-setup helper (mirrors InMemoryEntitlementsRepo.seed) — bypasses the
+   * conditional-insert semantics of createFamily so callers can seed synchronously inside a
+   * non-async buildDeps(). */
+  seed(meta: FamilyMeta): void {
+    this.meta.set(meta.familyId, { ...meta });
+    if (!this.members.has(meta.familyId)) {
+      this.members.set(meta.familyId, new Map());
+    }
+  }
+
   async createFamily(meta: FamilyMeta): Promise<void> {
     if (this.meta.has(meta.familyId)) {
       throw new Error(`InMemoryFamilyRepo: family ${meta.familyId} already exists`);

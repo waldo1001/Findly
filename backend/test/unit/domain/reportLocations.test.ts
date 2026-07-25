@@ -9,6 +9,7 @@ import { InMemoryUsageRepo } from "../../fakes/inMemoryUsageRepo";
 import { InMemoryGeofenceConfigRepo } from "../../fakes/inMemoryGeofenceConfigRepo";
 import { InMemoryEntitlementsRepo } from "../../fakes/inMemoryEntitlementsRepo";
 import { InMemoryUserRepo } from "../../fakes/inMemoryUserRepo";
+import { InMemoryFamilyRepo } from "../../fakes/inMemoryFamilyRepo";
 import { InMemoryGroupRepo } from "../../fakes/inMemoryGroupRepo";
 import { InMemoryGroupLastKnownRepo } from "../../fakes/inMemoryGroupLastKnownRepo";
 import { FixedClock } from "../../fakes/fixedClock";
@@ -24,6 +25,16 @@ const NOW = "2026-07-19T09:10:00Z";
 function buildDeps() {
   const entitlementsRepo = new InMemoryEntitlementsRepo();
   entitlementsRepo.seed(FAMILY_ID, { subscriptionStatus: "free", updatedAt: "2026-07-01T00:00:00Z" });
+  const familyRepo = new InMemoryFamilyRepo();
+  // Write-time family-existence guard (002 §4.2, B19 review-gate fix): seeded here so every
+  // existing "has a family" test keeps seeing FAMILY_ID as alive at write time — the guard
+  // itself is exercised by the dedicated describe block below, which deletes it mid-request.
+  familyRepo.seed({
+    familyId: FAMILY_ID,
+    familyName: "Wauters",
+    createdBy: USER_ID,
+    createdAt: "2026-07-01T00:00:00Z",
+  });
   return {
     deviceRepo: new InMemoryDeviceRepo(),
     lastKnownRepo: new InMemoryLastKnownRepo(),
@@ -33,6 +44,7 @@ function buildDeps() {
     geofenceConfigRepo: new InMemoryGeofenceConfigRepo(),
     entitlementsRepo,
     userRepo: new InMemoryUserRepo(),
+    familyRepo,
     groupRepo: new InMemoryGroupRepo(),
     groupLastKnownRepo: new InMemoryGroupLastKnownRepo(),
     clock: new FixedClock(new Date(NOW)),
@@ -162,6 +174,7 @@ describe("domain/location/reportLocations", () => {
       geofenceConfigRepo: new InMemoryGeofenceConfigRepo(),
       entitlementsRepo: new InMemoryEntitlementsRepo(), // deliberately not seeded
       userRepo: new InMemoryUserRepo(),
+      familyRepo: new InMemoryFamilyRepo(),
       groupRepo: new InMemoryGroupRepo(),
       groupLastKnownRepo: new InMemoryGroupLastKnownRepo(),
       clock: new FixedClock(new Date(NOW)),
@@ -788,6 +801,79 @@ describe("domain/location/reportLocations", () => {
       const replay = await reportLocations(familyLessInput({ body }), deps);
       expect(replay.accepted).toBe(0);
       expect(replay.duplicates).toBe(1);
+    });
+  });
+
+  // Review-gate fix (security, Major): the auth-context familyId snapshot (input.familyId)
+  // is taken BEFORE this function runs; if a concurrent DELETE /families/me (001 §13.3)
+  // completes while this batch is in flight, the family-scoped writes below must not
+  // silently resurrect data under the erased family (002 §4.2's normative write-time
+  // guard, 008 §5.2/§9).
+  describe("write-time family-existence guard (002 §4.2, in-flight erasure race)", () => {
+    const GUARD_GROUP_ID = "grp_9J2Kq7Lm3NpR5sTvWxYz";
+
+    // Simulates a family deletion completing in the exact window between the request's
+    // auth-context snapshot and the guard's own read: wraps the fake's getFamilyMeta so
+    // that, at the moment the ingest path performs its write-time re-check, the deletion
+    // has ALREADY landed (mirrors the groupSweeper TOCTOU test idiom in this codebase).
+    function raceFamilyDeletionIntoGuardRead(deps: ReturnType<typeof buildDeps>): void {
+      const realGetFamilyMeta = deps.familyRepo.getFamilyMeta.bind(deps.familyRepo);
+      deps.familyRepo.getFamilyMeta = async (familyId: string) => {
+        await deps.familyRepo.deleteFamilyMeta(familyId);
+        return realGetFamilyMeta(familyId);
+      };
+    }
+
+    it("skips the history append and the family-keyed usage row when the family is gone by write time, but the batch still succeeds with last-known and group fan-out intact (008 §9)", async () => {
+      const deps = buildDeps();
+      seedDevice(deps);
+      await seedActiveGroupMembership(deps, GUARD_GROUP_ID);
+      raceFamilyDeletionIntoGuardRead(deps);
+
+      const result = await reportLocations(baseInput(), deps); // input.familyId is still the stale FAMILY_ID snapshot
+
+      expect(result.accepted).toBe(1);
+      expect(result.duplicates).toBe(0);
+
+      // (a) no history line, no family-keyed usage row.
+      expect(deps.historyStore.fixes).toEqual([]);
+      expect(await deps.usageRepo.get(FAMILY_ID, "locationBatches", "2026-07-19")).toBe(0);
+      expect(await deps.usageRepo.get(FAMILY_ID, "fixes", "2026-07-19")).toBe(0);
+      // Usage degrades to the caller's own uid partition instead (family-less handling).
+      expect(await deps.usageRepo.get(USER_ID, "locationBatches", "2026-07-19")).toBe(1);
+      expect(await deps.usageRepo.get(USER_ID, "fixes", "2026-07-19")).toBe(1);
+
+      // (b) last-known and group fan-out still apply — only the family-scoped writes skip.
+      expect(result.lastKnownUpdated).toBe(true);
+      const stored = await deps.lastKnownRepo.get(USER_ID, DEVICE_ID);
+      expect(stored?.lat).toBe(51.0543);
+      const groupPosition = await deps.groupLastKnownRepo.get(GUARD_GROUP_ID, USER_ID);
+      expect(groupPosition).not.toBeNull();
+    });
+
+    it("pays the extra family-existence read only when the caller HAD a family (not for an already family-less caller)", async () => {
+      const deps = buildDeps();
+      seedDevice(deps);
+      let readCount = 0;
+      const realGetFamilyMeta = deps.familyRepo.getFamilyMeta.bind(deps.familyRepo);
+      deps.familyRepo.getFamilyMeta = async (familyId: string) => {
+        readCount += 1;
+        return realGetFamilyMeta(familyId);
+      };
+
+      await reportLocations(baseInput({ familyId: null }), deps);
+
+      expect(readCount).toBe(0);
+    });
+
+    it("does not affect the happy path: an accepted batch for a family that still exists appends history and records family-keyed usage as before", async () => {
+      const deps = buildDeps();
+      seedDevice(deps);
+
+      await reportLocations(baseInput(), deps);
+
+      expect(deps.historyStore.fixes.length).toBe(1);
+      expect(await deps.usageRepo.get(FAMILY_ID, "locationBatches", "2026-07-19")).toBe(1);
     });
   });
 

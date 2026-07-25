@@ -19,6 +19,7 @@ import type { Clock } from "../../ports/support";
 import type {
   DeviceRepo,
   EntitlementsRepo,
+  FamilyRepo,
   GroupLastKnownRepo,
   GroupRepo,
   IdempotencyRepo,
@@ -44,6 +45,9 @@ export interface ReportLocationsDeps {
   geofenceConfigRepo: GeofenceConfigRepo;
   entitlementsRepo: EntitlementsRepo;
   userRepo: UserRepo;
+  /** Write-time family-existence guard (002 §4.2, closes the in-flight erasure race): a
+   * point read this task reuses from an existing port, not a new one. */
+  familyRepo: FamilyRepo;
   groupRepo: GroupRepo;
   groupLastKnownRepo: GroupLastKnownRepo;
   clock: Clock;
@@ -217,18 +221,32 @@ export async function reportLocations(
     { userRepo: deps.userRepo, groupRepo: deps.groupRepo, groupLastKnownRepo: deps.groupLastKnownRepo },
   );
 
-  // History gate (005 §3, 001 §5.1): only appended when the caller has a family — a
-  // family-less user's fixes update last-known (and, later, group positions) only.
-  if (input.familyId) {
-    const familyId = input.familyId;
+  // Write-time family-existence guard (002 §4.2, security review-gate fix): input.familyId
+  // is a snapshot taken by the auth layer BEFORE this function ran (001 §1.5). A concurrent
+  // DELETE /families/me (001 §13.3) can complete while this batch is in flight; because the
+  // history append is create-if-not-exists, trusting the stale snapshot could silently
+  // recreate location coordinates under a family that was just erased — and since privacy
+  // deletion is one-shot with no sweeper (008 §1.2), that remnant would be permanent.
+  // Re-verify immediately before the family-scoped writes below (reusing the existing
+  // FamilyRepo.getFamilyMeta point read — no new port); if the family is gone, degrade to
+  // family-less handling for the REST of this request only (last-known and group fan-out
+  // above are unaffected — they're already done and were never family-scoped).
+  const familyIdForWrite =
+    input.familyId && (await deps.familyRepo.getFamilyMeta(input.familyId)) ? input.familyId : null;
+
+  // History gate (005 §3, 001 §5.1): only appended when the caller has a family that still
+  // exists at write time — a family-less (or just-erased) caller's fixes update last-known
+  // (and group positions) only.
+  if (familyIdForWrite) {
     for (const fix of body.fixes) {
-      await deps.historyStore.appendFix(familyId, input.uid, deviceId, buildFixLine(fix, receivedAt));
+      await deps.historyStore.appendFix(familyIdForWrite, input.uid, deviceId, buildFixLine(fix, receivedAt));
     }
   }
 
-  // Usage (002 §2.9) stays familyId-keyed, or the caller's own uid family-less — unrelated
-  // to the Devices/LastKnown re-key.
-  const usagePartition = input.familyId ?? input.uid;
+  // Usage (002 §2.9) stays familyId-keyed only while that family still exists at write
+  // time; otherwise it degrades to the caller's own uid partition, same as a family-less
+  // caller — unrelated to the Devices/LastKnown re-key.
+  const usagePartition = familyIdForWrite ?? input.uid;
   const date = usageDate(now);
   await deps.usageRepo.increment(usagePartition, "locationBatches", date);
   await deps.usageRepo.increment(usagePartition, "fixes", date, body.fixes.length);
