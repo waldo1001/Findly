@@ -18,8 +18,9 @@
 
 import { beforeAll, describe, expect, it } from "vitest";
 import { dropContainers, dropTables, ensureContainers, ensureTables } from "./support/ensureStorage";
-import { testDeviceId, testFamilyId, testGroupId, testUserId } from "./support/ids";
+import { testDeviceId, testFamilyId, testGroupId, testRequestId, testUserId } from "./support/ids";
 import { FixedClock } from "../fakes/fixedClock";
+import type { LocateRequestRecord } from "../../src/ports/repositories";
 
 import { deleteAccount, type DeleteAccountDeps } from "../../src/domain/user/deleteAccount";
 import { deleteFamilyFootprint, type DeleteFamilyFootprintDeps } from "../../src/domain/family/familyDeletion";
@@ -384,6 +385,70 @@ describe("integration/erasure against never-created storage (specs/002 §4.2, 00
       await expect(repo.deleteConfig(familyId)).resolves.toBeUndefined();
 
       await ensureContainers("config");
+    });
+  });
+
+  // B22 (specs/001 §6.1, 002 §2 general list-tolerance rule) — sibling of B20 in the locate
+  // flow, not an erasure path: createLocateRequest.ts's coalescing check calls
+  // listPendingByTargetDevice BEFORE the first LocateRequests row is ever created for a
+  // family, so a family's very first push-to-locate request hit the identical TableNotFound
+  // failure mode as B20, on a different endpoint (POST /locate-requests instead of
+  // DELETE /users/me).
+  describe("locate-request coalescing check tolerates the LocateRequests table never having existed (B22)", () => {
+    function buildRecord(overrides: Partial<LocateRequestRecord> & { familyId: string; targetDeviceId: string }): LocateRequestRecord {
+      return {
+        requestId: testRequestId(),
+        targetUserId: testUserId(),
+        requestedBy: testUserId(),
+        status: "pending",
+        createdAt: "2026-07-25T08:00:00Z",
+        expiresAt: "2026-07-25T08:01:00Z",
+        ...overrides,
+      };
+    }
+
+    it("resolves to [] — instead of throwing TableNotFound — for a family's very first locate request, LocateRequests table missing", async () => {
+      const familyId = testFamilyId();
+      const targetDeviceId = testDeviceId();
+      await dropTables("LocateRequests");
+      const repo = new TableLocateRequestRepo();
+
+      await expect(repo.listPendingByTargetDevice(familyId, targetDeviceId)).resolves.toEqual([]);
+
+      await ensureTables("LocateRequests");
+    });
+
+    it("happy path unchanged: an existing pending request for the same target device is found and returned", async () => {
+      const familyId = testFamilyId();
+      const targetDeviceId = testDeviceId();
+      const repo = new TableLocateRequestRepo();
+      const record = buildRecord({ familyId, targetDeviceId, status: "pending" });
+      await repo.create(record);
+
+      const found = await repo.listPendingByTargetDevice(familyId, targetDeviceId);
+
+      expect(found).toHaveLength(1);
+      expect(found[0]).toMatchObject({
+        requestId: record.requestId,
+        familyId,
+        targetDeviceId,
+        status: "pending",
+      });
+    });
+
+    it("genuinely different coalescing scenario (not just present/absent): a fulfilled request for the same device and a pending request for a different device both fail to coalesce", async () => {
+      const familyId = testFamilyId();
+      const targetDeviceId = testDeviceId();
+      const otherDeviceId = testDeviceId();
+      const repo = new TableLocateRequestRepo();
+      // Status mismatch — same device, but already fulfilled.
+      await repo.create(buildRecord({ familyId, targetDeviceId, status: "fulfilled" }));
+      // Target mismatch — pending, but a different device.
+      await repo.create(buildRecord({ familyId, targetDeviceId: otherDeviceId, status: "pending" }));
+
+      const found = await repo.listPendingByTargetDevice(familyId, targetDeviceId);
+
+      expect(found).toEqual([]);
     });
   });
 });
