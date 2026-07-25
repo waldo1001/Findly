@@ -24,6 +24,8 @@ data class PlanLimits(
     val maxGroupMembers: Int? = null,
     val maxGroupDurationDays: Int? = null,
     val groupGraceDays: Int? = null,
+    /** specs/008-privacy-endpoints.md §3 / 001-api-contract.md §13.1 — quota for `GET /export`. */
+    val exportsPerDay: Int? = null,
 )
 
 data class PlanFlags(
@@ -45,6 +47,7 @@ fun FeaturesDto.toDomain(): Features = Features(
         maxGroupMembers = limits.maxGroupMembers,
         maxGroupDurationDays = limits.maxGroupDurationDays,
         groupGraceDays = limits.groupGraceDays,
+        exportsPerDay = limits.exportsPerDay,
     ),
     flags = PlanFlags(
         pushToLocate = flags.pushToLocate,

@@ -59,6 +59,43 @@ class FeaturesMapperTest {
     }
 
     @Test
+    fun `toDomain copies the specs 008 exportsPerDay limit`() {
+        val dto = FeaturesDto(
+            subscriptionStatus = "free",
+            limits = PlanLimitsDto(
+                maxDevices = 10,
+                maxGeofences = 20,
+                historyDays = 90,
+                minSyncIntervalMinutes = 5,
+                locateRequestsPerDay = 100,
+                exportsPerDay = 3,
+            ),
+            flags = PlanFlagsDto(pushToLocate = true, geofencing = true, historyReplay = true),
+        )
+
+        val domain = dto.toDomain()
+
+        assertEquals(3, domain.limits.exportsPerDay)
+    }
+
+    @Test
+    fun `a fixture without exportsPerDay defaults it to null`() {
+        val dto = FeaturesDto(
+            subscriptionStatus = "free",
+            limits = PlanLimitsDto(
+                maxDevices = 10,
+                maxGeofences = 20,
+                historyDays = 90,
+                minSyncIntervalMinutes = 5,
+                locateRequestsPerDay = 100,
+            ),
+            flags = PlanFlagsDto(pushToLocate = true, geofencing = true, historyReplay = true),
+        )
+
+        assertEquals(null, dto.toDomain().limits.exportsPerDay)
+    }
+
+    @Test
     fun `toDomain copies the 001 §9 group-era limits and flag (specs 005)`() {
         val dto = FeaturesDto(
             subscriptionStatus = "free",

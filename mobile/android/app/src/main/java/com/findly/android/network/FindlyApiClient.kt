@@ -8,19 +8,20 @@ import com.findly.android.network.ports.GeofenceApi
 import com.findly.android.network.ports.GroupsApi
 import com.findly.android.network.ports.LocateApi
 import com.findly.android.network.ports.LocationsApi
+import com.findly.android.network.ports.PrivacyApi
 import java.io.IOException
 import okhttp3.ResponseBody
 import retrofit2.Response
 
 /**
- * Implements all six API port interfaces on top of [FindlyApiService]
- * (specs/003-android-client.md §5's endpoint table). The only thing the rest of the app depends
- * on for networking — mirrors the backend's ports/adapters split (`backend/README.md`).
+ * Implements all seven API port interfaces on top of [FindlyApiService]
+ * (specs/003-android-client.md §5/§12.4's endpoint table). The only thing the rest of the app
+ * depends on for networking — mirrors the backend's ports/adapters split (`backend/README.md`).
  */
 class FindlyApiClient(
     private val service: FindlyApiService,
     private val authProvider: AuthProvider,
-) : FamilyApi, DevicesApi, LocationsApi, LocateApi, GeofenceApi, GroupsApi {
+) : FamilyApi, DevicesApi, LocationsApi, LocateApi, GeofenceApi, GroupsApi, PrivacyApi {
 
     // ------------------------------------------------------------------
     // Shared envelope/error handling (specs/003 §6)
@@ -289,4 +290,44 @@ class FindlyApiClient(
 
     override suspend fun getGroupLatestLocations(groupId: String): ApiResult<GroupLatestLocationsResponseDto> =
         unwrap { service.getGroupLatestLocations(groupId) }
+
+    // ------------------------------------------------------------------
+    // PrivacyApi (001 §13; specs/008-privacy-endpoints.md)
+    // ------------------------------------------------------------------
+
+    /** §13.1 — the export document is unenveloped, so this bypasses [unwrap]/[unwrapBare204]
+     * entirely (specs/003 §12.4) while still funneling through [withAuthRetry] like every other
+     * call. */
+    override suspend fun exportData(userId: String?): ApiResult<ExportResult> = withAuthRetry {
+        try {
+            val response = service.exportData(userId)
+            if (response.isSuccessful) {
+                val body = response.body()
+                if (body == null) {
+                    ApiResult.Failure(ApiError.InternalError("empty export body", null))
+                } else {
+                    val result = ExportResult(
+                        body = body.bytes(),
+                        suggestedFileName = fileNameFromContentDisposition(response.headers()["Content-Disposition"]),
+                        contentType = response.headers()["Content-Type"],
+                    )
+                    ApiResult.Success(result, features = null)
+                }
+            } else {
+                ApiResult.Failure(parseError(response.errorBody()?.string()))
+            }
+        } catch (e: IOException) {
+            ApiResult.Failure(ApiError.NetworkFailure(e))
+        }
+    }
+
+    override suspend fun deleteAccount(): ApiResult<Unit> = unwrapBare204 { service.deleteAccount() }
+
+    override suspend fun deleteFamily(): ApiResult<Unit> = unwrapBare204 { service.deleteFamily() }
+
+    private fun fileNameFromContentDisposition(header: String?): String? {
+        if (header == null) return null
+        val match = Regex("filename=\"?([^\";]+)\"?").find(header) ?: return null
+        return match.groupValues[1]
+    }
 }
