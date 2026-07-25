@@ -13,6 +13,24 @@
 | web | ✅ **W1 merged and live** — the project's first `web/` code. Join-link landing page + `.well-known` files deployed to `swa-findly` (H4, done 2026-07-22). One real bug found and fixed post-deploy: see H4 note below. |
 | Azure/Firebase provisioning | ✅ Azure infra + OIDC CI/CD done; join-link SWA provisioned (H4). **Firebase phone-auth setup (H2) done 2026-07-22**, except the two pieces that are genuinely Apple-enrollment-gated (iOS App Check registration, APNs key upload — both now owned by H6, which already tracks them) and the account reset (deliberately deferred to just before real launch). Android on-device sign-in is fully unblocked; iOS on-device sign-in still needs H6. |
 
+## Rename to Findly + infra recreate (2026-07-25)
+
+The app was renamed **Where's Waldo → Findly** (O10 resolved) and the cloud infra recreated under the new name. Full runbook: [`docs/findly-rename-runbook.md`](findly-rename-runbook.md). State:
+
+- ✅ **Code rename** merged (PR #1); GitHub repo renamed `WhereIsWaldo → Findly`; origin re-pointed. Bundle ids `com.findly.{android,ios}`.
+- ✅ **Azure recreated + verified**: RG `Findly`, `stfindly`, `func-findly`, `swa-findly`, OIDC app `gh-findly-deploy`. Fixed two script bugs live: HTTPS-only was off (now on), and the OIDC role assignments + immutable-subject federated credential (renamed repos emit `repo:owner@id/repo@id:...` → `AADSTS700213`). Script hardened in PR #4.
+- ✅ **Firebase**: new project `findly-71f7b` (old `whereiswaldo-30e9c` is immutable). `FIREBASE_PROJECT_ID` + `FCM_SERVICE_ACCOUNT_JSON` set on `func-findly`; config files placed (gitignored). Apple **Team ID `92A2K3Q7NH`**.
+- ✅ **GitHub variables** set (6× `AZURE_*`). **Client config** (PR #3): new `JOIN_LINK_HOST = kind-plant-0fb99b003.7.azurestaticapps.net`, release `BASE_URL = https://func-findly.azurewebsites.net/api/`. **Universal Links** live & verified (AASA `92A2K3Q7NH.com.findly.ios`, assetlinks `com.findly.android`, both 200/json).
+- ✅ **CI**: `android`/`ios` PR path filters removed (PR #5) so required checks always report.
+
+**⚠️ NOT DONE — backend is not deployed to `func-findly`** (recreated empty; `GET /api/v1/families/me` → 404). The redeploy step was blocked for the automated session. **To deploy: re-run the latest `backend` workflow run on main** (`gh run rerun 30149764671`) — OIDC + roles + vars are all in place now, so it will deploy — **or** push any `backend/**` change to main. Then confirm: unauth `GET https://func-findly.azurewebsites.net/api/v1/families/me` → `AUTH_MISSING_TOKEN` (not 404).
+
+**Then the smoke-test** (real end-to-end proof): Android dev build (pointed at `func-findly`) → sign in with test number `+32 470 00 00 01` / `123456` → `GET /v1/families/me` → `PROFILE_NOT_FOUND` (specs/001 §1.5).
+
+**Open PRs:** #2 (draft privacy/ToS — hold until copy is finalized + O7 export/delete resolved).
+
+**Apple-portal tail (H6, enrollment done):** enable Associated Domains + Push + App Attest on the `com.findly.ios` App ID; upload APNs `.p8` to Firebase; apply for Location Push entitlement (000 §O1); create App Store Connect app "Findly" + TestFlight.
+
 ## What's next (2026-07-22)
 
 Every coding task from specs/005–007 is merged **and, as of today, actually pushed and deployed** — the `/dev-loop` backlog is clear again. What's left is human/ops work:
