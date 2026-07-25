@@ -198,7 +198,9 @@ Owner `DELETE /groups/{id}` (001 §12.5) performs step 3 inline and synchronousl
 
 ### 4.2 Privacy deletion — coverage & ordering (001 §13, [008](008-privacy-endpoints.md))
 
-Both operations run **synchronously in the request**, are **idempotent** (every delete swallows not-found — the §4.1 sweeper idiom), and are **re-callable until clean** after any crash. The ordering below is normative: it makes the auth boundary flip *first* (stopping concurrent writes structurally) and keeps the *retry pointer* alive until last.
+Both operations run **synchronously in the request**, are **idempotent** (every delete swallows not-found — the §4.1 sweeper idiom), and are **re-callable until clean** after any crash.
+
+**"Not-found" includes the table or container never having been created (normative).** Tables and blob containers in this design are created lazily by their first *write*, so an erasure can legitimately run against storage where a given table/container **does not exist at all** — and that is indistinguishable, for erasure purposes, from it existing and being empty. Both cases MUST be treated as "nothing to delete", not as an error. This applies to the **list/enumerate** step as much as the delete step: every one of these sequences is list-then-delete, and it is the *listing* of a never-created table (Azure `TableNotFound`) or container (`ContainerNotFound`) that fails first — the per-row delete's own not-found tolerance never gets a chance to help. Reachable in production, not just in a fresh environment: a family that never uses push-to-locate never creates `LocateRequests`, so a member's account deletion would hit exactly this. Note this is **not** symmetrical with the read paths, which already return "no data" naturally; it is the erasure paths' enumerate calls that need it explicitly. The ordering below is normative: it makes the auth boundary flip *first* (stopping concurrent writes structurally) and keeps the *retry pointer* alive until last.
 
 **Account deletion (`DELETE /users/me`), in order:**
 
