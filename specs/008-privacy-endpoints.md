@@ -1,0 +1,137 @@
+# 008 — Privacy: data export & deletion
+
+## Goal
+
+The privacy surface required before any store release (000 §O7): **per-member data export** (GDPR Art. 15/20 — children's location data, EU users), **account deletion** (Google Play account-deletion policy; Apple guideline 5.1.1(v); GDPR Art. 17), and **family deletion** — plus the Play-required **web deletion page**. This spec owns the concepts, semantics, and guarantees; wire shapes live only in [001 §13](001-api-contract.md), storage coverage/ordering only in [002 §4.2](002-storage-schema.md).
+
+RFC 2119 keywords (MUST/SHOULD/MAY) are used normatively.
+
+Product decisions locked in (2026-07-25): web deletion is **self-service** (not request-by-email); deletion is **immediate hard delete** (no recovery window); a last-parent account deletion **cascades to family deletion**.
+
+## 1. Concepts
+
+### 1.1 Removal vs erasure (normative distinction)
+
+- **Removal** (existing §3.6): a parent removes a member — membership and devices go, historical data stays under normal retention (000 §Roles). Administrative, reversible by re-invite.
+- **Erasure** (this spec): the account holder deletes their **account** — everything about them is physically deleted, including their location history and their lines in the family's geofence-event history. Erasure is strictly stronger than removal and is never performed on someone else's behalf in v1 (§7).
+
+### 1.2 Immediate deletion (no recovery window)
+
+Both deletion endpoints execute **synchronously and irreversibly** in the request — same ethos as group deletion (005 §2.4: "temporary must mean actually deleted"). There is no tombstone/pending state, no restore endpoint, and no sweeper involvement. Fat-finger protection is client UX: both clients MUST show a two-step confirmation that names the consequences (§4.4, §5.4), and the family-delete confirmation MUST state that up to the full retention window of family history is destroyed.
+
+### 1.3 The Firebase side of an account
+
+The backend holds no Google credential (000 §D9) and MUST NOT gain one for deletion. The Firebase Auth user record (which is where the phone number lives — 006 §2) is deleted **client-side** via the Firebase SDK (`user.delete()` / `currentUser.delete()`), **after** the backend confirms `DELETE /users/me`. Ordering rationale: an orphaned Firebase user with no Findly data is harmless (holds only the phone number; re-sign-in just yields an empty profile-less account, and the user can retry the Firebase step); the reverse orphan — Findly data with no account — would be an erasure failure. Clients MUST surface a retry path when the Firebase step fails.
+
+## 2. Data inventory (what each operation covers)
+
+Erasure and export are defined against the complete 002 inventory. Per subject `uid`:
+
+| Data | Where (002) | Export (§3) | Account delete (§4) | Family delete (§5) |
+|---|---|---|---|---|
+| Profile (`displayName`, `familyId`, `role`) | `Users` §2.2 | yes | deleted (last — completion marker) | `familyId`/`role` → null |
+| Group memberships + reverse index | `Users`/`Groups` §2.2/§2.10 | yes (membership facts) | owned → §12.5 hard delete; joined → leave semantics | untouched |
+| Devices | `Devices` §2.4 | yes (minus push tokens — write-only, 001 §4.1) | deleted | untouched (user-owned) |
+| Last-known positions | `LastKnown` §2.5 | yes | deleted | untouched (user-owned) |
+| Group positions | `GroupLastKnown` §2.12 | yes (own rows) | deleted via the per-group handling | untouched |
+| Location history | `history/{familyId}/{uid}/…` §3.1 | yes — **full physical retention (400 d), not the `historyDays` read window** (Art. 15 covers everything held) | own prefix deleted | whole family prefix deleted |
+| Geofence events | `events/{familyId}/…` §3.1 (interleaved) | yes — own lines filtered | **own lines rewritten out** (§4.3) | whole prefix deleted |
+| Geofence config | `config/{familyId}/…` §3.1 | no (family document, not subject data; home/school coordinates are family-shared) | untouched (unless cascade) | deleted |
+| Locate requests naming the subject | `LocateRequests` §2.7 (`fixJson` holds coordinates) | no (transient, ≤60 s lifecycle; coordinates also in history) | rows where `requestedBy` or `targetUserId` = uid deleted | partition deleted |
+| Idempotency markers | `IdempotencyMarkers` §2.8 | no (opaque dedupe keys) | partitions of the subject's devices deleted | untouched (devices survive) |
+| Usage counters | `Usage` §2.9 | uid-keyed rows only (family-keyed are household aggregates, not subject-scoped) | uid-keyed partition deleted | family partition deleted |
+| Invites | `Invites` §2.3 + family index (002 §2.1) | no | untouched | canonical + index rows deleted; stragglers fail closed (001 §3.4) |
+| Phone number + sign-in metadata | Firebase Auth (006 §2 — never in Findly storage) | referenced in the export's `providerData` note | client-side `user.delete()` (§1.3) | n/a |
+
+## 3. Export
+
+- **Who:** any user with a profile exports **themselves**; a **parent** may export any current member of their family (open-family precedent — parents already see all of it). A non-parent requesting another user → `403 AUTH_FORBIDDEN`; a parent naming a non-member → `404 MEMBER_NOT_FOUND`. Removed ex-members are not exportable targets (their retained history remains reachable via 001 §5.3 until retention expires).
+- **What:** one self-contained JSON document (shape: 001 §13.1) covering every "yes" row of §2 — including location history to the **full physical retention window**, deliberately beyond `features.limits.historyDays`.
+- **How:** **synchronous streaming download** — deliberately no export files at rest (a stored export would be a second PII copy to secure and clean up) and no async job state. The response is the document itself, unenveloped, with `Content-Disposition: attachment` (the documented envelope exception, 001 §1.3/§13.1). No pagination: size is bounded by retention at family scale (single-digit MB; 002 §5).
+- **Quota:** `features.limits.exportsPerDay` (free: 3), counted against the **caller**, metric `exports` (002 §2.9) → `402 LIMIT_EXCEEDED`, `details.limit: "exportsPerDay"`. Export is the most expensive read in the system (~800 small blob reads worst case); the quota is the abuse bound.
+- Clients (003 §12.4 / 004 §3.6) MUST offer export in settings and hand the file to the OS share/save sheet.
+
+## 4. Account deletion — `DELETE /users/me`
+
+### 4.1 Semantics
+
+Available to **every** authenticated user, including one with **no profile** (idempotent no-op → `204` — this both covers the "signed in but never bootstrapped" state and makes crash-retry converge, §4.5). Erases every "account delete" row of §2, then the client performs the Firebase step (§1.3).
+
+### 4.2 The family cascade (last parent / sole member)
+
+Refusing erasure is not an option. If the caller is a family member and their departure would leave the family **without any parent** (they are the last parent, or the sole member), the account deletion **cascades to a full family deletion (§5)** — no parent-less zombie families. Otherwise (co-parents remain, or the caller is a non-parent member) the family survives: the caller's member row is deleted, their history prefix and event lines are erased (stronger than §3.6 removal — §1.1), and the roster shrinks. Clients MUST present the cascade consequence explicitly in the confirmation when the caller is the last parent ("you are the only parent — this deletes the family for everyone"). Other members keep their accounts, devices, and groups, and land in the family-less state (001 §1.5.4).
+
+### 4.3 Interleaved event-line erasure
+
+`events/{familyId}/{date}.jsonl` blobs interleave all members (002 §3.1), so per-subject erasure is a **filtered rewrite**: read the day-blob, drop lines with the subject's `userId`, `If-Match`-guarded delete, recreate-and-append the filtered lines (002 §4.2 owns the exact sequence and its concurrency guard). Past-day blobs are immutable; only the current UTC day can race a concurrent append, and the guard makes that lossless. Skipped entirely when the family cascade (§4.2) wipes the whole prefix anyway.
+
+### 4.4 Client obligations
+
+Both clients MUST: gate the action behind a two-step confirmation naming the consequences (device data, history, groups; the cascade when applicable); call `DELETE /users/me`; on `204` call the Firebase SDK delete; on Firebase failure offer retry (§1.3); then clear all local state and return to sign-in. The settings entry MUST be reachable without contacting support (store requirement).
+
+### 4.5 Idempotency & ordering
+
+The operation is **re-callable until it returns `204` with nothing left**: every step swallows not-found, and the deletion order (normative in 002 §4.2) deletes the subject's **devices first** (halting their ingest immediately) and the **profile row last** (the completion marker — the pointer that lets a retry find everything else). A crash mid-way is resolved by calling again; clients SHOULD retry on 5xx/timeouts.
+
+## 5. Family deletion — `DELETE /families/me`
+
+### 5.1 Semantics
+
+**Parent-only.** Synchronously and irreversibly deletes every "family delete" row of §2: the family's identity, roster, entitlements, usage, locate requests, invites (canonical + index), geofence config, and **all** history and event blobs — for every member, the full retention window. Returns `204`.
+
+### 5.2 What survives
+
+Members' **accounts survive**: profiles (now family-less), devices, last-known, and group memberships are untouched (all keyed per-user — 000 §D11 made this surgical). Their devices keep reporting; the history gate (001 §5.1) simply stops appending. There is no push notification in v1 — members discover the change on their next family-scoped call (`404 FAMILY_NOT_FOUND`) and land on the family-less home both clients already implement (deferred: a courtesy push, 000 §O14 family).
+
+### 5.3 Invite revocation
+
+Outstanding invite codes are revoked as part of the delete, found via the family-side index rows (002 §2.1). Belt-and-braces: invite acceptance **fails closed** when the family no longer exists (001 §3.4 → `INVITE_INVALID`), so an index row missed by a partial failure can never resurrect a deleted family.
+
+### 5.4 Client obligations
+
+Parent-only settings entry; two-step confirmation that names the irreversible loss of the **whole family's** history for all members. Recommended UX: require typing the family name.
+
+### 5.5 Idempotency & ordering
+
+Re-callable until clean (002 §4.2): other members' profiles are flipped family-less **first** (the auth boundary — their ingest stops appending immediately), the **caller's own profile is flipped last** (they must stay a parent-with-`familyId` so a retry can re-enter and finish). A crash after meta deletion but before the caller's flip leaves the caller pointing at a gone family; the re-call proceeds by `familyId` value and swallows not-founds.
+
+## 6. Web deletion page — `/delete-account`
+
+Google Play requires a **web resource** where users can delete their account without reinstalling the app. Decision: **self-service** — the page performs the real deletion, so identity is verified by the SMS sign-in itself (a request-by-email flow can't honestly verify ownership of a phone-number account).
+
+### 6.1 Page contract
+
+Hosted on the join-link SWA (007's host), route `/delete-account`. Flow: explanation → Firebase JS SDK **phone sign-in** (same test-number support, reCAPTCHA verification on web) → a confirmation step naming the consequences (incl. the §4.2 cascade when the backend reports a family — the page MAY simply always show the strongest warning) → `DELETE /users/me` with the web-minted ID token → Firebase `user.delete()` → done state. Failure of the Firebase step shows the same retry guidance as §1.3.
+
+Page rules: no analytics, no storage of any user data, nothing persisted beyond the Firebase SDK's own session handling; no capability in the URL (unlike `/g`, there is nothing secret in this page's address). The 007 join page's "zero external resources" rule is **explicitly not inherited** — this page MUST load the Firebase JS SDK; that rule exists for the join page's no-oracle/capability-URL properties, which don't apply here.
+
+### 6.2 Infrastructure prerequisites (human/ops — tracked as H9)
+
+1. **Firebase web app** registered in `findly-71f7b`; SWA host (and any later custom domain, 007 §6) added to Firebase Auth **authorized domains**.
+2. **CORS on the Function App** allowing the SWA origin (methods `DELETE`+preflight, `Authorization` header) — the API's first browser caller.
+3. **App Check**: before H8 flips enforcement ON for Authentication, the web app MUST be registered with the web App Check provider (reCAPTCHA), or this page's sign-in breaks — H8's checklist gains this item.
+4. SMS region policy (006 §6.3) applies to the page exactly as to the apps.
+
+## 7. Non-goals & deferred (explicit)
+
+- **Parent-initiated per-member erasure** ("erase my kid's data but keep their account") — v1 answers: §3.6 removal (history retained under retention), family deletion, or account deletion run from the child's own device. Tracked as 000 §O18.
+- **Recovery window / soft delete** — rejected for v1 (§1.2); revisit only with real-user evidence of accidental deletions.
+- **Web export** — export is in-app + API only; Play doesn't require a web export surface.
+- **Deletion audit dashboard** — standard request telemetry (`requestId`-correlated, PII-safe per B15) is the audit trail.
+- **Backend-side Firebase user deletion** — permanently out (would require a Google admin credential, violating 000 §D9's credential-free auth).
+
+## 8. Error cases
+
+All codes from the 001 §10 catalog (nothing new invented): `AUTH_FORBIDDEN` (non-parent family delete / non-parent exporting another user), `MEMBER_NOT_FOUND` (parent exporting a non-member), `LIMIT_EXCEEDED` (`details.limit: "exportsPerDay"`), `VALIDATION_FAILED` (malformed `userId` param), `INVITE_INVALID` (fail-closed accept, §5.3), plus the standard auth set. `PROFILE_NOT_FOUND` applies to export but deliberately **not** to `DELETE /users/me` (§4.1). Exact per-endpoint mapping: 001 §13.
+
+## 9. Test checklist (conforming implementations)
+
+- **Export:** self-export for member and family-less caller; parent-for-member; forbidden/not-found matrix; document covers every §2 "yes" row; history included **beyond `historyDays`** to full retention; push tokens absent; family-keyed usage absent, uid-keyed present; quota `exportsPerDay` enforced from `PLAN_MATRIX` (mutation-killable); unenveloped body + attachment header.
+- **Account delete:** full erasure of every §2 row (verify storage empty via fakes/Azurite); devices-first / profile-last ordering; re-call after simulated crash at every step boundary converges to `204`; no-profile caller → `204` no-op; owned groups hard-deleted, joined groups left; locate rows naming the subject gone; event-line rewrite removes only the subject's lines (other members' lines byte-identical) incl. the concurrent-append race (002 §6); cascade triggers on last-parent and sole-member, not on co-parent; non-cascade path leaves the family intact for others.
+- **Family delete:** parent-only; every family-scoped row/blob gone; members flipped family-less (others first, caller last); member accounts/devices/groups untouched; outstanding invites revoked via index; §3.4 fail-closed accept on a deleted family; re-call idempotency.
+- **Web page (W2):** static checks in the spirit of W1 (no analytics/storage beyond Firebase SDK); flow states incl. Firebase-delete failure + retry; CORS preflight against the deployed Function App.
+- **Clients:** two-step confirmations (cascade wording when last parent); Firebase `user.delete()` ordering after `204`; retry UX on Firebase failure; local-state wipe + return to sign-in; settings discoverability.
+
+## Open questions
+
+None — deferred matters are tracked in 000 §Open Items (O18 per-member erasure; O14 gains the family-deleted courtesy push) with v1 behavior fixed by this spec.
