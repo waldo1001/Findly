@@ -45,9 +45,11 @@ Estimate at the project's demonstrated pace: **1–3 weeks calendar**, Android a
 3. Background-location declaration + prominent-disclosure video; data-safety form (needs Phase 2's URL); content rating; listing assets; test-number sign-in notes for review.
 4. 14-day closed-test clock (if applicable) + Play review → promote to production → **M2-Android**.
 
-## Phase 4 — Apple store track (H6; starts the day enrollment clears)
+## Phase 4 — Apple store track (H6; **startable now — enrollment is already complete**)
 
-1. Team ID → complete AASA (`{TEAMID}.com.findly.ios`), activate Associated Domains (I6 prepared it), **upload APNs key to Firebase** (also unblocks on-device iOS phone sign-in), register iOS App Check (App Attest).
+> Corrected 2026-07-25: earlier drafts of this roadmap (and H6/store-readiness §2) treated Apple enrollment as a pending wildcard. It is **done** — Team ID `92A2K3Q7NH`, verified live in the served AASA. Apple is no longer the schedule risk it was listed as; the iOS critical path is **I9 (`.xcodeproj` app target)** plus the portal tail below, all of which can start today.
+
+1. ~~Team ID~~ **done**; AASA already complete and serving. Activate Associated Domains (I6 prepared it), **upload the APNs key to Firebase** (unblocks on-device iOS phone sign-in *and* iOS App Check → H8), register iOS App Check (App Attest).
 2. **Apply for the Location Push entitlement immediately** (000 §O1) — independent Apple lead time; *not* an M1/M2 blocker (locate ships best-effort without it).
 3. App Store Connect app + **TestFlight** upload (needs I9 + I10/I12 minimum) → family iPhones install → **M1-iOS reached here.**
 4. Privacy nutrition labels (mirror data-safety), age rating, purpose strings, review notes → App Review → **M2-iOS**.
@@ -62,11 +64,11 @@ Estimate at the project's demonstrated pace: **1–3 weeks calendar**, Android a
 
 ```
 M1-Android =  Phase 1 (Android half) + keystore/closed-track upload          ≈ 2–4 weeks
-M1-iOS     =  max(Apple enrollment ???, Phase 1 iOS incl. .xcodeproj) + TestFlight
-                                                                             ≈ 2–5 weeks (enrollment is the wildcard)
+M1-iOS     =  Phase 1 iOS (I9 .xcodeproj + I10/I12) + portal tail + TestFlight
+                                                                             ≈ 2–4 weeks (enrollment DONE — not a blocker)
 M2         =  M1 + Play 14-day clock (if applicable) + both store reviews    ≈ 4–8 weeks
 ```
 
-Assumptions: current session pace continues; estimates are calendar, not effort. The two items outside our control: **Apple enrollment** and **Play's background-location review**. Everything schedulable-by-us lands in Phases 0–2 within ~2–3 weeks.
+Assumptions: current session pace continues; estimates are calendar, not effort. Everything schedulable-by-us lands in Phases 0–2 within ~2–3 weeks.
 
-**Biggest schedule risks, in order:** (1) Apple enrollment stall — mitigate: nothing on the iOS critical path before it except I9/I10, which we do anyway; (2) Play background-location review rejection — mitigate: the 003 §11 disclosure flow already matches policy, record the demo video carefully; (3) device-runtime wave discovering real-device surprises (battery/scheduling behavior no test suite catches) — mitigate: M1 on the family's own phones *is* the field test, weeks before M2.
+**Biggest schedule risks, in order:** (1) **Play's 12-tester/14-day closed-test rule** — applies to personal accounts created on/after 2023-11-13, and it is now the single largest fixed delay on the path to M2-Android; an **Organization** account is exempt but needs a D-U-N-S number (check whether the existing Apple enrollment is an Organization one — if so the D-U-N-S already exists and is reusable). (2) Play background-location review rejection — mitigate: the 003 §11 / 009 §7 disclosure flow already matches policy; record the demo video carefully. (3) Device-runtime wave hitting real-device surprises (battery/scheduling behavior no test suite catches) — mitigate: M1 on the family's own phones *is* the field test, weeks before M2. **No longer a risk:** Apple enrollment (complete).

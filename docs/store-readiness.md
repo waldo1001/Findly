@@ -28,9 +28,11 @@ The convention use case (specs/007, 000 §D15/D16) requires strangers to *instal
 6. **Content rating questionnaire**, target-API-level compliance (current Play policy floor), listing assets (icon, screenshots, feature graphic), support email.
 7. **Store-review sign-in:** provide a Firebase **test phone number + fixed OTP** (006 §6.4) via the Play Console's app-access notes at submission time — the pair lives only in the two consoles, never in the repo.
 
-## 2. Apple App Store (H6 — blocked on the Developer Program enrollment)
+## 2. Apple App Store (H6 — **enrollment COMPLETE**, Team ID `92A2K3Q7NH`)
 
-1. Enrollment completes → record the **Team ID**: complete the AASA file server-side (007 §3, no app change) and activate the **Associated Domains** entitlement (004 §3.5).
+> Corrected 2026-07-25: this section previously said "blocked on the Developer Program enrollment". That is stale — the Team ID is real and verified live in the served AASA (`92A2K3Q7NH.com.findly.ios`). Nothing Apple-side is enrollment-gated any more; the remaining items are portal work plus I9 (the `.xcodeproj` app target) before a build can be uploaded.
+
+1. ~~Enrollment completes →~~ **Done** — Team ID recorded, AASA already complete and serving (007 §3); activate the **Associated Domains** entitlement (004 §3.5, prepared by I6).
 2. Upload the **APNs auth key** to Firebase (the outstanding H2 §3.8 step — phone-auth app verification on device needs it).
 3. **Apply for the Location Push Service Extension entitlement** immediately (000 §O1) — independent lead time, same account.
 4. Create the App Store Connect app (bundle id per Firebase registration), wire **TestFlight** for the first real-device builds.
