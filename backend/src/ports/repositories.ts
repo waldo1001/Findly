@@ -234,15 +234,38 @@ export interface IdempotencyRepo {
 }
 
 // ---------------------------------------------------------------------------
-// Usage (specs/002 §2.9, specs/001 §9 — this task exercises "apiCalls")
+// Usage (specs/002 §2.9, specs/001 §9 — this task exercises "apiCalls"; "exports" is
+// B17, specs/001 §13.1's quota metric)
 // ---------------------------------------------------------------------------
 
-export type UsageMetric = "locationBatches" | "fixes" | "locateRequests" | "geofenceEvents" | "apiCalls";
+export type UsageMetric =
+  | "locationBatches"
+  | "fixes"
+  | "locateRequests"
+  | "geofenceEvents"
+  | "apiCalls"
+  | "exports";
+
+export interface UsageRow {
+  date: string;
+  metric: UsageMetric;
+  count: number;
+}
 
 export interface UsageRepo {
   /** Read → +by → ETag-guarded merge, retry loop handled by the adapter (002 §2.9). */
   increment(familyId: string, metric: UsageMetric, date: string, by?: number): Promise<void>;
   get(familyId: string, metric: UsageMetric, date: string): Promise<number>;
+  /**
+   * Full partition scan — every `{date}:{metric}` row under one partition key (002 §2.9).
+   * Export-only (001 §13.1, 008 §2 "Usage counters ... uid-keyed rows only"): a family
+   * member's usage is always stored family-keyed, never uid-keyed (001 §9's "per family/day
+   * — per user/day for family-less callers" rule has no per-member exception), so callers
+   * only ever invoke this for a family-less subject's own uid partition — there is nothing
+   * subject-scoped to show for a family member (the family-keyed rows are a household
+   * aggregate, not this user's own data).
+   */
+  listByPartition(familyId: string): Promise<UsageRow[]>;
 }
 
 // ---------------------------------------------------------------------------
