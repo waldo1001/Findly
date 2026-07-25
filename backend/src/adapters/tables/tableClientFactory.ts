@@ -60,6 +60,10 @@ async function ensureTableExists(realClient: TableClient, tableName: string): Pr
   if (confirmedTables.has(tableName)) return;
   let pending = pendingCreates.get(tableName);
   if (!pending) {
+    // Not explicitly deleted on the success path — harmless today only because the 13 table
+    // names are a small, fixed, hardcoded set (never request-influenced): `confirmedTables.has`
+    // short-circuits before this entry is ever consulted again, so it just sits inert for the
+    // rest of the process's life. Revisit if table names ever become dynamic/per-tenant.
     pending = realClient.createTable().then(
       () => {
         confirmedTables.add(tableName);
@@ -120,6 +124,13 @@ function wrapListEntities(target: TableClient, tableName: string, args: unknown[
  *    same test process would wrongly trust a stale "confirmed" cache entry for a table that no
  *    longer exists.
  */
+// Safety of this Proxy pattern is contingent on TableClient exposing only plain public instance
+// fields internally (verified true for @azure/data-tables@13.3.2 — no `#private` fields, no
+// accessor properties, so `Reflect.get(target, prop, receiver)` with `receiver` set to the proxy
+// is harmless: `receiver` only matters for accessor properties, and every method below is invoked
+// via explicit `.apply(target, args)`, never a bare call that would bind `this` to the proxy).
+// If a future SDK upgrade introduces private class fields, a method could break when called
+// through this wrapper — re-verify this assumption when bumping @azure/data-tables.
 function withSelfHealingTable(realClient: TableClient, tableName: string): TableClient {
   const handler: ProxyHandler<TableClient> = {
     get(target, prop, receiver) {
