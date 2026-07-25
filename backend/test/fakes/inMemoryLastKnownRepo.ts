@@ -38,4 +38,9 @@ export class InMemoryLastKnownRepo implements LastKnownRepo {
     const roster = this.records.get(ownerUserId);
     return roster ? [...roster.values()].map((r) => ({ ...r })) : [];
   }
+
+  /** Account deletion (002 §4.2 step 2, B18). Idempotent. */
+  async deleteByOwner(ownerUserId: string): Promise<void> {
+    this.records.delete(ownerUserId);
+  }
 }
