@@ -48,10 +48,13 @@ export interface DeleteFamilyFootprintDeps {
 /**
  * Tears down every family-scoped row/blob for `familyId` (specs/008 §2 "Family delete"
  * column), in the normative 002 §4.2 order. `callerUid` is excluded from the step-1 fan-out
- * and flipped separately, last, in step 6. Safe to call repeatedly — every underlying
- * repo/store method it calls is documented idempotent (swallows not-found), and this
- * function reads live state (listMembers/listInviteIndexEntries) on every call rather than
- * trusting a snapshot, so it always resumes from wherever a prior crash left off.
+ * and flipped separately, last, in step 6. Safe to call repeatedly — every repo/store method
+ * this function calls is documented idempotent (swallows not-found — profile flips use
+ * `UserRepo.clearFamilyMembership`, not the non-idempotent `updateProfile`, specifically so a
+ * concurrent `DELETE /families/me/members/{userId}` deleting a member's profile row mid-run
+ * can't turn a routine race into an uncaught 500), and this function reads live state
+ * (listMembers/listInviteIndexEntries) on every call rather than trusting a snapshot, so it
+ * always resumes from wherever a prior crash left off.
  */
 export async function deleteFamilyFootprint(
   familyId: string,
@@ -62,7 +65,7 @@ export async function deleteFamilyFootprint(
   const members = await deps.familyRepo.listMembers(familyId);
   for (const member of members) {
     if (member.userId === callerUid) continue;
-    await deps.userRepo.updateProfile(member.userId, { familyId: null, role: null });
+    await deps.userRepo.clearFamilyMembership(member.userId);
   }
 
   // Step 2: Families member: + invite: rows; each invite: index row's canonical Invites
@@ -91,5 +94,5 @@ export async function deleteFamilyFootprint(
   await deps.familyRepo.deleteFamilyMeta(familyId);
 
   // Step 6: the caller's own profile flip, LAST — the retry pointer.
-  await deps.userRepo.updateProfile(callerUid, { familyId: null, role: null });
+  await deps.userRepo.clearFamilyMembership(callerUid);
 }

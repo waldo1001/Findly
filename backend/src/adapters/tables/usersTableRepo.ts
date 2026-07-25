@@ -50,6 +50,19 @@ export class TableUserRepo implements UserRepo {
     await this.client.deleteEntity(userId, PROFILE_ROW_KEY);
   }
 
+  /** Idempotent (002 §4.2 steps 1/6 — family deletion's re-call needs every step to
+   * swallow not-found, same idiom as TableFamilyRepo.removeMember). */
+  async clearFamilyMembership(userId: string): Promise<void> {
+    try {
+      await this.client.updateEntity(
+        { partitionKey: userId, rowKey: PROFILE_ROW_KEY, familyId: null, role: null },
+        "Merge",
+      );
+    } catch (err) {
+      if (!isNotFound(err)) throw err;
+    }
+  }
+
   async addGroupMembership(userId: string, entry: GroupMembershipIndexEntry): Promise<void> {
     await this.client.createEntity({
       partitionKey: userId,

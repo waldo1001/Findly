@@ -89,10 +89,22 @@ export interface UserRepo {
   getProfile(userId: string): Promise<UserProfile | null>;
   /** Written alongside FamilyRepo.addMember in the same logical operation (001 §3.1, §3.4). */
   createProfile(userId: string, profile: UserProfile): Promise<void>;
-  /** Role/displayName changes (001 §3.5) — Families stays the source of truth, this is a cache. */
+  /** Role/displayName changes (001 §3.5) — Families stays the source of truth, this is a
+   * cache. NOT idempotent: a missing profile row is a genuine bug for this caller
+   * (updateMember.ts always operates on an already-validated roster member) and MUST
+   * surface, not be swallowed — see clearFamilyMembership below for the one call site that
+   * needs different semantics. */
   updateProfile(userId: string, patch: Partial<UserProfile>): Promise<void>;
   /** Membership removal (001 §3.6). */
   deleteProfile(userId: string): Promise<void>;
+  /** Flips familyId/role to null — family deletion (001 §13.3, 002 §4.2 steps 1/6) and
+   * B18's account-deletion cascade reuse this. Idempotent: swallows not-found, because a
+   * concurrent DELETE /families/me/members/{userId} (001 §3.6) may have already deleted the
+   * profile row entirely out from under a family deletion's own roster snapshot — every
+   * other step of the 002 §4.2 sequence already tolerates this, this method closes the one
+   * gap. Deliberately a DEDICATED method rather than making updateProfile itself swallow
+   * not-found universally, which would mask genuine bugs in updateMember.ts's flow. */
+  clearFamilyMembership(userId: string): Promise<void>;
   /** Writes one `group:{groupId}` reverse-index row (001 §12.1/§12.6, 002 §2.2). */
   addGroupMembership(userId: string, entry: GroupMembershipIndexEntry): Promise<void>;
   /** Partition scan of `group:` rows = the "my groups" reverse index (001 §12.2, 002 §2.2). */

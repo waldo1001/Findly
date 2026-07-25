@@ -29,6 +29,14 @@ export class InMemoryUserRepo implements UserRepo {
     this.profiles.delete(userId);
   }
 
+  /** Idempotent (002 §4.2 steps 1/6, B19 review-gate fix): unlike updateProfile, a missing
+   * profile is a harmless no-op here. */
+  async clearFamilyMembership(userId: string): Promise<void> {
+    const existing = this.profiles.get(userId);
+    if (!existing) return;
+    this.profiles.set(userId, { ...existing, familyId: null, role: null });
+  }
+
   async addGroupMembership(userId: string, entry: GroupMembershipIndexEntry): Promise<void> {
     const existing = this.groupMemberships.get(userId) ?? new Map();
     existing.set(entry.groupId, { ...entry });

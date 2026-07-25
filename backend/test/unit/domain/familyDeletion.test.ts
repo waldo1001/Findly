@@ -189,10 +189,10 @@ describe("domain/family/familyDeletion", () => {
     const deps = buildDeps();
     await seedFullFamily(deps);
     const order: string[] = [];
-    const realUpdateProfile = deps.userRepo.updateProfile.bind(deps.userRepo);
-    deps.userRepo.updateProfile = async (userId, patch) => {
+    const realClearFamilyMembership = deps.userRepo.clearFamilyMembership.bind(deps.userRepo);
+    deps.userRepo.clearFamilyMembership = async (userId) => {
       order.push(userId);
-      return realUpdateProfile(userId, patch);
+      return realClearFamilyMembership(userId);
     };
 
     await deleteFamilyFootprint(FAMILY_ID, CALLER, deps);
@@ -206,17 +206,51 @@ describe("domain/family/familyDeletion", () => {
     const deps = buildDeps();
     await seedFullFamily(deps);
     let metaGoneWhenCallerFlipped = false;
-    const realUpdateProfile = deps.userRepo.updateProfile.bind(deps.userRepo);
-    deps.userRepo.updateProfile = async (userId, patch) => {
+    const realClearFamilyMembership = deps.userRepo.clearFamilyMembership.bind(deps.userRepo);
+    deps.userRepo.clearFamilyMembership = async (userId) => {
       if (userId === CALLER) {
         metaGoneWhenCallerFlipped = (await deps.familyRepo.getFamilyMeta(FAMILY_ID)) === null;
       }
-      return realUpdateProfile(userId, patch);
+      return realClearFamilyMembership(userId);
     };
 
     await deleteFamilyFootprint(FAMILY_ID, CALLER, deps);
 
     expect(metaGoneWhenCallerFlipped).toBe(true);
+  });
+
+  // Review-gate fix (code review, Major): every OTHER step here already swallows not-found
+  // (the 002 §4.1/§4.2 idempotency idiom) — the profile flips were the one exception. A
+  // concurrent DELETE /families/me/members/{userId} (001 §3.6) can delete a member's Users
+  // profile row entirely while this function is mid-run; the flip must converge, not throw.
+  it("converges when a member's Users profile row was concurrently deleted (e.g. by DELETE /families/me/members/{userId}) before its flip runs", async () => {
+    const deps = buildDeps();
+    await seedFullFamily(deps);
+    // listMembers() will still return OTHER_MEMBER (their Families member: row survives
+    // this particular race), but their Users profile row is already gone — exactly the
+    // finding's concrete scenario.
+    await deps.userRepo.deleteProfile(OTHER_MEMBER);
+
+    await expect(deleteFamilyFootprint(FAMILY_ID, CALLER, deps)).resolves.toBeUndefined();
+
+    expect(await deps.familyRepo.getFamilyMeta(FAMILY_ID)).toBeNull();
+    expect(await deps.familyRepo.listMembers(FAMILY_ID)).toEqual([]);
+    expect(await deps.userRepo.getProfile(OTHER_PARENT)).toEqual({ familyId: null, role: null, displayName: "Ines" });
+    expect(await deps.userRepo.getProfile(CALLER)).toEqual({ familyId: null, role: null, displayName: "Eric" });
+    expect(await deps.userRepo.getProfile(OTHER_MEMBER)).toBeNull(); // stays deleted, not resurrected
+  });
+
+  it("converges when the CALLER's own Users profile row was concurrently deleted before their own (step 6) flip runs", async () => {
+    const deps = buildDeps();
+    await seedFullFamily(deps);
+    // A co-parent's concurrent DELETE /families/me/members/{CALLER} could remove the
+    // caller's own profile row before step 6 gets to it.
+    await deps.userRepo.deleteProfile(CALLER);
+
+    await expect(deleteFamilyFootprint(FAMILY_ID, CALLER, deps)).resolves.toBeUndefined();
+
+    expect(await deps.familyRepo.getFamilyMeta(FAMILY_ID)).toBeNull();
+    expect(await deps.userRepo.getProfile(CALLER)).toBeNull(); // stays deleted, not resurrected
   });
 
   // --- crash-retry idempotency at each step boundary (specs/008 §9 requires this) ---
