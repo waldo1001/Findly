@@ -530,6 +530,21 @@ struct RequestBuildingTests {
         #expect(try JSONSerialization.jsonObject(with: data) is [String: Any], "must not attempt Envelope<T> decoding")
     }
 
+    /// specs/008-privacy-endpoints.md §3.1 rule 5 (review finding #6) — the server's own
+    /// `Cache-Control: no-store` (specs/001 §13.1) isn't enough on its own; clients MUST
+    /// additionally defeat LOCAL caching on this specific request, or the client's own HTTP cache
+    /// silently becomes a third on-disk copy of the subject's full location history outside the
+    /// app's own file handling (§3.1's whole point). Scoped to `exportData` only — every other
+    /// endpoint keeps the default `.useProtocolCachePolicy`.
+    @Test func exportData_setsCachePolicyToDefeatLocalCaching() async throws {
+        let client = makeClient()
+        MockURLProtocol.requestHandler = { request in
+            #expect(request.cachePolicy == .reloadIgnoringLocalAndRemoteCacheData)
+            return (jsonResponse(url: request.url!, status: 200), "{}".data(using: .utf8)!)
+        }
+        _ = try await client.exportData(userId: nil)
+    }
+
     @Test func exportData_parentForMember_buildsRequestWithUserIdQuery() async throws {
         let client = makeClient()
         MockURLProtocol.requestHandler = { request in

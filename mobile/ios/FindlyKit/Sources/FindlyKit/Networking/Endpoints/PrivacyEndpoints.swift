@@ -14,7 +14,10 @@ extension URLSessionAPIClient {
         if let userId {
             queryItems.append(URLQueryItem(name: "userId", value: userId))
         }
-        return try await sendRawData(method: .get, path: "export", queryItems: queryItems)
+        // specs/008-privacy-endpoints.md §3.1 rule 5 (review finding #6) — defeat local HTTP
+        // caching on this request specifically; the response's own `Cache-Control: no-store`
+        // (001 §13.1) isn't sufficient on its own.
+        return try await sendRawData(method: .get, path: "export", queryItems: queryItems, cachePolicy: .reloadIgnoringLocalAndRemoteCacheData)
     }
 
     /// §13.2 — bare 204. Available to every authenticated user, including one with no profile
