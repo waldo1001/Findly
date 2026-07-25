@@ -3,6 +3,7 @@
 
 import { odata, RestError } from "@azure/data-tables";
 import { createTableClient } from "./tableClientFactory";
+import { collectEntitiesTolerant } from "./listTolerant";
 import type {
   GroupExpiryPolicy,
   GroupMember,
@@ -69,21 +70,20 @@ export class TableGroupRepo implements GroupRepo {
   }
 
   async listMembers(groupId: string): Promise<GroupMember[]> {
-    const members: GroupMember[] = [];
-    const entities = this.client.listEntities({
-      queryOptions: {
-        filter: odata`PartitionKey eq ${groupId} and RowKey ge ${MEMBER_PREFIX} and RowKey lt ${"member;"}`,
-      },
-    });
-    for await (const entity of entities) {
-      members.push({
-        userId: String(entity.rowKey).slice(MEMBER_PREFIX.length),
-        role: entity.role as GroupRole,
-        displayName: String(entity.displayName),
-        joinedAt: String(entity.joinedAt),
-      });
-    }
-    return members;
+    // 002 §4.2 (B20) — a Groups table that has never been created resolves to no members.
+    const entities = await collectEntitiesTolerant(
+      this.client.listEntities({
+        queryOptions: {
+          filter: odata`PartitionKey eq ${groupId} and RowKey ge ${MEMBER_PREFIX} and RowKey lt ${"member;"}`,
+        },
+      }),
+    );
+    return entities.map((entity) => ({
+      userId: String(entity.rowKey).slice(MEMBER_PREFIX.length),
+      role: entity.role as GroupRole,
+      displayName: String(entity.displayName),
+      joinedAt: String(entity.joinedAt),
+    }));
   }
 
   async getMember(groupId: string, userId: string): Promise<GroupMember | null> {

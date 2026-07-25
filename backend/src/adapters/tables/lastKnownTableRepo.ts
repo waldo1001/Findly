@@ -3,6 +3,7 @@
 
 import { odata, RestError } from "@azure/data-tables";
 import { createTableClient } from "./tableClientFactory";
+import { collectEntitiesTolerant } from "./listTolerant";
 import type { FixSource, LastKnownRecord, LastKnownRepo } from "../../ports/repositories";
 
 const DEVICE_PREFIX = "device:";
@@ -92,17 +93,18 @@ export class TableLastKnownRepo implements LastKnownRepo {
   }
 
   async listByOwner(ownerUserId: string): Promise<LastKnownRecord[]> {
-    const records: LastKnownRecord[] = [];
-    const entities = this.client.listEntities({
-      queryOptions: {
-        filter: odata`PartitionKey eq ${ownerUserId} and RowKey ge ${DEVICE_PREFIX} and RowKey lt ${"device;"}`,
-      },
-    });
-    for await (const entity of entities) {
+    // 002 §4.2 (B20) — a LastKnown table that has never been created resolves to no rows.
+    const entities = await collectEntitiesTolerant(
+      this.client.listEntities({
+        queryOptions: {
+          filter: odata`PartitionKey eq ${ownerUserId} and RowKey ge ${DEVICE_PREFIX} and RowKey lt ${"device;"}`,
+        },
+      }),
+    );
+    return entities.map((entity) => {
       const deviceId = String(entity.rowKey).slice(DEVICE_PREFIX.length);
-      records.push(toRecord(deviceId, entity));
-    }
-    return records;
+      return toRecord(deviceId, entity);
+    });
   }
 
   /** Wipes the owner's whole partition — account deletion (001 §13.2, 002 §4.2 step 2, B18).

@@ -3,6 +3,7 @@
 
 import { odata, RestError } from "@azure/data-tables";
 import { createTableClient } from "./tableClientFactory";
+import { collectEntitiesTolerant } from "./listTolerant";
 import type { DevicePlatform, DeviceRecord, DeviceRepo } from "../../ports/repositories";
 
 const DEVICE_PREFIX = "device:";
@@ -65,17 +66,19 @@ export class TableDeviceRepo implements DeviceRepo {
   }
 
   async listDevices(ownerUserId: string): Promise<DeviceRecord[]> {
-    const devices: DeviceRecord[] = [];
-    const entities = this.client.listEntities({
-      queryOptions: {
-        filter: odata`PartitionKey eq ${ownerUserId} and RowKey ge ${DEVICE_PREFIX} and RowKey lt ${"device;"}`,
-      },
-    });
-    for await (const entity of entities) {
+    // 002 §4.2 (B20) — a Devices table that has never been created (TableNotFound) resolves
+    // to no devices, same as an existing-but-empty partition.
+    const entities = await collectEntitiesTolerant(
+      this.client.listEntities({
+        queryOptions: {
+          filter: odata`PartitionKey eq ${ownerUserId} and RowKey ge ${DEVICE_PREFIX} and RowKey lt ${"device;"}`,
+        },
+      }),
+    );
+    return entities.map((entity) => {
       const deviceId = String(entity.rowKey).slice(DEVICE_PREFIX.length);
-      devices.push(toRecord(deviceId, entity));
-    }
-    return devices;
+      return toRecord(deviceId, entity);
+    });
   }
 
   async countDevices(ownerUserId: string): Promise<number> {

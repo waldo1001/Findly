@@ -3,6 +3,7 @@
 
 import { odata, RestError } from "@azure/data-tables";
 import { createTableClient } from "./tableClientFactory";
+import { collectEntitiesTolerant } from "./listTolerant";
 import type { GroupMembershipIndexEntry, GroupRole, Role, UserProfile, UserRepo } from "../../ports/repositories";
 
 const PROFILE_ROW_KEY = "profile";
@@ -80,20 +81,20 @@ export class TableUserRepo implements UserRepo {
   }
 
   async listGroupMemberships(userId: string): Promise<GroupMembershipIndexEntry[]> {
-    const memberships: GroupMembershipIndexEntry[] = [];
-    const entities = this.client.listEntities({
-      queryOptions: {
-        filter: odata`PartitionKey eq ${userId} and RowKey ge ${GROUP_PREFIX} and RowKey lt ${"group;"}`,
-      },
-    });
-    for await (const entity of entities) {
-      memberships.push({
-        groupId: String(entity.rowKey).slice(GROUP_PREFIX.length),
-        role: entity.role as GroupRole,
-        joinedAt: String(entity.joinedAt),
-      });
-    }
-    return memberships;
+    // 002 §4.2 (B20) — a Users table that has never been created resolves to no memberships
+    // (reachable for account deletion's no-profile-caller bootstrap allowance, 001 §1.5.3).
+    const entities = await collectEntitiesTolerant(
+      this.client.listEntities({
+        queryOptions: {
+          filter: odata`PartitionKey eq ${userId} and RowKey ge ${GROUP_PREFIX} and RowKey lt ${"group;"}`,
+        },
+      }),
+    );
+    return entities.map((entity) => ({
+      groupId: String(entity.rowKey).slice(GROUP_PREFIX.length),
+      role: entity.role as GroupRole,
+      joinedAt: String(entity.joinedAt),
+    }));
   }
 
   async removeGroupMembership(userId: string, groupId: string): Promise<void> {

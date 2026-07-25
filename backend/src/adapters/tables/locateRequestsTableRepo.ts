@@ -3,6 +3,7 @@
 
 import { odata, RestError } from "@azure/data-tables";
 import { createTableClient } from "./tableClientFactory";
+import { collectEntitiesTolerant } from "./listTolerant";
 import type { LocateRequestRecord, LocateRequestRepo, LocateRequestStatus } from "../../ports/repositories";
 
 const REQUEST_PREFIX = "req:";
@@ -75,17 +76,17 @@ export class TableLocateRequestRepo implements LocateRequestRepo {
   }
 
   /** Wipes every `req:` row in the family's partition, regardless of status — family
-   * deletion (002 §4.2 step 3, B19). Idempotent. */
+   * deletion (002 §4.2 step 3, B19). Idempotent, and tolerates the LocateRequests table
+   * never having been created (a family that never used push-to-locate, B20). */
   async deletePartition(familyId: string): Promise<void> {
-    const rowKeys: string[] = [];
-    const entities = this.client.listEntities({
-      queryOptions: {
-        filter: odata`PartitionKey eq ${familyId} and RowKey ge ${REQUEST_PREFIX} and RowKey lt ${"req;"}`,
-      },
-    });
-    for await (const entity of entities) {
-      rowKeys.push(String(entity.rowKey));
-    }
+    const entities = await collectEntitiesTolerant(
+      this.client.listEntities({
+        queryOptions: {
+          filter: odata`PartitionKey eq ${familyId} and RowKey ge ${REQUEST_PREFIX} and RowKey lt ${"req;"}`,
+        },
+      }),
+    );
+    const rowKeys = entities.map((entity) => String(entity.rowKey));
     await Promise.all(
       rowKeys.map((rk) =>
         this.client.deleteEntity(familyId, rk).catch((err) => {
@@ -97,17 +98,19 @@ export class TableLocateRequestRepo implements LocateRequestRepo {
 
   /** Deletes rows in the family partition where `requestedBy` OR `targetUserId` is the
    * subject — account deletion (001 §13.2, 002 §4.2 step 4, B18). A single-partition scan,
-   * same idiom as listPendingByTargetDevice/deletePartition. Idempotent. */
+   * same idiom as listPendingByTargetDevice/deletePartition. Idempotent, and tolerates the
+   * LocateRequests table never having been created (B20's normative case: a family that
+   * never used push-to-locate never creates this table at all, so a member's account
+   * deletion legitimately reaches this step against a table that doesn't exist). */
   async deleteRowsForUser(familyId: string, userId: string): Promise<void> {
-    const rowKeys: string[] = [];
-    const entities = this.client.listEntities({
-      queryOptions: {
-        filter: odata`PartitionKey eq ${familyId} and RowKey ge ${REQUEST_PREFIX} and RowKey lt ${"req;"} and (requestedBy eq ${userId} or targetUserId eq ${userId})`,
-      },
-    });
-    for await (const entity of entities) {
-      rowKeys.push(String(entity.rowKey));
-    }
+    const entities = await collectEntitiesTolerant(
+      this.client.listEntities({
+        queryOptions: {
+          filter: odata`PartitionKey eq ${familyId} and RowKey ge ${REQUEST_PREFIX} and RowKey lt ${"req;"} and (requestedBy eq ${userId} or targetUserId eq ${userId})`,
+        },
+      }),
+    );
+    const rowKeys = entities.map((entity) => String(entity.rowKey));
     await Promise.all(
       rowKeys.map((rk) =>
         this.client.deleteEntity(familyId, rk).catch((err) => {

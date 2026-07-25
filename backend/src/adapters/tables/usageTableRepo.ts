@@ -4,6 +4,7 @@
 
 import { odata, RestError } from "@azure/data-tables";
 import { createTableClient } from "./tableClientFactory";
+import { collectEntitiesTolerant } from "./listTolerant";
 import type { UsageMetric, UsageRepo, UsageRow } from "../../ports/repositories";
 
 const MAX_RETRIES = 3;
@@ -71,33 +72,35 @@ export class TableUsageRepo implements UsageRepo {
   // B17 (specs/001 §13.1, 008 §2) — export-only partition scan; see the UsageRepo interface
   // doc for why callers only ever invoke this for a family-less subject's own uid partition.
   async listByPartition(familyId: string): Promise<UsageRow[]> {
-    const rows: UsageRow[] = [];
-    const entities = this.client.listEntities({
-      queryOptions: { filter: odata`PartitionKey eq ${familyId}` },
-    });
-    for await (const entity of entities) {
+    // 002 §4.2 (B20) — a Usage table that has never been created resolves to no rows (export
+    // walks this for a family-less subject's own uid partition, 008 §2).
+    const entities = await collectEntitiesTolerant(
+      this.client.listEntities({
+        queryOptions: { filter: odata`PartitionKey eq ${familyId}` },
+      }),
+    );
+    return entities.map((entity) => {
       const rk = String(entity.rowKey);
       const sep = rk.indexOf(":");
-      rows.push({
+      return {
         date: rk.slice(0, sep),
         metric: rk.slice(sep + 1) as UsageMetric,
         count: Number(entity.count ?? 0),
-      });
-    }
-    return rows;
+      };
+    });
   }
 
   /** Wipes every row in the family's partition — every metric, every date (002 §4.2 step 3,
    * B19). No rowkey filter needed: every row in this partition belongs to familyId by
-   * construction (same idiom as devicesTableRepo.deleteDevicesByOwner). Idempotent. */
+   * construction (same idiom as devicesTableRepo.deleteDevicesByOwner). Idempotent, and
+   * tolerates the Usage table never having been created at all (B20). */
   async deletePartition(familyId: string): Promise<void> {
-    const entities = this.client.listEntities({
-      queryOptions: { filter: odata`PartitionKey eq ${familyId}` },
-    });
-    const rowKeys: string[] = [];
-    for await (const entity of entities) {
-      rowKeys.push(String(entity.rowKey));
-    }
+    const entities = await collectEntitiesTolerant(
+      this.client.listEntities({
+        queryOptions: { filter: odata`PartitionKey eq ${familyId}` },
+      }),
+    );
+    const rowKeys = entities.map((entity) => String(entity.rowKey));
     await Promise.all(
       rowKeys.map((rk) =>
         this.client.deleteEntity(familyId, rk).catch((err) => {
