@@ -22,6 +22,8 @@ import com.findly.android.queue.InMemoryFixQueueStore
 import com.findly.android.ui.map.MapRenderer
 import com.findly.android.ui.map.PlaceholderMapRenderer
 import com.findly.android.ui.settings.DefaultLocalStateWiper
+import com.findly.android.ui.settings.ExportArtifactCleaner
+import com.findly.android.ui.settings.ExportFileWriter
 import com.findly.android.ui.settings.LocalStateWiper
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -80,10 +82,14 @@ class AppContainer(context: Context) {
      * wiring is A2/H1 scope (§10.5). */
     val fixQueueStore: FixQueueStore = InMemoryFixQueueStore()
 
-    /** A8 (specs/008-privacy-endpoints.md §4.4; specs/003-android-client.md §12.4): wipes local
-     * state after a successful account deletion. See [DefaultLocalStateWiper]'s doc for why only
-     * these two stores are wired today. */
-    val localStateWiper: LocalStateWiper = DefaultLocalStateWiper(fixQueueStore, deviceIdStore)
+    /** A8 (specs/008-privacy-endpoints.md §4.4/§3.1; specs/003-android-client.md §12.4): wipes
+     * local state — fix queue, deviceId, and export artifacts — after a successful account
+     * deletion. See [DefaultLocalStateWiper]'s doc for the current scope. */
+    val localStateWiper: LocalStateWiper = DefaultLocalStateWiper(
+        fixQueueStore = fixQueueStore,
+        deviceIdStore = deviceIdStore,
+        exportArtifactCleaner = ExportArtifactCleaner { ExportFileWriter.clearArtifacts(context) },
+    )
 
     /** A2's live-map tile renderer seam (`ui/map/MapRenderer.kt`) — [PlaceholderMapRenderer] is
      * the only implementation until H1 provisions a real Maps API key (`appConfig.mapsApiKey`). */

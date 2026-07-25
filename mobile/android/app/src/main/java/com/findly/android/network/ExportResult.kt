@@ -8,8 +8,11 @@ package com.findly.android.network
  *
  * @property body the raw response bytes (the export JSON document, UTF-8).
  * @property suggestedFileName parsed from the `Content-Disposition` header (001 §13.1:
- *   `findly-export-<userId>-<yyyy-MM-dd>.json`); `null` if the header is missing or unparsable —
- *   callers MUST supply a fallback name in that case.
+ *   `findly-export-<userId>-<yyyy-MM-dd>.json`); `null` if the header is missing or unparsable.
+ *   **Display hint only** (specs/008-privacy-endpoints.md §3.1 rules 3/6) — it embeds the
+ *   subject's `userId` and is server-supplied, untrusted input, so it MUST NEVER be passed to a
+ *   `File(parent, child)` constructor or otherwise used to build an on-disk path; `ExportArtifactStore`
+ *   ignores it entirely and always writes a fixed, non-identifying filename.
  * @property contentType the raw `Content-Type` response header (001 §13.1:
  *   `application/json; charset=utf-8`), `null` if absent.
  *
