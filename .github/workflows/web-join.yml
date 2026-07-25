@@ -35,6 +35,14 @@ jobs:
           web/join/verify-static-security.sh web/join/privacy.html
           web/join/verify-static-security.sh web/join/terms.html
 
+      - name: delete-account page checks (specs/008 §6.1 — Firebase config, no analytics, route)
+        run: |
+          web/join/verify-delete-account.sh web/join/delete-account.html web/join/staticwebapp.config.json
+
+      - name: site-wide framing headers (specs/007 §5 — clickjacking protection)
+        run: |
+          web/join/verify-security-headers.sh web/join/staticwebapp.config.json
+
   deploy:
     name: deploy
     runs-on: ubuntu-latest

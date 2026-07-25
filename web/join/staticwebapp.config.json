@@ -1,4 +1,8 @@
 {
+  "globalHeaders": {
+    "X-Frame-Options": "DENY",
+    "Content-Security-Policy": "frame-ancestors 'none'"
+  },
   "routes": [
     {
       "route": "/g",
@@ -11,6 +15,10 @@
     {
       "route": "/terms",
       "rewrite": "/terms.html"
+    },
+    {
+      "route": "/delete-account",
+      "rewrite": "/delete-account.html"
     },
     {
       "route": "/.well-known/apple-app-site-association",

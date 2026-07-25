@@ -1,0 +1,648 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Delete your Findly account</title>
+<!--
+  specs/008-privacy-endpoints.md §6 — the Google-Play-required self-service web deletion
+  page. Sibling of index.html (join) and privacy.html/terms.html (legal), same SWA
+  (specs/007), same visual style. Read specs/008 §6.1 before editing this file.
+
+  DELIBERATE DEPARTURE FROM index.html's SECURITY INVARIANTS (documented, not an oversight):
+  - specs/007 §2's "zero external resources / no network call" rule is the join page's
+    no-oracle / capability-URL property. It does NOT apply here (specs/008 §6.1 says so
+    explicitly): this page's entire job is to verify identity via Firebase phone sign-in
+    and then call the backend to actually delete the account, so it MUST load the
+    Firebase JS SDK and MUST make a network call (the DELETE itself). web/join/verify-static-security.sh
+    gained an opt-in allowlist (default behavior for index.html/privacy.html/terms.html is
+    byte-for-byte unchanged — see the script and .github/workflows/web-join.yml) instead of
+    being weakened globally.
+  - What STILL holds, same as every other page in this app: no analytics/telemetry of any
+    kind (no measurementId, no getAnalytics, no gtag/GA/GTM), no cookies, no
+    localStorage/sessionStorage writes by THIS page's own code (the Firebase SDK's own
+    on-device session persistence is explicitly out of scope of that rule — specs/008 §6.1),
+    and no capability/secret in the URL (this page takes no query string or fragment at all).
+  - The Firebase web config below is NOT a secret (client-embedded by design, like the key
+    in google-services.json) and intentionally omits measurementId — the console's generated
+    snippet includes analytics; we deliberately do not use it. Do not add it back.
+-->
+<style>
+  :root {
+    --primary: #00696e;
+    --on-primary: #ffffff;
+    --danger: #b3261e;
+    --on-danger: #ffffff;
+    --bg: #ffffff;
+    --fg: #1a1a1a;
+    --muted: #5f6b6c;
+    --card-bg: #f2f6f6;
+    --warn-bg: #fdeceb;
+    --warn-border: #f2c3bd;
+    --border: #d8e2e2;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --primary: #4cd4d9;
+      --on-primary: #00312f;
+      --danger: #ff8a80;
+      --on-danger: #3f0500;
+      --bg: #121717;
+      --fg: #eef2f2;
+      --muted: #a7b4b4;
+      --card-bg: #1b2222;
+      --warn-bg: #2a1917;
+      --warn-border: #4a2a26;
+      --border: #2a3333;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.5;
+    display: flex;
+    justify-content: center;
+    padding: 2rem 1rem 3rem;
+  }
+  main { width: 100%; max-width: 32rem; }
+  h1 { font-size: 1.4rem; margin: 0 0 0.25rem; }
+  .tagline { color: var(--muted); margin: 0 0 1.5rem; font-size: 0.95rem; }
+  section { margin-bottom: 1.5rem; }
+  .card {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 0.75rem;
+    padding: 1.25rem;
+  }
+  .warning {
+    background: var(--warn-bg);
+    border: 1px solid var(--warn-border);
+    border-radius: 0.75rem;
+    padding: 1.1rem 1.25rem;
+    margin-bottom: 1.25rem;
+  }
+  .warning h2 { margin: 0 0 0.6rem; font-size: 1rem; }
+  ul { padding-left: 1.2rem; }
+  li { margin-bottom: 0.4rem; }
+  label { display: block; font-size: 0.85rem; color: var(--muted); margin-bottom: 0.35rem; }
+  input[type="tel"], input[type="text"] {
+    width: 100%;
+    font: inherit;
+    font-size: 1.05rem;
+    padding: 0.6rem 0.7rem;
+    border: 1px solid var(--border);
+    border-radius: 0.5rem;
+    background: var(--bg);
+    color: var(--fg);
+    margin-bottom: 0.75rem;
+  }
+  .checkbox-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.55rem;
+    margin: 1rem 0 1.25rem;
+    font-size: 0.92rem;
+  }
+  .checkbox-row input { margin-top: 0.2rem; }
+  button, .btn {
+    display: inline-block;
+    font: inherit;
+    font-weight: 600;
+    font-size: 0.95rem;
+    border-radius: 0.5rem;
+    border: none;
+    padding: 0.65rem 1.1rem;
+    cursor: pointer;
+    text-decoration: none;
+    text-align: center;
+  }
+  .btn-primary { background: var(--primary); color: var(--on-primary); }
+  .btn-primary:active { opacity: 0.85; }
+  .btn-primary:disabled { opacity: 0.45; cursor: not-allowed; }
+  .btn-danger { background: var(--danger); color: var(--on-danger); }
+  .btn-danger:active { opacity: 0.85; }
+  .btn-danger:disabled { opacity: 0.45; cursor: not-allowed; }
+  .btn-link {
+    background: none;
+    border: none;
+    color: var(--primary);
+    font-weight: 600;
+    font-size: 0.9rem;
+    padding: 0.4rem 0;
+    cursor: pointer;
+    text-decoration: underline;
+  }
+  .btn-row { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: center; margin-top: 0.75rem; }
+  .error-text {
+    color: var(--danger);
+    font-size: 0.88rem;
+    margin: 0.25rem 0 0.75rem;
+    min-height: 1.2em;
+  }
+  .hint { color: var(--muted); font-size: 0.85rem; margin: 0.25rem 0 0.75rem; }
+  .status { font-size: 0.95rem; }
+  footer {
+    font-size: 0.78rem;
+    color: var(--muted);
+    margin-top: 2rem;
+  }
+  /* The reCAPTCHA container must exist in the DOM but is visually invisible in
+     "invisible" size — Firebase manages its own rendering inside it at runtime. */
+  #recaptcha-container { position: absolute; left: -9999px; top: -9999px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Delete your Findly account</h1>
+  <p class="tagline">Permanently delete your account and its data — no app reinstall needed.</p>
+
+  <!-- STEP: intro -->
+  <section id="step-intro" data-step="intro" hidden>
+    <div class="warning">
+      <h2>This is permanent</h2>
+      <p>Deleting your account happens immediately and cannot be undone. There is no
+        recovery window and no way for support to reverse it. This deletes:</p>
+      <ul>
+        <li>Your profile, phone-number sign-in, and registered devices</li>
+        <li>Your full location history and geofence ("Home"/"School" etc.) event history</li>
+        <li>Groups you own (deleted entirely); groups you've joined (you're removed from them)</li>
+        <li>Your usage records</li>
+      </ul>
+      <p><strong>If you are the only parent in your family, this also permanently deletes your
+        entire family</strong> — including every other member's location history — for
+        everyone. This page has no way to check that in advance, so please read this
+        carefully either way.</p>
+    </div>
+    <p>To prove this is really your account, you'll first sign in the same way you do in the
+      app: with your phone number and an SMS code.</p>
+    <button type="button" class="btn btn-primary" id="intro-continue">Continue to sign in</button>
+  </section>
+
+  <!-- STEP: phone entry -->
+  <section id="step-phone" data-step="phone" hidden>
+    <div class="card">
+      <label for="phone-input">Phone number</label>
+      <input type="tel" id="phone-input" value="+32" inputmode="tel" autocomplete="tel">
+      <p class="error-text" id="phone-error" aria-live="polite"></p>
+      <button type="button" class="btn btn-primary" id="phone-submit">Send code</button>
+    </div>
+  </section>
+
+  <!-- STEP: code entry -->
+  <section id="step-code" data-step="code" hidden>
+    <div class="card">
+      <label for="code-input">6-digit code sent by SMS</label>
+      <input type="text" id="code-input" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="one-time-code">
+      <p class="error-text" id="code-error" aria-live="polite"></p>
+      <div class="btn-row">
+        <button type="button" class="btn btn-primary" id="code-submit">Confirm code</button>
+        <button type="button" class="btn-link" id="code-resend" disabled>Resend (<span id="resend-countdown">30</span>s)</button>
+      </div>
+      <p><button type="button" class="btn-link" id="code-change-number">Use a different number</button></p>
+    </div>
+  </section>
+
+  <!-- STEP: confirm consequences (post sign-in) -->
+  <section id="step-confirm" data-step="confirm" hidden>
+    <div class="warning">
+      <h2>Confirm deletion</h2>
+      <p id="confirm-signed-in-as" class="hint"></p>
+      <p>This will <strong>immediately and permanently</strong> delete your account, devices,
+        location history, geofence events, and owned groups — and, if you are the family's
+        only parent, the whole family's data too. There is no undo.</p>
+    </div>
+    <div class="checkbox-row">
+      <input type="checkbox" id="confirm-checkbox">
+      <label for="confirm-checkbox" style="margin: 0;">I understand this permanently deletes my
+        account and cannot be undone.</label>
+    </div>
+    <div class="btn-row">
+      <button type="button" class="btn btn-danger" id="confirm-delete" disabled>Delete my account permanently</button>
+      <button type="button" class="btn-link" id="confirm-cancel">Cancel</button>
+    </div>
+  </section>
+
+  <!-- STEP: deleting (in progress) -->
+  <section id="step-deleting" data-step="deleting" hidden>
+    <div class="card">
+      <p class="status">Deleting your account&hellip; please don't close this page.</p>
+    </div>
+  </section>
+
+  <!-- STEP: done -->
+  <section id="step-done" data-step="done" hidden>
+    <div class="card">
+      <p class="status">Your account has been deleted. You can close this page now — if you
+        had the Findly app installed, it will no longer be able to sign in.</p>
+    </div>
+  </section>
+
+  <!-- STEP: Firebase-delete failure — requires-recent-login (specs/008 §1.3). This is
+       NOT a bare retry button: the backend deletion already succeeded (irreversible), and
+       retrying the SAME session can never become "recent" on its own. The only honest way
+       forward is a fresh sign-in, which this page can do without a second sub-flow because
+       the user is already right here. -->
+  <section id="step-reauth" data-step="reauth" hidden>
+    <div class="warning">
+      <h2>One step left</h2>
+      <p>Your Findly account and its data have already been deleted. To also remove your
+        sign-in record, you need to sign in again — this is quick, because there's nothing
+        else left to delete.</p>
+    </div>
+    <button type="button" class="btn btn-primary" id="reauth-signin-again">Sign out and sign in again</button>
+  </section>
+
+  <!-- STEP: Firebase-delete failure — a plain network/transport error, not an auth
+       problem. The session is still valid (a failed request doesn't sign anyone out), so
+       — unlike the reauth step above — the honest fix is a plain retry of this one step,
+       not a pointless extra sign-in. -->
+  <section id="step-firebase-network" data-step="firebase-network" hidden>
+    <div class="warning">
+      <h2>One step left</h2>
+      <p>Your Findly account and its data have already been deleted. We couldn't reach
+        Firebase to finish removing your sign-in record because of a connection problem.
+        Check your connection and try again — no need to sign in again.</p>
+    </div>
+    <button type="button" class="btn btn-primary" id="firebase-network-retry">Try again</button>
+  </section>
+
+  <!-- STEP: Firebase-delete failure — rate-limited (auth/too-many-requests). Deliberately
+       offers NO sign-in-again button here: that would send another SMS request and
+       compound the exact rate limit being reported, rather than fixing anything. The
+       only honest guidance is to wait. -->
+  <section id="step-firebase-too-many" data-step="firebase-too-many" hidden>
+    <div class="warning">
+      <h2>One step left, but not right now</h2>
+      <p>Your Findly account and its data have already been deleted. Removing your sign-in
+        record is temporarily rate-limited by Firebase after repeated attempts. Signing in
+        again right now would only make that worse. Wait a while, then reload this page
+        and sign in again to finish.</p>
+    </div>
+  </section>
+
+  <!-- STEP: transient backend failure — safe to retry (DELETE /users/me is idempotent,
+       specs/008 §4.5 / 001 §13.2). -->
+  <section id="step-backend-error" data-step="backend-error" hidden>
+    <div class="warning">
+      <h2>Something went wrong</h2>
+      <p id="backend-error-detail">We couldn't reach the server. It's safe to try again — deleting
+        an account is a repeatable operation.</p>
+    </div>
+    <div class="btn-row">
+      <button type="button" class="btn btn-primary" id="backend-error-retry">Try again</button>
+      <button type="button" class="btn-link" id="backend-error-restart">Sign out and start over</button>
+    </div>
+  </section>
+
+  <div id="recaptcha-container"></div>
+
+  <footer>Questions? Contact <a href="mailto:Findly@dynex.be">Findly@dynex.be</a>. See also the
+    <a href="/privacy">privacy policy</a>.</footer>
+</main>
+
+<script type="module">
+"use strict";
+
+// Firebase web app config — registered 2026-07-25 in project findly-71f7b. Not a secret:
+// client-embedded by design (same trust model as the API key in google-services.json).
+// measurementId is deliberately OMITTED — see the head comment. Do not add analytics.
+const FIREBASE_CONFIG = {
+  apiKey: "AIzaSyDYipzX2K6LHMCEFG9MAXmD0rAHHPl8K1c",
+  authDomain: "findly-71f7b.firebaseapp.com",
+  projectId: "findly-71f7b",
+  storageBucket: "findly-71f7b.firebasestorage.app",
+  messagingSenderId: "781593481145",
+  appId: "1:781593481145:web:ebfeadf36e5f17a220b068",
+};
+
+// specs/001 §1.1 base URL + §13.2 endpoint.
+const API_BASE = "https://func-findly.azurewebsites.net/api/v1";
+
+// Only initializeApp + getAuth — deliberately NOT importing firebase-analytics.js and
+// NOT calling getAnalytics() (specs/008 §6.1 forbids analytics on this page).
+import { initializeApp } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-app.js";
+import {
+  getAuth,
+  RecaptchaVerifier,
+  signInWithPhoneNumber,
+  signOut,
+  deleteUser,
+  getIdToken,
+} from "https://www.gstatic.com/firebasejs/12.16.0/firebase-auth.js";
+
+const app = initializeApp(FIREBASE_CONFIG);
+const auth = getAuth(app);
+
+// --- Phone-number normalization, mirrored from specs/006-phone-auth.md §3 (same pure
+// rules as the mobile PhoneNumberNormalizer / GroupCodeParsing-style whitelist logic) so
+// this third sign-in surface behaves identically to the apps. ---
+function normalizePhone(raw) {
+  var stripped = String(raw || "").replace(/[\s().-]/g, "");
+  if (/^00/.test(stripped)) {
+    stripped = "+" + stripped.slice(2);
+  } else if (/^0[^+]/.test(stripped) || /^0$/.test(stripped)) {
+    stripped = "+32" + stripped.slice(1);
+  }
+  return /^\+[1-9]\d{6,14}$/.test(stripped) ? stripped : null;
+}
+
+// specs/006 §4.2 closed error catalog — same fixed English messages as the apps use,
+// applied here so failures read identically across every Findly surface.
+function mapFirebaseAuthError(error) {
+  var code = (error && error.code) || "";
+  switch (code) {
+    case "auth/invalid-phone-number":
+      return { key: "INVALID_PHONE_NUMBER", message: "That doesn't look like a valid phone number." };
+    case "auth/too-many-requests":
+      return { key: "TOO_MANY_REQUESTS", message: "Too many attempts. Wait a while and try again." };
+    case "auth/quota-exceeded":
+      return { key: "SMS_QUOTA_EXCEEDED", message: "SMS limit reached for now. Try again later." };
+    case "auth/captcha-check-failed":
+    case "auth/app-not-authorized":
+    case "auth/missing-app-credential":
+      return { key: "APP_VERIFICATION_FAILED", message: "Couldn't verify this device. Update the app and try again." };
+    case "auth/invalid-verification-code":
+      return { key: "INVALID_CODE", message: "That code isn't right. Check the SMS and try again." };
+    case "auth/code-expired":
+      return { key: "CODE_EXPIRED", message: "That code expired. Request a new one." };
+    case "auth/network-request-failed":
+      return { key: "NETWORK", message: "No connection. Check your network and try again." };
+    default:
+      return { key: "UNKNOWN", message: "Couldn't sign in. Try again." };
+  }
+}
+
+// --- Tiny state machine driving the <section data-step="…"> blocks. ---
+var steps = Array.prototype.slice.call(document.querySelectorAll("[data-step]"));
+function showStep(name) {
+  steps.forEach(function (el) {
+    el.hidden = el.getAttribute("data-step") !== name;
+  });
+}
+
+var resendTimer = null;
+var resumeAfterReauth = false; // set true only when recovering from the reauth step
+var recaptchaVerifier = null;
+var confirmationResult = null;
+
+function getRecaptcha() {
+  if (!recaptchaVerifier) {
+    recaptchaVerifier = new RecaptchaVerifier(auth, "recaptcha-container", { size: "invisible" });
+  }
+  return recaptchaVerifier;
+}
+
+function startResendCooldown() {
+  var seconds = 30;
+  var countdownEl = document.getElementById("resend-countdown");
+  var resendBtn = document.getElementById("code-resend");
+  resendBtn.disabled = true;
+  countdownEl.textContent = String(seconds);
+  window.clearInterval(resendTimer);
+  resendTimer = window.setInterval(function () {
+    seconds -= 1;
+    countdownEl.textContent = String(Math.max(seconds, 0));
+    if (seconds <= 0) {
+      window.clearInterval(resendTimer);
+      resendBtn.disabled = false;
+    }
+  }, 1000);
+}
+
+function sendCode(phoneNumber) {
+  var errorEl = document.getElementById("phone-error");
+  errorEl.textContent = "";
+  return signInWithPhoneNumber(auth, phoneNumber, getRecaptcha())
+    .then(function (result) {
+      confirmationResult = result;
+      document.getElementById("code-input").value = "";
+      document.getElementById("code-error").textContent = "";
+      showStep("code");
+      startResendCooldown();
+    })
+    .catch(function (error) {
+      var mapped = mapFirebaseAuthError(error);
+      errorEl.textContent = mapped.message;
+      // An invisible verifier that failed a challenge must be torn down and recreated —
+      // it cannot be reused after a captcha-check failure.
+      if (recaptchaVerifier) {
+        recaptchaVerifier.clear();
+        recaptchaVerifier = null;
+      }
+    });
+}
+
+document.getElementById("intro-continue").addEventListener("click", function () {
+  showStep("phone");
+});
+
+document.getElementById("phone-submit").addEventListener("click", function () {
+  var raw = document.getElementById("phone-input").value;
+  var normalized = normalizePhone(raw);
+  var errorEl = document.getElementById("phone-error");
+  if (!normalized) {
+    errorEl.textContent = "That doesn't look like a valid phone number.";
+    return;
+  }
+  sendCode(normalized);
+});
+
+document.getElementById("code-submit").addEventListener("click", function () {
+  var code = document.getElementById("code-input").value.trim();
+  var errorEl = document.getElementById("code-error");
+  errorEl.textContent = "";
+  if (!confirmationResult) {
+    errorEl.textContent = "Request a code first.";
+    return;
+  }
+  confirmationResult
+    .confirm(code)
+    .then(function () {
+      window.clearInterval(resendTimer);
+      if (resumeAfterReauth) {
+        resumeAfterReauth = false;
+        beginDelete();
+        return;
+      }
+      var phoneNumber = auth.currentUser && auth.currentUser.phoneNumber;
+      var masked = phoneNumber ? "•••• " + phoneNumber.slice(-4) : "";
+      document.getElementById("confirm-signed-in-as").textContent = masked
+        ? "Signed in with the phone number ending in " + masked + "."
+        : "";
+      document.getElementById("confirm-checkbox").checked = false;
+      document.getElementById("confirm-delete").disabled = true;
+      showStep("confirm");
+    })
+    .catch(function (error) {
+      var mapped = mapFirebaseAuthError(error);
+      errorEl.textContent = mapped.message;
+      if (mapped.key === "CODE_EXPIRED") {
+        showStep("phone");
+      }
+    });
+});
+
+document.getElementById("code-resend").addEventListener("click", function () {
+  if (document.getElementById("code-resend").disabled) {
+    return;
+  }
+  var normalized = normalizePhone(document.getElementById("phone-input").value);
+  if (normalized) {
+    sendCode(normalized);
+  }
+});
+
+document.getElementById("code-change-number").addEventListener("click", function () {
+  window.clearInterval(resendTimer);
+  confirmationResult = null;
+  showStep("phone");
+});
+
+document.getElementById("confirm-checkbox").addEventListener("change", function (event) {
+  document.getElementById("confirm-delete").disabled = !event.target.checked;
+});
+
+document.getElementById("confirm-cancel").addEventListener("click", function () {
+  signOut(auth).catch(function () {
+    // Nothing meaningful to do if sign-out itself fails locally; the user is leaving anyway.
+  });
+  showStep("intro");
+});
+
+document.getElementById("confirm-delete").addEventListener("click", function () {
+  showStep("deleting");
+  beginDelete();
+});
+
+document.getElementById("reauth-signin-again").addEventListener("click", function () {
+  resumeAfterReauth = true;
+  signOut(auth)
+    .catch(function () {
+      // Even if the local sign-out call errors, proceeding to a fresh sign-in is still
+      // the right recovery — a failed signOut() does not mean the user stays signed in.
+    })
+    .then(function () {
+      confirmationResult = null;
+      showStep("phone");
+    });
+});
+
+document.getElementById("firebase-network-retry").addEventListener("click", function () {
+  // Deliberately NOT a sign-out: a network error doesn't invalidate the session, so
+  // retrying just this one Firebase call is the honest fix (specs/008 §1.3's "no bare
+  // retry" guidance is about requires-recent-login specifically, which cannot self-heal —
+  // a transport error can).
+  var user = auth.currentUser;
+  if (!user) {
+    showStep("phone");
+    return;
+  }
+  showStep("deleting");
+  finishFirebaseDelete(user);
+});
+
+document.getElementById("backend-error-retry").addEventListener("click", function () {
+  showStep("deleting");
+  beginDelete();
+});
+
+document.getElementById("backend-error-restart").addEventListener("click", function () {
+  resumeAfterReauth = false;
+  signOut(auth).catch(function () {});
+  showStep("intro");
+});
+
+// The one network call this page's own code makes beyond the Firebase SDK's internal
+// traffic: DELETE /api/v1/users/me (specs/001 §13.2, specs/008 §4). Idempotent — re-callable
+// until it returns 204 with nothing left, so every retry path above is genuinely safe,
+// unlike a Firebase-side retry (specs/008 §1.3).
+function callDeleteMe(idToken) {
+  return fetch(API_BASE + "/users/me", {
+    method: "DELETE",
+    mode: "cors",
+    headers: { Authorization: "Bearer " + idToken },
+  });
+}
+
+function beginDelete() {
+  var user = auth.currentUser;
+  if (!user) {
+    showStep("phone");
+    return;
+  }
+  getIdToken(user)
+    .then(function (idToken) {
+      return callDeleteMe(idToken);
+    })
+    .then(function (response) {
+      if (response.status === 204 || response.ok) {
+        return finishFirebaseDelete(user);
+      }
+      return response
+        .json()
+        .catch(function () {
+          return null;
+        })
+        .then(function (body) {
+          var detail =
+            body && body.error && body.error.message
+              ? body.error.message
+              : "The server rejected the request (status " + response.status + ").";
+          document.getElementById("backend-error-detail").textContent =
+            "We couldn't delete your account: " + detail + " It's safe to try again.";
+          showStep("backend-error");
+        });
+    })
+    .catch(function () {
+      document.getElementById("backend-error-detail").textContent =
+        "We couldn't reach the server. It's safe to try again — deleting an account is a repeatable operation.";
+      showStep("backend-error");
+    });
+}
+
+function finishFirebaseDelete(user) {
+  return deleteUser(user)
+    .then(function () {
+      showStep("done");
+    })
+    .catch(function (error) {
+      // In every branch below, the backend erasure has ALREADY succeeded (§4 of the
+      // beginDelete() chain only reaches here after a 204/ok response) — none of these
+      // paths risk data loss; they only affect how cleanly the Firebase Auth record
+      // (the phone number) gets removed.
+      var code = error && error.code;
+      if (code === "auth/requires-recent-login") {
+        // specs/008 §1.3: cannot self-heal by retrying: the session will never become
+        // "recent" on its own, so the only honest fix is a fresh sign-in.
+        showStep("reauth");
+        return;
+      }
+      if (code === "auth/network-request-failed") {
+        // A transport hiccup, not an auth problem — the session is still valid, so a
+        // plain retry of just this one step is the honest fix. Routing this to "sign out
+        // and sign in again" would send the user through an unnecessary SMS round-trip
+        // to fix a problem sign-in was never the cause of.
+        showStep("firebase-network");
+        return;
+      }
+      if (code === "auth/too-many-requests") {
+        // Firebase is rate-limiting sign-in-adjacent operations. "Sign out and sign in
+        // again" would issue another SMS request right into that same rate limit,
+        // compounding the problem instead of fixing it — the honest guidance is to wait.
+        showStep("firebase-too-many");
+        return;
+      }
+      // Any other Firebase-side failure here: the backend deletion already succeeded, so
+      // this is the same "one step left" situation in substance. Offer the same honest
+      // recovery rather than a bare retry.
+      showStep("reauth");
+    });
+}
+
+showStep("intro");
+</script>
+</body>
+</html>
