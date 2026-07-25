@@ -877,6 +877,64 @@ describe("domain/location/reportLocations", () => {
     });
   });
 
+  // B18 security review-gate follow-up (Major, 002 §4.2): the §1.2 ownership check earlier
+  // in this function is a snapshot taken BEFORE this request's writes; a concurrent
+  // DELETE /users/me (001 §13.2) deletes the whole Devices partition FIRST, but a request
+  // already past that check would otherwise still write LastKnown/a marker/group
+  // positions/history for an account being erased. Unlike the family guard above, there is
+  // NO degraded-but-valid mode: the whole batch must be abandoned, nothing written.
+  describe("write-time device-existence guard (002 §4.2, in-flight erasure race, B18 follow-up)", () => {
+    // Simulates the account's Devices partition being wiped in the exact window between the
+    // request's initial §1.2 ownership read and this guard's own re-read: wraps the fake's
+    // getDevice so the SECOND call (the guard's, not the earlier ownership check's first
+    // call) deletes the row before resolving — mirrors raceFamilyDeletionIntoGuardRead above.
+    function raceDeviceDeletionIntoGuardRead(deps: ReturnType<typeof buildDeps>): void {
+      const realGetDevice = deps.deviceRepo.getDevice.bind(deps.deviceRepo);
+      let callCount = 0;
+      deps.deviceRepo.getDevice = async (ownerUserId: string, deviceId: string) => {
+        callCount += 1;
+        if (callCount === 2) {
+          await deps.deviceRepo.deleteDevicesByOwner(ownerUserId);
+        }
+        return realGetDevice(ownerUserId, deviceId);
+      };
+    }
+
+    it("abandons the WHOLE batch — no marker, no last-known, no group position, no history, no usage — when the device is gone by write time", async () => {
+      const deps = buildDeps();
+      seedDevice(deps);
+      const GUARD_GROUP_ID = "grp_9J2Kq7Lm3NpR5sTvWxYz";
+      await seedActiveGroupMembership(deps, GUARD_GROUP_ID);
+      raceDeviceDeletionIntoGuardRead(deps);
+
+      await expectAppError(reportLocations(baseInput(), deps), "DEVICE_NOT_FOUND");
+
+      // Nothing was written — not last-known, not the group position, not history, not usage,
+      // and the idempotency marker is still free (a genuine retry after re-registration must
+      // not be shadowed by a marker this abandoned attempt should never have written).
+      expect(await deps.lastKnownRepo.get(USER_ID, DEVICE_ID)).toBeNull();
+      expect(await deps.groupLastKnownRepo.get(GUARD_GROUP_ID, USER_ID)).toBeNull();
+      expect(deps.historyStore.fixes).toEqual([]);
+      expect(await deps.usageRepo.get(FAMILY_ID, "locationBatches", "2026-07-19")).toBe(0);
+      expect(await deps.usageRepo.get(USER_ID, "locationBatches", "2026-07-19")).toBe(0);
+      const stillInsertable = await deps.idempotencyRepo.tryInsertBatchMarker(DEVICE_ID, "b7f2c1d0-0000-4000-8000-000000000001", {
+        receivedAt: "x",
+        fixCount: 1,
+      });
+      expect(stillInsertable).toBe(true);
+    });
+
+    it("does not affect the happy path: a device that still exists at write time is unaffected", async () => {
+      const deps = buildDeps();
+      seedDevice(deps);
+
+      const result = await reportLocations(baseInput(), deps);
+
+      expect(result.accepted).toBe(1);
+      expect(result.lastKnownUpdated).toBe(true);
+    });
+  });
+
   // specs/001 §5.1 group fan-out side effect + specs/002 §2.12 GroupLastKnown. Active-only,
   // position-only, only-newer — mirrors the family LastKnown semantics but independently.
   describe("group fan-out (001 §5.1, 002 §2.12)", () => {

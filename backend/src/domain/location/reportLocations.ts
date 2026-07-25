@@ -172,6 +172,19 @@ export async function reportLocations(
   // Geofences are family-scoped (§7.1) — a family-less caller has no config to sync.
   const geofenceEtag = input.familyId ? await deps.geofenceConfigRepo.getEtag(input.familyId) : "0";
 
+  // Write-time device-existence guard (002 §4.2, security review-gate fix — extends the
+  // family guard below to account deletion): the ownership check above is a snapshot taken
+  // BEFORE this function ran; a concurrent DELETE /users/me (001 §13.2) deletes the whole
+  // Devices partition FIRST specifically so device-originated calls stop, but a request
+  // already past that check would otherwise still write LastKnown, an idempotency marker,
+  // group positions, and (when the family survives) a history line for an account that is
+  // being erased. Unlike the family guard below there is no degraded-but-valid mode here —
+  // re-verify immediately before any write and abandon the WHOLE batch if the device is gone.
+  const deviceStillExists = await deps.deviceRepo.getDevice(input.uid, deviceId);
+  if (!deviceStillExists) {
+    throw new AppError("DEVICE_NOT_FOUND", "device was removed mid-request (concurrent account deletion)");
+  }
+
   const inserted = await deps.idempotencyRepo.tryInsertBatchMarker(deviceId, body.batchId, {
     receivedAt,
     fixCount: body.fixes.length,

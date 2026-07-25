@@ -104,4 +104,17 @@ export class TableLastKnownRepo implements LastKnownRepo {
     }
     return records;
   }
+
+  /** Wipes the owner's whole partition — account deletion (001 §13.2, 002 §4.2 step 2, B18).
+   * Idempotent. */
+  async deleteByOwner(ownerUserId: string): Promise<void> {
+    const records = await this.listByOwner(ownerUserId);
+    await Promise.all(
+      records.map((record) =>
+        this.client.deleteEntity(ownerUserId, `${DEVICE_PREFIX}${record.deviceId}`).catch((err) => {
+          if (!isNotFound(err)) throw err;
+        }),
+      ),
+    );
+  }
 }

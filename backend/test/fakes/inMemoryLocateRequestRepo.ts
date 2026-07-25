@@ -46,4 +46,16 @@ export class InMemoryLocateRequestRepo implements LocateRequestRepo {
   async deletePartition(familyId: string): Promise<void> {
     this.records.delete(familyId);
   }
+
+  /** Account deletion (002 §4.2 step 4, B18): rows naming the subject as requestedBy OR
+   * targetUserId. Idempotent. */
+  async deleteRowsForUser(familyId: string, userId: string): Promise<void> {
+    const roster = this.records.get(familyId);
+    if (!roster) return;
+    for (const [requestId, record] of roster) {
+      if (record.requestedBy === userId || record.targetUserId === userId) {
+        roster.delete(requestId);
+      }
+    }
+  }
 }

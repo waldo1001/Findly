@@ -14,6 +14,19 @@ export class InMemoryIdempotencyRepo implements IdempotencyRepo {
     return this.batchMarkers.get(this.key(deviceId, batchId));
   }
 
+  /** Test-only, read-only inspection helper (no side effects, unlike the tryInsert* probes):
+   * whether ANY marker (batch/event/fix) still exists in this deviceId's partition. */
+  hasAnyMarker(deviceId: string): boolean {
+    const prefix = `${deviceId}|`;
+    const hasIn = (keys: Iterable<string>): boolean => {
+      for (const key of keys) {
+        if (key.startsWith(prefix)) return true;
+      }
+      return false;
+    };
+    return hasIn(this.batchMarkers.keys()) || hasIn(this.eventMarkers) || hasIn(this.fixMarkers);
+  }
+
   async tryInsertBatchMarker(
     deviceId: string,
     batchId: string,
@@ -37,5 +50,20 @@ export class InMemoryIdempotencyRepo implements IdempotencyRepo {
     if (this.fixMarkers.has(key)) return false;
     this.fixMarkers.add(key);
     return true;
+  }
+
+  /** Account deletion (002 §4.2 step 3, B18): wipes every batch:/event:/fix: row across this
+   * one deviceId's partition. Idempotent. */
+  async deletePartition(deviceId: string): Promise<void> {
+    const prefix = `${deviceId}|`;
+    for (const key of this.batchMarkers.keys()) {
+      if (key.startsWith(prefix)) this.batchMarkers.delete(key);
+    }
+    for (const key of this.eventMarkers) {
+      if (key.startsWith(prefix)) this.eventMarkers.delete(key);
+    }
+    for (const key of this.fixMarkers) {
+      if (key.startsWith(prefix)) this.fixMarkers.delete(key);
+    }
   }
 }

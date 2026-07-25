@@ -95,7 +95,10 @@ export interface UserRepo {
    * surface, not be swallowed — see clearFamilyMembership below for the one call site that
    * needs different semantics. */
   updateProfile(userId: string, patch: Partial<UserProfile>): Promise<void>;
-  /** Membership removal (001 §3.6). */
+  /** Membership removal (001 §3.6) and account deletion's completion marker (001 §13.2,
+   * 002 §4.2 step 8, B18). Idempotent: swallows not-found so account deletion's re-call
+   * (the no-profile-caller no-op included, 008 §4.1) converges instead of throwing when a
+   * prior crashed run already deleted the row. */
   deleteProfile(userId: string): Promise<void>;
   /** Flips familyId/role to null — family deletion (001 §13.3, 002 §4.2 steps 1/6) and
    * B18's account-deletion cascade reuse this. Idempotent: swallows not-found, because a
@@ -208,6 +211,9 @@ export interface LastKnownRepo {
   upsertIfNewer(ownerUserId: string, record: LastKnownRecord): Promise<boolean>;
   /** One owner's partition scan (001 §5.2 fan-out input). */
   listByOwner(ownerUserId: string): Promise<LastKnownRecord[]>;
+  /** Wipes the owner's whole partition — account deletion (001 §13.2, 002 §4.2 step 2, B18).
+   * Idempotent. */
+  deleteByOwner(ownerUserId: string): Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
@@ -255,6 +261,10 @@ export interface LocateRequestRepo {
   /** Wipes every `req:` row in the family's partition, regardless of status — family
    * deletion (002 §4.2 step 3, B19). Idempotent. */
   deletePartition(familyId: string): Promise<void>;
+  /** Deletes rows in the family partition where `requestedBy` OR `targetUserId` is the
+   * subject (`fixJson` holds coordinates) — account deletion (001 §13.2, 002 §4.2 step 4,
+   * B18). A single-partition scan, same idiom as listPendingByTargetDevice. Idempotent. */
+  deleteRowsForUser(familyId: string, userId: string): Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
@@ -270,6 +280,12 @@ export interface IdempotencyRepo {
   ): Promise<boolean>;
   tryInsertEventMarker(deviceId: string, eventId: string, receivedAt: string): Promise<boolean>;
   tryInsertFixMarker(deviceId: string, fixId: string, receivedAt: string): Promise<boolean>;
+  /** Wipes every marker row (`batch:`/`event:`/`fix:`) in one device's partition — account
+   * deletion (001 §13.2, 002 §4.2 step 3, B18): one partition per deviceId collected from the
+   * subject's `Devices` partition BEFORE it is wiped in step 1 (on retry the device list is
+   * already empty, so there is nothing left to collect — the documented "skip" case).
+   * Idempotent. */
+  deletePartition(deviceId: string): Promise<void>;
 }
 
 // ---------------------------------------------------------------------------

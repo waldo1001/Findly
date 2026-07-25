@@ -20,9 +20,12 @@ export interface AuthGuardDeps {
 
 export interface AuthGuardOptions {
   /**
-   * True only for the four §1.5.3 profile-bootstrapping endpoints: POST /families,
-   * POST /invites/accept, POST /groups, POST /groups/join (§1.5 step 3). Every other
-   * endpoint without a profile gets PROFILE_NOT_FOUND.
+   * True for the four §1.5.3 profile-bootstrapping endpoints — POST /families,
+   * POST /invites/accept, POST /groups, POST /groups/join (§1.5 step 3) — PLUS
+   * DELETE /users/me (§13.2, B18): the one non-bootstrapping endpoint the §1.5.3 allowance
+   * also names, since account deletion must be an idempotent no-op for a caller with no
+   * profile at all (008 §4.1) rather than a 404. Every other endpoint without a profile gets
+   * PROFILE_NOT_FOUND.
    */
   allowNoProfile?: boolean;
 }

@@ -46,8 +46,15 @@ export class TableUserRepo implements UserRepo {
     await this.client.updateEntity({ partitionKey: userId, rowKey: PROFILE_ROW_KEY, ...patch }, "Merge");
   }
 
+  /** Idempotent (001 §13.2, 002 §4.2 step 8, B18 — the account-deletion completion marker
+   * must converge on a re-call after a prior crashed run already deleted this row, and the
+   * §1.5.3 no-profile-caller no-op has nothing to delete at all). */
   async deleteProfile(userId: string): Promise<void> {
-    await this.client.deleteEntity(userId, PROFILE_ROW_KEY);
+    try {
+      await this.client.deleteEntity(userId, PROFILE_ROW_KEY);
+    } catch (err) {
+      if (!isNotFound(err)) throw err;
+    }
   }
 
   /** Idempotent (002 §4.2 steps 1/6 — family deletion's re-call needs every step to

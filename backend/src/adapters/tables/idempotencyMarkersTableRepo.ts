@@ -2,12 +2,16 @@
 // already exists, 002 §2) IS the dedupe test. Integration-tested later; no unit tests
 // here (thin adapter, excluded from mutation).
 
-import { RestError } from "@azure/data-tables";
+import { odata, RestError } from "@azure/data-tables";
 import { createTableClient } from "./tableClientFactory";
 import type { IdempotencyRepo } from "../../ports/repositories";
 
 function isAlreadyExists(err: unknown): boolean {
   return err instanceof RestError && err.statusCode === 409;
+}
+
+function isNotFound(err: unknown): boolean {
+  return err instanceof RestError && err.statusCode === 404;
 }
 
 export class TableIdempotencyRepo implements IdempotencyRepo {
@@ -37,5 +41,26 @@ export class TableIdempotencyRepo implements IdempotencyRepo {
 
   async tryInsertFixMarker(deviceId: string, fixId: string, receivedAt: string): Promise<boolean> {
     return this.tryInsert(deviceId, `fix:${fixId}`, { receivedAt });
+  }
+
+  /** Wipes every batch:/event:/fix: row in one deviceId's whole partition — account deletion
+   * (001 §13.2, 002 §4.2 step 3, B18). No rowkey filter needed: every row in this partition
+   * belongs to deviceId by construction (same idiom as devicesTableRepo.deleteDevicesByOwner).
+   * Idempotent. */
+  async deletePartition(deviceId: string): Promise<void> {
+    const rowKeys: string[] = [];
+    const entities = this.client.listEntities({
+      queryOptions: { filter: odata`PartitionKey eq ${deviceId}` },
+    });
+    for await (const entity of entities) {
+      rowKeys.push(String(entity.rowKey));
+    }
+    await Promise.all(
+      rowKeys.map((rk) =>
+        this.client.deleteEntity(deviceId, rk).catch((err) => {
+          if (!isNotFound(err)) throw err;
+        }),
+      ),
+    );
   }
 }

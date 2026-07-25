@@ -221,4 +221,22 @@ export class InMemoryHistoryStore implements HistoryStore {
     this.events.length = 0;
     this.events.push(...keptEvents);
   }
+
+  /** Account deletion's non-cascade path (002 §4.2 step 6, B18): only the subject's own
+   * `history/{familyId}/{userId}/` prefix. */
+  async deleteUserPrefix(familyId: string, userId: string): Promise<void> {
+    const kept = this.fixes.filter((r) => !(r.familyId === familyId && r.userId === userId));
+    this.fixes.length = 0;
+    this.fixes.push(...kept);
+  }
+
+  /** In-memory stand-in for the real filtered day-blob rewrite (008 §4.3, 002 §4.2): drops
+   * only the subject's own event lines for this family, leaving every other member's lines
+   * untouched — the ETag/concurrent-append mechanics are adapter-specific (BlobHistoryStore)
+   * and integration-tested against real Azurite (test/integration/historyBlobStore.test.ts). */
+  async eraseUserFromEvents(familyId: string, userId: string): Promise<void> {
+    const kept = this.events.filter((r) => !(r.familyId === familyId && r.event.userId === userId));
+    this.events.length = 0;
+    this.events.push(...kept);
+  }
 }
