@@ -39,6 +39,10 @@ jobs:
         run: |
           web/join/verify-delete-account.sh web/join/delete-account.html web/join/staticwebapp.config.json
 
+      - name: site-wide framing headers (specs/007 §5 — clickjacking protection)
+        run: |
+          web/join/verify-security-headers.sh web/join/staticwebapp.config.json
+
   deploy:
     name: deploy
     runs-on: ubuntu-latest
