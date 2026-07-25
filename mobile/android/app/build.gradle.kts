@@ -53,7 +53,7 @@ val hasReleaseSigningMaterial: Boolean =
 // and the manifest's ${joinLinkHost} placeholder (AndroidManifest.xml's https intent-filter) from
 // this single value so the two can never drift apart. Debug and release intentionally share one
 // value (unlike BASE_URL/AUTH_MODE) — the join-link surface has no dev mode (specs/003 §12.3).
-val joinLinkHost: String = "gentle-hill-0fae42f03.7.azurestaticapps.net"
+val joinLinkHost: String = "kind-plant-0fb99b003.7.azurestaticapps.net"
 
 android {
     namespace = "com.findly.android"
@@ -111,7 +111,7 @@ android {
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             // Obviously-fake placeholder host (never resolves) — TODO(H1) replaces with the real
             // Function App URL once docs/azure-setup.md has been run (specs/003 §13).
-            buildConfigField("String", "BASE_URL", "\"https://CHANGE-ME.azurewebsites.net/api/\"")
+            buildConfigField("String", "BASE_URL", "\"https://func-findly.azurewebsites.net/api/\"")
             buildConfigField("String", "AUTH_MODE", "\"firebase\"")
             buildConfigField("String", "FIREBASE_PROJECT_ID", "\"CHANGE-ME\"")
             buildConfigField("String", "MAPS_API_KEY", "\"$mapsApiKey\"")

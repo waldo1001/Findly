@@ -24,7 +24,7 @@
 	  </array>
 	  "CHANGE-ME.azurestaticapps.net" is a placeholder standing in for the real value H4 already
 	  recorded elsewhere (docs/azure-setup.md §7; AppConfig.defaultJoinLinkHost in FindlyKit is
-	  "gentle-hill-0fae42f03.7.azurestaticapps.net") — deliberately NOT swapped in here yet, since
+	  "kind-plant-0fb99b003.7.azurestaticapps.net") — deliberately NOT swapped in here yet, since
 	  this entitlement itself stays inert until H6. H6 swaps this placeholder for the real value AND
 	  uncomments the block once Apple Developer Program enrollment completes. Adding it before
 	  enrollment breaks code signing, exactly like the Location Push entitlement above.

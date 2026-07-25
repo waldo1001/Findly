@@ -25,7 +25,7 @@ struct AppConfigTests {
     // mechanism exists yet, specs/004 §1.1, so this default is what actually ships).
     @Test func joinLinkHostDefaultsToTheProvisionedHost() {
         #expect(AppConfig().joinLinkHost == AppConfig.defaultJoinLinkHost)
-        #expect(AppConfig.defaultJoinLinkHost == "gentle-hill-0fae42f03.7.azurestaticapps.net")
+        #expect(AppConfig.defaultJoinLinkHost == "kind-plant-0fb99b003.7.azurestaticapps.net")
     }
 
     @Test func joinLinkHostIsConfigurable() {
