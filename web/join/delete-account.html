@@ -255,6 +255,34 @@
     <button type="button" class="btn btn-primary" id="reauth-signin-again">Sign out and sign in again</button>
   </section>
 
+  <!-- STEP: Firebase-delete failure — a plain network/transport error, not an auth
+       problem. The session is still valid (a failed request doesn't sign anyone out), so
+       — unlike the reauth step above — the honest fix is a plain retry of this one step,
+       not a pointless extra sign-in. -->
+  <section id="step-firebase-network" data-step="firebase-network" hidden>
+    <div class="warning">
+      <h2>One step left</h2>
+      <p>Your Findly account and its data have already been deleted. We couldn't reach
+        Firebase to finish removing your sign-in record because of a connection problem.
+        Check your connection and try again — no need to sign in again.</p>
+    </div>
+    <button type="button" class="btn btn-primary" id="firebase-network-retry">Try again</button>
+  </section>
+
+  <!-- STEP: Firebase-delete failure — rate-limited (auth/too-many-requests). Deliberately
+       offers NO sign-in-again button here: that would send another SMS request and
+       compound the exact rate limit being reported, rather than fixing anything. The
+       only honest guidance is to wait. -->
+  <section id="step-firebase-too-many" data-step="firebase-too-many" hidden>
+    <div class="warning">
+      <h2>One step left, but not right now</h2>
+      <p>Your Findly account and its data have already been deleted. Removing your sign-in
+        record is temporarily rate-limited by Firebase after repeated attempts. Signing in
+        again right now would only make that worse. Wait a while, then reload this page
+        and sign in again to finish.</p>
+    </div>
+  </section>
+
   <!-- STEP: transient backend failure — safe to retry (DELETE /users/me is idempotent,
        specs/008 §4.5 / 001 §13.2). -->
   <section id="step-backend-error" data-step="backend-error" hidden>
@@ -502,6 +530,20 @@ document.getElementById("reauth-signin-again").addEventListener("click", functio
     });
 });
 
+document.getElementById("firebase-network-retry").addEventListener("click", function () {
+  // Deliberately NOT a sign-out: a network error doesn't invalidate the session, so
+  // retrying just this one Firebase call is the honest fix (specs/008 §1.3's "no bare
+  // retry" guidance is about requires-recent-login specifically, which cannot self-heal —
+  // a transport error can).
+  var user = auth.currentUser;
+  if (!user) {
+    showStep("phone");
+    return;
+  }
+  showStep("deleting");
+  finishFirebaseDelete(user);
+});
+
 document.getElementById("backend-error-retry").addEventListener("click", function () {
   showStep("deleting");
   beginDelete();
@@ -567,8 +609,30 @@ function finishFirebaseDelete(user) {
       showStep("done");
     })
     .catch(function (error) {
-      if (error && error.code === "auth/requires-recent-login") {
+      // In every branch below, the backend erasure has ALREADY succeeded (§4 of the
+      // beginDelete() chain only reaches here after a 204/ok response) — none of these
+      // paths risk data loss; they only affect how cleanly the Firebase Auth record
+      // (the phone number) gets removed.
+      var code = error && error.code;
+      if (code === "auth/requires-recent-login") {
+        // specs/008 §1.3: cannot self-heal by retrying: the session will never become
+        // "recent" on its own, so the only honest fix is a fresh sign-in.
         showStep("reauth");
+        return;
+      }
+      if (code === "auth/network-request-failed") {
+        // A transport hiccup, not an auth problem — the session is still valid, so a
+        // plain retry of just this one step is the honest fix. Routing this to "sign out
+        // and sign in again" would send the user through an unnecessary SMS round-trip
+        // to fix a problem sign-in was never the cause of.
+        showStep("firebase-network");
+        return;
+      }
+      if (code === "auth/too-many-requests") {
+        // Firebase is rate-limiting sign-in-adjacent operations. "Sign out and sign in
+        // again" would issue another SMS request right into that same rate limit,
+        // compounding the problem instead of fixing it — the honest guidance is to wait.
+        showStep("firebase-too-many");
         return;
       }
       // Any other Firebase-side failure here: the backend deletion already succeeded, so
