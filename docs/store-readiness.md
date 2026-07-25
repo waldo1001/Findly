@@ -14,7 +14,7 @@ The convention use case (specs/007, 000 §D15/D16) requires strangers to *instal
 
 ## 1. Google Play (H5)
 
-1. **Developer account:** check whether yours is a personal account created after 2023-11-13 — those must run a **closed test with ≥12 testers for 14 days** before production access. Organization accounts are exempt. This is lead time, plan for it.
+1. **Developer account — RESOLVED 2026-07-25:** `waldo1001`, **Organisation account** under **Dynex bv** (Account ID `6979198494407001879`). Organisation accounts are **exempt** from the personal-account rule (created on/after 2023-11-13 → closed test with ≥12 testers for 14 days before production access). **No 14-day clock applies**, and the D-U-N-S number Google required to verify the organisation already exists and is reusable. Publisher name on the listing will be **Dynex bv**, consistent with the operator named in the privacy policy and ToS (H7).
 2. **Release keystore:** create locally (never committed — `docs/security-review-checklist.md`); enroll in **Play App Signing** (Google holds the app signing key; you keep the upload key). The **app signing key's SHA-256** (from the Play Console, not your upload key) is what goes into the Firebase Android app registration (006 §6.5) and `assetlinks.json` (007 §3).
 3. **A7 first:** `signingConfig` wired from CI/env references, `android.yml`'s release-build TODO resolved — no secret material in the repo. Once a real keystore exists, set these 4 **GitHub Actions repo secrets** (repo Settings → Secrets and variables → Actions — never commit them anywhere):
    - `ANDROID_KEYSTORE_BASE64` — the keystore file, base64-encoded (e.g. `base64 -i release.jks | pbcopy` on macOS, `base64 -w0 release.jks` on Linux)

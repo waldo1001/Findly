@@ -6,15 +6,15 @@ Written 2026-07-25. Goal: every family phone (Android + iPhone) installs Findly 
 
 | Milestone | What it means | Store mechanism |
 |---|---|---|
-| **M1 — Family install** | Family phones install from the store infrastructure, weeks before public | iOS: **TestFlight** · Android: **Play closed-testing track** (which *also* runs down the 14-day closed-test requirement, if it applies — the family are the testers) |
+| **M1 — Family install** | Family phones install from the store infrastructure, before public release | iOS: **TestFlight** · Android: **Play internal/closed track** (a convenience for staged rollout — the 14-day closed-test obligation does **not** apply, the account is Organisation) |
 | **M2 — Public release** | Production listings, anyone can install | App Store + Play production |
 
 ## Phase 0 — this week (human, ~1 h total)
 
 1. ~~Commit specs/008~~ → PR + merge (spec commit before implementation, per process).
 2. **Firebase tail on `findly-71f7b`** (the H2 pieces that didn't carry over in the rename, found during the 2026-07-25 smoke test): Blaze plan + budget alert (€5), SMS region allowlist **BE, NL** (family mode). Without this, real-number sign-in fails; test numbers work regardless.
-3. **Check the Play account rule now** (store-readiness §1.1): personal account created after 2023-11-13 → mandatory **closed test, ≥12 testers, 14 days** before production. Pure lead time — knowing this today shapes M2-Android by two weeks. (M1 is unaffected — the family installs from the closed track either way.)
-4. **Chase Apple enrollment status** (H6's gate) — the single least-controllable item on the whole roadmap.
+3. ~~Check the Play account rule~~ **RESOLVED 2026-07-25:** `waldo1001` is an **Organisation** account under **Dynex bv** → **exempt** from the 12-tester/14-day closed-test requirement, and the required D-U-N-S already exists. The largest fixed delay to M2-Android is gone; the closed track is now purely an M1 convenience, not an obligation.
+4. ~~Chase Apple enrollment~~ **RESOLVED 2026-07-25:** already complete (Team ID `92A2K3Q7NH`, verified live in the served AASA). Apple is not a blocker; see Phase 4.
 5. **Google Maps API key** for Android (the `MAPS_API_KEY` plumbing already exists; mobile-native dynamic maps are $0 on Google's pricing — key restricted to the app's package + SHA-256). iOS needs nothing (MapKit, keyless).
 
 ## Phase 1 — device-runtime wave (the unscheduled gap; backlog A9–A12 / I9–I12)
@@ -41,9 +41,9 @@ Estimate at the project's demonstrated pace: **1–3 weeks calendar**, Android a
 ## Phase 3 — Android store track (H5; starts now, human + waits)
 
 1. Release keystore + **Play App Signing** enrollment; 4 GitHub secrets (store-readiness §1.3); app-signing SHA-256 → Firebase registration + `assetlinks.json`.
-2. Upload first release to the **closed track**; add the family (+ friends to reach 12 if the rule applies) as testers → **M1-Android reached here.**
+2. Upload the first release to the **internal test track** (instant, no review) and add the family as testers → **M1-Android reached here.** No minimum tester count, no waiting period — the Organisation account is exempt.
 3. Background-location declaration + prominent-disclosure video; data-safety form (needs Phase 2's URL); content rating; listing assets; test-number sign-in notes for review.
-4. 14-day closed-test clock (if applicable) + Play review → promote to production → **M2-Android**.
+4. Play review (the background-location declaration is the slow part) → promote to production → **M2-Android**.
 
 ## Phase 4 — Apple store track (H6; **startable now — enrollment is already complete**)
 
