@@ -48,4 +48,14 @@ export class InMemoryFamilyRepo implements FamilyRepo {
   async removeMember(familyId: string, userId: string): Promise<void> {
     this.members.get(familyId)?.delete(userId);
   }
+
+  /**
+   * Test-only seam: deletes ONLY the `meta` row, leaving member rows in place — same idiom
+   * as InMemoryGroupRepo.deleteMetaOnlyForTest, used to make exportUserData's defense-in-depth
+   * "family meta missing after listMembers succeeded" invariant guard independently testable
+   * without a real storage-level partial-failure race.
+   */
+  deleteMetaOnlyForTest(familyId: string): void {
+    this.meta.delete(familyId);
+  }
 }
