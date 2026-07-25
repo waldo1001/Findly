@@ -12,4 +12,8 @@ class InMemoryDeviceIdStore : DeviceIdStore {
     override fun put(uid: String, deviceId: String) {
         map[uid] = deviceId
     }
+
+    override fun clear(uid: String) {
+        map.remove(uid)
+    }
 }

@@ -14,6 +14,10 @@ class SharedPreferencesDeviceIdStore(context: Context) : DeviceIdStore {
         prefs.edit().putString(keyFor(uid), deviceId).apply()
     }
 
+    override fun clear(uid: String) {
+        prefs.edit().remove(keyFor(uid)).apply()
+    }
+
     private fun keyFor(uid: String) = "device_id_$uid"
 
     private companion object {

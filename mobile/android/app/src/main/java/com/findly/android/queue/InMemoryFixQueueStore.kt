@@ -68,4 +68,11 @@ class InMemoryFixQueueStore(
             inFlight = null
         }
     }
+
+    override suspend fun clearAll() {
+        mutex.withLock {
+            pending.clear()
+            inFlight = null
+        }
+    }
 }

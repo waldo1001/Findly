@@ -29,4 +29,9 @@ interface FixQueueStore {
      * [nextBatch] call (§10.2 rule 4).
      */
     suspend fun markBatchRejected(batchId: String, offendingFixIds: Set<String>)
+
+    /** Drops every pending/in-flight fix unconditionally — used only by a full local-state wipe
+     * after account deletion (specs/008-privacy-endpoints.md §4.4; specs/003-android-client.md
+     * §12.4: "clear all local state (fix queue, cached config/ETags, deviceId, DataStore)"). */
+    suspend fun clearAll()
 }

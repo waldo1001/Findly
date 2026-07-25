@@ -67,6 +67,20 @@ class FirebaseAuthProvider(
         resendToken = null
     }
 
+    /** specs/008-privacy-endpoints.md §1.3 — deletes the signed-in Firebase Auth user. Never
+     * throws: a failure (no current user, `requires-recent-login`, network, …) is reported as
+     * `false` so [com.findly.android.ui.settings.PrivacyStateHolder] can offer a retry path
+     * instead of crashing the delete-account flow. */
+    override suspend fun deleteCurrentUser(): Boolean {
+        val user = firebaseAuth.currentUser ?: return false
+        return try {
+            user.delete().await()
+            true
+        } catch (e: Exception) {
+            false
+        }
+    }
+
     override fun startPhoneVerification(phoneNumberE164: String): Flow<PhoneVerificationEvent> = callbackFlow {
         val activity = activityProvider.current()
         if (activity == null) {
