@@ -96,6 +96,15 @@ az functionapp config appsettings set -n "$FUNCAPP" -g "$RG" --settings \
   BLOB_ENDPOINT="https://$STORAGE.blob.core.windows.net"
 # NB: FCM_SERVICE_ACCOUNT_JSON is set later from the new Firebase service-account key (runbook step 3).
 
+# REQUIRED — a freshly recreated storage account has zero tables, and Azure Table Storage does
+# NOT auto-create one on first write (docs/azure-setup.md has the full rationale). Missing here
+# during the original Findly rename left `stfindly` with zero tables until fixed live 2026-07-25 —
+# every write-path endpoint (starting with the most basic, POST /families) 500'd until this ran.
+for t in Families Users Invites Devices LastKnown Entitlements LocateRequests \
+         IdempotencyMarkers Usage Groups GroupCodes GroupLastKnown GroupExpiry; do
+  az storage table create --name "$t" --account-name "$STORAGE" --auth-mode login
+done
+
 # ---------------------------------------------------------------------------
 # 3. RECREATE — OIDC app registration for GitHub Actions (mirrors §2)
 # ---------------------------------------------------------------------------

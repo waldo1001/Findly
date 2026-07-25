@@ -51,6 +51,20 @@ az functionapp config appsettings set -n $FUNCAPP -g $RG --settings \
   FIREBASE_PROJECT_ID=$FIREBASE_PROJECT_ID \
   TABLES_ENDPOINT="https://$STORAGE.table.core.windows.net" \
   BLOB_ENDPOINT="https://$STORAGE.blob.core.windows.net"
+
+# REQUIRED — Azure Table Storage does NOT auto-create a table on first write (unlike the
+# blob containers, which the app creates lazily via create-if-not-exists on append, 002 §3.2).
+# Every table in specs/002 §2 must exist before the app can write to it, or every create/insert
+# hits a raw TableNotFound (a 500, not a handled error — reads happen to survive because Table
+# Storage's TableNotFound is also a 404, identical to "row not found", which the read paths
+# already treat as absent; writes have no equivalent swallow, nor should they). Found live
+# 2026-07-25: this step was missing from both this doc and scripts/rename-azure-recreate.sh,
+# so `stfindly` (recreated for the Findly rename) had zero tables and `POST /families` — one of
+# the most basic endpoints in the app — 500'd until this ran.
+for t in Families Users Invites Devices LastKnown Entitlements LocateRequests \
+         IdempotencyMarkers Usage Groups GroupCodes GroupLastKnown GroupExpiry; do
+  az storage table create --name "$t" --account-name $STORAGE --auth-mode login
+done
 ```
 
 ## 2. GitHub Actions → Azure via OIDC (no secrets)
