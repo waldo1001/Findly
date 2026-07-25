@@ -17,6 +17,7 @@ describe("domain/plan", () => {
         maxGroupMembers: 200,
         maxGroupDurationDays: 30,
         groupGraceDays: 7,
+        exportsPerDay: 3,
       },
       flags: {
         pushToLocate: true,

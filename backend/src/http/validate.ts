@@ -296,3 +296,16 @@ export const reportGeofenceEventsRequestSchema = z.object({
   events: z.array(geofenceEventRequestSchema).min(1).max(20),
 });
 export type ReportGeofenceEventsRequest = z.infer<typeof reportGeofenceEventsRequestSchema>;
+
+// specs/001 §13.1 `GET /export` query params. `userId` is optional (defaults to the caller,
+// 008 §3) and, like memberUserIdParamSchema, gets the Table-Storage-key character gate
+// because a validated value reaches DeviceRepo/LastKnownRepo/etc. lookups keyed by it.
+export const exportQuerySchema = z.object({
+  userId: z
+    .string()
+    .min(1)
+    .max(128)
+    .regex(ALLOWED_TABLE_KEY_CHARS, "userId contains characters forbidden in a Table Storage key")
+    .optional(),
+});
+export type ExportQuery = z.infer<typeof exportQuerySchema>;

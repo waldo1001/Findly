@@ -2,9 +2,9 @@
 // then log-and-drop — usage is telemetry, not billing). Integration-tested later; no
 // unit tests here (thin adapter, excluded from mutation).
 
-import { RestError } from "@azure/data-tables";
+import { odata, RestError } from "@azure/data-tables";
 import { createTableClient } from "./tableClientFactory";
-import type { UsageMetric, UsageRepo } from "../../ports/repositories";
+import type { UsageMetric, UsageRepo, UsageRow } from "../../ports/repositories";
 
 const MAX_RETRIES = 3;
 
@@ -66,5 +66,24 @@ export class TableUsageRepo implements UsageRepo {
       if (isNotFound(err)) return 0;
       throw err;
     }
+  }
+
+  // B17 (specs/001 §13.1, 008 §2) — export-only partition scan; see the UsageRepo interface
+  // doc for why callers only ever invoke this for a family-less subject's own uid partition.
+  async listByPartition(familyId: string): Promise<UsageRow[]> {
+    const rows: UsageRow[] = [];
+    const entities = this.client.listEntities({
+      queryOptions: { filter: odata`PartitionKey eq ${familyId}` },
+    });
+    for await (const entity of entities) {
+      const rk = String(entity.rowKey);
+      const sep = rk.indexOf(":");
+      rows.push({
+        date: rk.slice(0, sep),
+        metric: rk.slice(sep + 1) as UsageMetric,
+        count: Number(entity.count ?? 0),
+      });
+    }
+    return rows;
   }
 }
