@@ -13,21 +13,13 @@
 	  Add this only once Apple grants the entitlement (Apple Developer Program enrollment required
 	  first). Adding it before the entitlement is granted breaks code signing.
 	-->
-	<!--
-	  PENDING (specs/007-public-join-links.md §3/§4, specs/004-ios-client.md §3.5) — Associated
-	  Domains for public join links (https://{JOIN_LINK_HOST}/g#CODE). Same precedent as the
-	  Location Push entitlement above: requires a paid Apple Developer Program membership;
-	  prepared now, activated at task H6, not blocking I6:
-	  <key>com.apple.developer.associated-domains</key>
-	  <array>
-	    <string>applinks:CHANGE-ME.azurestaticapps.net</string>
-	  </array>
-	  "CHANGE-ME.azurestaticapps.net" is a placeholder standing in for the real value H4 already
-	  recorded elsewhere (docs/azure-setup.md §7; AppConfig.defaultJoinLinkHost in FindlyKit is
-	  "kind-plant-0fb99b003.7.azurestaticapps.net") — deliberately NOT swapped in here yet, since
-	  this entitlement itself stays inert until H6. H6 swaps this placeholder for the real value AND
-	  uncomments the block once Apple Developer Program enrollment completes. Adding it before
-	  enrollment breaks code signing, exactly like the Location Push entitlement above.
-	-->
+	<!-- Associated Domains for public join links (https://{JOIN_LINK_HOST}/g#CODE) — activated
+	     2026-07-25 (H6): Apple Developer enrollment complete, Team ID 92A2K3Q7NH. Before a real
+	     signed build, enable the "Associated Domains" capability on the com.findly.ios App ID +
+	     provisioning profile (the Xcode app target doesn't exist yet — specs/004 §1.1). -->
+	<key>com.apple.developer.associated-domains</key>
+	<array>
+	  <string>applinks:kind-plant-0fb99b003.7.azurestaticapps.net</string>
+	</array>
 </dict>
 </plist>
