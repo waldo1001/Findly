@@ -122,7 +122,7 @@ Google Play requires a **web resource** where users can delete their account wit
 
 Hosted on the join-link SWA (007's host), route `/delete-account`. Flow: explanation → Firebase JS SDK **phone sign-in** (same test-number support, reCAPTCHA verification on web) → a confirmation step naming the consequences (incl. the §4.2 cascade when the backend reports a family — the page MAY simply always show the strongest warning) → `DELETE /users/me` with the web-minted ID token → Firebase `user.delete()` → done state. Failure of the Firebase step shows the same retry guidance as §1.3.
 
-Page rules: no analytics, no storage of any user data, nothing persisted beyond the Firebase SDK's own session handling; no capability in the URL (unlike `/g`, there is nothing secret in this page's address). The 007 join page's "zero external resources" rule is **explicitly not inherited** — this page MUST load the Firebase JS SDK; that rule exists for the join page's no-oracle/capability-URL properties, which don't apply here.
+Page rules: no analytics, no storage of any user data, nothing persisted beyond the Firebase SDK's own session handling; no capability in the URL (unlike `/g`, there is nothing secret in this page's address). The page MUST NOT be framable — see the site-wide requirement in [007 §5](007-public-join-links.md), which this page is the reason for: a clickjacked join flow is an annoyance, a clickjacked deletion flow is irreversible. The 007 join page's "zero external resources" rule is **explicitly not inherited** — this page MUST load the Firebase JS SDK; that rule exists for the join page's no-oracle/capability-URL properties, which don't apply here.
 
 ### 6.2 Infrastructure prerequisites (human/ops — tracked as H9)
 
