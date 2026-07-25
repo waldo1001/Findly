@@ -113,7 +113,7 @@ android {
             // Function App URL once docs/azure-setup.md has been run (specs/003 §13).
             buildConfigField("String", "BASE_URL", "\"https://func-findly.azurewebsites.net/api/\"")
             buildConfigField("String", "AUTH_MODE", "\"firebase\"")
-            buildConfigField("String", "FIREBASE_PROJECT_ID", "\"CHANGE-ME\"")
+            buildConfigField("String", "FIREBASE_PROJECT_ID", "\"findly-71f7b\"")
             buildConfigField("String", "MAPS_API_KEY", "\"$mapsApiKey\"")
             buildConfigField("String", "JOIN_LINK_HOST", "\"$joinLinkHost\"")
             manifestPlaceholders["joinLinkHost"] = joinLinkHost
