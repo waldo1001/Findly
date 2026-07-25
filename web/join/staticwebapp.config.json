@@ -5,6 +5,14 @@
       "rewrite": "/index.html"
     },
     {
+      "route": "/privacy",
+      "rewrite": "/privacy.html"
+    },
+    {
+      "route": "/terms",
+      "rewrite": "/terms.html"
+    },
+    {
       "route": "/.well-known/apple-app-site-association",
       "rewrite": "/.well-known/apple-app-site-association.json"
     },

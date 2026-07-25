@@ -29,8 +29,11 @@ jobs:
           node -e "JSON.parse(require('fs').readFileSync('web/join/.well-known/apple-app-site-association.json', 'utf8')); console.log('apple-app-site-association OK')"
           node -e "JSON.parse(require('fs').readFileSync('web/join/staticwebapp.config.json', 'utf8')); console.log('staticwebapp.config.json OK')"
 
-      - name: landing page security invariants (specs/007 §2, §7)
-        run: web/join/verify-static-security.sh
+      - name: static-page security invariants (specs/007 §2, §7; docs/store-readiness.md §0)
+        run: |
+          web/join/verify-static-security.sh web/join/index.html
+          web/join/verify-static-security.sh web/join/privacy.html
+          web/join/verify-static-security.sh web/join/terms.html
 
   deploy:
     name: deploy

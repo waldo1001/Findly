@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Privacy Policy — Findly</title>
+<!--
+  Findly Privacy Policy. Operator: Dynex bv. Contact: Findly@dynex.be. Governed by Belgian law.
+  Content is drafted from the technical specs (specs/000-007) so factual claims are accurate to what
+  the app does; it has NOT been through a formal legal review — have counsel review before relying on
+  it for a store submission. KNOWN GAP: data deletion is currently email-based (Findly@dynex.be);
+  Google Play's account-deletion policy requires an in-app OR web-based self-service deletion path
+  before a Play submission (000 §O7). Static page, no external resources, no analytics/tracking.
+-->
+<style>
+  :root {
+    --primary: #00696e;
+    --on-primary: #ffffff;
+    --bg: #ffffff;
+    --fg: #1a1a1a;
+    --muted: #5f6b6c;
+    --card-bg: #f2f6f6;
+    --border: #d8e2e2;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --primary: #4cd4d9;
+      --on-primary: #00312f;
+      --bg: #121717;
+      --fg: #eef2f2;
+      --muted: #a7b4b4;
+      --card-bg: #1b2222;
+      --border: #2a3333;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.55;
+    display: flex;
+    justify-content: center;
+    padding: 2rem 1rem 3rem;
+  }
+  main { width: 100%; max-width: 42rem; }
+  h1 { font-size: 1.5rem; margin-bottom: 0.25rem; }
+  .updated { color: var(--muted); font-size: 0.9rem; margin-bottom: 2rem; }
+  h2 { font-size: 1.1rem; margin-top: 2rem; border-bottom: 1px solid var(--border); padding-bottom: 0.4rem; }
+  .placeholder { background: var(--card-bg); border: 1px dashed var(--border); border-radius: 6px; padding: 0.15rem 0.4rem; font-family: monospace; }
+  .draft-banner {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.9rem 1.1rem;
+    margin-bottom: 2rem;
+    font-size: 0.92rem;
+  }
+  ul { padding-left: 1.3rem; }
+  li { margin-bottom: 0.4rem; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Privacy Policy</h1>
+  <p class="updated">Last updated: 25 July 2026</p>
+
+  <h2>Who runs this</h2>
+  <p>
+    Findly is a private, family-oriented location-sharing app operated by
+    <strong>Dynex bv</strong> (Belgium). If you have questions about this policy
+    or your data, contact <a href="mailto:Findly@dynex.be">Findly@dynex.be</a>.
+  </p>
+
+  <h2>What we collect</h2>
+  <ul>
+    <li><strong>Phone number</strong> — used only to sign you in (there are no passwords). Your phone
+      number is handled by Firebase Authentication (operated by Google) and is <em>not</em> sent to or
+      stored by our own backend, ever.</li>
+    <li><strong>Location</strong> — latitude/longitude, accuracy, and the time each position was
+      recorded, reported periodically by devices you register.</li>
+    <li><strong>Device information</strong> — a device name/model, platform (Android/iOS), and a push
+      notification token, so the app can wake your device and send you alerts.</li>
+    <li><strong>Geofence events</strong> — if you set up a "place" (like Home or School), we record
+      when a device enters or leaves it.</li>
+    <li><strong>Group membership</strong> — if you create or join a temporary group, we store your
+      display name for that group and your membership record for as long as the group exists.</li>
+  </ul>
+  <p>We do not collect contacts, photos, messages, browsing history, or anything not listed above.</p>
+
+  <h2>Who can see your data</h2>
+  <p>
+    Your location is visible only to the other members of your <strong>family</strong> (people you've
+    explicitly invited) and, if you choose to join one, the other members of any <strong>temporary
+    group</strong> you're part of (people who have your group's join code). We never sell your data,
+    and we don't use it for advertising — there are no ad or analytics SDKs in this app.
+  </p>
+  <p>
+    Temporary groups are deliberately more limited: other members see only your current position and
+    display name — never your device details, battery level, or location history.
+  </p>
+
+  <h2>How long we keep it</h2>
+  <ul>
+    <li><strong>Family location history</strong> is kept for up to 400 days, though the app itself only
+      lets you look back 90 days by default.</li>
+    <li><strong>Temporary group locations</strong> are deleted automatically, typically within about a
+      day of the group ending — the exact timing depends on which of three expiry options the group's
+      creator chose (immediate deletion, a short grace period, or keeping just the member list as a
+      memento with locations still deleted).</li>
+    <li>If you leave a family or a group, your future location is no longer shared with it, but
+      historical records already stored follow the retention rules above.</li>
+  </ul>
+
+  <h2>Data export &amp; deletion</h2>
+  <p>
+    You can request a copy of your personal data, or deletion of your account and its associated data,
+    at any time by emailing <a href="mailto:Findly@dynex.be">Findly@dynex.be</a>. We action deletion
+    requests within 30 days. Leaving a family or group, or uninstalling the app and turning off
+    sharing, stops further location collection immediately; the retention periods above then apply to
+    any history already stored.
+  </p>
+
+  <h2>Children's accounts</h2>
+  <p>
+    This app is designed for family use and may be used by children as part of a family that is set up
+    and supervised by a parent or guardian. Children do not create their own independent accounts. A
+    parent or guardian is responsible for reviewing this policy and consenting on behalf of any child
+    members of their family, and may remove a child from the family — which stops that child's location
+    sharing — at any time.
+  </p>
+
+  <h2>Where your data is stored</h2>
+  <p>
+    Data is stored on Microsoft Azure infrastructure in the West Europe region. Authentication is
+    handled by Firebase (Google). Push notifications are delivered via Firebase Cloud Messaging and,
+    for iOS, Apple's Push Notification service.
+  </p>
+
+  <h2>Security</h2>
+  <p>
+    All traffic between the app and our servers is encrypted (HTTPS/TLS). Sign-in uses phone-number
+    verification instead of passwords, removing an entire category of password-related risk. Temporary
+    group data is deliberately minimized (position-only, see above) specifically to limit what could
+    ever be exposed even in the event of a problem.
+  </p>
+
+  <h2>Your rights</h2>
+  <p>
+    If you're in the EU/EEA or another jurisdiction with similar protections, you have rights to access,
+    correct, or request deletion of your data, and to object to or restrict certain processing. Contact
+    <a href="mailto:Findly@dynex.be">Findly@dynex.be</a> to exercise these rights.
+  </p>
+
+  <h2>Changes to this policy</h2>
+  <p>
+    We'll update the "last updated" date above whenever this policy changes, and post the new version
+    at this same address.
+  </p>
+</main>
+</body>
+</html>
