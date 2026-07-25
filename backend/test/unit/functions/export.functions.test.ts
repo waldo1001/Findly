@@ -81,6 +81,10 @@ describe("functions/export.functions", () => {
     expect(response.status).toBe(200);
     expect(response.headers["Content-Type"]).toBe("application/json; charset=utf-8");
     expect(response.headers["Content-Disposition"]).toBe('attachment; filename="findly-export-u2-2026-07-25.json"');
+    // specs/001 §13.1 / specs/008 §3.1 — REQUIRED: without it an intermediary or the
+    // client's own HTTP cache could silently persist a second plaintext copy of the
+    // subject's full location history.
+    expect(response.headers["Cache-Control"]).toBe("no-store");
     expect(response.jsonBody).toBeUndefined();
     expect(JSON.parse(response.body)).toEqual(doc);
     // Not enveloped: no top-level "data"/"features" keys wrapping the document.

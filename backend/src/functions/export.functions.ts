@@ -89,6 +89,10 @@ app.http("exportUserData", {
         headers: {
           "Content-Type": "application/json; charset=utf-8",
           "Content-Disposition": `attachment; filename="${filename}"`,
+          // specs/001 §13.1 / specs/008 §3.1 — REQUIRED: without it an intermediary or the
+          // client's own HTTP cache could silently persist a second plaintext copy of the
+          // subject's full location history, defeating the deletion guarantee from outside.
+          "Cache-Control": "no-store",
         },
         body: JSON.stringify(doc),
       };
