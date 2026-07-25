@@ -21,6 +21,8 @@ import com.findly.android.queue.FixQueueStore
 import com.findly.android.queue.InMemoryFixQueueStore
 import com.findly.android.ui.map.MapRenderer
 import com.findly.android.ui.map.PlaceholderMapRenderer
+import com.findly.android.ui.settings.DefaultLocalStateWiper
+import com.findly.android.ui.settings.LocalStateWiper
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -68,7 +70,8 @@ class AppContainer(context: Context) {
     private val findlyApiService = RetrofitFactory.create(appConfig.baseUrl, authProvider)
     val findlyApiClient: FindlyApiClient = FindlyApiClient(findlyApiService, authProvider)
 
-    private val deviceIdProvider = DeviceIdProvider(SharedPreferencesDeviceIdStore(context))
+    private val deviceIdStore = SharedPreferencesDeviceIdStore(context)
+    private val deviceIdProvider = DeviceIdProvider(deviceIdStore)
     private val deviceInfoProvider = AndroidDeviceInfoProvider()
     val deviceRegistrar: DeviceRegistrar =
         DeviceRegistrar(findlyApiClient, deviceIdProvider, deviceInfoProvider)
@@ -76,6 +79,11 @@ class AppContainer(context: Context) {
     /** Offline fix-queue (specs/003 §10) — not yet drained by anything; `LocationSyncWorker`
      * wiring is A2/H1 scope (§10.5). */
     val fixQueueStore: FixQueueStore = InMemoryFixQueueStore()
+
+    /** A8 (specs/008-privacy-endpoints.md §4.4; specs/003-android-client.md §12.4): wipes local
+     * state after a successful account deletion. See [DefaultLocalStateWiper]'s doc for why only
+     * these two stores are wired today. */
+    val localStateWiper: LocalStateWiper = DefaultLocalStateWiper(fixQueueStore, deviceIdStore)
 
     /** A2's live-map tile renderer seam (`ui/map/MapRenderer.kt`) — [PlaceholderMapRenderer] is
      * the only implementation until H1 provisions a real Maps API key (`appConfig.mapsApiKey`). */

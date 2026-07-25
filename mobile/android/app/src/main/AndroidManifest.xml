@@ -77,6 +77,20 @@
             </intent-filter>
         </activity>
 
+        <!-- specs/003-android-client.md §12.4 / 001-api-contract.md §13.1: the export share-sheet
+             handoff needs a content:// URI for the downloaded file (ExportFileWriter.kt). Only
+             cacheDir/exports/ is exposed (res/xml/file_paths.xml) — nothing else in the app's
+             storage is reachable through this provider. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
     </application>
 
 </manifest>
