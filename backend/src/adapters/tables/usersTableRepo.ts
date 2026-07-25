@@ -80,7 +80,10 @@ export class TableUserRepo implements UserRepo {
    * Read -> Replace-with-preserved-displayName, ETag-guarded, bounded retry on conflict —
    * same idiom as the Usage increment loop (002 §2.9) and the sweeper's
    * assertGroupMetaUnchanged ETag-recheck (002 §4.1) — because a concurrent updateProfile
-   * (001 §3.5, e.g. a displayName change) could race this read/write pair. */
+   * (001 §3.5, e.g. a displayName change) could race this read/write pair.
+   *
+   * If UserProfile ever gains a field beyond familyId/role/displayName, add it to the
+   * Replace payload below too — Replace drops anything not explicitly included. */
   async clearFamilyMembership(userId: string): Promise<void> {
     for (let attempt = 0; attempt < MAX_RETRIES; attempt += 1) {
       let entity;
