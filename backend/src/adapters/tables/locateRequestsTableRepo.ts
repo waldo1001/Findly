@@ -61,18 +61,22 @@ export class TableLocateRequestRepo implements LocateRequestRepo {
     );
   }
 
+  /** Coalescing check (001 §6.1) — runs BEFORE this family's first `LocateRequests` row is
+   * ever created, so a family's very first push-to-locate request legitimately reaches this
+   * scan against a table that has never been created (B22, sibling of B20's
+   * deletePartition/deleteRowsForUser below: same table, same lazy-creation gap). */
   async listPendingByTargetDevice(familyId: string, targetDeviceId: string): Promise<LocateRequestRecord[]> {
-    const records: LocateRequestRecord[] = [];
-    const entities = this.client.listEntities({
-      queryOptions: {
-        filter: odata`PartitionKey eq ${familyId} and RowKey ge ${REQUEST_PREFIX} and RowKey lt ${"req;"} and status eq ${"pending"} and targetDeviceId eq ${targetDeviceId}`,
-      },
-    });
-    for await (const entity of entities) {
+    const entities = await collectEntitiesTolerant(
+      this.client.listEntities({
+        queryOptions: {
+          filter: odata`PartitionKey eq ${familyId} and RowKey ge ${REQUEST_PREFIX} and RowKey lt ${"req;"} and status eq ${"pending"} and targetDeviceId eq ${targetDeviceId}`,
+        },
+      }),
+    );
+    return entities.map((entity) => {
       const requestId = String(entity.rowKey).slice(REQUEST_PREFIX.length);
-      records.push(toRecord(requestId, familyId, entity));
-    }
-    return records;
+      return toRecord(requestId, familyId, entity);
+    });
   }
 
   /** Wipes every `req:` row in the family's partition, regardless of status — family
