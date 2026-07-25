@@ -17,6 +17,9 @@ export interface PlanLimits {
   maxGroupDurationDays: number;
   /** Derived graceUntil for `grace`-policy groups (005 §2.2, §4). */
   groupGraceDays: number;
+  /** Caller-scoped (001 §9, §13.1): GET /export quota, counted against the caller even
+   * when exporting another family member (008 §3). */
+  exportsPerDay: number;
 }
 
 export interface PlanFlags {
@@ -46,6 +49,7 @@ const FREE_PLAN: PlanBenefits = {
     maxGroupMembers: 200,
     maxGroupDurationDays: 30,
     groupGraceDays: 7,
+    exportsPerDay: 3,
   },
   flags: {
     pushToLocate: true,
