@@ -13,9 +13,11 @@ import org.junit.Test
 /**
  * [ExportArtifactStore] is pure `java.io.File` logic (no `android.*`) — testable with a real temp
  * directory, no Robolectric/instrumented test needed. Covers specs/008-privacy-endpoints.md §3.1's
- * export-artifact hygiene rules 2 (deleted after handoff / before next write), 3 (no durable
- * identifier in the on-disk name), and 6 (never build a path from server-supplied input — this
- * store never even looks at server input, it always writes the fixed [ExportArtifactStore.FILE_NAME]).
+ * export-artifact hygiene rules 2 (amended: cleared before every new write, so at most one
+ * artifact ever exists — [ColdStartExportCleanupTest] and `LocalStateWiperTest` cover this rule's
+ * other two non-racing triggers, cold start and account-deletion wipe), 3 (no durable identifier
+ * in the on-disk name), and 6 (never build a path from server-supplied input — this store never
+ * even looks at server input, it always writes the fixed [ExportArtifactStore.FILE_NAME]).
  */
 class ExportArtifactStoreTest {
 

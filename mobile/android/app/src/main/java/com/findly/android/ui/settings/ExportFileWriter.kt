@@ -29,7 +29,9 @@ object ExportFileWriter {
     /** Writes [result]'s body via [ExportArtifactStore] (always at the fixed, non-identifying
      * on-disk name — the server-supplied `Content-Disposition` filename in [result] is display
      * input only and is never used to build a path, 008 §3.1 rules 3/6) and returns a chooser
-     * [Intent] ready to `startActivity`/launch via an `ActivityResultLauncher`. */
+     * [Intent] ready to `startActivity`. Deliberately a plain `startActivity`, not an
+     * `ActivityResultLauncher` — see [clearArtifacts]'s doc for why the chooser's result callback
+     * is not a safe cleanup signal. */
     fun buildShareIntent(context: Context, result: ExportResult): Intent {
         val file = ExportArtifactStore.write(exportsDir(context), result.body, result.suggestedFileName)
         val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
@@ -43,15 +45,18 @@ object ExportFileWriter {
     }
 
     /**
-     * Removes any export artifact (008 §3.1 rule 2). Called from three places:
-     * - `SettingsScreen.kt`'s share-intent `ActivityResultLauncher` callback, once the OS share
-     *   sheet interaction completes or is dismissed;
-     * - `SettingsScreen.kt`'s `DisposableEffect` on screen teardown, as a defensive backstop;
+     * Removes any export artifact (008 §3.1 rule 2, amended). Called from exactly two places —
+     * both are triggers that cannot race a share-sheet consumer still reading the file:
+     * - `AppContainer`'s cold-start wipe, so an artifact never survives a process restart;
      * - [DefaultLocalStateWiper], as part of the account-deletion local wipe.
      *
-     * [buildShareIntent] itself also clears any prior artifact before writing a new one
-     * (defends the "second export doesn't accumulate a second file" rule even if a caller skips
-     * the two triggers above).
+     * [buildShareIntent] itself also clears any prior artifact before writing a new one, so at
+     * most one ever exists. Deliberately **not** called from `SettingsScreen.kt` on the share
+     * chooser's return/dismissal or on screen teardown: an implicit `ACTION_SEND` chooser's
+     * activity-result callback fires as soon as the target activity is *launched*, not once it
+     * has finished reading the `content://` bytes — clearing on that signal would delete the file
+     * out from under lazily-reading targets like "Save to Files"/"Save to Drive" and silently
+     * break the export. Privacy that breaks the feature is a bug, not privacy (008 §3.1 rule 2).
      */
     fun clearArtifacts(context: Context) {
         ExportArtifactStore.clear(exportsDir(context))

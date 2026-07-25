@@ -25,11 +25,18 @@ object ExportArtifactStore {
     const val FILE_NAME = "export.json"
 
     /**
-     * Deletes any previously-written export artifact under [exportsDir]. Called:
-     * - before every new write ([write], below — 008 §3.1 rule 2: "defensively on the next export"),
-     * - after the share/save handoff completes or is dismissed ([ExportFileWriter.clearArtifacts]),
-     * - on screen teardown (`SettingsScreen.kt`'s `DisposableEffect`),
+     * Deletes any previously-written export artifact under [exportsDir]. Called only from
+     * triggers that cannot race a share-sheet consumer still reading the file (008 §3.1 rule 2,
+     * amended):
+     * - before every new write ([write], below — "at most one artifact ever exists"),
+     * - on the next app cold start ([ExportFileWriter.clearArtifacts], via `AppContainer`'s
+     *   startup wipe),
      * - and by the account-deletion local wipe ([DefaultLocalStateWiper]).
+     *
+     * Deliberately **not** called on share-sheet return/dismissal or screen teardown: an implicit
+     * `ACTION_SEND` chooser's activity-result callback fires as soon as the target activity is
+     * launched, not once it has actually read the `content://` bytes, so clearing on that signal
+     * would race and silently corrupt lazily-reading targets ("Save to Files"/"Save to Drive").
      *
      * Safe to call when [exportsDir] doesn't exist or is already empty.
      */
@@ -56,5 +63,20 @@ object ExportArtifactStore {
         val file = File(exportsDir, FILE_NAME)
         file.writeBytes(body)
         return file
+    }
+}
+
+/**
+ * The cold-start trigger of 008 §3.1 rule 2 (amended) — an export artifact must never survive a
+ * process restart. Pure Kotlin (delegates to the injected [ExportArtifactCleaner], no
+ * `android.*`) so it's unit-testable without a `Context`. `AppContainer`'s `init` block is the
+ * only call site: it runs exactly once per process, via `FindlyApplication.onCreate` — the one
+ * true "cold start" hook in this codebase, and unlike a screen-teardown or share-sheet-return
+ * signal, a fresh process start can never race a share-sheet consumer still reading the file from
+ * a previous process.
+ */
+class ColdStartExportCleanup(private val exportArtifactCleaner: ExportArtifactCleaner) {
+    fun run() {
+        exportArtifactCleaner.clear()
     }
 }

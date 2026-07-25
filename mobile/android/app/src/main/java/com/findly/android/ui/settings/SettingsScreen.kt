@@ -1,7 +1,5 @@
 package com.findly.android.ui.settings
 
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -10,7 +8,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -53,29 +50,20 @@ fun SettingsRoute(
     val privacyState by privacyViewModel.state.collectAsState()
     val context = LocalContext.current
 
-    // 008 §3.1 rule 2: the export artifact must not outlive the share/save interaction. Using
-    // StartActivityForResult (rather than a bare context.startActivity) is what makes "the
-    // chooser returned control to us" observable at all — the callback fires whether the user
-    // completed a share (the target activity launched then returned) or dismissed/cancelled the
-    // chooser without picking anything, which is exactly the "completes or is dismissed" trigger.
-    val shareLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
-        ExportFileWriter.clearArtifacts(context)
-    }
-
     // 001 §13.1 / specs/003 §12.4: the export body is handed to the OS share/save sheet unparsed,
     // exactly once per successful export — ExportFileWriter is the one place it touches disk.
+    // 008 §3.1 rule 2 (amended): the artifact is deliberately NOT cleared on the chooser's return,
+    // dismissal, or this screen's teardown — an implicit ACTION_SEND chooser's activity-result
+    // callback fires as soon as the target activity is *launched*, not once it has finished
+    // reading the content:// bytes, so clearing on that signal would race and silently corrupt
+    // lazily-reading share targets ("Save to Files"/"Save to Drive"). Cleanup instead happens
+    // before the next write (ExportArtifactStore.write, below), on the next cold start
+    // (AppContainer's startup wipe), and via the account-deletion local wipe.
     LaunchedEffect(privacyState.exportFlow) {
         val ready = privacyState.exportFlow as? ExportFlow.Ready ?: return@LaunchedEffect
         val intent = ExportFileWriter.buildShareIntent(context, ready.result)
-        shareLauncher.launch(intent)
+        context.startActivity(intent)
         privacyViewModel.dismissExportResult()
-    }
-
-    // 008 §3.1 rule 2's other defensive trigger: clear any artifact left behind if this screen is
-    // torn down before the chooser above ever returns (e.g. back-navigation mid-share, process
-    // death). Safe/idempotent — ExportArtifactStore.clear() is a no-op when nothing is there.
-    DisposableEffect(Unit) {
-        onDispose { ExportFileWriter.clearArtifacts(context) }
     }
 
     SettingsScreen(
