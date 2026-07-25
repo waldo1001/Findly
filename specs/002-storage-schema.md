@@ -207,9 +207,10 @@ Both operations run **synchronously in the request**, are **idempotent** (every 
 3. `IdempotencyMarkers` — one partition per deviceId collected in step 1 (on retry: none left, skip).
 4. If in a family: `LocateRequests` rows in the family partition where `requestedBy` **or** `targetUserId` is the subject (`fixJson` holds coordinates — single-partition scan).
 5. Owned groups: full §4.1-step-3 hard delete each (inline §12.5 semantics). Joined groups: leave semantics each — `Groups` member row, `GroupLastKnown` row, and the `Users` `group:` reverse-index row deleted together per group (retry finds only unprocessed groups).
-6. If in a family and **not** cascading: `history/{familyId}/{uid}/` prefix delete, then the events filtered rewrite (below), then the `Families` member row.
-7. If cascading (last parent / sole member — 008 §4.2): run the family deletion sequence below instead of step 6 (the whole-prefix wipe subsumes the rewrite).
-8. `Users` profile row **last** — the completion marker and the retry pointer (its `familyId` and residual `group:` rows are how a re-call finds the remaining work).
+6. `Usage` — the subject's **own uid-keyed** partition (§2.9). **Not conditional on family membership:** any period the account spent family-less accumulated rows under its own `uid` (001 §9's "per family/day — per user/day for family-less callers"), so a current family member can still hold them from before they joined, from between families, or from groups-only use. Family-**keyed** rows are household aggregates, explicitly *not* the subject's to erase (008 §2) — those go only with family deletion. Idempotent, so it is harmless when there are none.
+7. If in a family and **not** cascading: `history/{familyId}/{uid}/` prefix delete, then the events filtered rewrite (below), then the `Families` member row.
+8. If cascading (last parent / sole member — 008 §4.2): run the family deletion sequence below instead of step 7 (the whole-prefix wipe subsumes the rewrite).
+9. `Users` profile row **last** — the completion marker and the retry pointer (its `familyId` and residual `group:` rows are how a re-call finds the remaining work).
 
 **Family deletion (`DELETE /families/me`), in order:**
 
