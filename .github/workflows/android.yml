@@ -4,8 +4,10 @@ on:
   push:
     branches: [main]
     paths: ["mobile/android/**", ".github/workflows/android.yml"]
+  # Deliberately NO path filter on pull_request: android-build is a required check on main,
+  # and a path-filtered workflow never reports its checks on non-matching PRs — every
+  # non-mobile PR would hang on "Expected — waiting for status" (same fix as backend.yml).
   pull_request:
-    paths: ["mobile/android/**", ".github/workflows/android.yml"]
 
 # Least privilege (docs/security-review-checklist.md §2): this workflow only checks out,
 # builds, and runs unit tests — no deploy, no write access needed.
