@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Privacy Policy — Findly</title>
+<!--
+  DRAFT — task H7 (docs/store-readiness.md §0). Written from the actual technical
+  specs (specs/000-007) so every factual claim below is accurate to what the app
+  really does as of 2026-07-22 — but this is NOT a substitute for legal review.
+  Before this is used for a real store submission or handed to real users:
+    1. Have a lawyer (ideally one familiar with GDPR + children's-data rules in
+       your target countries) review this end to end.
+    2. Fill in every [BRACKETED PLACEHOLDER] below with real values.
+    3. Resolve the "Data export & deletion" section honestly — as of this draft,
+       there is no self-service export/delete endpoint yet (000 §O7, a spec still
+       to be written); either ship that feature first, or replace that section
+       with an accurate description of the manual process you'll actually offer.
+    4. Re-read this after any material change to what the app collects or does.
+  Static page, no external resources, no analytics/tracking on this page itself
+  (matches the rest of this site's convention — see index.html's own invariants).
+-->
+<style>
+  :root {
+    --primary: #00696e;
+    --on-primary: #ffffff;
+    --bg: #ffffff;
+    --fg: #1a1a1a;
+    --muted: #5f6b6c;
+    --card-bg: #f2f6f6;
+    --border: #d8e2e2;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --primary: #4cd4d9;
+      --on-primary: #00312f;
+      --bg: #121717;
+      --fg: #eef2f2;
+      --muted: #a7b4b4;
+      --card-bg: #1b2222;
+      --border: #2a3333;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.55;
+    display: flex;
+    justify-content: center;
+    padding: 2rem 1rem 3rem;
+  }
+  main { width: 100%; max-width: 42rem; }
+  h1 { font-size: 1.5rem; margin-bottom: 0.25rem; }
+  .updated { color: var(--muted); font-size: 0.9rem; margin-bottom: 2rem; }
+  h2 { font-size: 1.1rem; margin-top: 2rem; border-bottom: 1px solid var(--border); padding-bottom: 0.4rem; }
+  .placeholder { background: var(--card-bg); border: 1px dashed var(--border); border-radius: 6px; padding: 0.15rem 0.4rem; font-family: monospace; }
+  .draft-banner {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.9rem 1.1rem;
+    margin-bottom: 2rem;
+    font-size: 0.92rem;
+  }
+  ul { padding-left: 1.3rem; }
+  li { margin-bottom: 0.4rem; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Privacy Policy</h1>
+  <p class="updated">Last updated: [DATE] — Draft, pending legal review (see comment in page source)</p>
+
+  <div class="draft-banner">
+    <strong>This is a draft.</strong> It accurately describes what the app collects and does today,
+    but has not been reviewed by a lawyer and has placeholder contact/company details. Do not submit
+    this to an app store or link it from a real listing until that review is done.
+  </div>
+
+  <h2>Who runs this</h2>
+  <p>
+    Findly is a private, family-oriented location-sharing app operated by
+    <span class="placeholder">[YOUR NAME OR COMPANY]</span>. If you have questions about this policy
+    or your data, contact <span class="placeholder">[CONTACT EMAIL]</span>.
+  </p>
+
+  <h2>What we collect</h2>
+  <ul>
+    <li><strong>Phone number</strong> — used only to sign you in (there are no passwords). Your phone
+      number is handled by Firebase Authentication (operated by Google) and is <em>not</em> sent to or
+      stored by our own backend, ever.</li>
+    <li><strong>Location</strong> — latitude/longitude, accuracy, and the time each position was
+      recorded, reported periodically by devices you register.</li>
+    <li><strong>Device information</strong> — a device name/model, platform (Android/iOS), and a push
+      notification token, so the app can wake your device and send you alerts.</li>
+    <li><strong>Geofence events</strong> — if you set up a "place" (like Home or School), we record
+      when a device enters or leaves it.</li>
+    <li><strong>Group membership</strong> — if you create or join a temporary group, we store your
+      display name for that group and your membership record for as long as the group exists.</li>
+  </ul>
+  <p>We do not collect contacts, photos, messages, browsing history, or anything not listed above.</p>
+
+  <h2>Who can see your data</h2>
+  <p>
+    Your location is visible only to the other members of your <strong>family</strong> (people you've
+    explicitly invited) and, if you choose to join one, the other members of any <strong>temporary
+    group</strong> you're part of (people who have your group's join code). We never sell your data,
+    and we don't use it for advertising — there are no ad or analytics SDKs in this app.
+  </p>
+  <p>
+    Temporary groups are deliberately more limited: other members see only your current position and
+    display name — never your device details, battery level, or location history.
+  </p>
+
+  <h2>How long we keep it</h2>
+  <ul>
+    <li><strong>Family location history</strong> is kept for up to 400 days, though the app itself only
+      lets you look back 90 days by default.</li>
+    <li><strong>Temporary group locations</strong> are deleted automatically, typically within about a
+      day of the group ending — the exact timing depends on which of three expiry options the group's
+      creator chose (immediate deletion, a short grace period, or keeping just the member list as a
+      memento with locations still deleted).</li>
+    <li>If you leave a family or a group, your future location is no longer shared with it, but
+      historical records already stored follow the retention rules above.</li>
+  </ul>
+
+  <h2>Data export &amp; deletion</h2>
+  <p>
+    <span class="placeholder">
+      [TODO before this policy is complete: this app does not yet have a self-service "export my data"
+      or "delete my account" feature. Either build one before publishing this policy, or replace this
+      paragraph with an honest description of the manual process you'll offer instead — e.g. "email us
+      and we'll delete your data within N days." Google Play's account-deletion policy requires apps
+      with sign-in to offer an in-app or web-based deletion path, not email-only, so this needs to be
+      resolved before a Play Store submission, not just before "real" launch.]
+    </span>
+  </p>
+
+  <h2>Children's accounts</h2>
+  <p>
+    This app is designed for family use and may be used by children under a parent or guardian's
+    account setup and supervision. A parent/guardian is responsible for reviewing this policy and
+    consenting on behalf of any child members of their family. <span class="placeholder">[Add your
+    specific age-related commitments here once decided, e.g. minimum age, parental-consent process
+    details.]</span>
+  </p>
+
+  <h2>Where your data is stored</h2>
+  <p>
+    Data is stored on Microsoft Azure infrastructure in the <span class="placeholder">West Europe</span>
+    region. Authentication is handled by Firebase (Google). Push notifications are delivered via
+    Firebase Cloud Messaging and, for iOS, Apple's Push Notification service.
+  </p>
+
+  <h2>Security</h2>
+  <p>
+    All traffic between the app and our servers is encrypted (HTTPS/TLS). Sign-in uses phone-number
+    verification instead of passwords, removing an entire category of password-related risk. Temporary
+    group data is deliberately minimized (position-only, see above) specifically to limit what could
+    ever be exposed even in the event of a problem.
+  </p>
+
+  <h2>Your rights</h2>
+  <p>
+    If you're in the EU/EEA or another jurisdiction with similar protections, you have rights to access,
+    correct, or request deletion of your data, and to object to or restrict certain processing. Contact
+    <span class="placeholder">[CONTACT EMAIL]</span> to exercise these rights until the self-service
+    tools above exist.
+  </p>
+
+  <h2>Changes to this policy</h2>
+  <p>
+    We'll update the "last updated" date above whenever this policy changes, and post the new version
+    at this same address.
+  </p>
+</main>
+</body>
+</html>
