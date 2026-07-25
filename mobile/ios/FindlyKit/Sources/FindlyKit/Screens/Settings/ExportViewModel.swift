@@ -13,22 +13,37 @@ public final class ExportViewModel: ObservableObject {
     }
 
     @Published public private(set) var state: State = .loading
-    /// The raw export document (001 §13.1 — never decoded through the §3.1 envelope), ready to
-    /// hand to a `ShareLink`/document exporter once populated.
+    /// The raw export document (001 §13.1 — never decoded through the §3.1 envelope). Kept
+    /// alongside `shareURL` mainly for tests/observability — `ExportScreen` hands `shareURL`, not
+    /// this, to `ShareLink`.
     @Published public private(set) var exportedData: Data?
+    /// specs/008-privacy-endpoints.md §3.1 (review finding #1) — the app-private, opaquely-named
+    /// file `exportArtifactStore` just wrote `exportedData` to; `ExportScreen`'s `ShareLink` is
+    /// built from THIS, never from an ad hoc temp-file write of its own. `nil` whenever there is no
+    /// live artifact (before the first export, after `clearShareArtifact()`, or after a failure).
+    @Published public private(set) var shareURL: URL?
     @Published public private(set) var exportError: String?
 
     private let apiClient: FindlyAPIClient
+    private let exportArtifactStore: ExportArtifactStoring
 
-    public init(apiClient: FindlyAPIClient) {
+    public init(apiClient: FindlyAPIClient, exportArtifactStore: ExportArtifactStoring = InMemoryExportArtifactStore()) {
         self.apiClient = apiClient
+        self.exportArtifactStore = exportArtifactStore
     }
 
     public func load() async {
         state = .loading
         do {
             let envelope = try await apiClient.getMyFamily()
-            state = .loaded(isParent: envelope.data.me.role == "parent", members: envelope.data.members)
+            // specs/001-api-contract.md §13.1 (review finding #2) — `userId` targets "another"
+            // current family member; the §3.2 `members` roster includes the caller like any other
+            // entry, so the caller must never appear as one of their own export targets here (self
+            // is already covered by the separate "Export my data" row, `userId: nil`). Mirrors
+            // `DeleteAccountViewModel.load()`'s existing self-filter.
+            let me = envelope.data.me
+            let otherMembers = envelope.data.members.filter { $0.userId != me.userId }
+            state = .loaded(isParent: me.role == "parent", members: otherMembers)
         } catch {
             if let code = (error as? APIError)?.serverCode, code == .familyNotFound || code == .profileNotFound {
                 state = .loaded(isParent: false, members: [])
@@ -41,23 +56,34 @@ public final class ExportViewModel: ObservableObject {
     /// `userId == nil` exports the caller; a non-`nil` value is the parent-for-member path — the
     /// server enforces the role/membership check (`403 AUTH_FORBIDDEN`/`404 MEMBER_NOT_FOUND`), not
     /// this method.
+    ///
+    /// specs/008-privacy-endpoints.md §3.1 (review finding #1) — the fetched document is written to
+    /// disk through `exportArtifactStore`, never with an identifier-bearing filename and never left
+    /// for `ExportScreen` to materialize itself. `write(_:)` already removes any previous artifact
+    /// first (rule 2's "defensively on the next export"), so back-to-back exports (e.g. a parent
+    /// exporting two children in a row) never accumulate more than one file. A write failure clears
+    /// all published state rather than leaving a stale/successful-looking `shareURL` around.
     public func export(userId: String?) async {
         exportError = nil
         do {
-            exportedData = try await apiClient.exportData(userId: userId)
+            let data = try await apiClient.exportData(userId: userId)
+            let url = try exportArtifactStore.write(data)
+            exportedData = data
+            shareURL = url
         } catch {
+            exportedData = nil
+            shareURL = nil
             exportError = userFacingMessage(for: error)
         }
     }
 
-    /// specs/001-api-contract.md §13.1 — mirrors the server's own `Content-Disposition` filename
-    /// (`findly-export-<userId>-<yyyy-MM-dd>.json`) so the on-device share sheet suggests the same
-    /// name the server would have sent as a header — this client never reads response headers for
-    /// the raw-`Data` export path (`sendRawData`), by design, so this is computed client-side.
-    public static func suggestedFileName(userId: String, generatedAt: Date = Date()) -> String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd"
-        formatter.timeZone = TimeZone(identifier: "UTC")
-        return "findly-export-\(userId)-\(formatter.string(from: generatedAt)).json"
+    /// specs/008-privacy-endpoints.md §3.1 rule 2 (review finding #1) — `ExportScreen` calls this
+    /// once the share/save interaction completes OR is dismissed, and again on its own teardown
+    /// (`onDisappear`), so the artifact never survives longer than the interaction that created it.
+    /// Safe to call with nothing exported yet (a no-op on the store).
+    public func clearShareArtifact() {
+        exportArtifactStore.removeCurrentArtifact()
+        exportedData = nil
+        shareURL = nil
     }
 }

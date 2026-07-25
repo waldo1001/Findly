@@ -25,6 +25,13 @@ struct RootView: View {
     // once they land.
     private let deviceIdProvider: DeviceIdProviding
     private let fixQueue: FixQueue
+    // specs/008-privacy-endpoints.md §3.1 — ONE shared instance between `ExportViewModel` (which
+    // writes the artifact) and `DeleteAccountViewModel` (whose local wipe must remove it, rule 2)
+    // — two independent stores would let the wipe clear an artifact `ExportScreen` never wrote to.
+    // The real on-disk implementation (app-private storage + `.completeFileProtection` + backup
+    // exclusion, specs/008 §3.1 rules 1/4) — never the in-memory test fake — is what a real device
+    // build always gets here.
+    private let exportArtifactStore: ExportArtifactStoring
 
     // specs/004-ios-client.md §4.1, §8 — AuthMode.stubLocal (default) matches the backend's
     // AUTH_MODE=insecure-local (specs/001 §2.3); AuthMode.firebase swaps in FirebaseAuthProvider,
@@ -42,6 +49,7 @@ struct RootView: View {
         self.joinLinkHost = config.joinLinkHost
         self.deviceIdProvider = UserDefaultsDeviceIdProvider()
         self.fixQueue = FixQueue()
+        self.exportArtifactStore = FileManagerExportArtifactStore()
     }
 
     var body: some View {
@@ -131,14 +139,14 @@ struct RootView: View {
                 )
             case .exportData:
                 ExportScreen(
-                    viewModel: ExportViewModel(apiClient: apiClient),
-                    myUserId: authProvider.currentUserId ?? "me"
+                    viewModel: ExportViewModel(apiClient: apiClient, exportArtifactStore: exportArtifactStore)
                 )
             case .deleteAccount:
                 DeleteAccountScreen(
                     viewModel: DeleteAccountViewModel(
                         apiClient: apiClient, authProvider: authProvider,
-                        deviceIdProvider: deviceIdProvider, fixQueue: fixQueue
+                        deviceIdProvider: deviceIdProvider, fixQueue: fixQueue,
+                        exportArtifactStore: exportArtifactStore
                     ),
                     onCompleted: { coordinator.showSignIn() }
                 )
