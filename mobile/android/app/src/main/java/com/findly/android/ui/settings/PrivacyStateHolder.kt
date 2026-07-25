@@ -120,11 +120,23 @@ class PrivacyStateHolder(
         }
     }
 
-    /** Retries only the client-side Firebase step (008 §1.3) — `DELETE /users/me` already
-     * succeeded and is never re-sent. */
-    suspend fun retryFirebaseDelete() {
+    /**
+     * The 008 §1.3 recovery for a Firebase-delete failure — deliberately NOT a retry of
+     * [AuthProvider.deleteCurrentUser]. `user.delete()` commonly fails with `requires-recent-
+     * login`, and by this point `DELETE /users/me` has already succeeded irreversibly: the
+     * session is never going to become "recent" on its own, so a bare retry would fail forever
+     * (the reason [DeleteAccountFlow.FirebaseRetryNeeded] no longer means "retry" — it means
+     * "needs this escape hatch"). Signs the user out; `DELETE /users/me` is an idempotent no-op
+     * for a profile-less caller (008 §4.1) and this privacy UI stays reachable without a profile
+     * (008 §4.4), so after signing back in and re-running [startDeleteAccount]/
+     * [confirmDeleteAccount] the session is recent and [finishAccountDeletion] succeeds. Deliberately
+     * does NOT wipe local state here — the account isn't actually gone from this device's
+     * perspective until that later, successful run completes.
+     */
+    suspend fun signOutAfterFirebaseFailure() {
         if (_state.value.deleteAccountFlow !is DeleteAccountFlow.FirebaseRetryNeeded) return
-        finishAccountDeletion()
+        authProvider.signOut()
+        _state.value = _state.value.copy(deleteAccountFlow = DeleteAccountFlow.Idle)
     }
 
     /** Called only after a `204` from `DELETE /users/me` (008 §1.3's ordering). Captures the uid

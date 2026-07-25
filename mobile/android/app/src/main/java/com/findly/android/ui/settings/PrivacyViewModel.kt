@@ -48,8 +48,11 @@ class PrivacyViewModel(
         viewModelScope.launch { stateHolder.confirmDeleteAccount() }
     }
 
-    fun retryFirebaseDelete() {
-        viewModelScope.launch { stateHolder.retryFirebaseDelete() }
+    /** 008 §1.3's recovery for a Firebase-delete failure — signs out so the user can sign back in
+     * and re-run delete-account with a fresh session; deliberately NOT a bare retry (see
+     * [PrivacyStateHolder.signOutAfterFirebaseFailure]'s doc). */
+    fun signOutAfterFirebaseFailure() {
+        viewModelScope.launch { stateHolder.signOutAfterFirebaseFailure() }
     }
 
     fun startDeleteFamily() {

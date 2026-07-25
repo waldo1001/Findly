@@ -93,7 +93,7 @@ fun SettingsRoute(
         onAdvanceDeleteAccountConfirmation = privacyViewModel::advanceDeleteAccountConfirmation,
         onCancelDeleteAccount = privacyViewModel::cancelDeleteAccount,
         onConfirmDeleteAccount = privacyViewModel::confirmDeleteAccount,
-        onRetryFirebaseDelete = privacyViewModel::retryFirebaseDelete,
+        onSignOutAfterFirebaseFailure = privacyViewModel::signOutAfterFirebaseFailure,
         onStartDeleteFamily = privacyViewModel::startDeleteFamily,
         onUpdateDeleteFamilyTypedName = privacyViewModel::updateDeleteFamilyTypedName,
         onCancelDeleteFamily = privacyViewModel::cancelDeleteFamily,
@@ -119,7 +119,7 @@ fun SettingsScreen(
     onAdvanceDeleteAccountConfirmation: () -> Unit = {},
     onCancelDeleteAccount: () -> Unit = {},
     onConfirmDeleteAccount: () -> Unit = {},
-    onRetryFirebaseDelete: () -> Unit = {},
+    onSignOutAfterFirebaseFailure: () -> Unit = {},
     onStartDeleteFamily: () -> Unit = {},
     onUpdateDeleteFamilyTypedName: (String) -> Unit = {},
     onCancelDeleteFamily: () -> Unit = {},
@@ -214,7 +214,7 @@ fun SettingsScreen(
                 onAdvanceDeleteAccountConfirmation = onAdvanceDeleteAccountConfirmation,
                 onCancelDeleteAccount = onCancelDeleteAccount,
                 onConfirmDeleteAccount = onConfirmDeleteAccount,
-                onRetryFirebaseDelete = onRetryFirebaseDelete,
+                onSignOutAfterFirebaseFailure = onSignOutAfterFirebaseFailure,
                 onStartDeleteFamily = onStartDeleteFamily,
                 onUpdateDeleteFamilyTypedName = onUpdateDeleteFamilyTypedName,
                 onCancelDeleteFamily = onCancelDeleteFamily,
@@ -241,7 +241,7 @@ private fun PrivacySection(
     onAdvanceDeleteAccountConfirmation: () -> Unit,
     onCancelDeleteAccount: () -> Unit,
     onConfirmDeleteAccount: () -> Unit,
-    onRetryFirebaseDelete: () -> Unit,
+    onSignOutAfterFirebaseFailure: () -> Unit,
     onStartDeleteFamily: () -> Unit,
     onUpdateDeleteFamilyTypedName: (String) -> Unit,
     onCancelDeleteFamily: () -> Unit,
@@ -309,7 +309,7 @@ private fun PrivacySection(
         onAdvance = onAdvanceDeleteAccountConfirmation,
         onCancel = onCancelDeleteAccount,
         onConfirm = onConfirmDeleteAccount,
-        onRetryFirebase = onRetryFirebaseDelete,
+        onSignOutAfterFirebaseFailure = onSignOutAfterFirebaseFailure,
     )
 
     DeleteFamilyDialog(
@@ -321,14 +321,17 @@ private fun PrivacySection(
 }
 
 /** The two-step delete-account confirm (specs/008-privacy-endpoints.md §4.4) — [DeleteAccountFlow]
- * itself is what prevents a network call before the second dialog's confirm button. */
+ * itself is what prevents a network call before the second dialog's confirm button. The
+ * [DeleteAccountFlow.FirebaseRetryNeeded] dialog offers sign-out, never a bare retry (008 §1.3 —
+ * a retry is a trap: `requires-recent-login` never clears on its own; signing out and back in,
+ * then re-running delete-account from Settings, is the only real recovery). */
 @Composable
 private fun DeleteAccountDialogs(
     flow: DeleteAccountFlow,
     onAdvance: () -> Unit,
     onCancel: () -> Unit,
     onConfirm: () -> Unit,
-    onRetryFirebase: () -> Unit,
+    onSignOutAfterFirebaseFailure: () -> Unit,
 ) {
     when (flow) {
         is DeleteAccountFlow.Step1Confirming -> AlertDialog(
@@ -366,8 +369,14 @@ private fun DeleteAccountDialogs(
         DeleteAccountFlow.FirebaseRetryNeeded -> AlertDialog(
             onDismissRequest = {},
             title = { Text("Almost done") },
-            text = { Text("Your data was deleted, but we couldn't finish signing you out. Please retry.") },
-            confirmButton = { FindlyButton(text = "Retry", onClick = onRetryFirebase) },
+            text = {
+                Text(
+                    "Your data has already been deleted, but we couldn't finish signing you out " +
+                        "of this device. Sign out now, then sign back in and delete your account " +
+                        "again to finish — it won't create anything new.",
+                )
+            },
+            confirmButton = { FindlyButton(text = "Sign out", onClick = onSignOutAfterFirebaseFailure) },
         )
 
         is DeleteAccountFlow.Failed -> AlertDialog(

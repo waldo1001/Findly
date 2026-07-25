@@ -296,7 +296,7 @@ class PrivacyStateHolderTest {
     }
 
     @Test
-    fun `a Firebase delete failure after a successful 204 offers a retry path without wiping state`() = runTest {
+    fun `a Firebase delete failure after a successful 204 lands on FirebaseRetryNeeded without wiping state or signing out`() = runTest {
         val privacyApi = FakePrivacyApi()
         val authProvider = FakeAuthProvider().apply { deleteCurrentUserResult = false }
         val localStateWiper = FakeLocalStateWiper()
@@ -313,8 +313,19 @@ class PrivacyStateHolderTest {
         assertEquals(0, authProvider.signOutCallCount)
     }
 
+    // specs/008-privacy-endpoints.md §1.3 (normative recovery, updated post-review): a bare retry
+    // of deleteCurrentUser() is a trap — `requires-recent-login` never clears on its own, and by
+    // this point DELETE /users/me has already succeeded irreversibly, so retrying forever leaves
+    // the user stuck. The only correct recovery is sign out -> sign in again -> re-run delete,
+    // which works because DELETE /users/me is an idempotent no-op for a profile-less caller
+    // (§4.1) and the privacy UI stays reachable without a profile (§4.4): after a fresh sign-in
+    // the session is recent and deleteCurrentUser() succeeds. PrivacyStateHolder therefore never
+    // re-invokes deleteCurrentUser() itself from this state — it only offers the sign-out escape
+    // hatch, and does NOT wipe local state here (deletion doesn't actually complete until the
+    // caller re-runs the whole confirm flow after signing back in).
+
     @Test
-    fun `retryFirebaseDelete retries only the Firebase step, never re-calling DELETE users me`() = runTest {
+    fun `signOutAfterFirebaseFailure from FirebaseRetryNeeded signs out without re-calling DELETE users me or wiping local state`() = runTest {
         val privacyApi = FakePrivacyApi()
         val authProvider = FakeAuthProvider(initialState = AuthState.SignedIn("uid-parent")).apply { deleteCurrentUserResult = false }
         val localStateWiper = FakeLocalStateWiper()
@@ -325,25 +336,53 @@ class PrivacyStateHolderTest {
         h.confirmDeleteAccount()
         assertEquals(DeleteAccountFlow.FirebaseRetryNeeded, h.state.value.deleteAccountFlow)
 
-        authProvider.deleteCurrentUserResult = true
-        h.retryFirebaseDelete()
+        h.signOutAfterFirebaseFailure()
 
-        assertEquals(1, privacyApi.deleteAccountCallCount) // still just the one original call
-        assertEquals(2, authProvider.deleteCurrentUserCallCount)
-        assertEquals(listOf("uid-parent"), localStateWiper.wipeAllCalls)
+        assertEquals(1, privacyApi.deleteAccountCallCount) // never re-sent
+        assertEquals(1, authProvider.deleteCurrentUserCallCount) // never re-invoked — the trap
+        assertTrue("no local wipe until deletion genuinely completes", localStateWiper.wipeAllCalls.isEmpty())
         assertEquals(1, authProvider.signOutCallCount)
         assertEquals(DeleteAccountFlow.Idle, h.state.value.deleteAccountFlow)
     }
 
     @Test
-    fun `retryFirebaseDelete outside FirebaseRetryNeeded is a no-op`() = runTest {
+    fun `signOutAfterFirebaseFailure outside FirebaseRetryNeeded is a no-op`() = runTest {
         val authProvider = FakeAuthProvider()
         val h = holder(authProvider = authProvider, scope = backgroundScope)
         runCurrent()
 
-        h.retryFirebaseDelete()
+        h.signOutAfterFirebaseFailure()
 
-        assertEquals(0, authProvider.deleteCurrentUserCallCount)
+        assertEquals(0, authProvider.signOutCallCount)
+    }
+
+    @Test
+    fun `re-running confirm delete account after a fresh sign-in succeeds and wipes state (the actual 008 §1_3 recovery path)`() = runTest {
+        val privacyApi = FakePrivacyApi()
+        val authProvider = FakeAuthProvider(initialState = AuthState.SignedIn("uid-parent")).apply { deleteCurrentUserResult = false }
+        val localStateWiper = FakeLocalStateWiper()
+        val h = holder(privacyApi = privacyApi, authProvider = authProvider, localStateWiper = localStateWiper, scope = backgroundScope)
+        runCurrent()
+        h.startDeleteAccount()
+        h.advanceDeleteAccountConfirmation()
+        h.confirmDeleteAccount()
+        h.signOutAfterFirebaseFailure() // user signs out...
+
+        // ...signs back in (a fresh, recent session) and re-runs the whole confirm flow, exactly
+        // as they would from Settings (008 §4.4: reachable without a profile) — DELETE /users/me
+        // is idempotent (§4.1: "nothing left") and deleteCurrentUser() now succeeds.
+        authProvider.deleteCurrentUserResult = true
+        authProvider.signedInUidOnConfirm = "uid-parent"
+        authProvider.confirmCode("000000") // simulates the fresh sign-in
+        h.startDeleteAccount()
+        h.advanceDeleteAccountConfirmation()
+        h.confirmDeleteAccount()
+
+        assertEquals(2, privacyApi.deleteAccountCallCount) // the idempotent re-call, per §4.1
+        assertEquals(2, authProvider.deleteCurrentUserCallCount)
+        assertEquals(listOf("uid-parent"), localStateWiper.wipeAllCalls)
+        assertEquals(2, authProvider.signOutCallCount) // once for the escape hatch, once on success
+        assertEquals(DeleteAccountFlow.Idle, h.state.value.deleteAccountFlow)
     }
 
     // ------------------------------------------------------------------

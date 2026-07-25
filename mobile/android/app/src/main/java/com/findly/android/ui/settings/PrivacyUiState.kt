@@ -39,8 +39,11 @@ sealed class DeleteAccountFlow {
 
     data class Deleting(val cascadeWarning: Boolean) : DeleteAccountFlow()
 
-    /** The backend `204` succeeded but the Firebase SDK delete failed — offer retry (008 §1.3);
-     * [PrivacyStateHolder.retryFirebaseDelete] does NOT re-send `DELETE /users/me`. */
+    /** The backend `204` succeeded but the Firebase SDK delete failed (typically
+     * `requires-recent-login`). NOT a bare-retry state — a retry is a trap, since the session
+     * never becomes recent on its own (008 §1.3). The only way out is
+     * [PrivacyStateHolder.signOutAfterFirebaseFailure]: sign out, sign back in, and re-run the
+     * confirm flow from a fresh session. */
     data object FirebaseRetryNeeded : DeleteAccountFlow()
 
     data class Failed(val message: String) : DeleteAccountFlow()
