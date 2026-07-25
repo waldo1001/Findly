@@ -24,8 +24,11 @@ General rules:
 |---|---|---|
 | `{familyId}` | `meta` | `familyName`, `createdBy` (userId), `createdAt` |
 | `{familyId}` | `member:{userId}` | `role` (`parent`\|`member`), `displayName`, `joinedAt` |
+| `{familyId}` | `invite:{code}` | `expiresAt` (**index row** — canonical invite lives in §2.3) |
 
 Access: point read (`meta`); partition range scan on `member:` = roster (001 §3.2). Roster mutations are guarded updates (last-parent rule checked inside the scan, 001 §3.5/3.6).
+
+The `invite:` rows are the **invite reverse index** (same idiom as `Users`' `group:` rows, §2.2): written by invite creation (001 §3.3) *after* the canonical §2.3 row, read only by family deletion (§4.2) to find and revoke outstanding codes. The acceptance path never reads them. Consistency: a lost index row (partial-failure) merely leaves the canonical row to lazy 72 h expiry — harmless, because acceptance fails closed on a deleted family (001 §3.4); a lost canonical row makes the index row dead weight the family delete swallows.
 
 ### 2.2 `Users` — the auth hot path (+ group reverse index)
 
@@ -94,7 +97,7 @@ Conditional insert = the dedupe test (001 §5.1, §7.3; decision 000 §D7). Rows
 |---|---|---|
 | `{familyId}` — or `{userId}` for family-less callers (001 §9) | `{yyyy-MM-dd}:{metric}` | `count` (Int32) |
 
-Metrics: `locationBatches`, `fixes`, `locateRequests`, `geofenceEvents`, `apiCalls`. Increment = read → +n → ETag-guarded merge, retry loop (max 3, then log-and-drop — usage is telemetry, not billing… yet). Contention is a single family's own devices: single-digit writes/minute worst case. The locate quota (001 §6.1) reads `{today}:locateRequests`.
+Metrics: `locationBatches`, `fixes`, `locateRequests`, `geofenceEvents`, `apiCalls`, `exports` (001 §13.1 quota). Increment = read → +n → ETag-guarded merge, retry loop (max 3, then log-and-drop — usage is telemetry, not billing… yet). Contention is a single family's own devices: single-digit writes/minute worst case. The locate quota (001 §6.1) reads `{today}:locateRequests`.
 
 ### 2.10 `Groups`
 
@@ -177,7 +180,7 @@ Lifecycle management policy on the account (applied by `docs/azure-setup.md`; JS
 - Physical retention: delete at 400 d. Azure lifecycle management supports **only the delete action for append blobs** (no `tierToCool`) — history blobs stay in the hot tier until deletion, which at ~15 MB/year is cost-irrelevant.
 - The **free-tier read window** (`features.limits.historyDays: 90`) is enforced in the API (001 §5.3), *not* by lifecycle — upgrading a family to a longer window later requires zero data migration (data exists to 400 d regardless).
 - Tables (`LastKnown`, markers, usage) are small; no lifecycle needed. Marker/locate-request purge timers = backlog.
-- GDPR delete/export (000 §O7) will operate on the `{familyId}/…` prefixes — the path design makes per-family and per-user erasure a prefix delete.
+- GDPR delete/export operate on the `{familyId}/…` prefixes (spec'd: [008](008-privacy-endpoints.md), wire shapes 001 §13, ordering §4.2 below) — the path design makes per-family erasure and per-user *history* erasure a prefix delete. The one non-prefix case: per-user erasure of the interleaved `events/` blobs is a filtered rewrite (§4.2).
 
 ### 4.1 Group sweeper (the project's first timer-triggered function)
 
@@ -193,6 +196,34 @@ Per run: scan `GroupExpiry` (§2.13) partitions for dates `[today − 45 … tod
 
 Owner `DELETE /groups/{id}` (001 §12.5) performs step 3 inline and synchronously. Together with the lazy read checks (005 §2.3), this delivers the normative guarantee: group location data is API-unreadable from `endsAt` and physically gone within ~24 h of the policy's deletion point.
 
+### 4.2 Privacy deletion — coverage & ordering (001 §13, [008](008-privacy-endpoints.md))
+
+Both operations run **synchronously in the request**, are **idempotent** (every delete swallows not-found — the §4.1 sweeper idiom), and are **re-callable until clean** after any crash. The ordering below is normative: it makes the auth boundary flip *first* (stopping concurrent writes structurally) and keeps the *retry pointer* alive until last.
+
+**Account deletion (`DELETE /users/me`), in order:**
+
+1. `Devices` partition — the subject's device-originated calls now fail `DEVICE_NOT_FOUND`; ingest stops.
+2. `LastKnown` partition.
+3. `IdempotencyMarkers` — one partition per deviceId collected in step 1 (on retry: none left, skip).
+4. If in a family: `LocateRequests` rows in the family partition where `requestedBy` **or** `targetUserId` is the subject (`fixJson` holds coordinates — single-partition scan).
+5. Owned groups: full §4.1-step-3 hard delete each (inline §12.5 semantics). Joined groups: leave semantics each — `Groups` member row, `GroupLastKnown` row, and the `Users` `group:` reverse-index row deleted together per group (retry finds only unprocessed groups).
+6. If in a family and **not** cascading: `history/{familyId}/{uid}/` prefix delete, then the events filtered rewrite (below), then the `Families` member row.
+7. If cascading (last parent / sole member — 008 §4.2): run the family deletion sequence below instead of step 6 (the whole-prefix wipe subsumes the rewrite).
+8. `Users` profile row **last** — the completion marker and the retry pointer (its `familyId` and residual `group:` rows are how a re-call finds the remaining work).
+
+**Family deletion (`DELETE /families/me`), in order:**
+
+1. Every **other** member's `Users` profile: `familyId`/`role` → null — the auth boundary (001 §1.5) now routes their reports family-less (no history appends) and their family reads to `FAMILY_NOT_FOUND`.
+2. `Families` `member:` + `invite:` rows; each `invite:` row's canonical `Invites` row (§2.3) deleted with it.
+3. `Entitlements`, `Usage` partition, `LocateRequests` partition.
+4. Blob prefixes: `history/{familyId}/`, `events/{familyId}/`, `config/{familyId}/`.
+5. `Families` `meta`.
+6. The **caller's** profile flip (`familyId`/`role` → null) **last** — they must remain a parent-with-`familyId` so a retry can re-enter §1.6's role check and resume by `familyId` value (steps 2–5 proceed against a possibly-already-gone meta).
+
+**Events filtered rewrite (per-subject erasure from interleaved `events/` blobs):** for each `events/{familyId}/{y}/{M}/{d}.jsonl` blob: read all lines + capture the ETag; if no line carries the subject's `userId`, skip; else delete the blob with `If-Match` (a `412` — concurrent append — re-reads and retries, bounded like the §2.9 loop), recreate via create-if-not-exists (swallowing `409` — a §3.2 writer may have recreated it first), and re-append the filtered lines. No line of any *other* member is ever lost: the recreate-race unions the concurrent writer's fresh lines with the re-appended filtered history, and readers already sort (§3.2). Only the current UTC day-blob can race at all — past days are append-dead.
+
+Cost bound: ≤ ~800 small blob reads + the table partition deletes — seconds at family scale (§5), well inside consumption-plan limits. The export read path (001 §13.1) walks the same inventory read-only and is bounded identically.
+
 ## 5. Cost model (order of magnitude)
 
 Family of 5, 15-min intervals: ~480 fixes/day ≈ 480 appends + ~500 table transactions/day ≈ **well under €1/month** in transactions; storage ~15 MB/year of JSONL. The dominant cost is Functions consumption executions, still single-digit euros. Fits the 000 cost target with a wide margin.
@@ -205,6 +236,7 @@ Family of 5, 15-min intervals: ~480 fixes/day ≈ 480 appends + ~500 table trans
 - Cursor round-trip across day boundaries and multi-device merge.
 - Geofence ETag flow incl. `"0"` sentinel create and 412→409 mapping.
 - Groups: join membership-insert race (double join → one winner + `GROUP_ALREADY_MEMBER`); code-rotate sequence survives a crash between steps (old or new code resolves, never neither); `GroupLastKnown` only-newer race (same idiom as §2.5); sweeper re-run after simulated crash mid-hard-delete converges (expiry row deleted last); expiry-row re-bucket self-heals after a partial `PATCH endsAt` move.
+- Privacy deletion (§4.2): account-delete re-run after simulated crash at every step boundary converges (profile row last); family-delete likewise (caller's flip last); events filtered rewrite vs a genuinely concurrent §3.2 append — no other member's line lost, subject's lines gone; invite index + canonical row deleted together; export walks the full retention window (a blob older than `historyDays` appears in the export).
 - Unit tests (domain) MUST NOT touch any of this — fakes implement the ports (`backend/src/ports/`).
 
 ## Open questions

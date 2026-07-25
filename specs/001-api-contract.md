@@ -42,6 +42,7 @@ Every **error** response:
 - `code` is machine-stable and comes only from the catalog in §10.
 - `requestId` is server-generated per request and echoed in server logs (correlation).
 - Error responses MAY include `features` but clients MUST NOT rely on it.
+- **Enveloping exceptions (exhaustive):** the body-less successes (`204` — §3.6, §12.5, §12.8, §12.9, §13.2, §13.3; `304` — §7.1) and the **export download** (§13.1), whose success body is the export document itself, unenveloped.
 
 ### 1.4 Data conventions
 
@@ -68,7 +69,7 @@ A **profile** (the caller's `Users` row, 002 §2.2) and a **family** are distinc
 
 1. Verify the Firebase ID token (§2). Failure → 401 (§10).
 2. Load the caller's profile (`Users` table, 002 §2.2): `uid → { familyId | null, role | null, displayName }`.
-3. If **no profile exists**, the only permitted endpoints are the four profile-bootstrapping ones — `POST /families` (§3.1), `POST /invites/accept` (§3.4), `POST /groups` (§12.1), `POST /groups/join` (§12.6) — each of which creates the profile, taking `displayName` from the request. Everything else → `404 PROFILE_NOT_FOUND`.
+3. If **no profile exists**, the only permitted endpoints are the four profile-bootstrapping ones — `POST /families` (§3.1), `POST /invites/accept` (§3.4), `POST /groups` (§12.1), `POST /groups/join` (§12.6) — each of which creates the profile, taking `displayName` from the request — plus `DELETE /users/me` (§13.2), which is permitted without a profile as an idempotent no-op (008 §4.1: covers the never-bootstrapped state and makes deletion crash-retry converge). Everything else → `404 PROFILE_NOT_FOUND`.
 4. If the profile has **no family** (`familyId: null`), the family-scoped endpoints (§3.2–3.6, §5.2, §5.3, §6, §7) → `404 FAMILY_NOT_FOUND`. Device endpoints (§4), location reporting (§5.1), and group endpoints (§12) work without a family.
 5. Role checks per endpoint table (§1.6). Role/pause state is read from storage on **every** request — this, not token revocation, is the enforcement boundary (§2.4).
 
@@ -105,6 +106,9 @@ A **profile** (the caller's `Users` row, 002 §2.2) and a **family** are distinc
 | 12.8 | `POST /api/v1/groups/{groupId}/leave` | group member (not owner) |
 | 12.9 | `DELETE /api/v1/groups/{groupId}/members/{userId}` | group owner |
 | 12.10 | `GET /api/v1/groups/{groupId}/locations/latest` | group member |
+| 13.1 | `GET /api/v1/export` | any user with a profile (self); parent for another family member |
+| 13.2 | `DELETE /api/v1/users/me` | any authenticated user (works without a profile — §1.5.3) |
+| 13.3 | `DELETE /api/v1/families/me` | parent |
 
 In the "Caller" column, **member/parent** mean family roles (§3); **group member/owner** mean roles within the addressed group (§12). Family-role violation → `403 AUTH_FORBIDDEN`; non-membership of the addressed group → `404 GROUP_NOT_FOUND` (existence masked, §12); group-role violation by a member → `403 AUTH_FORBIDDEN`.
 
@@ -180,6 +184,8 @@ Side effects: `Users` profile row written; `Entitlements` record created with `s
 
 Invites are **single-use** and expire after **72 h**. The parent shares the code out-of-band (OS share sheet).
 
+Side effect: a family-side **index row** is recorded (002 §2.1) so family deletion (§13.3) can find and revoke outstanding invites; the acceptance path never reads it.
+
 ### 3.4 Accept invite — `POST /invites/accept`
 
 Caller MUST NOT already belong to a family (→ `409 FAMILY_ALREADY_MEMBER`).
@@ -192,7 +198,7 @@ Caller MUST NOT already belong to a family (→ `409 FAMILY_ALREADY_MEMBER`).
 { "familyId": "fam_…", "familyName": "Wauters", "role": "member" }
 ```
 
-Errors: unknown/consumed code → `400 INVITE_INVALID` / `400 INVITE_ALREADY_USED`; past `expiresAt` → `410 INVITE_EXPIRED`. Consumption is race-safe (ETag-conditional, 002 §2) — exactly one concurrent accept wins.
+Errors: unknown/consumed code → `400 INVITE_INVALID` / `400 INVITE_ALREADY_USED`; past `expiresAt` → `410 INVITE_EXPIRED`. Consumption is race-safe (ETag-conditional, 002 §2) — exactly one concurrent accept wins. **Fail-closed on deleted families (008 §5.3):** acceptance MUST verify the family still exists before creating any membership — a code whose family is gone (family deleted, §13.3) → `400 INVITE_INVALID`, indistinguishable from an unknown code; a deleted family can never be resurrected through a straggler invite row.
 
 ### 3.5 Update member — `PATCH /families/me/members/{userId}` (parent)
 
@@ -207,7 +213,7 @@ A parent MUST NOT demote themselves if they are the last parent (→ `400 VALIDA
 
 ### 3.6 Remove member — `DELETE /families/me/members/{userId}` (parent)
 
-`204` (empty body — one of the body-less success responses, together with §7.1's `304` and the group `204`s of §12.5/§12.8/§12.9). Removes membership, profile link, and the member's device registrations. History blobs are untouched (retention policy governs them). The last parent cannot remove themselves (`400 VALIDATION_FAILED`, `details.reason: "lastParent"`).
+`204` (empty body — one of the body-less success responses, together with §7.1's `304` and the `204`s of §12.5/§12.8/§12.9/§13.2/§13.3). Removes membership, profile link, and the member's device registrations. History blobs are untouched (retention policy governs them). The last parent cannot remove themselves (`400 VALIDATION_FAILED`, `details.reason: "lastParent"`).
 
 ---
 
@@ -561,7 +567,8 @@ Shape (present in every success envelope):
   "limits": { "maxDevices": 10, "maxGeofences": 20, "historyDays": 90,
               "minSyncIntervalMinutes": 5, "locateRequestsPerDay": 100,
               "maxActiveGroups": 5, "maxGroupMembers": 200,
-              "maxGroupDurationDays": 30, "groupGraceDays": 7 },
+              "maxGroupDurationDays": 30, "groupGraceDays": 7,
+              "exportsPerDay": 3 },
   "flags": { "pushToLocate": true, "geofencing": true, "historyReplay": true, "groups": true } }
 ```
 
@@ -569,9 +576,9 @@ Shape (present in every success envelope):
 - `"active"` currently mirrors `"free"` — it is a reserved placeholder; changing plan benefits later = editing the matrix, nothing else.
 - The `features` envelope always reflects the **caller**: their family's entitlement when they have one, else an implicit `"free"` (family-less users have no `Entitlements` row — 002 §2.6).
 - **Group capacity is governed by the owner's plan:** `maxGroupMembers` is resolved from the group **owner's** entitlement at join time (§12.6) — the future "owner upgrades → bigger group" story without snapshotting limits into storage. The caller-scoped group limits (`maxActiveGroups`, `maxGroupDurationDays`) enforce against the caller's own `features`.
-- **Every** limit enforcement point (device cap §4.1, geofence cap §7.2, history window §5.3/§7.4, locate quota §6.1, interval floor §1.4/§4.3, group caps §12.1/§12.4/§12.6) reads this object — never a literal.
-- Plan-cap violations (`maxDevices`, `maxGeofences`, `locateRequestsPerDay`, `minSyncIntervalMinutes`, `maxActiveGroups`, `maxGroupDurationDays`) use HTTP **402** `LIMIT_EXCEEDED` with `details.limit: "<limits key>"` — the single future upsell hook. Two deliberate exceptions: the history window is `400 VALIDATION_FAILED`, `details.reason: "beyondRetention"` (§5.3/§7.4), because it bounds a query, not a plan action; and group capacity is `409 GROUP_FULL` (§12.6), because the joiner hitting it isn't the upsell target — the owner's plan governs capacity.
-- **Usage increment rules** (stored per family/day — per user/day for family-less callers, 002 §2.9): `apiCalls` +1 per authenticated request (any endpoint, once auth succeeds); `locationBatches` +1 per accepted non-duplicate batch; `fixes` + accepted-fix count; `locateRequests` +1 per `201`-created request only (coalesced `200`s and rejections excluded — this metric feeds the §6.1 quota); `geofenceEvents` + accepted-event count.
+- **Every** limit enforcement point (device cap §4.1, geofence cap §7.2, history window §5.3/§7.4, locate quota §6.1, interval floor §1.4/§4.3, group caps §12.1/§12.4/§12.6, export quota §13.1) reads this object — never a literal.
+- Plan-cap violations (`maxDevices`, `maxGeofences`, `locateRequestsPerDay`, `minSyncIntervalMinutes`, `maxActiveGroups`, `maxGroupDurationDays`, `exportsPerDay`) use HTTP **402** `LIMIT_EXCEEDED` with `details.limit: "<limits key>"` — the single future upsell hook. Two deliberate exceptions: the history window is `400 VALIDATION_FAILED`, `details.reason: "beyondRetention"` (§5.3/§7.4), because it bounds a query, not a plan action; and group capacity is `409 GROUP_FULL` (§12.6), because the joiner hitting it isn't the upsell target — the owner's plan governs capacity.
+- **Usage increment rules** (stored per family/day — per user/day for family-less callers, 002 §2.9): `apiCalls` +1 per authenticated request (any endpoint, once auth succeeds); `locationBatches` +1 per accepted non-duplicate batch; `fixes` + accepted-fix count; `locateRequests` +1 per `201`-created request only (coalesced `200`s and rejections excluded — this metric feeds the §6.1 quota); `geofenceEvents` + accepted-event count; `exports` +1 per successful §13.1 download (feeds the `exportsPerDay` quota; counted against the **caller**, also when exporting another member).
 
 ---
 
@@ -602,7 +609,7 @@ Shape (present in every success envelope):
 | 400 | `GROUP_CODE_INVALID` | Unknown or rotated group join code (§12.6) | — |
 | 400 | `VALIDATION_FAILED` | Any request-schema violation | `{ "fields": ["fixes[3].recordedAt"], "reason?": "lastParent" \| "beyondRetention" \| "deviceIdInUse" \| "ownerCannotLeave" \| … }` |
 | 400 | `LOCATION_BATCH_TOO_LARGE` | > 100 fixes (§5.1) | `{ "max": 100 }` |
-| 402 | `LIMIT_EXCEEDED` | Plan limit hit | `{ "limit": "maxDevices" \| "maxGeofences" \| "locateRequestsPerDay" \| "minSyncIntervalMinutes" \| "maxActiveGroups" \| "maxGroupDurationDays" }` |
+| 402 | `LIMIT_EXCEEDED` | Plan limit hit | `{ "limit": "maxDevices" \| "maxGeofences" \| "locateRequestsPerDay" \| "minSyncIntervalMinutes" \| "maxActiveGroups" \| "maxGroupDurationDays" \| "exportsPerDay" }` |
 | 429 | `RATE_LIMITED` | Per-user throttle (reserved; not enforced in v1) | `{ "retryAfterSeconds": 30 }` |
 | 500 | `INTERNAL_ERROR` | Unhandled failure; never leaks internals | — |
 | 503 | `PUSH_DELIVERY_FAILED` | Reserved. The locate flow reports push failure via `status: "pushFailed"` (§6.2), never via this error; geofence fan-out failures are silent best-effort. Kept for future endpoints where a synchronous push IS the operation. | — |
@@ -613,7 +620,7 @@ Envelope format: §1.3. `message` is for logs/debugging only; clients map `code`
 
 ## 11. Test checklist (conforming backend)
 
-- Envelope: every success includes `features`; every error matches §1.3 with a `requestId`; §3.6/§12.5/§12.8/§12.9 return bare `204`.
+- Envelope: every success includes `features`; every error matches §1.3 with a `requestId`; §3.6/§12.5/§12.8/§12.9/§13.2/§13.3 return bare `204`; §13.1 returns the unenveloped export document.
 - Auth: each 401 variant; role matrix per §1.6; no-family allowance (§1.5.3); pause enforcement on §5.1/§7.3 (with `deviceSettings` in `details`) but **not** §6.3.
 - Family: create → creator parent + entitlements `free`; double-create/join → `FAMILY_ALREADY_MEMBER`; invite single-use under concurrency; expiry; last-parent protection.
 - Devices: defaults on first registration; upsert preserves parent-managed settings; device cap counts only new registrations; owner-PATCH restricted to `pushToken`.
@@ -625,6 +632,7 @@ Envelope format: §1.3. `message` is for logs/debugging only; clients map `code`
 - Features: limits read from `PLAN_MATRIX` only (mutation testing should kill hardcoded-literal mutants).
 - Profiles: the four §1.5.3 bootstrap endpoints create a profile; `PROFILE_NOT_FOUND` everywhere else without one; family-less caller on family-scoped endpoints → `FAMILY_NOT_FOUND`; family-less §4.2 own-devices response and §4.3 full-field own-device PATCH.
 - Groups (§12; full matrix in 005 §7): lifecycle × policy enforcement; owned+joined `maxActiveGroups` count; owner-plan `GROUP_FULL`; join/rotate/kick/leave code paths; `GROUP_NOT_FOUND` masking for non-members; §5.1 fan-out (active groups only, position-only fields, only-newer) and the family-less history gate; sweeper per-policy deletion + idempotent re-run.
+- Privacy (§13; full matrix in 008 §9): export coverage/authorization/quota; account-delete erasure completeness, ordering (devices first, profile last), crash-retry idempotency, no-profile no-op, last-parent/sole-member cascade; family-delete coverage, member survival, invite revocation + §3.4 fail-closed.
 
 ---
 
@@ -739,6 +747,50 @@ Only on `active` groups — `ended`/`archived`/expired → `410 GROUP_EXPIRED` (
 ```
 
 `isStale` uses the §5.2 formula, computed from the `syncIntervalMinutes` frozen into the group position at write time (002 §2.12) — it reflects the reporting device's interval as of its last fix.
+
+---
+
+## 13. Privacy: export & deletion
+
+Concepts, guarantees, and the web deletion surface are normative in [008](008-privacy-endpoints.md); this section owns the wire shapes. Storage coverage and deletion ordering: 002 §4.2.
+
+### 13.1 Export — `GET /export`
+
+Query: `userId` (optional — another **current member of the caller's family**, parent-only; defaults to the caller). Caller needs a profile (`404 PROFILE_NOT_FOUND` otherwise). A non-parent supplying `userId` ≠ self → `403 AUTH_FORBIDDEN`; a parent supplying a non-member → `404 MEMBER_NOT_FOUND`. Quota: `features.limits.exportsPerDay` per caller per UTC day (→ `402 LIMIT_EXCEEDED`, `details.limit: "exportsPerDay"`).
+
+**Response (`200`) is the export document itself — NOT enveloped** (§1.3 exception; there is no `features` object): `Content-Type: application/json; charset=utf-8`, `Content-Disposition: attachment; filename="findly-export-<userId>-<yyyy-MM-dd>.json"`. Location history spans the **full physical retention window** (002 §4), deliberately beyond `features.limits.historyDays` (008 §3). No pagination; the document is size-bounded by retention at family scale.
+
+```json
+{ "formatVersion": 1,
+  "generatedAt": "2026-07-25T14:00:00Z",
+  "subject": { "userId": "<uid>", "displayName": "Noor" },
+  "family": { "familyId": "fam_…", "familyName": "Wauters",
+              "role": "member", "joinedAt": "…" },          // null when family-less
+  "devices": [ { /* §4.1 response object — push tokens never included */ } ],
+  "lastKnown": [ { "deviceId": "…", "lat": 51.05, "lon": 3.71, "accuracyM": 12.5,
+                   "batteryPct": 78, "recordedAt": "…", "receivedAt": "…", "source": "periodic" } ],
+  "locationHistory": [ { /* 002 §3.2 history line + "deviceId" */ } ],
+  "geofenceEvents": [ { /* 002 §3.2 event line — subject's own lines only */ } ],
+  "groups": [ { "groupId": "grp_…", "name": "Festival crew", "role": "member",
+                "displayName": "Noor", "joinedAt": "…", "state": "active", "endsAt": "…" } ],
+  "groupPositions": [ { "groupId": "grp_…", "lat": 51.05, "lon": 3.71,
+                        "accuracyM": 15.0, "recordedAt": "…" } ],
+  "usage": [ { "date": "2026-07-25", "metric": "apiCalls", "count": 41 } ],   // uid-keyed rows only (008 §2)
+  "providerData": { "firebaseAuthentication":
+      "Your phone number and sign-in metadata are held by Firebase Authentication, not by Findly; they are deleted when your account is deleted." } }
+```
+
+Success increments usage metric `exports` (§9).
+
+### 13.2 Delete my account — `DELETE /users/me`
+
+`204` (empty body). Available to **every** authenticated user — including one with **no profile** (idempotent no-op, §1.5.3). Synchronous, irreversible erasure of every subject-scoped item (coverage table: 008 §2; ordering + crash-retry semantics: 002 §4.2 — devices first, profile row last). Owned groups are hard-deleted with §12.5 semantics; joined groups are left with §12.8 semantics. **Cascade rule (008 §4.2):** when the caller's departure would leave their family without any parent (last parent, or sole member), the call performs the full §13.3 family deletion inline; otherwise the family survives and only the caller is erased.
+
+After `204`, the client MUST delete the Firebase Auth user via the SDK (008 §1.3) — the backend never touches Firebase accounts. The endpoint is re-callable until clean; clients SHOULD retry on 5xx/timeout.
+
+### 13.3 Delete my family — `DELETE /families/me` (parent)
+
+`204` (empty body). Synchronous, irreversible deletion of every family-scoped item — identity, roster, entitlements, usage, locate requests, invites (revoked via the 002 §2.1 index rows), geofence config, and **all** history/event blobs for every member (coverage: 008 §2; ordering: 002 §4.2 — other members' profiles flip family-less first, caller's profile last). Member **accounts survive** family-less (008 §5.2): their devices, last-known, and groups are untouched; there is no push notification in v1 — members land on `404 FAMILY_NOT_FOUND` → the family-less home. Re-callable until clean.
 
 ## Open questions
 

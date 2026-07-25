@@ -177,6 +177,14 @@ All request/response field names match 001 verbatim (`camelCase`, identical keys
 - SwiftUI delivers universal links through the existing `.onOpenURL`; `GroupCodeParsing` (FindlyKit, pure/testable) gains the https form — `{JOIN_LINK_HOST}` host + `/g` path + **fragment-carried code** (007 §1), same charset whitelist and hyphen tolerance as the `findly://` form; wrong host/path rejected; valid link without a usable fragment routes to `GroupJoinScreen` with an empty prefill.
 - Sharing: `ShareLink` switches to the 007 §1 https link; the detail screen renders a **QR of that link generated on-device** (CoreImage `CIQRCodeGenerator` — never a networked QR service, 007 §4). The `findly://` deep link stays supported.
 
+### 3.6 Privacy: export & account deletion ([008](008-privacy-endpoints.md); wire shapes 001 §13)
+
+Screen inventory and behavior mirror the Android spec **exactly** — see [003 §12.4](003-android-client.md) (settings entries for export / delete account / delete family; two-step confirmations incl. the last-parent cascade wording; family-name typing on family delete; `FAMILY_NOT_FOUND` lands on the existing family-less home). iOS specifics:
+
+- The three 001 §13 calls extend the §3.2 client mapping in FindlyKit. `GET /export` is the one **unenveloped** response (001 §13.1): the client method returns raw `Data` (never decoded through the §3.1 envelope path) handed to a `ShareLink`/document exporter; `.confirmationDialog` is the confirmation surface (the I5-established pattern).
+- After `DELETE /users/me` returns `204`: `Auth.auth().currentUser?.delete()` (008 §1.3 — may require recent login; on failure offer re-authenticate → retry); then wipe all local state (fix queue, cached ETags, `deviceId`, Keychain incl. the I7 `KeychainStore` entries) and return to sign-in.
+- Test checklist additions (§10 applies): confirmation gating, cascade wording trigger, Firebase-delete ordering + failure/retry, Keychain/local wipe completeness, raw-`Data` export path bypassing envelope decoding, `exportsPerDay` message mapping.
+
 ### 3.3 Token-expiry retry (001 §2.1)
 
 `URLSessionAPIClient` catches a decoded `AUTH_TOKEN_EXPIRED` error, calls `authProvider.refreshIDToken()`, and retries the **same** request exactly once; a second `AUTH_TOKEN_EXPIRED` propagates to the caller. This is orthogonal to §4 below (which reacts to the **push**-token refreshing, not the Firebase ID token).
