@@ -13,6 +13,10 @@
       "rewrite": "/terms.html"
     },
     {
+      "route": "/delete-account",
+      "rewrite": "/delete-account.html"
+    },
+    {
       "route": "/.well-known/apple-app-site-association",
       "rewrite": "/.well-known/apple-app-site-association.json"
     },
