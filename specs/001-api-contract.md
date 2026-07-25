@@ -758,7 +758,7 @@ Concepts, guarantees, and the web deletion surface are normative in [008](008-pr
 
 Query: `userId` (optional — another **current member of the caller's family**, parent-only; defaults to the caller). Caller needs a profile (`404 PROFILE_NOT_FOUND` otherwise). A non-parent supplying `userId` ≠ self → `403 AUTH_FORBIDDEN`; a parent supplying a non-member → `404 MEMBER_NOT_FOUND`. Quota: `features.limits.exportsPerDay` per caller per UTC day (→ `402 LIMIT_EXCEEDED`, `details.limit: "exportsPerDay"`).
 
-**Response (`200`) is the export document itself — NOT enveloped** (§1.3 exception; there is no `features` object): `Content-Type: application/json; charset=utf-8`, `Content-Disposition: attachment; filename="findly-export-<userId>-<yyyy-MM-dd>.json"`. Location history spans the **full physical retention window** (002 §4), deliberately beyond `features.limits.historyDays` (008 §3). No pagination; the document is size-bounded by retention at family scale.
+**Response (`200`) is the export document itself — NOT enveloped** (§1.3 exception; there is no `features` object): `Content-Type: application/json; charset=utf-8`, `Content-Disposition: attachment; filename="findly-export-<userId>-<yyyy-MM-dd>.json"`, and **`Cache-Control: no-store`** (REQUIRED — without it an intermediary or the client's own HTTP cache silently persists a second plaintext copy of the subject's full history; see 008 §3.1). Location history spans the **full physical retention window** (002 §4), deliberately beyond `features.limits.historyDays` (008 §3). No pagination; the document is size-bounded by retention at family scale.
 
 ```json
 { "formatVersion": 1,

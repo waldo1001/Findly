@@ -1,0 +1,20 @@
+Findly — Stepped F, canonical geometry (1024 x 1024 master)
+
+PIN
+  head circle      r 200, centre (512, 450)
+  tip              (512, 772), corner radius 30
+  path             M 355.3 574.2 A 200 200 0 1 1 668.7 574.2 L 540.5 734.5 Q 512 772 483.5 734.5 Z
+
+BARS  (height 44, corner radius 22, gap 26, left-aligned at x=412)
+  bar 1            x 412  y 354  w 200
+  bar 2            x 412  y 424  w 136
+  bar 3            x 412  y 494  w  44
+  stack centre     y 446 (4px above true centre — optical)
+
+HALO
+  circle           cx 512  cy 512  r 424   stroke 10  dash 26/22  white @ 42%
+  rounded square   x/y 88  848 x 848  r 180  stroke 10  dash 26/22  white @ 26%
+
+ANDROID
+  glyph group scaled 0.738 about (512,512) so the halo lands on r 313,
+  inside the 66dp keyline (safe zone is 72dp of a 108dp canvas).

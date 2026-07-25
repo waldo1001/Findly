@@ -117,7 +117,7 @@ Elevation (dp): `level0`=0, `level1`=1, `level2`=3, `level3`=6.
 - **Stateless presentational components** in `ui/designsystem/components/`: `FindlyButton`, `FindlyCard`, `FindlyListRow`, `FindlyStatusChip`, `FindlyMapMarkerBubble`, `FindlyTopBar`, `FindlyEmptyState`, `FindlyLoadingState`, `FindlyErrorState` (A1); **A2 additively adds** `FindlyTextField` (labeled single-line input — geofence editor fields, invite code/display-name entry), `FindlySwitchRow` (a `FindlyListRow` with a trailing, `FindlyTheme`-recolored `Switch` — device pause/tracking toggles, geofence notify flags), and `FindlySectionHeader` (a titled group label — settings screen's "Devices"/"Members" grouping). Each takes plain data (strings, booleans, callbacks) and renders using only `FindlyTheme.*` — never a screen-specific dependency, never a ViewModel reference.
 - Screens (`ui/home/HomeScreen.kt` in A1; `ui/map`, `ui/history`, `ui/geofences`, `ui/locate`, `ui/settings`, `ui/invites` in A2; `ui/groups` in A5) compose these components and are driven by state hoisted from a ViewModel. A `ComponentGalleryPreview.kt` renders every component in both themes side by side, as a visual regression aid for a future design swap. Three documented exceptions to "components only" exist, each a platform primitive with real behavior beyond styling — never a substitute for a missing design-system component. The two Material3 exceptions (1–2) theme correctly with zero extra work because `FindlyTheme` already maps every token onto a real Material3 `MaterialTheme` (previous bullet's "any un-migrated Material3 primitive still themes correctly"); the third (3) is an OS-level surface that needs no `FindlyTheme` styling at all:
   1. A2's history screen uses Material3's `DatePicker`/`DatePickerDialog` directly for the date-range inputs (a calendar widget, not a styling primitive).
-  2. A5's `GroupDetailScreen` uses Material3's `AlertDialog` directly for owner-action confirmations (rename/extend/rotate/kick/delete, §12.2) — a modal-overlay primitive with its own dismiss/back-press handling, not a styling primitive; re-implementing a confirm dialog as a design-system component was judged not worth it for five call sites in one screen.
+  2. A5's `GroupDetailScreen` uses Material3's `AlertDialog` directly for owner-action confirmations (rename/extend/rotate/kick/delete, §12.2) — a modal-overlay primitive with its own dismiss/back-press handling, not a styling primitive; re-implementing a confirm dialog as a design-system component was judged not worth it for five call sites in one screen. **A8's `SettingsScreen` uses it on the same grounds** for the §12.4 delete-account / delete-family confirmations.
   3. A5's `GroupMapScreen`/`GroupDetailScreen` use a plain Android `Toast` for the `GROUP_EXPIRED` bounce-back notice (§12.2) — an OS-level surface outside the app's own UI entirely (unlike 1–2, it needs none of `FindlyTheme`'s styling), the simplest way to show a transient, unmissable notice immediately before navigating away.
 
 ## 5. Networking layer — endpoint → client mapping
@@ -259,6 +259,8 @@ interface PushTokenProvider {
 }
 ```
 
+**Runtime contract:** the real FCM implementation and the handling of all four push types are normative in **[009 §5](009-device-runtime.md)** (task A9).
+
 `StubPushTokenProvider` is the A1 implementation (no real FCM SDK wired — `google-services.json` is absent per H1-waiver): it never emits a token, documented as a TODO(H1)/TODO(A2) wiring point for `FirebaseMessaging.getInstance()` + a `FirebaseMessagingService.onNewToken` override. The **contract** is fixed now: whatever the real implementation is, `AppContainer` wires its `addRefreshListener` to `deviceRegistrar::onPushTokenRefreshed`, which re-calls `POST /devices` with the new token — satisfying 001 §4.1 / 000 §O4 ("Clients MUST re-`POST /devices` on token refresh") without any future call-site change.
 
 ## 10. Offline fix-queue & `batchId` idempotency (001 §5.1)
@@ -303,11 +305,16 @@ Ties `FixQueueStore` + `LocationsApi` together: `syncOnce()` calls `nextBatch()`
 
 The task allows "Room or an abstraction." **A1 ships the abstraction (`FixQueueStore`) plus an in-memory implementation (`InMemoryFixQueueStore`)**, not a Room-backed one, for one concrete reason: this sandbox has no Android/Gradle toolchain to compile-check a Room + KSP annotation-processing setup (§13.4), and an unverifiable `@Entity`/`@Dao`/KSP-version pairing is a worse risk than an honestly-scoped in-memory placeholder behind the exact interface a persistent implementation will later satisfy with zero call-site changes. This is a deliberate, documented scope decision, not an oversight — flagged again in the final task report.
 
-### 10.5 Periodic worker — scaffold only
+### 10.5 Periodic worker — scaffold only (real scheduling: [009 §3](009-device-runtime.md))
+
+> The scheduling strategy this scaffold is waiting for — WorkManager for ≥15 min, a `FOREGROUND_SERVICE_LOCATION` service for 5/10 min, once-per-local-day for 1440, plus the durable Room-backed queue that replaces §10.4's in-memory store — is normative in **[009 §2–§3](009-device-runtime.md)** (tasks A10/A11).
+
 
 `queue/worker/LocationSyncWorker` (a `CoroutineWorker` skeleton) and `LocationSyncScheduler` (holds the WorkManager periodic-request-building TODO) exist as untested Android-framework glue, per the task's explicit allowance ("the periodic worker may be scaffolded with clear runtime TODOs"). All actual sync decision logic lives in the tested `LocationSyncCoordinator` above; the worker's job is only to invoke it on a schedule once WorkManager enqueueing is wired (A2/H1-adjacent).
 
 ## 11. Permission & onboarding flow (000 §O2)
+
+> Cross-platform permission rules (prominent disclosure before the OS prompt, denial banner, foreground re-check, revocation handling) are normative in **[009 §7](009-device-runtime.md)**; the Android staging below is the platform detail it references.
 
 Normative for A2's implementation (no permission-request UI ships in A1 beyond declaring manifest permissions):
 
@@ -359,7 +366,7 @@ Error rendering: the six group codes surface through `ApiErrorUserMessage` like 
 Extends the §5 endpoint mapping with the three 001 §13 calls. New rules on top of the standard client stack:
 
 - **Export** (settings entry, all users; parents additionally per family member from the member row): `GET /export` is the one **unenveloped** response in the API (001 §13.1) — the client saves the raw body via the OS share/save sheet (`ACTION_CREATE_DOCUMENT` or share intent), never parses it beyond size/error handling. `402 LIMIT_EXCEEDED` (`exportsPerDay`) maps to a friendly retry-tomorrow message in `ApiErrorUserMessage`.
-- **Delete account** (settings entry, all users — MUST be reachable without contacting support, store requirement): two-step confirmation naming the consequences; when `GET /families/me` shows the caller as the only parent (or sole member), the confirmation MUST carry the 008 §4.2 cascade wording ("you are the only parent — this deletes the family for everyone"). On `204`: call `FirebaseAuth.currentUser.delete()` (008 §1.3); on its failure show a retry path (re-authenticate → retry delete); on success clear **all** local state (fix queue, cached config/ETags, `deviceId`, DataStore) and return to sign-in.
+- **Delete account** (settings entry, all users — MUST be reachable without contacting support, store requirement): two-step confirmation naming the consequences; when `GET /families/me` shows the caller as the only parent (or sole member), the confirmation MUST carry the 008 §4.2 cascade wording ("you are the only parent — this deletes the family for everyone"). On `204`: call `FirebaseAuth.currentUser.delete()` (008 §1.3); on its failure follow 008 §1.3's **sign out → sign in → re-run delete** recovery (a bare retry is a trap — `requires-recent-login` never clears by retrying), with the sign-out action reachable from the failure state itself; on success clear **all** local state — fix queue, `deviceId`, any cached config/ETags, **and the export artifacts of 008 §3.1** (a plaintext export must never outlive the account it belongs to).
 - **Delete family** (settings entry, parents only): two-step confirmation naming the irreversible loss of the whole family's history for all members; recommended: require typing the family name (008 §5.4). On `204` the app returns to the family-less home (the account survives).
 - Other members discover a deleted family via `FAMILY_NOT_FOUND` (008 §5.2) — the existing family-less handling (§12.2's home behavior) is the landing, no new screen.
 - Test checklist additions (§16 applies): confirmation gating (no call before the second confirm), cascade wording trigger condition, Firebase-delete ordering after `204` and its failure/retry path, local-state wipe completeness, export share-sheet handoff with unparsed body, `exportsPerDay` message mapping.

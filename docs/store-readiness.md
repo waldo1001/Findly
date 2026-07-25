@@ -14,7 +14,7 @@ The convention use case (specs/007, 000 §D15/D16) requires strangers to *instal
 
 ## 1. Google Play (H5)
 
-1. **Developer account:** check whether yours is a personal account created after 2023-11-13 — those must run a **closed test with ≥12 testers for 14 days** before production access. Organization accounts are exempt. This is lead time, plan for it.
+1. **Developer account — RESOLVED 2026-07-25:** `waldo1001`, **Organisation account** under **Dynex bv** (Account ID `6979198494407001879`). Organisation accounts are **exempt** from the personal-account rule (created on/after 2023-11-13 → closed test with ≥12 testers for 14 days before production access). **No 14-day clock applies**, and the D-U-N-S number Google required to verify the organisation already exists and is reusable. Publisher name on the listing will be **Dynex bv**, consistent with the operator named in the privacy policy and ToS (H7).
 2. **Release keystore:** create locally (never committed — `docs/security-review-checklist.md`); enroll in **Play App Signing** (Google holds the app signing key; you keep the upload key). The **app signing key's SHA-256** (from the Play Console, not your upload key) is what goes into the Firebase Android app registration (006 §6.5) and `assetlinks.json` (007 §3).
 3. **A7 first:** `signingConfig` wired from CI/env references, `android.yml`'s release-build TODO resolved — no secret material in the repo. Once a real keystore exists, set these 4 **GitHub Actions repo secrets** (repo Settings → Secrets and variables → Actions — never commit them anywhere):
    - `ANDROID_KEYSTORE_BASE64` — the keystore file, base64-encoded (e.g. `base64 -i release.jks | pbcopy` on macOS, `base64 -w0 release.jks` on Linux)
@@ -28,9 +28,11 @@ The convention use case (specs/007, 000 §D15/D16) requires strangers to *instal
 6. **Content rating questionnaire**, target-API-level compliance (current Play policy floor), listing assets (icon, screenshots, feature graphic), support email.
 7. **Store-review sign-in:** provide a Firebase **test phone number + fixed OTP** (006 §6.4) via the Play Console's app-access notes at submission time — the pair lives only in the two consoles, never in the repo.
 
-## 2. Apple App Store (H6 — blocked on the Developer Program enrollment)
+## 2. Apple App Store (H6 — **enrollment COMPLETE**, Team ID `92A2K3Q7NH`)
 
-1. Enrollment completes → record the **Team ID**: complete the AASA file server-side (007 §3, no app change) and activate the **Associated Domains** entitlement (004 §3.5).
+> Corrected 2026-07-25: this section previously said "blocked on the Developer Program enrollment". That is stale — the Team ID is real and verified live in the served AASA (`92A2K3Q7NH.com.findly.ios`). Nothing Apple-side is enrollment-gated any more; the remaining items are portal work plus I9 (the `.xcodeproj` app target) before a build can be uploaded.
+
+1. ~~Enrollment completes →~~ **Done** — Team ID recorded, AASA already complete and serving (007 §3); activate the **Associated Domains** entitlement (004 §3.5, prepared by I6).
 2. Upload the **APNs auth key** to Firebase (the outstanding H2 §3.8 step — phone-auth app verification on device needs it).
 3. **Apply for the Location Push Service Extension entitlement** immediately (000 §O1) — independent lead time, same account.
 4. Create the App Store Connect app (bundle id per Firebase registration), wire **TestFlight** for the first real-device builds.

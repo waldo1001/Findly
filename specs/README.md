@@ -17,8 +17,9 @@ This project is **spec-driven**: no implementation code is written before (a) a 
 | [`006-phone-auth.md`](006-phone-auth.md) | Phone-number-only sign-in: flow, normalization, dev mode, Firebase requirements, abuse/cost posture |
 | [`007-public-join-links.md`](007-public-join-links.md) | Public join links: `https://{JOIN_LINK_HOST}/g#CODE`, static landing page, `.well-known` files, on-device QR, SWA hosting |
 | [`008-privacy-endpoints.md`](008-privacy-endpoints.md) | Privacy: per-member data export, account deletion (last-parent cascade), family deletion, self-service web deletion page |
+| [`009-device-runtime.md`](009-device-runtime.md) | Device runtime: capture policy & accuracy tiers, durable fix queue, per-platform scheduling, pause, push handling, geofence registration lifecycle, permissions |
 
-Future specs claim the next number (e.g. `009-web-viz.md`, `0xx-subscriptions.md`).
+Future specs claim the next number (e.g. `010-web-viz.md`, `0xx-subscriptions.md`).
 
 ## Required sections in every spec
 

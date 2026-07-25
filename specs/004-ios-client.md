@@ -182,7 +182,7 @@ All request/response field names match 001 verbatim (`camelCase`, identical keys
 Screen inventory and behavior mirror the Android spec **exactly** — see [003 §12.4](003-android-client.md) (settings entries for export / delete account / delete family; two-step confirmations incl. the last-parent cascade wording; family-name typing on family delete; `FAMILY_NOT_FOUND` lands on the existing family-less home). iOS specifics:
 
 - The three 001 §13 calls extend the §3.2 client mapping in FindlyKit. `GET /export` is the one **unenveloped** response (001 §13.1): the client method returns raw `Data` (never decoded through the §3.1 envelope path) handed to a `ShareLink`/document exporter; `.confirmationDialog` is the confirmation surface (the I5-established pattern).
-- After `DELETE /users/me` returns `204`: `Auth.auth().currentUser?.delete()` (008 §1.3 — may require recent login; on failure offer re-authenticate → retry); then wipe all local state (fix queue, cached ETags, `deviceId`, Keychain incl. the I7 `KeychainStore` entries) and return to sign-in.
+- After `DELETE /users/me` returns `204`: `Auth.auth().currentUser?.delete()` (008 §1.3). On failure follow 008 §1.3's **sign out → sign in → re-run delete** recovery — a bare retry is a trap, since `requires-recent-login` never clears by retrying — with the sign-out action reachable from the failure state itself. On success wipe all local state: fix queue, cached ETags, `deviceId`, the Keychain entries written by I7's `KeychainStore` (removed explicitly, **not** left to `signOut()`'s internal ordering — if `signOut()` throws, the entry survives), and the **export artifacts of 008 §3.1**.
 - Test checklist additions (§10 applies): confirmation gating, cascade wording trigger, Firebase-delete ordering + failure/retry, Keychain/local wipe completeness, raw-`Data` export path bypassing envelope decoding, `exportsPerDay` message mapping.
 
 ### 3.3 Token-expiry retry (001 §2.1)
@@ -263,6 +263,9 @@ Push tokens are **write-only** (never read back, 001 §4.1/§4.2) — `FindlyKit
 ---
 
 ## 7. Location & push-to-locate strategy (000 §O1, §O2, §O3; 001 §5–§6, §8)
+
+> The on-device runtime contract — the three opportunistic iOS triggers (`BGAppRefreshTask`, significant-location-change, geofence transitions) and the `× 0.8` elapsed-time rule, the durable Core Data/SQLite queue replacing §6's in-memory store, push routing, region-monitoring lifecycle, and the When-In-Use → Always staging — is normative in **[009](009-device-runtime.md)** (tasks I10–I12). The scaffolding described below is what those tasks replace.
+
 
 - **Sync:** `LocationProviding` protocol (foreground high-accuracy fix + background significant-change monitoring); `SystemLocationProvider` (`#if os(iOS)`) wraps `CLLocationManager` with staged authorization (When-In-Use → Always upgrade prompt) — implementation body is scaffolded with `// TODO(I2 or on-device session):` markers for the actual `CLLocationManagerDelegate` wiring, since it cannot be exercised without a device/simulator. `BackgroundSyncScheduling` (`#if os(iOS) && canImport(BackgroundTasks)`) scaffolds `BGAppRefreshTask` registration the same way. Both conform to protocols with fully-tested fakes so `FixQueue`/`DeviceRegistrationService` consumers are unit-testable without either framework.
 - **Interval honesty (000 §O2):** the UI (I2) must present the configured interval as a *target*; this spec's models carry `syncIntervalMinutes` verbatim from the server — no client-side reinterpretation.
