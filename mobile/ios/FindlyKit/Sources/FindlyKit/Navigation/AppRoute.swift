@@ -20,4 +20,11 @@ public enum AppRoute: Equatable {
     case groupDetail(groupId: String)
     case groupJoin(prefillCode: String)
     case groupMap(groupId: String)
+
+    // MARK: - I8 privacy routes (specs/004 §3.6; specs/008)
+
+    case privacySettings
+    case exportData
+    case deleteAccount
+    case deleteFamily
 }

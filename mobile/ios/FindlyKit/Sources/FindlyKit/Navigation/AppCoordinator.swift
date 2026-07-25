@@ -79,6 +79,24 @@ public final class AppCoordinator: ObservableObject {
         route = .groupMap(groupId: groupId)
     }
 
+    // MARK: - I8 privacy routes (specs/004 §3.6; specs/008)
+
+    public func showPrivacySettings() {
+        route = .privacySettings
+    }
+
+    public func showExportData() {
+        route = .exportData
+    }
+
+    public func showDeleteAccount() {
+        route = .deleteAccount
+    }
+
+    public func showDeleteFamily() {
+        route = .deleteFamily
+    }
+
     /// The app target's `onOpenURL` forwards here (specs/004 §3.4/§3.5) — `GroupCodeParsing` (pure,
     /// FindlyKit) validates/normalizes the incoming link BEFORE any route change. Two forms are
     /// recognized: the legacy `findly://group-join?code=…` scheme (unchanged behavior — an

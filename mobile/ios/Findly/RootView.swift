@@ -17,6 +17,14 @@ struct RootView: View {
     // specs/004-ios-client.md §3.5, specs/007-public-join-links.md §1 — threaded into
     // `GroupDetailScreen` for its share link/QR (`AppConfig.joinLinkHost`).
     private let joinLinkHost: String
+    // specs/004-ios-client.md §3.6, specs/008-privacy-endpoints.md §4.4 — the local-state-wipe
+    // dependencies `DeleteAccountViewModel` clears after a successful account deletion. Not wired
+    // into device-registration/location-sync flows yet (I1 scaffolding, still not connected to the
+    // UI layer by any task through I7) — a single shared instance here is the natural, minimal
+    // integration point for I8's wipe requirement, and becomes the shared instance those flows use
+    // once they land.
+    private let deviceIdProvider: DeviceIdProviding
+    private let fixQueue: FixQueue
 
     // specs/004-ios-client.md §4.1, §8 — AuthMode.stubLocal (default) matches the backend's
     // AUTH_MODE=insecure-local (specs/001 §2.3); AuthMode.firebase swaps in FirebaseAuthProvider,
@@ -32,6 +40,8 @@ struct RootView: View {
         }
         self.apiClient = URLSessionAPIClient(baseURL: config.baseURL, authProvider: authProvider)
         self.joinLinkHost = config.joinLinkHost
+        self.deviceIdProvider = UserDefaultsDeviceIdProvider()
+        self.fixQueue = FixQueue()
     }
 
     var body: some View {
@@ -53,7 +63,8 @@ struct RootView: View {
                     onSelectDevices: { isParent in coordinator.showDeviceSettings(isParent: isParent) },
                     onSelectFamily: { coordinator.showFamilyMembers() },
                     onSelectInvite: { coordinator.showCreateInvite() },
-                    onSelectGroups: { coordinator.showGroupsList() }
+                    onSelectGroups: { coordinator.showGroupsList() },
+                    onSelectPrivacySettings: { coordinator.showPrivacySettings() }
                 )
             case .liveMap:
                 LiveMapScreen(viewModel: LiveMapViewModel(apiClient: apiClient), renderer: defaultMapRenderer)
@@ -107,6 +118,34 @@ struct RootView: View {
                     viewModel: GroupMapViewModel(apiClient: apiClient, groupId: groupId),
                     renderer: defaultMapRenderer,
                     onExit: { coordinator.showGroupsList() }
+                )
+
+            // MARK: - I8 privacy routes (specs/004 §3.6; specs/008-privacy-endpoints.md)
+
+            case .privacySettings:
+                PrivacySettingsScreen(
+                    viewModel: PrivacySettingsViewModel(apiClient: apiClient),
+                    onSelectExport: { coordinator.showExportData() },
+                    onSelectDeleteAccount: { coordinator.showDeleteAccount() },
+                    onSelectDeleteFamily: { coordinator.showDeleteFamily() }
+                )
+            case .exportData:
+                ExportScreen(
+                    viewModel: ExportViewModel(apiClient: apiClient),
+                    myUserId: authProvider.currentUserId ?? "me"
+                )
+            case .deleteAccount:
+                DeleteAccountScreen(
+                    viewModel: DeleteAccountViewModel(
+                        apiClient: apiClient, authProvider: authProvider,
+                        deviceIdProvider: deviceIdProvider, fixQueue: fixQueue
+                    ),
+                    onCompleted: { coordinator.showSignIn() }
+                )
+            case .deleteFamily:
+                DeleteFamilyScreen(
+                    viewModel: DeleteFamilyViewModel(apiClient: apiClient),
+                    onCompleted: { coordinator.showHome() }
                 )
             }
         }

@@ -14,6 +14,7 @@ public struct HomeScreen: View {
     private let onSelectFamily: () -> Void
     private let onSelectInvite: () -> Void
     private let onSelectGroups: () -> Void
+    private let onSelectPrivacySettings: () -> Void
 
     public init(
         viewModel: HomeViewModel,
@@ -24,7 +25,8 @@ public struct HomeScreen: View {
         onSelectDevices: @escaping (Bool) -> Void,
         onSelectFamily: @escaping () -> Void,
         onSelectInvite: @escaping () -> Void,
-        onSelectGroups: @escaping () -> Void
+        onSelectGroups: @escaping () -> Void,
+        onSelectPrivacySettings: @escaping () -> Void
     ) {
         self.viewModel = viewModel
         self.onSelectMap = onSelectMap
@@ -35,6 +37,7 @@ public struct HomeScreen: View {
         self.onSelectFamily = onSelectFamily
         self.onSelectInvite = onSelectInvite
         self.onSelectGroups = onSelectGroups
+        self.onSelectPrivacySettings = onSelectPrivacySettings
     }
 
     public var body: some View {
@@ -81,6 +84,10 @@ public struct HomeScreen: View {
                     // shape as every other button above (no bottom-nav/drawer component exists
                     // yet, per I2's own documented convention).
                     FindlyButton("Groups", style: .secondary) { onSelectGroups() }
+                    // specs/008-privacy-endpoints.md §4.4 — export/delete-account MUST be
+                    // reachable without contacting support (a store requirement); this is the one
+                    // unconditional entry point into the privacy settings hub for a family member.
+                    FindlyButton("Privacy & data", style: .secondary) { onSelectPrivacySettings() }
                 }
                 .padding(theme.spacing.xl)
             }
@@ -97,6 +104,9 @@ public struct HomeScreen: View {
                 message: "You don't belong to a family, but you can still create or join a temporary group."
             )
             FindlyButton("Groups") { onSelectGroups() }
+            // specs/008-privacy-endpoints.md §4.4 — a family-less user is still a full account
+            // holder and must still be able to export/delete without contacting support.
+            FindlyButton("Privacy & data", style: .secondary) { onSelectPrivacySettings() }
         }
         .padding(theme.spacing.xl)
     }
