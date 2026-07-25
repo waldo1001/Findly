@@ -92,6 +92,9 @@ async function seedScenario(
 
   await deps.entitlementsRepo.create(FAMILY_ID, "free", "2026-07-19T08:00:00Z");
   await deps.usageRepo.increment(FAMILY_ID, "apiCalls", "2026-07-19");
+  // CALLER's own uid-keyed Usage row, e.g. from a period spent family-less before joining
+  // (002 §4.2 step 6, B18 follow-up) — a CURRENT family member can still hold these.
+  await deps.usageRepo.increment(CALLER, "apiCalls", "2026-07-18");
 
   // Devices + LastKnown, both callers.
   await deps.deviceRepo.putDevice(CALLER, {
@@ -290,9 +293,10 @@ async function seedScenario(
  * 002 §4.2's documented, accepted edge, once the device list can no longer be collected, its
  * IdempotencyMarkers partition is orphaned forever ("on retry: none left, skip").
  *
- * `locateControlRowSurvives` and `otherMemberEventSurvives` are false only for the cascade
- * path, where the WHOLE family footprint (LocateRequests partition, history/events prefix)
- * is wiped for every member — not just the rows/lines naming the departing subject. */
+ * `locateControlRowSurvives`, `otherMemberEventSurvives`, and `familyUsageSurvives` are false
+ * only for the cascade path, where the WHOLE family footprint (LocateRequests partition,
+ * history/events prefix, family-keyed Usage partition) is wiped for every member — not just
+ * the rows/lines naming the departing subject. */
 async function assertCallerFullyErased(
   deps: DeleteAccountDeps,
   opts: {
@@ -300,6 +304,7 @@ async function assertCallerFullyErased(
     locateControlRowSurvives?: boolean;
     otherMemberEventSurvives?: boolean;
     ownedGroupExpiryRowCleaned?: boolean;
+    familyUsageSurvives?: boolean;
   } = {},
 ): Promise<void> {
   const {
@@ -307,11 +312,21 @@ async function assertCallerFullyErased(
     locateControlRowSurvives = true,
     otherMemberEventSurvives = true,
     ownedGroupExpiryRowCleaned = true,
+    familyUsageSurvives = true,
   } = opts;
 
   expect(await deps.deviceRepo.listDevices(CALLER)).toEqual([]);
   expect(await deps.lastKnownRepo.listByOwner(CALLER)).toEqual([]);
   expect(await deps.userRepo.getProfile(CALLER)).toBeNull();
+
+  // CALLER's own uid-keyed Usage partition (002 §4.2 step 6, B18 follow-up) — unconditional
+  // on family membership/cascade. Family-keyed usage is a separate check below.
+  expect(await deps.usageRepo.get(CALLER, "apiCalls", "2026-07-18")).toBe(0);
+  if (familyUsageSurvives) {
+    expect(await deps.usageRepo.get(FAMILY_ID, "apiCalls", "2026-07-19")).toBe(1); // non-cascade: family-keyed rows are untouched
+  } else {
+    expect(await deps.usageRepo.get(FAMILY_ID, "apiCalls", "2026-07-19")).toBe(0); // cascade: whole family partition gone
+  }
 
   // Idempotency markers: CALLER's device partition (read-only check — see the doc above for
   // why this is sometimes expected to still be present), OTHER's always untouched.
@@ -365,7 +380,7 @@ describe("domain/user/deleteAccount", () => {
     const deps = buildDeps();
     await seedScenario(deps, { callerRole: "member", includeOtherParent: true });
 
-    await deleteAccount({ uid: CALLER, familyId: FAMILY_ID }, deps);
+    await deleteAccount({ uid: CALLER, familyId: FAMILY_ID, role: "member" }, deps);
 
     await assertCallerFullyErased(deps);
     // Family survives for others (008 §4.2 non-cascade path).
@@ -389,9 +404,13 @@ describe("domain/user/deleteAccount", () => {
     const deps = buildDeps();
     await seedScenario(deps, { callerRole: "parent", includeOtherParent: false });
 
-    await deleteAccount({ uid: CALLER, familyId: FAMILY_ID }, deps);
+    await deleteAccount({ uid: CALLER, familyId: FAMILY_ID, role: "parent" }, deps);
 
-    await assertCallerFullyErased(deps, { locateControlRowSurvives: false, otherMemberEventSurvives: false });
+    await assertCallerFullyErased(deps, {
+      locateControlRowSurvives: false,
+      otherMemberEventSurvives: false,
+      familyUsageSurvives: false,
+    });
     // Whole family gone (008 §4.2 cascade path).
     expect(await deps.familyRepo.getFamilyMeta(FAMILY_ID)).toBeNull();
     expect(await deps.entitlementsRepo.get(FAMILY_ID)).toBeNull();
@@ -408,33 +427,121 @@ describe("domain/user/deleteAccount", () => {
     await deps.userRepo.createProfile(CALLER, { familyId: FAMILY_ID, role: "parent", displayName: "Eric" });
     await deps.entitlementsRepo.create(FAMILY_ID, "free", "2026-07-19T08:00:00Z");
 
-    await deleteAccount({ uid: CALLER, familyId: FAMILY_ID }, deps);
+    await deleteAccount({ uid: CALLER, familyId: FAMILY_ID, role: "parent" }, deps);
 
     expect(await deps.familyRepo.getFamilyMeta(FAMILY_ID)).toBeNull();
     expect(await deps.userRepo.getProfile(CALLER)).toBeNull();
   });
 
-  it("does NOT cascade when a co-parent remains, even though the caller themself is a parent", async () => {
+  // The "sole member" clause of the cascade condition (008 §4.2) is independent of the
+  // "caller is a parent" clause — defense in depth against a stale/incorrect `role` snapshot
+  // in the auth context: a truly sole member (no OTHER member at all) must cascade regardless
+  // of what `role` claims, since there is nobody else's data to protect from a wrongful
+  // cascade either way.
+  it("cascades for a sole member even when the (defensively untrusted) role snapshot says non-parent", async () => {
+    const deps = buildDeps();
+    await deps.familyRepo.createFamily({ familyId: FAMILY_ID, familyName: "Solo", createdBy: CALLER, createdAt: "2026-07-19T08:00:00Z" });
+    await deps.familyRepo.addMember(FAMILY_ID, { userId: CALLER, role: "parent", displayName: "Eric", joinedAt: "2026-07-19T08:00:00Z" });
+    await deps.userRepo.createProfile(CALLER, { familyId: FAMILY_ID, role: "parent", displayName: "Eric" });
+    await deps.entitlementsRepo.create(FAMILY_ID, "free", "2026-07-19T08:00:00Z");
+
+    await deleteAccount({ uid: CALLER, familyId: FAMILY_ID, role: "member" }, deps);
+
+    expect(await deps.familyRepo.getFamilyMeta(FAMILY_ID)).toBeNull();
+    expect(await deps.userRepo.getProfile(CALLER)).toBeNull();
+  });
+
+  it("does NOT cascade when a co-parent remains, even though the caller themself is a parent — and even with a non-parent child ALSO in the roster (mixed-role otherMembers)", async () => {
     const deps = buildDeps();
     await deps.familyRepo.createFamily({ familyId: FAMILY_ID, familyName: "Wauters", createdBy: CALLER, createdAt: "2026-07-19T08:00:00Z" });
     await deps.familyRepo.addMember(FAMILY_ID, { userId: CALLER, role: "parent", displayName: "Eric", joinedAt: "2026-07-19T08:00:00Z" });
     await deps.familyRepo.addMember(FAMILY_ID, { userId: OTHER_PARENT, role: "parent", displayName: "Ines", joinedAt: "2026-07-19T08:00:00Z" });
+    // A non-parent child ALSO in the roster: otherMembers is now a MIX of parent + non-parent
+    // roles, which is what distinguishes "some other member is a parent" from "every other
+    // member is a parent" (the latter would be false here, wrongly implying no parent left).
+    await deps.familyRepo.addMember(FAMILY_ID, { userId: OTHER_MEMBER, role: "member", displayName: "Noor", joinedAt: "2026-07-19T08:00:00Z" });
     await deps.userRepo.createProfile(CALLER, { familyId: FAMILY_ID, role: "parent", displayName: "Eric" });
     await deps.userRepo.createProfile(OTHER_PARENT, { familyId: FAMILY_ID, role: "parent", displayName: "Ines" });
+    await deps.userRepo.createProfile(OTHER_MEMBER, { familyId: FAMILY_ID, role: "member", displayName: "Noor" });
     await deps.entitlementsRepo.create(FAMILY_ID, "free", "2026-07-19T08:00:00Z");
 
-    await deleteAccount({ uid: CALLER, familyId: FAMILY_ID }, deps);
+    await deleteAccount({ uid: CALLER, familyId: FAMILY_ID, role: "parent" }, deps);
 
     expect(await deps.familyRepo.getFamilyMeta(FAMILY_ID)).not.toBeNull();
-    expect(await deps.familyRepo.listMembers(FAMILY_ID)).toEqual([expect.objectContaining({ userId: OTHER_PARENT })]);
+    expect(await deps.familyRepo.listMembers(FAMILY_ID)).toEqual(
+      expect.arrayContaining([expect.objectContaining({ userId: OTHER_PARENT }), expect.objectContaining({ userId: OTHER_MEMBER })]),
+    );
     expect(await deps.userRepo.getProfile(OTHER_PARENT)).toEqual({ familyId: FAMILY_ID, role: "parent", displayName: "Ines" });
+    expect(await deps.userRepo.getProfile(OTHER_MEMBER)).toEqual({ familyId: FAMILY_ID, role: "member", displayName: "Noor" });
     expect(await deps.userRepo.getProfile(CALLER)).toBeNull();
+  });
+
+  // Security review-gate finding (BLOCKING, 000 §O19): the Families roster has no ETag
+  // guard, so two parents calling DELETE /users/me concurrently can each observe the other
+  // and both take the non-cascade branch, leaving the family with ZERO parents. The
+  // narrowed cascade condition (008 §4.2) requires the CALLER to BE a parent — a remaining
+  // non-parent child must NEVER cascade, even in this already-broken, parent-less state.
+  it("does NOT cascade for a non-parent caller in an already parent-less family (000 §O19's race — the narrowed condition contains the blast radius)", async () => {
+    const deps = buildDeps();
+    // Simulates the aftermath of the 000 §O19 race directly (no parent survives), rather
+    // than the race itself — the point under test is the CONDITION, not the race.
+    await deps.familyRepo.createFamily({
+      familyId: FAMILY_ID,
+      familyName: "Wauters",
+      createdBy: "gone-parent-uid",
+      createdAt: "2026-07-19T08:00:00Z",
+    });
+    await deps.familyRepo.addMember(FAMILY_ID, { userId: CALLER, role: "member", displayName: "Eric", joinedAt: "2026-07-19T08:00:00Z" });
+    await deps.familyRepo.addMember(FAMILY_ID, { userId: OTHER_MEMBER, role: "member", displayName: "Noor", joinedAt: "2026-07-19T08:00:00Z" });
+    await deps.userRepo.createProfile(CALLER, { familyId: FAMILY_ID, role: "member", displayName: "Eric" });
+    await deps.userRepo.createProfile(OTHER_MEMBER, { familyId: FAMILY_ID, role: "member", displayName: "Noor" });
+    await deps.entitlementsRepo.create(FAMILY_ID, "free", "2026-07-19T08:00:00Z");
+
+    await deleteAccount({ uid: CALLER, familyId: FAMILY_ID, role: "member" }, deps);
+
+    // The family (and OTHER_MEMBER's membership in it) survives — only CALLER is erased.
+    expect(await deps.familyRepo.getFamilyMeta(FAMILY_ID)).not.toBeNull();
+    expect(await deps.entitlementsRepo.get(FAMILY_ID)).not.toBeNull();
+    expect(await deps.familyRepo.listMembers(FAMILY_ID)).toEqual([expect.objectContaining({ userId: OTHER_MEMBER })]);
+    expect(await deps.userRepo.getProfile(OTHER_MEMBER)).toEqual({ familyId: FAMILY_ID, role: "member", displayName: "Noor" });
+    expect(await deps.userRepo.getProfile(CALLER)).toBeNull();
+  });
+
+  // Security review-gate finding (Major, 002 §4.2 step 6): 002 §4.2's numbered ordering list
+  // originally omitted the subject's uid-keyed Usage partition entirely. apiCalls is keyed
+  // profile?.familyId ?? uid (B14), so a CURRENT family member can still hold uid-keyed rows
+  // from any earlier family-less period — those must be erased too, while the family-keyed
+  // rows (household aggregates) must NOT be touched by a non-cascade account deletion.
+  it("erases the subject's own uid-keyed Usage partition even as a CURRENT family member, while family-keyed rows survive (non-cascade path)", async () => {
+    const deps = buildDeps();
+    await seedScenario(deps, { callerRole: "member", includeOtherParent: true });
+    // Extra uid-keyed rows across two metrics/dates, on top of seedScenario's own apiCalls
+    // row, to prove the WHOLE uid partition goes, not just one row.
+    await deps.usageRepo.increment(CALLER, "locationBatches", "2026-07-17");
+    await deps.usageRepo.increment(CALLER, "apiCalls", "2026-07-18", 4);
+
+    await deleteAccount({ uid: CALLER, familyId: FAMILY_ID, role: "member" }, deps);
+
+    expect(await deps.usageRepo.get(CALLER, "apiCalls", "2026-07-18")).toBe(0);
+    expect(await deps.usageRepo.get(CALLER, "locationBatches", "2026-07-17")).toBe(0);
+    // Family-keyed usage is untouched — the family survives (co-parent remains).
+    expect(await deps.usageRepo.get(FAMILY_ID, "apiCalls", "2026-07-19")).toBe(1);
+  });
+
+  it("erases the subject's uid-keyed Usage partition unconditionally, even for a family-less caller", async () => {
+    const deps = buildDeps();
+    await deps.userRepo.createProfile(CALLER, { familyId: null, role: null, displayName: "Eric" });
+    await deps.usageRepo.increment(CALLER, "apiCalls", "2026-07-18");
+
+    await deleteAccount({ uid: CALLER, familyId: null, role: null }, deps);
+
+    expect(await deps.usageRepo.get(CALLER, "apiCalls", "2026-07-18")).toBe(0);
   });
 
   it("is a 204 no-op for a caller with no profile at all (specs/008 §4.1)", async () => {
     const deps = buildDeps();
 
-    await expect(deleteAccount({ uid: "ghost-uid", familyId: null }, deps)).resolves.toBeUndefined();
+    await expect(deleteAccount({ uid: "ghost-uid", familyId: null, role: null }, deps)).resolves.toBeUndefined();
 
     expect(await deps.userRepo.getProfile("ghost-uid")).toBeNull();
     expect(await deps.deviceRepo.listDevices("ghost-uid")).toEqual([]);
@@ -457,7 +564,7 @@ describe("domain/user/deleteAccount", () => {
       lastSeenAt: "2026-07-19T08:00:00Z",
     });
 
-    await deleteAccount({ uid: CALLER, familyId: null }, deps);
+    await deleteAccount({ uid: CALLER, familyId: null, role: null }, deps);
 
     expect(await deps.deviceRepo.listDevices(CALLER)).toEqual([]);
     expect(await deps.userRepo.getProfile(CALLER)).toBeNull();
@@ -498,7 +605,7 @@ describe("domain/user/deleteAccount", () => {
       return realRemoveMember(familyId, userId);
     };
 
-    await deleteAccount({ uid: CALLER, familyId: null }, deps);
+    await deleteAccount({ uid: CALLER, familyId: null, role: null }, deps);
 
     expect(locateCalls).toBe(0);
     expect(listMembersCalls).toBe(0);
@@ -534,7 +641,7 @@ describe("domain/user/deleteAccount", () => {
       return realDeleteProfile(userId);
     };
 
-    await deleteAccount({ uid: CALLER, familyId: FAMILY_ID }, deps);
+    await deleteAccount({ uid: CALLER, familyId: FAMILY_ID, role: "member" }, deps);
 
     expect(order[0]).toBe("devices");
     expect(order[order.length - 1]).toBe("profile");
@@ -549,7 +656,7 @@ describe("domain/user/deleteAccount", () => {
     // elsewhere (e.g. the sweeper) — the meta point-read below MUST return null.
     await deps.userRepo.addGroupMembership(CALLER, { groupId: "grp_gone00000000000", role: "owner", joinedAt: "2026-07-19T08:00:00Z" });
 
-    await expect(deleteAccount({ uid: CALLER, familyId: null }, deps)).resolves.toBeUndefined();
+    await expect(deleteAccount({ uid: CALLER, familyId: null, role: null }, deps)).resolves.toBeUndefined();
 
     expect(await deps.userRepo.listGroupMemberships(CALLER)).toEqual([]);
   });
@@ -561,7 +668,7 @@ describe("domain/user/deleteAccount", () => {
     await seedScenario(deps, { callerRole: "member", includeOtherParent: true });
     await deps.deviceRepo.deleteDevicesByOwner(CALLER);
 
-    await deleteAccount({ uid: CALLER, familyId: FAMILY_ID }, deps);
+    await deleteAccount({ uid: CALLER, familyId: FAMILY_ID, role: "member" }, deps);
 
     // Devices were already gone BEFORE this call, so the deviceId list could not be
     // re-collected — CALLER_DEVICE's IdempotencyMarkers partition is orphaned (accepted,
@@ -589,7 +696,7 @@ describe("domain/user/deleteAccount", () => {
       await deps.groupExpiryRepo.deleteExpiryRow("2026-07-21", OWNED_GROUP);
     }
 
-    await deleteAccount({ uid: CALLER, familyId: FAMILY_ID }, deps);
+    await deleteAccount({ uid: CALLER, familyId: FAMILY_ID, role: "member" }, deps);
 
     await assertCallerFullyErased(deps, { idempotencyMarkersCleaned: false });
   });
@@ -604,7 +711,7 @@ describe("domain/user/deleteAccount", () => {
     await deps.historyStore.eraseUserFromEvents(FAMILY_ID, CALLER);
     // Families member row deliberately NOT removed yet; Users profile also untouched.
 
-    await deleteAccount({ uid: CALLER, familyId: FAMILY_ID }, deps);
+    await deleteAccount({ uid: CALLER, familyId: FAMILY_ID, role: "member" }, deps);
 
     await assertCallerFullyErased(deps, { idempotencyMarkersCleaned: false });
     expect(await deps.familyRepo.getFamilyMeta(FAMILY_ID)).not.toBeNull();
@@ -622,7 +729,7 @@ describe("domain/user/deleteAccount", () => {
     // Users profile row (the retry pointer) is untouched — still shows the old familyId.
     expect(await deps.userRepo.getProfile(CALLER)).toEqual({ familyId: FAMILY_ID, role: "member", displayName: "Eric" });
 
-    await deleteAccount({ uid: CALLER, familyId: FAMILY_ID }, deps);
+    await deleteAccount({ uid: CALLER, familyId: FAMILY_ID, role: "member" }, deps);
 
     await assertCallerFullyErased(deps, { idempotencyMarkersCleaned: false });
   });
@@ -646,7 +753,7 @@ describe("domain/user/deleteAccount", () => {
     await deps.familyRepo.deleteFamilyMeta(FAMILY_ID);
     expect(await deps.userRepo.getProfile(CALLER)).toEqual({ familyId: FAMILY_ID, role: "parent", displayName: "Eric" });
 
-    await deleteAccount({ uid: CALLER, familyId: FAMILY_ID }, deps);
+    await deleteAccount({ uid: CALLER, familyId: FAMILY_ID, role: "parent" }, deps);
 
     expect(await deps.userRepo.getProfile(CALLER)).toBeNull();
     expect(await deps.familyRepo.getFamilyMeta(FAMILY_ID)).toBeNull();
@@ -656,12 +763,12 @@ describe("domain/user/deleteAccount", () => {
     const deps = buildDeps();
     await seedScenario(deps, { callerRole: "member", includeOtherParent: true });
 
-    await deleteAccount({ uid: CALLER, familyId: FAMILY_ID }, deps);
+    await deleteAccount({ uid: CALLER, familyId: FAMILY_ID, role: "member" }, deps);
     await assertCallerFullyErased(deps);
 
     // A literal retry now sees familyId: null (the profile is gone) — same as the real
     // authGuard would resolve for a profile-less retry (008 §4.1).
-    await expect(deleteAccount({ uid: CALLER, familyId: null }, deps)).resolves.toBeUndefined();
+    await expect(deleteAccount({ uid: CALLER, familyId: null, role: null }, deps)).resolves.toBeUndefined();
     await assertCallerFullyErased(deps);
   });
 });

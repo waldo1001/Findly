@@ -63,7 +63,7 @@ app.http("deleteAccount", {
         { allowNoProfile: true },
       );
       await deleteAccount(
-        { uid: auth.uid, familyId: auth.familyId },
+        { uid: auth.uid, familyId: auth.familyId, role: auth.role },
         {
           familyRepo,
           userRepo,
