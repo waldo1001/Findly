@@ -58,15 +58,26 @@ final class FirebaseAuthProvider: AuthProviding {
 
     func signOut() throws {
         try Auth.auth().signOut()
+    }
+
+    /// specs/004-ios-client.md §3.6, specs/008-privacy-endpoints.md §1.3 (review finding #5) —
+    /// removes the Keychain-backed phone-verification session id as its OWN unconditional step,
+    /// deliberately NOT nested inside `signOut()`: `signOut()` can throw (e.g. `Auth.auth().signOut()`
+    /// failing) and callers invoke it via `try?` (`DeleteAccountViewModel`), so a clear nested after
+    /// the throwing call could be skipped entirely and strand the entry. MUST NOT throw —
+    /// `KeychainStoring.removeString` already swallows its own storage errors, and callers reach
+    /// this during an already-in-progress irreversible account wipe / sign-out-for-retry where
+    /// there is no meaningful failure recovery left to offer.
+    func clearStoredSession() {
         verificationID = nil
     }
 
     /// specs/008-privacy-endpoints.md §1.3 — called by `DeleteAccountViewModel` ONLY after
     /// `DELETE /users/me` returns `204`. May throw `requiresRecentLogin` if the SDK demands a
-    /// fresh sign-in for this sensitive operation; the ViewModel surfaces a retry path rather than
-    /// treating that as fatal (§1.3: "Clients MUST surface a retry path when the Firebase step
-    /// fails"). Deliberately does NOT also call `signOut()`/clear the Keychain — the ViewModel does
-    /// that itself, uniformly, once the whole flow (this call + the local-state wipe) completes.
+    /// fresh sign-in for this sensitive operation; the ViewModel surfaces the sign-out-then-retry
+    /// recovery (§1.3) rather than treating that as fatal. Deliberately does NOT also call
+    /// `signOut()`/`clearStoredSession()` — the ViewModel does that itself, uniformly, once the
+    /// whole flow (this call + the local-state wipe, or the sign-out-for-retry path) completes.
     func deleteCurrentUser() async throws {
         guard let user = Auth.auth().currentUser else { throw AuthError.notSignedIn }
         try await user.delete()
@@ -127,6 +138,7 @@ final class FirebaseAuthProvider: AuthProviding {
     func currentIDToken() async throws -> String { throw AuthError.notSignedIn }
     func refreshIDToken() async throws -> String { throw AuthError.notSignedIn }
     func signOut() throws {}
+    func clearStoredSession() {}
     func deleteCurrentUser() async throws { throw AuthError.notSignedIn }
     func startPhoneVerification(phoneNumberE164: String) async throws { throw PhoneAuthError.unknown }
     func confirmCode(_ code: String) async throws { throw PhoneAuthError.unknown }

@@ -13,22 +13,32 @@ import Foundation
 /// **Ordering (008 §1.3/§4.4):** `confirmDelete()` calls `DELETE /users/me` FIRST; only on its
 /// `204` does it call `authProvider.deleteCurrentUser()` (the Firebase step, app-target-implemented
 /// — FindlyKit stays Firebase-SDK-free). Local state (fix queue, cached `deviceId`, the
-/// Keychain-backed Firebase session via `signOut()`) is wiped ONLY after BOTH steps succeed — an
-/// orphaned Firebase user with erased Findly data is harmless and retryable; wiping local state
-/// before the Firebase step succeeds would strand a caller who needs to retry it (008 §1.3 — "an
-/// orphaned Firebase user ... is harmless ... the reverse orphan ... would be an erasure failure").
-/// `retryFirebaseDelete()` re-attempts ONLY the Firebase step — the backend call already returned
-/// `204`, and re-invoking it again is unnecessary even though 008 §4.5 confirms it would be safe.
+/// Keychain-backed Firebase session, any export artifact) is wiped ONLY after BOTH steps succeed —
+/// an orphaned Firebase user with erased Findly data is harmless and retryable; wiping local state
+/// before the Firebase step succeeds would strand a caller who needs to retry it.
+///
+/// **Firebase-failure recovery (008 §1.3 — a bare retry is a trap):** `user.delete()` commonly
+/// fails with `requires-recent-login`, and the backend deletion has already succeeded
+/// irreversibly by then. The session is not going to become recent on its own, so re-invoking
+/// `deleteCurrentUser()` unchanged would fail identically forever. The ONLY valid recovery is
+/// `signOutForRetry()`: sign out (making the sign-out action reachable from the failure state
+/// itself, per 008 §1.3), sign back in through the normal app flow, then re-open this screen and
+/// tap Delete again — `DELETE /users/me` is an idempotent no-op by then (008 §4.1) and the now-
+/// fresh session lets `user.delete()` succeed. No in-place re-authentication sub-flow is built.
 @MainActor
 public final class DeleteAccountViewModel: ObservableObject {
     public enum Phase: Equatable {
         case loading
         case ready(cascadeWarning: Bool)
         case deleting
-        /// The backend erasure succeeded but the client-side Firebase step failed (e.g. requires a
-        /// recent sign-in, 008 §1.3) — local state is deliberately NOT wiped yet; the screen offers
-        /// re-authenticate/retry per `retryFirebaseDelete()`.
+        /// The backend erasure succeeded but the client-side Firebase step failed — local state is
+        /// deliberately NOT wiped yet. The only way out is `signOutForRetry()`.
         case firebaseDeleteFailed
+        /// `signOutForRetry()` ran — the screen navigates to sign-in, same as `.completed`, but
+        /// local state (fix queue/deviceId/export artifact) was NOT wiped, since the account isn't
+        /// confirmed torn down client-side yet; the user re-opens this screen after signing back
+        /// in to finish (a no-op backend call + a now-succeeding Firebase delete).
+        case signedOutForRetry
         /// Both steps succeeded and local state has been wiped — the screen navigates to sign-in.
         case completed
         case error(String)
@@ -40,13 +50,18 @@ public final class DeleteAccountViewModel: ObservableObject {
     private let authProvider: AuthProviding
     private let deviceIdProvider: DeviceIdProviding
     private let fixQueue: FixQueue
+    private let exportArtifactStore: ExportArtifactStoring
     private var pendingWipeUserId: String?
 
-    public init(apiClient: FindlyAPIClient, authProvider: AuthProviding, deviceIdProvider: DeviceIdProviding, fixQueue: FixQueue) {
+    public init(
+        apiClient: FindlyAPIClient, authProvider: AuthProviding, deviceIdProvider: DeviceIdProviding,
+        fixQueue: FixQueue, exportArtifactStore: ExportArtifactStoring = InMemoryExportArtifactStore()
+    ) {
         self.apiClient = apiClient
         self.authProvider = authProvider
         self.deviceIdProvider = deviceIdProvider
         self.fixQueue = fixQueue
+        self.exportArtifactStore = exportArtifactStore
     }
 
     public func load() async {
@@ -76,30 +91,40 @@ public final class DeleteAccountViewModel: ObservableObject {
             phase = .error(userFacingMessage(for: error))
             return
         }
-        await completeFirebaseDeleteAndWipe()
-    }
-
-    /// 008 §1.3 — "Clients MUST surface a retry path when the Firebase step fails." The backend
-    /// erasure already succeeded (we only reach `.firebaseDeleteFailed` after that), so this only
-    /// retries the client-side Firebase deletion, not the whole flow.
-    public func retryFirebaseDelete() async {
-        phase = .deleting
-        await completeFirebaseDeleteAndWipe()
-    }
-
-    private func completeFirebaseDeleteAndWipe() async {
         do {
             try await authProvider.deleteCurrentUser()
         } catch {
             phase = .firebaseDeleteFailed
             return
         }
+        await wipeLocalStateAndComplete()
+    }
+
+    /// specs/008-privacy-endpoints.md §1.3 (review finding #4) — the ONLY valid recovery from
+    /// `.firebaseDeleteFailed`. Deliberately does NOT re-invoke `deleteAccount()`/
+    /// `deleteCurrentUser()` — that would be the bare-retry trap this method replaces. Both calls
+    /// below are best-effort: the account is already erased server-side, so there is no meaningful
+    /// failure recovery left to offer if signing out itself fails — the screen still navigates to
+    /// sign-in either way.
+    public func signOutForRetry() {
+        // clearStoredSession() is unconditional (finding #5) — NOT nested inside the swallowed
+        // signOut() call below, so a signOut() failure can never strand it.
+        authProvider.clearStoredSession()
+        try? authProvider.signOut()
+        phase = .signedOutForRetry
+    }
+
+    private func wipeLocalStateAndComplete() async {
         if let uid = pendingWipeUserId {
             deviceIdProvider.clearDeviceId(forUserId: uid)
         }
         await fixQueue.clearAll()
-        // signOut() is also what clears the Keychain-backed Firebase verificationID
-        // (FirebaseAuthProvider, I7) — swallow any error, the account is already erased either way.
+        // specs/008-privacy-endpoints.md §3.1 rule 2 (finding #1) — any export artifact must not
+        // survive the account it belongs to.
+        exportArtifactStore.removeCurrentArtifact()
+        // clearStoredSession() is unconditional (008 §1.3/finding #5) — NOT nested inside the
+        // swallowed signOut() call below, so a signOut() failure can never strand it.
+        authProvider.clearStoredSession()
         try? authProvider.signOut()
         phase = .completed
     }

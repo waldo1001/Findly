@@ -101,6 +101,16 @@ struct StubAuthProviderTests {
         }
     }
 
+    /// specs/004-ios-client.md §3.6, specs/008-privacy-endpoints.md §1.3 (review finding #5) — a
+    /// distinct, unconditional step from `signOut()`, so a `signOut()` failure can never strand the
+    /// locally-stored session material behind.
+    @Test func clearStoredSession_doesNotThrow_andIsIndependentOfSignOut() {
+        let provider = StubAuthProvider(currentUserId: "+32470000008")
+        provider.clearStoredSession() // must not throw — no `try` needed
+        // dev/test provider has no Keychain-backed state; this just proves the method exists and
+        // is callable without any prior/concurrent signOut() call.
+    }
+
     @Test func refreshIDToken_yieldsADifferentTokenThanBefore() async throws {
         let provider = StubAuthProvider(currentUserId: "+32470000005")
         let first = try await provider.currentIDToken()

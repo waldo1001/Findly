@@ -1,10 +1,12 @@
+import Foundation
 import Testing
 @testable import FindlyKit
 
 /// specs/004-ios-client.md §3.6, specs/008-privacy-endpoints.md §4 — account deletion: the
 /// last-parent/sole-member cascade wording trigger (008 §4.2), the 008 §1.3 ordering
-/// (`DELETE /users/me` 204 → Firebase `user.delete()` → local wipe), the Firebase-failure retry
-/// path, and confirmation gating (no destructive call fires merely from `load()`).
+/// (`DELETE /users/me` 204 → Firebase `user.delete()` → local wipe), the sign-out-then-retry
+/// recovery when the Firebase step fails (008 §1.3 — a bare retry is a trap), and confirmation
+/// gating (no destructive call fires merely from `load()`).
 @MainActor
 struct DeleteAccountViewModelTests {
 
@@ -12,8 +14,13 @@ struct DeleteAccountViewModelTests {
         GetMyFamilyResponse(familyId: "fam_1", familyName: "Wauters", createdAt: "2026-07-19T08:00:00Z", me: me, members: members)
     }
 
-    func makeViewModel(api: FakeAPIClient, auth: FakeAuthProviding, deviceIdProvider: DeviceIdProviding = InMemoryDeviceIdProvider(), fixQueue: FixQueue = FixQueue()) -> DeleteAccountViewModel {
-        DeleteAccountViewModel(apiClient: api, authProvider: auth, deviceIdProvider: deviceIdProvider, fixQueue: fixQueue)
+    func makeViewModel(
+        api: FakeAPIClient, auth: FakeAuthProviding,
+        deviceIdProvider: DeviceIdProviding = InMemoryDeviceIdProvider(),
+        fixQueue: FixQueue = FixQueue(),
+        exportArtifactStore: InMemoryExportArtifactStore = InMemoryExportArtifactStore()
+    ) -> DeleteAccountViewModel {
+        DeleteAccountViewModel(apiClient: api, authProvider: auth, deviceIdProvider: deviceIdProvider, fixQueue: fixQueue, exportArtifactStore: exportArtifactStore)
     }
 
     // MARK: - Cascade-warning detection (008 §4.2)
@@ -140,7 +147,7 @@ struct DeleteAccountViewModelTests {
         #expect(auth.deleteCurrentUserCallCount == 0)
     }
 
-    // MARK: - The 008 §1.3 ordering + local wipe
+    // MARK: - The 008 §1.3 ordering + local wipe (review finding #1/#5 — export artifact + unconditional Keychain clear)
 
     @Test func confirmDelete_success_ordersBackendThenFirebaseThenWipesLocalState_thenCompletes() async {
         let api = FakeAPIClient()
@@ -151,16 +158,20 @@ struct DeleteAccountViewModelTests {
         _ = deviceIdProvider.deviceId(forUserId: "u1") // pre-register, so clearing is observable
         let fixQueue = FixQueue()
         await fixQueue.enqueue(LocationFix(fixId: "f1", recordedAt: "2026-07-19T09:00:00Z", lat: 51.0, lon: 3.7, accuracyM: 10, batteryPct: 80, source: .periodic))
-        let viewModel = makeViewModel(api: api, auth: auth, deviceIdProvider: deviceIdProvider, fixQueue: fixQueue)
+        let exportArtifactStore = InMemoryExportArtifactStore()
+        _ = try? exportArtifactStore.write(Data("leftover export".utf8))
+        let viewModel = makeViewModel(api: api, auth: auth, deviceIdProvider: deviceIdProvider, fixQueue: fixQueue, exportArtifactStore: exportArtifactStore)
 
         await viewModel.confirmDelete()
 
         #expect(api.deleteAccountCallCount == 1)
         #expect(auth.deleteCurrentUserCallCount == 1)
-        #expect(auth.signOutCallCount == 1, "signOut() is what wipes the Keychain-backed verificationID, per FirebaseAuthProvider")
+        #expect(auth.clearStoredSessionCallCount == 1, "008 §1.3 (finding #5) — the Keychain-backed session is cleared as its own unconditional step")
+        #expect(auth.signOutCallCount == 1)
         #expect(await fixQueue.queuedCount() == 0)
         // A fresh id is issued for "u1" now — proof the old one was actually cleared, not reused.
         #expect(deviceIdProvider.deviceId(forUserId: "u1") != "dev-1")
+        #expect(exportArtifactStore.currentURL == nil, "008 §3.1 rule 2 (finding #1) — any export artifact is removed by the account-deletion wipe")
         #expect(viewModel.phase == .completed)
     }
 
@@ -184,7 +195,7 @@ struct DeleteAccountViewModelTests {
         api.deleteAccountHandler = {}
         let auth = FakeAuthProviding()
         auth.currentUserId = "u1"
-        auth.deleteCurrentUserResult = .failure(AuthError.notSignedIn) // stand-in for "requires recent login"
+        auth.deleteCurrentUserResult = .failure(AuthError.notSignedIn) // stand-in for requires-recent-login
         let fixQueue = FixQueue()
         await fixQueue.enqueue(LocationFix(fixId: "f1", recordedAt: "2026-07-19T09:00:00Z", lat: 51.0, lon: 3.7, accuracyM: 10, batteryPct: 80, source: .periodic))
         let viewModel = makeViewModel(api: api, auth: auth, fixQueue: fixQueue)
@@ -194,9 +205,16 @@ struct DeleteAccountViewModelTests {
         #expect(viewModel.phase == .firebaseDeleteFailed)
         #expect(await fixQueue.queuedCount() == 1, "local state must survive an unrecovered Firebase-delete failure")
         #expect(auth.signOutCallCount == 0)
+        #expect(auth.clearStoredSessionCallCount == 0, "the Keychain clear is part of the wipe, which only runs once the flow actually completes")
     }
 
-    @Test func retryFirebaseDelete_afterFailure_succeeds_doesNotRecallBackendDelete_andCompletes() async {
+    // MARK: - Sign-out-then-retry recovery (008 §1.3, review finding #4 — a bare retry is a trap)
+
+    @Test func signOutForRetry_isOnlyReachableAfterAFirebaseDeleteFailure() async {
+        // Documents the state machine: `.ready`/`.deleting` never expose a retry path — only
+        // `.firebaseDeleteFailed` does (enforced by the Screen switching on `phase`, but the
+        // ViewModel method itself is safe to call in any phase, matching the rest of this
+        // codebase's convention of not re-deriving guards the Screen already enforces).
         let api = FakeAPIClient()
         api.deleteAccountHandler = {}
         let auth = FakeAuthProviding()
@@ -207,12 +225,46 @@ struct DeleteAccountViewModelTests {
         await viewModel.confirmDelete()
         #expect(viewModel.phase == .firebaseDeleteFailed)
 
-        auth.deleteCurrentUserResult = .success(())
-        await viewModel.retryFirebaseDelete()
+        viewModel.signOutForRetry()
 
-        #expect(api.deleteAccountCallCount == 1, "the backend call is idempotent but the retry path should not blindly re-fire it")
-        #expect(auth.deleteCurrentUserCallCount == 2)
-        #expect(viewModel.phase == .completed)
+        #expect(viewModel.phase == .signedOutForRetry)
+    }
+
+    @Test func signOutForRetry_callsClearStoredSessionAndSignOut_doesNotRecallDeleteAccountOrFirebaseDelete() async {
+        let api = FakeAPIClient()
+        api.deleteAccountHandler = {}
+        let auth = FakeAuthProviding()
+        auth.currentUserId = "u1"
+        auth.deleteCurrentUserResult = .failure(AuthError.notSignedIn)
+        let viewModel = makeViewModel(api: api, auth: auth)
+        await viewModel.confirmDelete()
+
+        viewModel.signOutForRetry()
+
+        #expect(auth.clearStoredSessionCallCount == 1)
+        #expect(auth.signOutCallCount == 1)
+        // The trap this replaces: NOT a bare re-invocation of the failed calls.
+        #expect(api.deleteAccountCallCount == 1, "still just the one original call — sign-out-for-retry is not a backend re-call")
+        #expect(auth.deleteCurrentUserCallCount == 1, "still just the one original failed attempt — no blind re-invocation")
+    }
+
+    /// Review finding #5 — proves the Keychain clear is genuinely unconditional: it still happens
+    /// even when `signOut()` itself throws, which is exactly the scenario finding #5 flagged
+    /// (`FirebaseAuthProvider` previously nested the Keychain clear inside `signOut()`'s own body).
+    @Test func signOutForRetry_evenWhenSignOutThrows_stillClearsStoredSession_andTransitionsPhase() async {
+        let api = FakeAPIClient()
+        api.deleteAccountHandler = {}
+        let auth = FakeAuthProviding()
+        auth.currentUserId = "u1"
+        auth.deleteCurrentUserResult = .failure(AuthError.notSignedIn)
+        let viewModel = makeViewModel(api: api, auth: auth)
+        await viewModel.confirmDelete()
+
+        auth.signOutResult = .failure(AuthError.notSignedIn)
+        viewModel.signOutForRetry()
+
+        #expect(auth.clearStoredSessionCallCount == 1, "must run even though signOut() below it failed")
+        #expect(viewModel.phase == .signedOutForRetry, "the screen still navigates to sign-in — there is nothing else to offer")
     }
 
     // MARK: - Cascade wording (008 §4.2)

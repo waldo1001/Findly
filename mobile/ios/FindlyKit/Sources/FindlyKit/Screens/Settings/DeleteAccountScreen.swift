@@ -26,7 +26,11 @@ public struct DeleteAccountScreen: View {
         .background(theme.colors.surfaceVariant)
         .task { await viewModel.load() }
         .onChange(of: viewModel.phase) { phase in
-            if phase == .completed { onCompleted() }
+            // specs/008-privacy-endpoints.md §1.3 (review finding #4) — `.signedOutForRetry`
+            // navigates to sign-in exactly like `.completed`: local state was deliberately NOT
+            // wiped (the account isn't confirmed torn down client-side yet), but there is nothing
+            // left for THIS screen to do — the user signs back in and re-opens it to finish.
+            if phase == .completed || phase == .signedOutForRetry { onCompleted() }
         }
     }
 
@@ -41,7 +45,7 @@ public struct DeleteAccountScreen: View {
             LoadingStateView(message: "Deleting your account…")
         case .firebaseDeleteFailed:
             firebaseFailedView
-        case .completed:
+        case .completed, .signedOutForRetry:
             // Transient — `onCompleted()` (above) navigates away on this same tick.
             LoadingStateView(message: "Done.")
         case .error(let message):
@@ -75,14 +79,18 @@ public struct DeleteAccountScreen: View {
         }
     }
 
-    /// specs/008-privacy-endpoints.md §1.3 — the backend erasure already succeeded; only the
-    /// client-side Firebase step needs retrying (may require a recent sign-in).
+    /// specs/008-privacy-endpoints.md §1.3 (review finding #4) — the backend erasure already
+    /// succeeded; the client-side Firebase step failed, commonly because it needs a recent
+    /// sign-in. A bare retry is a trap (it would fail identically forever), so the only offered
+    /// action is `signOutForRetry()`: sign out now, sign back in through the normal flow, then
+    /// re-open this screen — the backend call is an idempotent no-op and the fresh session lets
+    /// the Firebase step succeed.
     private var firebaseFailedView: some View {
         ErrorStateView(
-            message: "Your data was deleted, but we couldn't finish signing you out. Please try again — you may need to sign in again first.",
-            retryTitle: "Retry"
+            message: "Your data was deleted, but we couldn't finish removing your sign-in. Sign out, then sign back in and try deleting again.",
+            retryTitle: "Sign out"
         ) {
-            Task { await viewModel.retryFirebaseDelete() }
+            viewModel.signOutForRetry()
         }
         .padding(theme.spacing.xl)
     }
