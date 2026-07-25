@@ -142,6 +142,13 @@ struct ExportViewModelTests {
     // subject's real `uid` in the filename, and never deleted. These tests prove the ViewModel
     // (not the untestable SwiftUI `ExportScreen`) now owns that lifecycle end-to-end through
     // `ExportArtifactStoring`, so it's the same testable layer as `DeleteAccountViewModel`'s wipe.
+    //
+    // Rule 2 was later amended: a screen-teardown/share-dismissal clear races the OS share
+    // sheet's consumer (which may still be reading the file asynchronously), so
+    // `ExportViewModel` deliberately has no such method — only the clear-before-write behavior
+    // below remains at this layer; the other two permitted triggers (app cold start, the
+    // account-deletion wipe) are covered in `ExportArtifactStoringTests`/
+    // `DeleteAccountViewModelTests` respectively.
 
     @Test func export_success_writesDataThroughTheArtifactStore_andPublishesItsURL() async {
         let api = FakeAPIClient()
@@ -173,32 +180,6 @@ struct ExportViewModelTests {
 
         #expect(store.writtenData[firstURL] == nil, "the previous export must be gone once a new one starts")
         #expect(viewModel.shareURL != firstURL)
-    }
-
-    /// Rule 2's "removed once the share/save interaction completes or is dismissed... and on
-    /// screen teardown" — `ExportScreen` calls this on share completion/dismissal and
-    /// `onDisappear`. An export artifact MUST NOT survive the session that created it.
-    @Test func clearShareArtifact_removesTheArtifactFromTheStore_andClearsPublishedState() async {
-        let api = FakeAPIClient()
-        api.exportDataHandler = { _ in Data("export-1".utf8) }
-        let store = InMemoryExportArtifactStore()
-        let viewModel = ExportViewModel(apiClient: api, exportArtifactStore: store)
-        await viewModel.export(userId: nil)
-        #expect(viewModel.shareURL != nil)
-
-        viewModel.clearShareArtifact()
-
-        #expect(store.currentURL == nil)
-        #expect(viewModel.shareURL == nil)
-    }
-
-    @Test func clearShareArtifact_withNothingExported_isANoOp() {
-        let store = InMemoryExportArtifactStore()
-        let viewModel = ExportViewModel(apiClient: FakeAPIClient(), exportArtifactStore: store)
-
-        viewModel.clearShareArtifact() // must not crash
-
-        #expect(store.removeCallCount == 0)
     }
 
     /// A disk failure writing the artifact must not leave stale published state pointing at a URL

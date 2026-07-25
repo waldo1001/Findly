@@ -2,13 +2,17 @@ import Foundation
 import Testing
 @testable import FindlyKit
 
-/// specs/008-privacy-endpoints.md §3.1 (review finding #1) — the export document is the most
-/// sensitive payload in the product (one subject's full movement history to the full retention
-/// window, in plaintext, in a single file). This suite proves the hygiene rules that are testable
-/// without a real device: app-private storage, deleted defensively before the next write and on
-/// explicit removal, no durable `userId`/`uid` embedded in the on-disk name, and (for the real
-/// `FileManagerExportArtifactStore`) that data-protection/backup-exclusion attributes are actually
-/// requested — not left to inherited defaults.
+/// specs/008-privacy-endpoints.md §3.1 (review finding #1; rule 2 later amended to close a
+/// share-sheet race) — the export document is the most sensitive payload in the product (one
+/// subject's full movement history to the full retention window, in plaintext, in a single file).
+/// This suite proves the hygiene rules that are testable without a real device: app-private
+/// storage, deleted defensively before the next write and via explicit removal, cold-start-safe
+/// removal (a fresh store instance still finds a PREVIOUS instance's leftover file — the property
+/// that makes triggers (b)/(c) correct), no durable `userId`/`uid` embedded in the on-disk name,
+/// and (for the real `FileManagerExportArtifactStore`) that data-protection/backup-exclusion
+/// attributes are actually requested — not left to inherited defaults. Deliberately NOT covered
+/// here (removed by the spec amendment): any screen-teardown/share-dismissal trigger — see
+/// `ExportArtifactStoring`'s doc comment for why.
 struct ExportArtifactStoringTests {
 
     // MARK: - ExportArtifactNaming (rule 3 — no durable identifier)
@@ -27,6 +31,15 @@ struct ExportArtifactStoringTests {
         let first = ExportArtifactNaming.fileName()
         let second = ExportArtifactNaming.fileName()
         #expect(first != second, "a stable/deterministic name would let a directory listing become a roster of who's been exported")
+    }
+
+    /// specs/008-privacy-endpoints.md §3.1 rule 2(b) — the predicate `removeCurrentArtifact()`'s
+    /// cold-start-safe directory scan is built on: it must recognize the type's own generated
+    /// names and reject everything else.
+    @Test func isExportArtifactFileName_matchesOnlyTheGeneratedPattern() {
+        #expect(ExportArtifactNaming.isExportArtifactFileName(ExportArtifactNaming.fileName()))
+        #expect(!ExportArtifactNaming.isExportArtifactFileName("not-an-export.json"))
+        #expect(!ExportArtifactNaming.isExportArtifactFileName("findly-export-2026-07-25-abc12345.txt"), "wrong extension must not match")
     }
 
     // MARK: - InMemoryExportArtifactStore (dev/test fake)
@@ -111,9 +124,48 @@ struct ExportArtifactStoringTests {
         #expect(!FileManager.default.fileExists(atPath: url.path))
     }
 
-    @Test func fileManagerStore_removeCurrentArtifact_withNothingWritten_doesNotThrowOrCrash() {
-        let store = FileManagerExportArtifactStore(directory: FileManager.default.temporaryDirectory)
+    @Test func fileManagerStore_removeCurrentArtifact_withNothingWritten_doesNotThrowOrCrash() throws {
+        let directory = try Self.makeScratchDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = FileManagerExportArtifactStore(directory: directory)
         store.removeCurrentArtifact()
+    }
+
+    /// specs/008-privacy-endpoints.md §3.1 rule 2(b) (spec amendment) — the app-cold-start
+    /// cleanup trigger. A fresh process constructs a fresh `FileManagerExportArtifactStore`
+    /// instance with no in-memory record of what a PREVIOUS process's instance wrote (e.g. the
+    /// app was killed mid-export, before the next write's defensive clear or the account-deletion
+    /// wipe ever ran). This is the load-bearing proof that `removeCurrentArtifact()` still finds
+    /// and removes that leftover file — it must NOT rely on a remembered `currentURL`, which a
+    /// brand-new instance can never have.
+    @Test func fileManagerStore_removeCurrentArtifact_findsAnArtifactWrittenByADifferentInstance_simulatingColdStart() throws {
+        let directory = try Self.makeScratchDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let firstProcessStore = FileManagerExportArtifactStore(directory: directory)
+        let url = try firstProcessStore.write(Data("export-1".utf8))
+        #expect(FileManager.default.fileExists(atPath: url.path))
+
+        // Simulate the app being killed and relaunched: a brand-new instance, sharing nothing
+        // with the one that wrote the file except the directory.
+        let coldStartStore = FileManagerExportArtifactStore(directory: directory)
+        coldStartStore.removeCurrentArtifact()
+
+        #expect(!FileManager.default.fileExists(atPath: url.path), "cold start must remove an artifact left by a PREVIOUS instance/process, not just its own in-memory state")
+    }
+
+    /// The directory-scan cold-start cleanup must only ever touch files matching the export
+    /// artifact's own naming pattern — never delete unrelated files that happen to share the
+    /// directory (a real risk once the default `directory` is the shared system temp directory).
+    @Test func fileManagerStore_removeCurrentArtifact_leavesUnrelatedFilesInTheSameDirectoryAlone() throws {
+        let directory = try Self.makeScratchDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let unrelatedURL = directory.appendingPathComponent("not-an-export.txt")
+        try Data("unrelated".utf8).write(to: unrelatedURL)
+        let store = FileManagerExportArtifactStore(directory: directory)
+
+        store.removeCurrentArtifact()
+
+        #expect(FileManager.default.fileExists(atPath: unrelatedURL.path), "must only match the export-artifact naming pattern")
     }
 
     /// Rule 4 — backup exclusion is requested explicitly, not left to inherited defaults. (File

@@ -3,16 +3,30 @@ import Foundation
 /// specs/008-privacy-endpoints.md §3.1 — the export document is the most sensitive payload in the
 /// product: one subject's complete movement history to the full retention window, in plaintext, in
 /// a single file. A parent may export a **child**. This protocol abstracts its on-disk lifecycle so
-/// `DeleteAccountViewModel`'s local wipe (rule 2 — MUST also remove any export artifact) and
+/// `DeleteAccountViewModel`'s local wipe (rule 2c — MUST also remove any export artifact) and
 /// `ExportScreen` (which creates them for `ShareLink`) share one testable contract — the
 /// protocol-abstracts-the-OS-dependency idiom already used by `DeviceIdProviding`/`KeychainStoring`.
+///
+/// **Permitted removal triggers ONLY (rule 2, amended):** (a) immediately before writing a new
+/// export, so at most one artifact ever exists; (b) once at app cold start, so an artifact never
+/// survives a process restart; (c) the account-deletion local wipe. Screen-level triggers (share
+/// completion, dismissal, `onDisappear`) are deliberately NOT among them: the OS share sheet hands
+/// the file's URL to another app, which may read it lazily/asynchronously — clearing on those
+/// signals races that consumer and can delete the file out from under a "Save to Files"-style
+/// target while it's still reading. Screen teardown MAY clear it only where the platform guarantees
+/// the consumer already copied the data; iOS's `ShareLink` gives no such guarantee, so this codebase
+/// never calls a removal from `ExportScreen`.
 public protocol ExportArtifactStoring: AnyObject {
     /// Writes `data` to a fresh, app-private file with an opaque (non-`userId`-derived) name,
-    /// first removing any artifact from a previous call (rule 2's "defensively on the next
-    /// export"). Returns the file's URL for `ShareLink`. Throws only on a genuine disk failure.
+    /// first removing any artifact from a previous call (trigger (a) — "immediately before writing
+    /// a new export"). Returns the file's URL for `ShareLink`. Throws only on a genuine disk
+    /// failure.
     func write(_ data: Data) throws -> URL
-    /// Removes the artifact from the most recent `write(_:)`, if any — a no-op otherwise. Callers
-    /// invoke this on share/dismiss, screen teardown, and the account-deletion local wipe (rule 2).
+    /// Removes any live export artifact, if one exists — a no-op otherwise. Callers invoke this
+    /// before every `write(_:)` (trigger a), once at app cold start (trigger b — see
+    /// `FileManagerExportArtifactStore`'s doc comment for why this must NOT rely on in-memory
+    /// state), and from the account-deletion local wipe (trigger c). Deliberately NOT called from
+    /// `ExportScreen` on share completion/dismissal/teardown — see the protocol's doc comment.
     func removeCurrentArtifact()
 }
 
@@ -21,15 +35,30 @@ public protocol ExportArtifactStoring: AnyObject {
 /// intentionally takes NO identifier parameter at all — there is nothing stable to accidentally
 /// leak. The user-visible *suggested* name MAY still be friendly (a date is enough).
 public enum ExportArtifactNaming {
+    private static let prefix = "findly-export-"
+    private static let suffix = ".json"
+
     public static func fileName(generatedAt: Date = Date(), randomSuffix: String = UUID().uuidString.prefix(8).lowercased()) -> String {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd"
         formatter.timeZone = TimeZone(identifier: "UTC")
-        return "findly-export-\(formatter.string(from: generatedAt))-\(randomSuffix).json"
+        return "\(prefix)\(formatter.string(from: generatedAt))-\(randomSuffix)\(suffix)"
+    }
+
+    /// specs/008-privacy-endpoints.md §3.1 rule 2(b) — whether `fileName` matches the pattern this
+    /// type generates. `FileManagerExportArtifactStore`'s cold-start cleanup uses this to find a
+    /// stale artifact by filesystem scan rather than by any in-memory record of what was written —
+    /// a fresh process has none. Matching by pattern (not an exact remembered name) also means the
+    /// scan can never be fooled by an unrelated file that merely happens to share a directory.
+    public static func isExportArtifactFileName(_ fileName: String) -> Bool {
+        fileName.hasPrefix(prefix) && fileName.hasSuffix(suffix)
     }
 }
 
-/// In-memory fake — dev/test default; never touches disk, so `swift test` stays hermetic.
+/// In-memory fake — dev/test default; never touches disk, so `swift test` stays hermetic. A
+/// single-slot, in-process store: there is no cross-process "cold start" concept for it (a test's
+/// process ends when the test does), so `removeCurrentArtifact()` tracking `currentURL` in memory
+/// is sufficient here — unlike `FileManagerExportArtifactStore`, see its doc comment.
 public final class InMemoryExportArtifactStore: ExportArtifactStoring {
     public private(set) var writtenData: [URL: Data] = [:]
     public private(set) var currentURL: URL?
@@ -60,10 +89,23 @@ public final class InMemoryExportArtifactStore: ExportArtifactStoring {
 /// `ExportArtifactNaming`). Both attribute-setting calls are best-effort (`try?`): a failure there
 /// must not block the export the user actually asked for, and there is nothing more restrictive to
 /// fall back to short of not writing the file at all.
+///
+/// `removeCurrentArtifact()` deliberately does NOT track "the current artifact" as an in-memory
+/// `currentURL` ivar — it scans `directory` and removes every file matching
+/// `ExportArtifactNaming.isExportArtifactFileName`. This is required for trigger (b), the app
+/// cold-start cleanup (rule 2): a fresh process constructs a fresh store instance with no memory
+/// of what a PREVIOUS process wrote, so instance-state tracking would make that instance's very
+/// first `removeCurrentArtifact()` call a silent no-op against a real leftover file (e.g. the app
+/// was killed mid-export, before the next write's defensive clear or the account-deletion wipe
+/// ever ran) — exactly the durability gap rule 2(b) exists to close. Filtering by name (not
+/// deleting indiscriminately) also means this is safe to point at a directory shared with other,
+/// unrelated temp files. At most one artifact should ever exist on disk at a time (rule 2a), so
+/// "remove every match" and "remove the one current artifact" are the same operation — this also
+/// makes the method idempotent and safe to call from multiple independent triggers/instances
+/// without coordination.
 public final class FileManagerExportArtifactStore: ExportArtifactStoring {
     private let fileManager: FileManager
     private let directory: URL
-    private var currentURL: URL?
 
     public init(fileManager: FileManager = .default, directory: URL? = nil) {
         self.fileManager = fileManager
@@ -79,13 +121,13 @@ public final class FileManagerExportArtifactStore: ExportArtifactStoring {
         var resourceValues = URLResourceValues()
         resourceValues.isExcludedFromBackup = true
         try? mutableURL.setResourceValues(resourceValues)
-        currentURL = mutableURL
         return mutableURL
     }
 
     public func removeCurrentArtifact() {
-        guard let currentURL else { return }
-        try? fileManager.removeItem(at: currentURL)
-        self.currentURL = nil
+        guard let contents = try? fileManager.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil) else { return }
+        for url in contents where ExportArtifactNaming.isExportArtifactFileName(url.lastPathComponent) {
+            try? fileManager.removeItem(at: url)
+        }
     }
 }

@@ -5,9 +5,17 @@ import SwiftUI
 /// pattern as the invite/group-detail share cards). `GET /export` is the one unenveloped response in
 /// the API (001 §13.1). All artifact-file handling (write, opaque naming, data-protection/backup
 /// exclusion, cleanup) lives in `ExportViewModel`/`ExportArtifactStoring` (specs/008 §3.1, review
-/// finding #1) — this screen's only jobs with the result are handing `viewModel.shareURL` to
-/// `ShareLink` and telling the ViewModel when the interaction is over (`clearShareArtifact()`), on
-/// dismiss/teardown and defensively before starting a new export.
+/// finding #1) — this screen's only job with the result is handing `viewModel.shareURL` to
+/// `ShareLink`.
+///
+/// **Deliberately no teardown/dismissal cleanup here (§3.1 rule 2, amended).** The OS share sheet
+/// hands the file's URL to another app, which may read it lazily/asynchronously — a "Save to
+/// Files"-style target's read can still be in flight after the sheet dismisses or this screen
+/// disappears. Clearing on either signal would race that consumer and could delete the file out
+/// from under it. The artifact is instead bounded by: the next export's own defensive clear
+/// (`ExportArtifactStoring.write`), a one-shot cleanup at app cold start (`FindlyApp.init`), and
+/// the account-deletion local wipe (`DeleteAccountViewModel`) — none of which can race an
+/// in-progress share.
 public struct ExportScreen: View {
     @Environment(\.theme) private var theme
     @ObservedObject private var viewModel: ExportViewModel
@@ -23,13 +31,6 @@ public struct ExportScreen: View {
         }
         .background(theme.colors.surfaceVariant)
         .task { await viewModel.load() }
-        // specs/008-privacy-endpoints.md §3.1 rule 2 — "removed... on screen teardown": this is
-        // the client-side approximation available without deeper UIKit share-sheet-completion
-        // plumbing (SwiftUI's `ShareLink` exposes no completion callback); combined with the
-        // defensive per-export cleanup `ExportViewModel.export` already performs via
-        // `ExportArtifactStoring.write`, the artifact never outlives either this screen or the
-        // next export, whichever comes first.
-        .onDisappear { viewModel.clearShareArtifact() }
     }
 
     @ViewBuilder

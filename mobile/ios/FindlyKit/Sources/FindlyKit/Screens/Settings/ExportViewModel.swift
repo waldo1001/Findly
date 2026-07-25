@@ -19,8 +19,12 @@ public final class ExportViewModel: ObservableObject {
     @Published public private(set) var exportedData: Data?
     /// specs/008-privacy-endpoints.md §3.1 (review finding #1) — the app-private, opaquely-named
     /// file `exportArtifactStore` just wrote `exportedData` to; `ExportScreen`'s `ShareLink` is
-    /// built from THIS, never from an ad hoc temp-file write of its own. `nil` whenever there is no
-    /// live artifact (before the first export, after `clearShareArtifact()`, or after a failure).
+    /// built from THIS, never from an ad hoc temp-file write of its own. `nil` before the first
+    /// export, or after a failure. There is deliberately no ViewModel-level way to clear this
+    /// early: rule 2 (amended) permits removal only immediately before the next write, at app
+    /// cold start, or via the account-deletion wipe — never on screen teardown/share completion,
+    /// which would race the OS share sheet's consumer (it may still be reading the file
+    /// asynchronously when those signals fire).
     @Published public private(set) var shareURL: URL?
     @Published public private(set) var exportError: String?
 
@@ -75,15 +79,5 @@ public final class ExportViewModel: ObservableObject {
             shareURL = nil
             exportError = userFacingMessage(for: error)
         }
-    }
-
-    /// specs/008-privacy-endpoints.md §3.1 rule 2 (review finding #1) — `ExportScreen` calls this
-    /// once the share/save interaction completes OR is dismissed, and again on its own teardown
-    /// (`onDisappear`), so the artifact never survives longer than the interaction that created it.
-    /// Safe to call with nothing exported yet (a no-op on the store).
-    public func clearShareArtifact() {
-        exportArtifactStore.removeCurrentArtifact()
-        exportedData = nil
-        shareURL = nil
     }
 }
