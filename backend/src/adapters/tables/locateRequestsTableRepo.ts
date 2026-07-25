@@ -73,4 +73,25 @@ export class TableLocateRequestRepo implements LocateRequestRepo {
     }
     return records;
   }
+
+  /** Wipes every `req:` row in the family's partition, regardless of status — family
+   * deletion (002 §4.2 step 3, B19). Idempotent. */
+  async deletePartition(familyId: string): Promise<void> {
+    const rowKeys: string[] = [];
+    const entities = this.client.listEntities({
+      queryOptions: {
+        filter: odata`PartitionKey eq ${familyId} and RowKey ge ${REQUEST_PREFIX} and RowKey lt ${"req;"}`,
+      },
+    });
+    for await (const entity of entities) {
+      rowKeys.push(String(entity.rowKey));
+    }
+    await Promise.all(
+      rowKeys.map((rk) =>
+        this.client.deleteEntity(familyId, rk).catch((err) => {
+          if (!isNotFound(err)) throw err;
+        }),
+      ),
+    );
+  }
 }

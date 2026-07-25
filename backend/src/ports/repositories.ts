@@ -24,6 +24,14 @@ export interface FamilyMember {
   joinedAt: string;
 }
 
+// specs/002 §2.1 — the `invite:{code}` reverse-index row: written by invite creation (001
+// §3.3) *after* the canonical §2.3 Invites row, read only by family deletion (002 §4.2) to
+// find and revoke outstanding codes. The acceptance path never reads it (B19, specs/008 §5.3).
+export interface FamilyInviteIndexEntry {
+  code: string;
+  expiresAt: string;
+}
+
 export interface FamilyRepo {
   /** Conditional insert of the `meta` row (001 §3.1). */
   createFamily(meta: FamilyMeta): Promise<void>;
@@ -39,8 +47,19 @@ export interface FamilyRepo {
     userId: string,
     patch: Partial<Pick<FamilyMember, "role" | "displayName">>,
   ): Promise<FamilyMember>;
-  /** Removes a member row (001 §3.6). */
+  /** Removes a member row (001 §3.6, 002 §4.2 step 2). Idempotent: swallows not-found so
+   * family deletion's re-call converges (B19). */
   removeMember(familyId: string, userId: string): Promise<void>;
+  /** Writes one `invite:{code}` index row (001 §3.3 side effect, 002 §2.1), after the
+   * canonical Invites row. */
+  addInviteIndexEntry(familyId: string, entry: FamilyInviteIndexEntry): Promise<void>;
+  /** Partition range scan of `invite:` rows — family deletion's invite-revocation lookup
+   * (002 §2.1/§4.2 step 2, B19). */
+  listInviteIndexEntries(familyId: string): Promise<FamilyInviteIndexEntry[]>;
+  /** Deletes one `invite:{code}` index row (002 §4.2 step 2, B19). Idempotent. */
+  removeInviteIndexEntry(familyId: string, code: string): Promise<void>;
+  /** Deletes the `meta` row — family deletion (001 §13.3, 002 §4.2 step 5, B19). Idempotent. */
+  deleteFamilyMeta(familyId: string): Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
@@ -106,6 +125,9 @@ export interface InviteRepo {
   getInvite(inviteCode: string): Promise<InviteRecord | null>;
   /** ETag-guarded merge setting usedBy/usedAt; race-safe (001 §3.4, 002 §2.3). */
   consumeInvite(inviteCode: string, usedBy: string, usedAt: string): Promise<ConsumeInviteResult>;
+  /** Deletes the canonical `{inviteCode}` row — family deletion's invite revocation, found
+   * via the 002 §2.1 index rows (002 §4.2 step 2, B19). Idempotent. */
+  deleteInvite(inviteCode: string): Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
@@ -189,6 +211,8 @@ export interface EntitlementsRepo {
   /** Created at family creation with "free" (001 §3.1). */
   create(familyId: string, subscriptionStatus: SubscriptionStatus, updatedAt: string): Promise<void>;
   get(familyId: string): Promise<EntitlementsRecord | null>;
+  /** Deletes the `entitlement` row — family deletion (002 §4.2 step 3, B19). Idempotent. */
+  delete(familyId: string): Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
@@ -216,6 +240,9 @@ export interface LocateRequestRepo {
   update(familyId: string, requestId: string, patch: Partial<LocateRequestRecord>): Promise<void>;
   /** Partition scan filtered to pending + same target = coalescing (001 §6.1). */
   listPendingByTargetDevice(familyId: string, targetDeviceId: string): Promise<LocateRequestRecord[]>;
+  /** Wipes every `req:` row in the family's partition, regardless of status — family
+   * deletion (002 §4.2 step 3, B19). Idempotent. */
+  deletePartition(familyId: string): Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
@@ -243,6 +270,9 @@ export interface UsageRepo {
   /** Read → +by → ETag-guarded merge, retry loop handled by the adapter (002 §2.9). */
   increment(familyId: string, metric: UsageMetric, date: string, by?: number): Promise<void>;
   get(familyId: string, metric: UsageMetric, date: string): Promise<number>;
+  /** Wipes every `{date}:{metric}` row in the family's partition — family deletion (002 §4.2
+   * step 3, B19). Idempotent. */
+  deletePartition(familyId: string): Promise<void>;
 }
 
 // ---------------------------------------------------------------------------

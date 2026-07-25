@@ -3,10 +3,11 @@
 
 import { odata, RestError } from "@azure/data-tables";
 import { createTableClient } from "./tableClientFactory";
-import type { FamilyMember, FamilyMeta, FamilyRepo, Role } from "../../ports/repositories";
+import type { FamilyInviteIndexEntry, FamilyMember, FamilyMeta, FamilyRepo, Role } from "../../ports/repositories";
 
 const META_ROW_KEY = "meta";
 const MEMBER_PREFIX = "member:";
+const INVITE_INDEX_PREFIX = "invite:";
 
 function isNotFound(err: unknown): boolean {
   return err instanceof RestError && err.statusCode === 404;
@@ -84,7 +85,53 @@ export class TableFamilyRepo implements FamilyRepo {
     };
   }
 
+  /** Idempotent (002 §4.2 — family deletion's re-call needs every delete to swallow
+   * not-found, same idiom as TableGroupRepo.removeMember). */
   async removeMember(familyId: string, userId: string): Promise<void> {
-    await this.client.deleteEntity(familyId, `${MEMBER_PREFIX}${userId}`);
+    try {
+      await this.client.deleteEntity(familyId, `${MEMBER_PREFIX}${userId}`);
+    } catch (err) {
+      if (!isNotFound(err)) throw err;
+    }
+  }
+
+  async addInviteIndexEntry(familyId: string, entry: FamilyInviteIndexEntry): Promise<void> {
+    await this.client.createEntity({
+      partitionKey: familyId,
+      rowKey: `${INVITE_INDEX_PREFIX}${entry.code}`,
+      expiresAt: entry.expiresAt,
+    });
+  }
+
+  async listInviteIndexEntries(familyId: string): Promise<FamilyInviteIndexEntry[]> {
+    const entries: FamilyInviteIndexEntry[] = [];
+    const entities = this.client.listEntities({
+      queryOptions: {
+        filter: odata`PartitionKey eq ${familyId} and RowKey ge ${INVITE_INDEX_PREFIX} and RowKey lt ${"invite;"}`,
+      },
+    });
+    for await (const entity of entities) {
+      entries.push({
+        code: String(entity.rowKey).slice(INVITE_INDEX_PREFIX.length),
+        expiresAt: String(entity.expiresAt),
+      });
+    }
+    return entries;
+  }
+
+  async removeInviteIndexEntry(familyId: string, code: string): Promise<void> {
+    try {
+      await this.client.deleteEntity(familyId, `${INVITE_INDEX_PREFIX}${code}`);
+    } catch (err) {
+      if (!isNotFound(err)) throw err;
+    }
+  }
+
+  async deleteFamilyMeta(familyId: string): Promise<void> {
+    try {
+      await this.client.deleteEntity(familyId, META_ROW_KEY);
+    } catch (err) {
+      if (!isNotFound(err)) throw err;
+    }
   }
 }

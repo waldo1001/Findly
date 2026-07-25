@@ -210,4 +210,15 @@ export class InMemoryHistoryStore implements HistoryStore {
 
     return { items: results, nextCursor };
   }
+
+  /** Wipes every recorded fix/event belonging to `familyId` (002 §4.2 step 4, B19). */
+  async deleteFamilyPrefix(familyId: string): Promise<void> {
+    const keptFixes = this.fixes.filter((r) => r.familyId !== familyId);
+    this.fixes.length = 0;
+    this.fixes.push(...keptFixes);
+
+    const keptEvents = this.events.filter((r) => r.familyId !== familyId);
+    this.events.length = 0;
+    this.events.push(...keptEvents);
+  }
 }

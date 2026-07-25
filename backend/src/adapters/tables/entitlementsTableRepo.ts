@@ -36,4 +36,13 @@ export class TableEntitlementsRepo implements EntitlementsRepo {
       throw err;
     }
   }
+
+  /** Idempotent (002 §4.2 step 3 — family deletion, B19). */
+  async delete(familyId: string): Promise<void> {
+    try {
+      await this.client.deleteEntity(familyId, ENTITLEMENT_ROW_KEY);
+    } catch (err) {
+      if (!isNotFound(err)) throw err;
+    }
+  }
 }
