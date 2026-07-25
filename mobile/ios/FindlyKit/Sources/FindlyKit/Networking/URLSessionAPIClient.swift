@@ -123,6 +123,29 @@ public final class URLSessionAPIClient: FindlyAPIClient {
         throw APIError.server(decodedError, httpStatus: httpStatus)
     }
 
+    /// Sends a request expecting a RAW, unenveloped 2xx body (specs/001 §13.1 — the one exception
+    /// to the §3.1 `{data,features}` envelope: `GET /export`'s success body is the export document
+    /// itself). Error responses still decode through the standard `{error:{...}}` envelope, incl.
+    /// the retry-once-on-`AUTH_TOKEN_EXPIRED` path — only the SUCCESS shape is special-cased here.
+    func sendRawData(
+        method: HTTPMethod,
+        path: String,
+        queryItems: [URLQueryItem] = [],
+        allowRetry: Bool = true
+    ) async throws -> Data {
+        let request = try await makeRequest(method: method, path: path, queryItems: queryItems)
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw APIError.transport("response was not an HTTPURLResponse")
+        }
+        if (200...299).contains(http.statusCode) {
+            return data
+        }
+        return try await handleErrorAndMaybeRetry(data: data, httpStatus: http.statusCode, allowRetry: allowRetry) {
+            try await self.sendRawData(method: method, path: path, queryItems: queryItems, allowRetry: false)
+        }
+    }
+
     /// Sends a request whose success path needs the raw `HTTPURLResponse` (specs/001 §7.1/§7.2 —
     /// the ETag lives in a response header, not the JSON body). `notModifiedIsSuccess` treats a
     /// bare `304` as success rather than routing it through error decoding (§7.1 only).

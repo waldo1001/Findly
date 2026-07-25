@@ -51,6 +51,12 @@ extension APIError {
             case .locationBatchTooLarge:
                 return "Too many locations at once."
             case .limitExceeded:
+                // specs/008-privacy-endpoints.md §3, specs/004-ios-client.md §3.6 — the export
+                // quota gets its own friendly, retry-tomorrow message; every other LIMIT_EXCEEDED
+                // (`details.limit` unset or some other plan limit) keeps the generic message.
+                if case .string("exportsPerDay")? = body.details?["limit"] {
+                    return "You've reached today's export limit. Try again tomorrow."
+                }
                 return "You've reached a plan limit."
             case .rateLimited:
                 return "Too many requests — please wait a moment."

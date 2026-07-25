@@ -50,4 +50,16 @@ public protocol FindlyAPIClient {
     func leaveGroup(groupId: String) async throws
     func removeGroupMember(groupId: String, userId: String) async throws
     func getGroupLatestLocations(groupId: String) async throws -> Envelope<GroupLatestLocationsResponse>
+
+    // §13 — Privacy: export & deletion (specs/008-privacy-endpoints.md; wire shapes 001 §13)
+
+    /// `userId == nil` exports the caller (any user with a profile); a parent may pass another
+    /// current family member's id (001 §13.1). Returns the RAW, unenveloped export document —
+    /// the one exception to the §3.1 envelope (001 §1.3) — never decoded as `Envelope<T>`.
+    func exportData(userId: String?) async throws -> Data
+    /// Bare 204 (001 §13.2). Available to every authenticated user, including one with no
+    /// profile (idempotent no-op, 008 §4.1).
+    func deleteAccount() async throws
+    /// Bare 204 (001 §13.3). Parent-only.
+    func deleteFamily() async throws
 }

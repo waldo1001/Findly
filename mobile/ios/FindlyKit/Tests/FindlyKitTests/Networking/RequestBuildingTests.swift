@@ -507,4 +507,77 @@ struct RequestBuildingTests {
         #expect(envelope.data.members[0].location?.lat == 51.0543)
         #expect(envelope.data.members[1].location == nil)
     }
+
+    // MARK: §13 Privacy (specs/008-privacy-endpoints.md; wire shapes 001 §13)
+
+    @Test func exportData_selfExport_buildsRequestWithNoUserIdQuery() async throws {
+        let client = makeClient()
+        let rawDocument = """
+        { "formatVersion": 1, "generatedAt": "2026-07-25T14:00:00Z",
+          "subject": { "userId": "u1", "displayName": "Eric" } }
+        """.data(using: .utf8)!
+        MockURLProtocol.requestHandler = { request in
+            #expect(request.httpMethod == "GET")
+            let components = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)!
+            #expect(components.path == "/api/v1/export")
+            #expect(components.queryItems == nil, "self-export omits the userId query param entirely")
+            return (jsonResponse(url: request.url!, status: 200), rawDocument)
+        }
+        let data = try await client.exportData(userId: nil)
+        // §13.1's success body is the export document ITSELF, never wrapped in the §3.1
+        // {data,features} envelope — this is the load-bearing assertion for the raw-Data path.
+        #expect(data == rawDocument)
+        #expect(try JSONSerialization.jsonObject(with: data) is [String: Any], "must not attempt Envelope<T> decoding")
+    }
+
+    @Test func exportData_parentForMember_buildsRequestWithUserIdQuery() async throws {
+        let client = makeClient()
+        MockURLProtocol.requestHandler = { request in
+            let components = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)!
+            #expect(components.path == "/api/v1/export")
+            let query = Dictionary(uniqueKeysWithValues: (components.queryItems ?? []).map { ($0.name, $0.value) })
+            #expect(query["userId"] ?? nil == "u2")
+            return (jsonResponse(url: request.url!, status: 200), "{}".data(using: .utf8)!)
+        }
+        _ = try await client.exportData(userId: "u2")
+    }
+
+    @Test func exportData_errorResponse_decodesThroughTheStandardErrorEnvelope() async throws {
+        let client = makeClient()
+        MockURLProtocol.requestHandler = { request in
+            let errorJSON = """
+            { "error": { "code": "LIMIT_EXCEEDED", "message": "daily export quota reached",
+                         "details": { "limit": "exportsPerDay" }, "requestId": "r1" } }
+            """
+            return (jsonResponse(url: request.url!, status: 402), errorJSON.data(using: .utf8)!)
+        }
+        do {
+            _ = try await client.exportData(userId: nil)
+            Issue.record("expected exportData to throw")
+        } catch let APIError.server(body, httpStatus) {
+            #expect(body.code == .limitExceeded)
+            #expect(body.details?["limit"] == .string("exportsPerDay"))
+            #expect(httpStatus == 402)
+        }
+    }
+
+    @Test func deleteAccount_buildsRequestAndHandlesNoContent() async throws {
+        let client = makeClient()
+        MockURLProtocol.requestHandler = { request in
+            #expect(request.httpMethod == "DELETE")
+            #expect(request.url?.path == "/api/v1/users/me")
+            return (jsonResponse(url: request.url!, status: 204), Data())
+        }
+        try await client.deleteAccount()
+    }
+
+    @Test func deleteFamily_buildsRequestAndHandlesNoContent() async throws {
+        let client = makeClient()
+        MockURLProtocol.requestHandler = { request in
+            #expect(request.httpMethod == "DELETE")
+            #expect(request.url?.path == "/api/v1/families/me")
+            return (jsonResponse(url: request.url!, status: 204), Data())
+        }
+        try await client.deleteFamily()
+    }
 }
