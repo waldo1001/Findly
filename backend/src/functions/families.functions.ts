@@ -13,6 +13,7 @@ import { getMyFamily } from "../domain/family/getMyFamily";
 import { createInvite } from "../domain/family/createInvite";
 import { updateMember } from "../domain/family/updateMember";
 import { removeMember } from "../domain/family/removeMember";
+import { deleteFamily } from "../domain/family/deleteFamily";
 import { createTokenVerifier } from "../adapters/auth/firebaseJoseVerifier";
 import { TableUserRepo } from "../adapters/tables/usersTableRepo";
 import { TableFamilyRepo } from "../adapters/tables/familiesTableRepo";
@@ -20,6 +21,9 @@ import { TableEntitlementsRepo } from "../adapters/tables/entitlementsTableRepo"
 import { TableUsageRepo } from "../adapters/tables/usageTableRepo";
 import { TableDeviceRepo } from "../adapters/tables/devicesTableRepo";
 import { TableInviteRepo } from "../adapters/tables/invitesTableRepo";
+import { TableLocateRequestRepo } from "../adapters/tables/locateRequestsTableRepo";
+import { BlobHistoryStore } from "../adapters/blobs/historyBlobStore";
+import { BlobGeofenceConfigRepo } from "../adapters/blobs/geofenceConfigBlobRepo";
 import { SystemClock } from "../adapters/support/systemClock";
 import { CryptoIdGenerator } from "../adapters/support/cryptoIdGenerator";
 import { CryptoInviteCodeGenerator } from "../adapters/support/cryptoInviteCodeGenerator";
@@ -31,6 +35,9 @@ const entitlementsRepo = new TableEntitlementsRepo();
 const usageRepo = new TableUsageRepo();
 const deviceRepo = new TableDeviceRepo();
 const inviteRepo = new TableInviteRepo();
+const locateRequestRepo = new TableLocateRequestRepo();
+const historyStore = new BlobHistoryStore();
+const geofenceConfigRepo = new BlobGeofenceConfigRepo();
 const clock = new SystemClock();
 const idGenerator = new CryptoIdGenerator();
 const inviteCodeGenerator = new CryptoInviteCodeGenerator();
@@ -120,7 +127,7 @@ app.http("createInvite", {
       const body: unknown = await request.json().catch(() => ({}));
       const result = await createInvite(
         { uid: auth.uid, familyId: auth.familyId, role: auth.role, body },
-        { inviteRepo, entitlementsRepo, inviteCodeGenerator, clock },
+        { inviteRepo, familyRepo, entitlementsRepo, inviteCodeGenerator, clock },
       );
       return {
         status: 201,
@@ -172,6 +179,25 @@ app.http("removeMember", {
       return { status: 204 };
     } catch (err) {
       return errorResponse(err, requestId, context, "removeMember");
+    }
+  },
+});
+
+app.http("deleteFamily", {
+  methods: ["DELETE"],
+  authLevel: "anonymous",
+  route: "v1/families/me",
+  handler: async (request: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> => {
+    const requestId = newRequestId();
+    try {
+      const auth = await authenticate(request.headers.get("authorization"), { tokenVerifier, userRepo, usageRepo, clock });
+      await deleteFamily(
+        { uid: auth.uid, familyId: auth.familyId, role: auth.role },
+        { familyRepo, userRepo, inviteRepo, entitlementsRepo, usageRepo, locateRequestRepo, historyStore, geofenceConfigRepo },
+      );
+      return { status: 204 };
+    } catch (err) {
+      return errorResponse(err, requestId, context, "deleteFamily");
     }
   },
 });

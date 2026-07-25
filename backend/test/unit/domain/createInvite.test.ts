@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { createInvite } from "../../../src/domain/family/createInvite";
 import { getFeatures } from "../../../src/domain/plan";
 import { InMemoryInviteRepo } from "../../fakes/inMemoryInviteRepo";
+import { InMemoryFamilyRepo } from "../../fakes/inMemoryFamilyRepo";
 import { InMemoryEntitlementsRepo } from "../../fakes/inMemoryEntitlementsRepo";
 import { SeqInviteCodeGenerator } from "../../fakes/seqInviteCodeGenerator";
 import { FixedClock } from "../../fakes/fixedClock";
@@ -15,6 +16,7 @@ function buildDeps() {
   entitlementsRepo.seed(FAMILY_ID, { subscriptionStatus: "free", updatedAt: "2026-07-19T08:00:00Z" });
   return {
     inviteRepo: new InMemoryInviteRepo(),
+    familyRepo: new InMemoryFamilyRepo(),
     entitlementsRepo,
     inviteCodeGenerator: new SeqInviteCodeGenerator(),
     clock: new FixedClock(new Date("2026-07-19T09:00:00Z")),
@@ -125,6 +127,7 @@ describe("domain/family/createInvite", () => {
   it("throws INTERNAL_ERROR when the family has no Entitlements record", async () => {
     const deps = {
       inviteRepo: new InMemoryInviteRepo(),
+      familyRepo: new InMemoryFamilyRepo(),
       entitlementsRepo: new InMemoryEntitlementsRepo(), // deliberately not seeded
       inviteCodeGenerator: new SeqInviteCodeGenerator(),
       clock: new FixedClock(new Date("2026-07-19T09:00:00Z")),
@@ -134,5 +137,27 @@ describe("domain/family/createInvite", () => {
       createInvite({ uid: "u1", familyId: FAMILY_ID, role: "parent", body: { role: "member" } }, deps),
       "INTERNAL_ERROR",
     );
+  });
+
+  it("writes a Families invite: index row after the canonical Invites row (002 §2.1, B19)", async () => {
+    const deps = buildDeps();
+
+    const result = await createInvite(
+      { uid: "u1", familyId: FAMILY_ID, role: "parent", body: { role: "member" } },
+      deps,
+    );
+
+    const indexEntries = await deps.familyRepo.listInviteIndexEntries(FAMILY_ID);
+    expect(indexEntries).toEqual([{ code: result.inviteCode, expiresAt: result.expiresAt }]);
+  });
+
+  it("canonicalizes the index row's code the same way as the canonical invite row", async () => {
+    const lowerHyphenGenerator: InviteCodeGenerator = { next: () => "7f3k-9qrz" };
+    const deps = { ...buildDeps(), inviteCodeGenerator: lowerHyphenGenerator };
+
+    await createInvite({ uid: "u1", familyId: FAMILY_ID, role: "parent", body: { role: "member" } }, deps);
+
+    const indexEntries = await deps.familyRepo.listInviteIndexEntries(FAMILY_ID);
+    expect(indexEntries).toEqual([{ code: "7F3K9QRZ", expiresAt: "2026-07-22T09:00:00.000Z" }]);
   });
 });

@@ -3,7 +3,7 @@
 import { AppError } from "../../http/errors";
 import { createInviteRequestSchema, parseOrThrow } from "../../http/validate";
 import type { Clock, InviteCodeGenerator } from "../../ports/support";
-import type { EntitlementsRepo, InviteRecord, InviteRepo, Role } from "../../ports/repositories";
+import type { EntitlementsRepo, FamilyRepo, InviteRecord, InviteRepo, Role } from "../../ports/repositories";
 import { getFeatures, type Features } from "../plan";
 import { normalizeInviteCode } from "./inviteCode";
 
@@ -11,6 +11,9 @@ const INVITE_TTL_HOURS = 72;
 
 export interface CreateInviteDeps {
   inviteRepo: InviteRepo;
+  /** Family deletion's invite-revocation lookup (002 §2.1/§4.2, B19) — this task writes
+   * the `invite:{code}` index row, never reads it back. */
+  familyRepo: FamilyRepo;
   entitlementsRepo: EntitlementsRepo;
   inviteCodeGenerator: InviteCodeGenerator;
   clock: Clock;
@@ -63,6 +66,10 @@ export async function createInvite(input: CreateInviteInput, deps: CreateInviteD
     expiresAt,
   };
   await deps.inviteRepo.createInvite(invite);
+  // Family-side index row, written AFTER the canonical row (001 §3.3, 002 §2.1): lets
+  // family deletion (008 §5.3) find and revoke outstanding invites. The acceptance path
+  // never reads it.
+  await deps.familyRepo.addInviteIndexEntry(familyId, { code: inviteCode, expiresAt });
 
   return { inviteCode, role: body.role, expiresAt, features };
 }
