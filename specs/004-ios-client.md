@@ -264,6 +264,9 @@ Push tokens are **write-only** (never read back, 001 §4.1/§4.2) — `FindlyKit
 
 ## 7. Location & push-to-locate strategy (000 §O1, §O2, §O3; 001 §5–§6, §8)
 
+> The on-device runtime contract — the three opportunistic iOS triggers (`BGAppRefreshTask`, significant-location-change, geofence transitions) and the `× 0.8` elapsed-time rule, the durable Core Data/SQLite queue replacing §6's in-memory store, push routing, region-monitoring lifecycle, and the When-In-Use → Always staging — is normative in **[009](009-device-runtime.md)** (tasks I10–I12). The scaffolding described below is what those tasks replace.
+
+
 - **Sync:** `LocationProviding` protocol (foreground high-accuracy fix + background significant-change monitoring); `SystemLocationProvider` (`#if os(iOS)`) wraps `CLLocationManager` with staged authorization (When-In-Use → Always upgrade prompt) — implementation body is scaffolded with `// TODO(I2 or on-device session):` markers for the actual `CLLocationManagerDelegate` wiring, since it cannot be exercised without a device/simulator. `BackgroundSyncScheduling` (`#if os(iOS) && canImport(BackgroundTasks)`) scaffolds `BGAppRefreshTask` registration the same way. Both conform to protocols with fully-tested fakes so `FixQueue`/`DeviceRegistrationService` consumers are unit-testable without either framework.
 - **Interval honesty (000 §O2):** the UI (I2) must present the configured interval as a *target*; this spec's models carry `syncIntervalMinutes` verbatim from the server — no client-side reinterpretation.
 - **"1 day" interval (000 §O3):** scheduling semantics (first opportunistic fix per device-local calendar day) belong to the on-device scheduler (I2/runtime), not to any I1 type; noted here so the eventual scheduler implementation has a normative pointer.

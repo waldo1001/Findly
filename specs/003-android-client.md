@@ -259,6 +259,8 @@ interface PushTokenProvider {
 }
 ```
 
+**Runtime contract:** the real FCM implementation and the handling of all four push types are normative in **[009 §5](009-device-runtime.md)** (task A9).
+
 `StubPushTokenProvider` is the A1 implementation (no real FCM SDK wired — `google-services.json` is absent per H1-waiver): it never emits a token, documented as a TODO(H1)/TODO(A2) wiring point for `FirebaseMessaging.getInstance()` + a `FirebaseMessagingService.onNewToken` override. The **contract** is fixed now: whatever the real implementation is, `AppContainer` wires its `addRefreshListener` to `deviceRegistrar::onPushTokenRefreshed`, which re-calls `POST /devices` with the new token — satisfying 001 §4.1 / 000 §O4 ("Clients MUST re-`POST /devices` on token refresh") without any future call-site change.
 
 ## 10. Offline fix-queue & `batchId` idempotency (001 §5.1)
@@ -303,11 +305,16 @@ Ties `FixQueueStore` + `LocationsApi` together: `syncOnce()` calls `nextBatch()`
 
 The task allows "Room or an abstraction." **A1 ships the abstraction (`FixQueueStore`) plus an in-memory implementation (`InMemoryFixQueueStore`)**, not a Room-backed one, for one concrete reason: this sandbox has no Android/Gradle toolchain to compile-check a Room + KSP annotation-processing setup (§13.4), and an unverifiable `@Entity`/`@Dao`/KSP-version pairing is a worse risk than an honestly-scoped in-memory placeholder behind the exact interface a persistent implementation will later satisfy with zero call-site changes. This is a deliberate, documented scope decision, not an oversight — flagged again in the final task report.
 
-### 10.5 Periodic worker — scaffold only
+### 10.5 Periodic worker — scaffold only (real scheduling: [009 §3](009-device-runtime.md))
+
+> The scheduling strategy this scaffold is waiting for — WorkManager for ≥15 min, a `FOREGROUND_SERVICE_LOCATION` service for 5/10 min, once-per-local-day for 1440, plus the durable Room-backed queue that replaces §10.4's in-memory store — is normative in **[009 §2–§3](009-device-runtime.md)** (tasks A10/A11).
+
 
 `queue/worker/LocationSyncWorker` (a `CoroutineWorker` skeleton) and `LocationSyncScheduler` (holds the WorkManager periodic-request-building TODO) exist as untested Android-framework glue, per the task's explicit allowance ("the periodic worker may be scaffolded with clear runtime TODOs"). All actual sync decision logic lives in the tested `LocationSyncCoordinator` above; the worker's job is only to invoke it on a schedule once WorkManager enqueueing is wired (A2/H1-adjacent).
 
 ## 11. Permission & onboarding flow (000 §O2)
+
+> Cross-platform permission rules (prominent disclosure before the OS prompt, denial banner, foreground re-check, revocation handling) are normative in **[009 §7](009-device-runtime.md)**; the Android staging below is the platform detail it references.
 
 Normative for A2's implementation (no permission-request UI ships in A1 beyond declaring manifest permissions):
 
