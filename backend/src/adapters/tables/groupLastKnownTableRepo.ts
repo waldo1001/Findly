@@ -4,6 +4,7 @@
 
 import { odata, RestError } from "@azure/data-tables";
 import { createTableClient } from "./tableClientFactory";
+import { collectEntitiesTolerant } from "./listTolerant";
 import type { GroupLastKnownRecord, GroupLastKnownRepo } from "../../ports/repositories";
 
 const MEMBER_PREFIX = "member:";
@@ -75,17 +76,19 @@ export class TableGroupLastKnownRepo implements GroupLastKnownRepo {
   }
 
   async listByGroup(groupId: string): Promise<GroupLastKnownRecord[]> {
-    const records: GroupLastKnownRecord[] = [];
-    const entities = this.client.listEntities({
-      queryOptions: {
-        filter: odata`PartitionKey eq ${groupId} and RowKey ge ${MEMBER_PREFIX} and RowKey lt ${"member;"}`,
-      },
-    });
-    for await (const entity of entities) {
+    // 002 §4.2 (B20) — a GroupLastKnown table that has never been created (no member of this
+    // group has ever posted a position) resolves to no rows.
+    const entities = await collectEntitiesTolerant(
+      this.client.listEntities({
+        queryOptions: {
+          filter: odata`PartitionKey eq ${groupId} and RowKey ge ${MEMBER_PREFIX} and RowKey lt ${"member;"}`,
+        },
+      }),
+    );
+    return entities.map((entity) => {
       const userId = String(entity.rowKey).slice(MEMBER_PREFIX.length);
-      records.push(toRecord(userId, entity));
-    }
-    return records;
+      return toRecord(userId, entity);
+    });
   }
 
   async removeMember(groupId: string, userId: string): Promise<void> {

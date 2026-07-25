@@ -4,6 +4,7 @@
 
 import { odata, RestError } from "@azure/data-tables";
 import { createTableClient } from "./tableClientFactory";
+import { collectEntitiesTolerant } from "./listTolerant";
 import type { IdempotencyRepo } from "../../ports/repositories";
 
 function isAlreadyExists(err: unknown): boolean {
@@ -48,13 +49,14 @@ export class TableIdempotencyRepo implements IdempotencyRepo {
    * belongs to deviceId by construction (same idiom as devicesTableRepo.deleteDevicesByOwner).
    * Idempotent. */
   async deletePartition(deviceId: string): Promise<void> {
-    const rowKeys: string[] = [];
-    const entities = this.client.listEntities({
-      queryOptions: { filter: odata`PartitionKey eq ${deviceId}` },
-    });
-    for await (const entity of entities) {
-      rowKeys.push(String(entity.rowKey));
-    }
+    // 002 §4.2 (B20) — an IdempotencyMarkers table that has never been created (e.g. a
+    // device that never posted a batch/event/fix) resolves to nothing to delete.
+    const entities = await collectEntitiesTolerant(
+      this.client.listEntities({
+        queryOptions: { filter: odata`PartitionKey eq ${deviceId}` },
+      }),
+    );
+    const rowKeys = entities.map((entity) => String(entity.rowKey));
     await Promise.all(
       rowKeys.map((rk) =>
         this.client.deleteEntity(deviceId, rk).catch((err) => {

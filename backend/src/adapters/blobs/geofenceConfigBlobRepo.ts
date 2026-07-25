@@ -7,6 +7,7 @@
 
 import { RestError } from "@azure/storage-blob";
 import { createContainerClient } from "./blobClientFactory";
+import { deleteBlobTolerant } from "./listTolerant";
 import type {
   GeofenceConfigDocument,
   GeofenceConfigRepo,
@@ -94,9 +95,12 @@ export class BlobGeofenceConfigRepo implements GeofenceConfigRepo {
     }
   }
 
-  /** Idempotent (002 §4.2 step 4 — family deletion, B19). */
+  /** Idempotent (002 §4.2 step 4 — family deletion, B19). Tolerates the `config` container
+   * never having been created at all (a family that never set a geofence config, B20):
+   * `deleteIfExists()` alone only swallows `BlobNotFound`, NOT `ContainerNotFound`, so a
+   * missing container needs the extra tolerance `deleteBlobTolerant` provides. */
   async deleteConfig(familyId: string): Promise<void> {
     const client = this.container.getBlockBlobClient(this.blobPath(familyId));
-    await client.deleteIfExists();
+    await deleteBlobTolerant(client);
   }
 }

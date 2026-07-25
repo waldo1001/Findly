@@ -3,6 +3,7 @@
 
 import { odata, RestError } from "@azure/data-tables";
 import { createTableClient } from "./tableClientFactory";
+import { collectEntitiesTolerant } from "./listTolerant";
 import type { GroupExpiryAction, GroupExpiryRepo, GroupExpiryRow } from "../../ports/repositories";
 
 function isNotFound(err: unknown): boolean {
@@ -34,14 +35,14 @@ export class TableGroupExpiryRepo implements GroupExpiryRepo {
 
   async listByDate(bucketDate: string): Promise<GroupExpiryRow[]> {
     // The sweeper's bucket walk (002 §2.13/§4.1): a single tiny partition scan per date, never
-    // a full table scan.
-    const rows: GroupExpiryRow[] = [];
-    const entities = this.client.listEntities({
-      queryOptions: { filter: odata`PartitionKey eq ${bucketDate}` },
-    });
-    for await (const entity of entities) {
-      rows.push({ groupId: String(entity.rowKey), action: entity.action as GroupExpiryAction });
-    }
-    return rows;
+    // a full table scan. Tolerates a GroupExpiry table that has never been created — a
+    // deployment that has never had a single group (B20) — resolving to no rows rather than
+    // crashing the whole daily timer run.
+    const entities = await collectEntitiesTolerant(
+      this.client.listEntities({
+        queryOptions: { filter: odata`PartitionKey eq ${bucketDate}` },
+      }),
+    );
+    return entities.map((entity) => ({ groupId: String(entity.rowKey), action: entity.action as GroupExpiryAction }));
   }
 }

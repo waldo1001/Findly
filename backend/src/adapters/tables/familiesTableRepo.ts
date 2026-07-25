@@ -3,6 +3,7 @@
 
 import { odata, RestError } from "@azure/data-tables";
 import { createTableClient } from "./tableClientFactory";
+import { collectEntitiesTolerant } from "./listTolerant";
 import type { FamilyInviteIndexEntry, FamilyMember, FamilyMeta, FamilyRepo, Role } from "../../ports/repositories";
 
 const META_ROW_KEY = "meta";
@@ -52,21 +53,20 @@ export class TableFamilyRepo implements FamilyRepo {
   }
 
   async listMembers(familyId: string): Promise<FamilyMember[]> {
-    const members: FamilyMember[] = [];
-    const entities = this.client.listEntities({
-      queryOptions: {
-        filter: odata`PartitionKey eq ${familyId} and RowKey ge ${MEMBER_PREFIX} and RowKey lt ${"member;"}`,
-      },
-    });
-    for await (const entity of entities) {
-      members.push({
-        userId: String(entity.rowKey).slice(MEMBER_PREFIX.length),
-        role: entity.role as Role,
-        displayName: String(entity.displayName),
-        joinedAt: String(entity.joinedAt),
-      });
-    }
-    return members;
+    // 002 §4.2 (B20) — a Families table that has never been created resolves to no members.
+    const entities = await collectEntitiesTolerant(
+      this.client.listEntities({
+        queryOptions: {
+          filter: odata`PartitionKey eq ${familyId} and RowKey ge ${MEMBER_PREFIX} and RowKey lt ${"member;"}`,
+        },
+      }),
+    );
+    return entities.map((entity) => ({
+      userId: String(entity.rowKey).slice(MEMBER_PREFIX.length),
+      role: entity.role as Role,
+      displayName: String(entity.displayName),
+      joinedAt: String(entity.joinedAt),
+    }));
   }
 
   async updateMember(
@@ -104,19 +104,18 @@ export class TableFamilyRepo implements FamilyRepo {
   }
 
   async listInviteIndexEntries(familyId: string): Promise<FamilyInviteIndexEntry[]> {
-    const entries: FamilyInviteIndexEntry[] = [];
-    const entities = this.client.listEntities({
-      queryOptions: {
-        filter: odata`PartitionKey eq ${familyId} and RowKey ge ${INVITE_INDEX_PREFIX} and RowKey lt ${"invite;"}`,
-      },
-    });
-    for await (const entity of entities) {
-      entries.push({
-        code: String(entity.rowKey).slice(INVITE_INDEX_PREFIX.length),
-        expiresAt: String(entity.expiresAt),
-      });
-    }
-    return entries;
+    // 002 §4.2 (B20) — same tolerance as listMembers: no table yet means no entries.
+    const entities = await collectEntitiesTolerant(
+      this.client.listEntities({
+        queryOptions: {
+          filter: odata`PartitionKey eq ${familyId} and RowKey ge ${INVITE_INDEX_PREFIX} and RowKey lt ${"invite;"}`,
+        },
+      }),
+    );
+    return entities.map((entity) => ({
+      code: String(entity.rowKey).slice(INVITE_INDEX_PREFIX.length),
+      expiresAt: String(entity.expiresAt),
+    }));
   }
 
   async removeInviteIndexEntry(familyId: string, code: string): Promise<void> {

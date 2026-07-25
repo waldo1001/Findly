@@ -6,6 +6,7 @@
 
 import { RestError, type ContainerClient } from "@azure/storage-blob";
 import { createContainerClient } from "./blobClientFactory";
+import { collectBlobsTolerant } from "./listTolerant";
 import {
   decodeEventCursor,
   decodeFixCursor,
@@ -102,12 +103,12 @@ async function downloadDayLines(container: ContainerClient, blobPath: string): P
  * have ever written history for that user (002 §3.1 path shape). */
 async function listDeviceIds(container: ContainerClient, familyId: string, userId: string): Promise<string[]> {
   const prefix = `${familyId}/${userId}/`;
-  const deviceIds: string[] = [];
-  for await (const item of container.listBlobsByHierarchy("/", { prefix })) {
-    if (item.kind === "prefix") {
-      deviceIds.push(item.name.slice(prefix.length, -1));
-    }
-  }
+  // 002 §4.2 (B20) — a `history` container that has never been created (this subject has no
+  // history at all yet) resolves to no device directories, same as an empty prefix.
+  const items = await collectBlobsTolerant(container.listBlobsByHierarchy("/", { prefix }));
+  const deviceIds = items
+    .filter((item) => item.kind === "prefix")
+    .map((item) => item.name.slice(prefix.length, -1));
   return deviceIds.sort();
 }
 
@@ -137,16 +138,15 @@ async function mapWithConcurrency<T>(items: T[], concurrency: number, fn: (item:
 }
 
 /** Deletes every blob under `prefix` in `container` (`deleteIfExists` is itself
- * not-found-tolerant, so no try/catch is needed here — 002 §4.2 idempotency idiom).
- * Bounded-parallel (002 §4.2) — a family's full history/events prefix can span thousands of
- * day blobs across every member/device. */
+ * not-found-tolerant, so no try/catch is needed for the per-blob delete — 002 §4.2
+ * idempotency idiom). The LISTING itself also tolerates the container never having been
+ * created at all (ContainerNotFound, B20) — resolving to nothing to delete, exactly like an
+ * existing-but-empty prefix. Bounded-parallel (002 §4.2) — a family's full history/events
+ * prefix can span thousands of day blobs across every member/device. */
 async function deletePrefix(container: ContainerClient, prefix: string): Promise<void> {
-  const blobNames: string[] = [];
-  for await (const blob of container.listBlobsFlat({ prefix })) {
-    blobNames.push(blob.name);
-  }
-  await mapWithConcurrency(blobNames, ERASURE_CONCURRENCY, async (blobName) => {
-    await container.getBlobClient(blobName).deleteIfExists();
+  const blobs = await collectBlobsTolerant(container.listBlobsFlat({ prefix }));
+  await mapWithConcurrency(blobs, ERASURE_CONCURRENCY, async (blob) => {
+    await container.getBlobClient(blob.name).deleteIfExists();
   });
 }
 
@@ -334,15 +334,14 @@ export class BlobHistoryStore implements HistoryStore {
    * lines, leaving every other member's lines byte-identical. */
   async eraseUserFromEvents(familyId: string, userId: string): Promise<void> {
     const prefix = `${familyId}/`;
-    const blobPaths: string[] = [];
-    for await (const blob of this.eventsContainer.listBlobsFlat({ prefix })) {
-      blobPaths.push(blob.name);
-    }
+    // 002 §4.2 (B20) — an `events` container that has never been created (this family never
+    // had a geofence event) resolves to no day blobs to inspect.
+    const blobs = await collectBlobsTolerant(this.eventsContainer.listBlobsFlat({ prefix }));
     // Bounded-parallel (002 §4.2): a long-lived family's events/ prefix has one day-blob per
     // day of family lifetime, and every one of them must be inspected (the subject's lines
     // may be in any of them) — sequential one-at-a-time round-trips risk the request timeout.
-    await mapWithConcurrency(blobPaths, ERASURE_CONCURRENCY, async (blobPath) => {
-      await eraseSubjectFromEventDayBlob(this.eventsContainer, blobPath, userId);
+    await mapWithConcurrency(blobs, ERASURE_CONCURRENCY, async (blob) => {
+      await eraseSubjectFromEventDayBlob(this.eventsContainer, blob.name, userId);
     });
   }
 }
