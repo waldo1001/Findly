@@ -206,4 +206,107 @@ describe("integration/BlobHistoryStore — history container (specs/002 §3.1-§
 
     expect(page.items[0]).toMatchObject({ geofenceName: null, lat: null, lon: null, radiusM: null });
   });
+
+  it("deleteUserPrefix wipes only that user's history/{familyId}/{userId}/ prefix, leaving another user's history intact (specs/002 §4.2 step 6, B18)", async () => {
+    const store = new BlobHistoryStore();
+    const familyId = testFamilyId();
+    const subjectUserId = testUserId();
+    const otherUserId = testUserId();
+    const deviceId = testDeviceId();
+
+    await store.appendFix(familyId, subjectUserId, deviceId, fixLine({ fixId: "subject-fix" }));
+    await store.appendFix(familyId, otherUserId, deviceId, fixLine({ fixId: "other-fix" }));
+
+    await store.deleteUserPrefix(familyId, subjectUserId);
+
+    const subjectPage = await store.readFixHistory(familyId, subjectUserId, undefined, "2026-07-19", "2026-07-19", 500, null);
+    expect(subjectPage.items).toEqual([]);
+    const otherPage = await store.readFixHistory(familyId, otherUserId, undefined, "2026-07-19", "2026-07-19", 500, null);
+    expect(otherPage.items.map((i) => i.fixId)).toEqual(["other-fix"]);
+  });
+
+  it("deleteUserPrefix is idempotent (a second call on an already-empty prefix is a no-op)", async () => {
+    const store = new BlobHistoryStore();
+    const familyId = testFamilyId();
+    const subjectUserId = testUserId();
+
+    await expect(store.deleteUserPrefix(familyId, subjectUserId)).resolves.toBeUndefined();
+    await expect(store.deleteUserPrefix(familyId, subjectUserId)).resolves.toBeUndefined();
+  });
+
+  it("eraseUserFromEvents (008 §4.3, 002 §4.2): removes only the subject's lines from a day blob, leaving every other member's line untouched", async () => {
+    const store = new BlobHistoryStore();
+    const familyId = testFamilyId();
+    const subjectUserId = testUserId();
+    const otherUserId = testUserId();
+
+    await store.appendEvent(familyId, eventLine({ eventId: "e-subject-1", userId: subjectUserId, recordedAt: "2026-07-19T15:00:00Z" }));
+    await store.appendEvent(familyId, eventLine({ eventId: "e-other-1", userId: otherUserId, recordedAt: "2026-07-19T15:01:00Z" }));
+    await store.appendEvent(familyId, eventLine({ eventId: "e-subject-2", userId: subjectUserId, recordedAt: "2026-07-19T15:02:00Z" }));
+    await store.appendEvent(familyId, eventLine({ eventId: "e-other-2", userId: otherUserId, recordedAt: "2026-07-19T15:03:00Z" }));
+
+    await store.eraseUserFromEvents(familyId, subjectUserId);
+
+    const all = await store.readEventHistory(familyId, "2026-07-19", "2026-07-19", undefined, 500, null);
+    expect(all.items.map((e) => e.eventId).sort()).toEqual(["e-other-1", "e-other-2"]);
+  });
+
+  it("eraseUserFromEvents is a no-op when the subject has no lines in a day blob (other lines byte-identical)", async () => {
+    const store = new BlobHistoryStore();
+    const familyId = testFamilyId();
+    const subjectUserId = testUserId();
+    const otherUserId = testUserId();
+
+    await store.appendEvent(familyId, eventLine({ eventId: "e-other-only", userId: otherUserId, recordedAt: "2026-07-19T15:00:00Z" }));
+
+    await store.eraseUserFromEvents(familyId, subjectUserId);
+
+    const all = await store.readEventHistory(familyId, "2026-07-19", "2026-07-19", undefined, 500, null);
+    expect(all.items.map((e) => e.eventId)).toEqual(["e-other-only"]);
+  });
+
+  it("eraseUserFromEvents is idempotent (calling it again after the subject's lines are already gone is a no-op)", async () => {
+    const store = new BlobHistoryStore();
+    const familyId = testFamilyId();
+    const subjectUserId = testUserId();
+    const otherUserId = testUserId();
+
+    await store.appendEvent(familyId, eventLine({ eventId: "e-subject", userId: subjectUserId, recordedAt: "2026-07-19T15:00:00Z" }));
+    await store.appendEvent(familyId, eventLine({ eventId: "e-other", userId: otherUserId, recordedAt: "2026-07-19T15:01:00Z" }));
+
+    await store.eraseUserFromEvents(familyId, subjectUserId);
+    await store.eraseUserFromEvents(familyId, subjectUserId);
+
+    const all = await store.readEventHistory(familyId, "2026-07-19", "2026-07-19", undefined, 500, null);
+    expect(all.items.map((e) => e.eventId)).toEqual(["e-other"]);
+  });
+
+  it("eraseUserFromEvents survives a genuinely concurrent §3.2 append to the same day blob — no other member's line is ever lost (008 §4.3, 002 §4.2/§6)", async () => {
+    const store = new BlobHistoryStore();
+    const familyId = testFamilyId();
+    const subjectUserId = testUserId();
+    const otherUserId = testUserId();
+
+    // Pre-existing lines: one of the subject's (to be erased), one of another member's
+    // (must survive).
+    await store.appendEvent(familyId, eventLine({ eventId: "e-subject-pre", userId: subjectUserId, recordedAt: "2026-07-19T15:00:00Z" }));
+    await store.appendEvent(familyId, eventLine({ eventId: "e-other-pre", userId: otherUserId, recordedAt: "2026-07-19T15:01:00Z" }));
+
+    // Fire the erasure concurrently with a fresh append from another member — a genuine
+    // network race with no artificial synchronization, same idiom as the "two concurrent
+    // appends" test above. The concurrent append's line must survive the rewrite regardless
+    // of interleaving (the delete+recreate race unions it back in, 002 §4.2).
+    await Promise.all([
+      store.eraseUserFromEvents(familyId, subjectUserId),
+      store.appendEvent(familyId, eventLine({ eventId: "e-other-concurrent", userId: otherUserId, recordedAt: "2026-07-19T15:02:00Z" })),
+    ]);
+
+    const all = await store.readEventHistory(familyId, "2026-07-19", "2026-07-19", undefined, 500, null);
+    const eventIds = all.items.map((e) => e.eventId).sort();
+    expect(eventIds).not.toContain("e-subject-pre");
+    expect(eventIds).toContain("e-other-pre");
+    expect(eventIds).toContain("e-other-concurrent");
+    // Every surviving line still belongs to otherUserId — none of the subject's leaked back in.
+    expect(all.items.every((e) => e.userId === otherUserId)).toBe(true);
+  });
 });

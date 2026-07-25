@@ -94,4 +94,26 @@ export class TableLocateRequestRepo implements LocateRequestRepo {
       ),
     );
   }
+
+  /** Deletes rows in the family partition where `requestedBy` OR `targetUserId` is the
+   * subject — account deletion (001 §13.2, 002 §4.2 step 4, B18). A single-partition scan,
+   * same idiom as listPendingByTargetDevice/deletePartition. Idempotent. */
+  async deleteRowsForUser(familyId: string, userId: string): Promise<void> {
+    const rowKeys: string[] = [];
+    const entities = this.client.listEntities({
+      queryOptions: {
+        filter: odata`PartitionKey eq ${familyId} and RowKey ge ${REQUEST_PREFIX} and RowKey lt ${"req;"} and (requestedBy eq ${userId} or targetUserId eq ${userId})`,
+      },
+    });
+    for await (const entity of entities) {
+      rowKeys.push(String(entity.rowKey));
+    }
+    await Promise.all(
+      rowKeys.map((rk) =>
+        this.client.deleteEntity(familyId, rk).catch((err) => {
+          if (!isNotFound(err)) throw err;
+        }),
+      ),
+    );
+  }
 }

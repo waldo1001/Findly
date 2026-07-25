@@ -24,6 +24,21 @@ function isNotFound(err: unknown): boolean {
   return err instanceof RestError && err.statusCode === 404;
 }
 
+function isPreconditionFailed(err: unknown): boolean {
+  return err instanceof RestError && err.statusCode === 412;
+}
+
+/** Node.js readable stream -> Buffer (the SDK's own `downloadToBuffer` doesn't expose the
+ * ETag alongside the content; the events filtered rewrite needs both from the SAME GET, so
+ * this reads the stream from a raw `.download()` call instead). */
+async function streamToBuffer(readable: NodeJS.ReadableStream): Promise<Buffer> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of readable) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as string));
+  }
+  return Buffer.concat(chunks);
+}
+
 /** UTC yyyy/MM/dd path segments from an ISO 8601 `recordedAt` (002 §3.1 day-boundary rule). */
 function dayPath(recordedAtIso: string): string {
   const date = new Date(recordedAtIso);
@@ -275,5 +290,92 @@ export class BlobHistoryStore implements HistoryStore {
   async deleteFamilyPrefix(familyId: string): Promise<void> {
     await deletePrefix(this.historyContainer, `${familyId}/`);
     await deletePrefix(this.eventsContainer, `${familyId}/`);
+  }
+
+  /** Wipes only the `history/{familyId}/{userId}/` prefix — account deletion's non-cascade
+   * path (001 §13.2, 002 §4.2 step 6, B18). Idempotent. */
+  async deleteUserPrefix(familyId: string, userId: string): Promise<void> {
+    await deletePrefix(this.historyContainer, `${familyId}/${userId}/`);
+  }
+
+  /** The interleaved-events filtered rewrite (001 §13.2, 008 §4.3, 002 §4.2): walks every
+   * `events/{familyId}/{yyyy}/{MM}/{dd}.jsonl` day blob and erases only the subject's own
+   * lines, leaving every other member's lines byte-identical. */
+  async eraseUserFromEvents(familyId: string, userId: string): Promise<void> {
+    const prefix = `${familyId}/`;
+    const blobPaths: string[] = [];
+    for await (const blob of this.eventsContainer.listBlobsFlat({ prefix })) {
+      blobPaths.push(blob.name);
+    }
+    for (const blobPath of blobPaths) {
+      await eraseSubjectFromEventDayBlob(this.eventsContainer, blobPath, userId);
+    }
+  }
+}
+
+// Bounded like the §2.9 usage-increment retry loop (002 §2.9) — only the CURRENT UTC day
+// blob can race a concurrent §3.2 append at all (past days are append-dead), so in practice
+// this resolves on the first or second attempt.
+const EVENTS_REWRITE_MAX_ATTEMPTS = 3;
+
+/**
+ * One day blob's filtered rewrite (008 §4.3, 002 §4.2): read all lines + capture the ETag in
+ * a single GET; if none of them carry the subject's userId, leave the blob untouched; else
+ * delete it `If-Match`-guarded (a 412 — a concurrent append changed the ETag, or a 404 — the
+ * blob vanished from under us — both mean "state changed, re-read and retry"), recreate
+ * create-if-not-exists (swallowing 409 — a concurrent §3.2 writer, or a concurrent erasure of
+ * a DIFFERENT subject, may have recreated it first), then re-append the filtered lines. No
+ * other member's line is ever lost: the recreate-race unions whatever a concurrent writer
+ * appended in between with our own re-appended filtered history, and readers already sort by
+ * recordedAt (002 §3.2/§3.3).
+ */
+async function eraseSubjectFromEventDayBlob(
+  container: ContainerClient,
+  blobPath: string,
+  userId: string,
+): Promise<void> {
+  const client = container.getAppendBlobClient(blobPath);
+
+  for (let attempt = 0; attempt < EVENTS_REWRITE_MAX_ATTEMPTS; attempt += 1) {
+    let lines: string[];
+    let etag: string | undefined;
+    try {
+      const response = await client.download();
+      const buffer = response.readableStreamBody ? await streamToBuffer(response.readableStreamBody) : Buffer.alloc(0);
+      lines = buffer
+        .toString("utf-8")
+        .split("\n")
+        .filter((line) => line.length > 0);
+      etag = response.etag;
+    } catch (err) {
+      if (isNotFound(err)) return; // no blob at all for this day — nothing to erase.
+      throw err;
+    }
+
+    const hasSubjectLine = lines.some((line) => (JSON.parse(line) as EventLine).userId === userId);
+    if (!hasSubjectLine) return; // none of the subject's lines here — leave untouched.
+
+    const filteredLines = lines.filter((line) => (JSON.parse(line) as EventLine).userId !== userId);
+
+    try {
+      await client.delete({ conditions: { ifMatch: etag } });
+    } catch (err) {
+      if ((isPreconditionFailed(err) || isNotFound(err)) && attempt < EVENTS_REWRITE_MAX_ATTEMPTS - 1) {
+        continue; // concurrent write changed (or removed) the blob — re-read and retry.
+      }
+      throw err;
+    }
+
+    try {
+      await client.create({ conditions: { ifNoneMatch: "*" } });
+    } catch (err) {
+      if (!isAlreadyExists(err)) throw err; // a concurrent writer recreated it first.
+    }
+
+    for (const line of filteredLines) {
+      const lineBuffer = Buffer.from(`${line}\n`, "utf-8");
+      await client.appendBlock(lineBuffer, lineBuffer.length);
+    }
+    return;
   }
 }
