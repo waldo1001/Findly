@@ -1,5 +1,6 @@
 package com.findly.android.ui.designsystem.components
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Column
@@ -11,12 +12,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.unit.Dp
 import com.findly.android.ui.designsystem.FindlyTheme
 
 /**
@@ -124,7 +126,7 @@ private fun LabelBubble(
  * directly below the bubble, same fill color. */
 @Composable
 private fun MarkerTail(fill: Color) {
-    androidx.compose.foundation.Canvas(
+    Canvas(
         modifier = Modifier.size(width = FindlyTheme.spacing.md, height = FindlyTheme.spacing.sm),
     ) {
         val path = Path().apply {
@@ -140,7 +142,7 @@ private fun MarkerTail(fill: Color) {
 /** A dashed ring around the bubble (stale state) — `Modifier.border` has no dashed variant, so
  * this draws one directly with a dash [PathEffect], matching [FindlyTheme.corner.pill]'s fully
  * rounded shape. */
-private fun Modifier.dashedRing(color: Color, strokeWidth: androidx.compose.ui.unit.Dp): Modifier =
+private fun Modifier.dashedRing(color: Color, strokeWidth: Dp): Modifier =
     this.drawBehind {
         val strokeWidthPx = strokeWidth.toPx()
         val cornerRadiusPx = size.minDimension / 2f

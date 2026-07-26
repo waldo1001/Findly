@@ -9,12 +9,14 @@ plugins {
     id("com.google.gms.google-services")
 }
 
-// A2 (specs/003-android-client.md §13, `ui/map/MapRenderer.kt`): a real map-tile SDK needs a
-// Google Maps API key that only exists once H1 (docs/azure-setup.md) provisions one. Read from a
-// Gradle project property so it can be supplied via `-PMAPS_API_KEY=...` (CI secret) or a local,
-// gitignored `local.properties`/`gradle.properties` override — NEVER hardcoded here and NEVER
-// committed (docs/security-review-checklist.md §5). Empty string is the correct, safe default:
-// `PlaceholderMapRenderer` is used regardless of this value in A2 (no real SDK is wired yet).
+// A2/A12 (specs/003-android-client.md §13, `ui/map/MapRenderer.kt`): the real map-tile SDK
+// (A12's GoogleMapRenderer, com.google.maps.android:maps-compose below) needs a Google Maps API
+// key that only exists once H1 (docs/azure-setup.md) provisions one. Read from a Gradle project
+// property so it can be supplied via `-PMAPS_API_KEY=...` (CI secret) or a local, gitignored
+// `local.properties`/`gradle.properties` override — NEVER hardcoded here and NEVER committed
+// (docs/security-review-checklist.md §5). Empty string is the correct, safe default: the Maps
+// SDK reads this (via the manifest meta-data below) at process start and simply renders a
+// tile-less grey map when it's blank — no code branches on its presence.
 val mapsApiKey: String = (project.findProperty("MAPS_API_KEY") as String?).orEmpty()
 
 // A7 (docs/store-readiness.md §1): release-signing material must never be hardcoded or
@@ -96,6 +98,7 @@ android {
             buildConfigField("String", "MAPS_API_KEY", "\"$mapsApiKey\"")
             buildConfigField("String", "JOIN_LINK_HOST", "\"$joinLinkHost\"")
             manifestPlaceholders["joinLinkHost"] = joinLinkHost
+            manifestPlaceholders["mapsApiKey"] = mapsApiKey
         }
         release {
             // A7: real release signing when CI/local supplies all four values above; otherwise
@@ -117,6 +120,7 @@ android {
             buildConfigField("String", "MAPS_API_KEY", "\"$mapsApiKey\"")
             buildConfigField("String", "JOIN_LINK_HOST", "\"$joinLinkHost\"")
             manifestPlaceholders["joinLinkHost"] = joinLinkHost
+            manifestPlaceholders["mapsApiKey"] = mapsApiKey
         }
     }
 
@@ -189,6 +193,23 @@ dependencies {
     // only new dependency this task adds (see ui/groups/GroupQrCodeGenerator.kt's doc for the full
     // justification, reviewed per docs/security-review-checklist.md §4).
     implementation("com.google.zxing:core:3.5.3")
+
+    // A12 (specs/003-android-client.md §12): the real Google Maps tile renderer behind the
+    // MapRenderer seam (GoogleMapRenderer replaces PlaceholderMapRenderer at AppContainer's
+    // composition root). Needs a Maps API key at runtime (the manifest's
+    // com.google.android.geo.API_KEY meta-data, sourced from BuildConfig.MAPS_API_KEY above) —
+    // an empty key (the default until H1 provisions a real one, docs/azure-setup.md) still
+    // builds and runs fine, it just yields a tile-less grey map, same "degrade gracefully
+    // without secrets" pattern every other H1-waived dependency in this codebase already uses.
+    // maps-compose brings MarkerComposable, letting markers render the design-system
+    // FindlyMapMarkerBubble instead of a default pin (design/findly-design-system/README.md).
+    // Pinned to 6.4.4 (not the latest 8.x line): newer releases transitively require
+    // androidx.core:core-ktx 1.19.0, whose AAR metadata demands compileSdk 37 — this project is
+    // still on compileSdk 36 (only the android-36 platform is installed in this environment, and
+    // bumping compileSdk/targetSdk is a separate decision outside A12's scope). 6.4.4's own
+    // core-ktx pin (1.15.0) matches the version already used directly below, verified compatible.
+    implementation("com.google.android.gms:play-services-maps:20.0.0")
+    implementation("com.google.maps.android:maps-compose:6.4.4")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")

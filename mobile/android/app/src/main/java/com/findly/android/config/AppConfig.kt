@@ -12,10 +12,13 @@ import com.findly.android.auth.AuthMode
  * @property mapsApiKey empty string until H1 provisions a real key. Sourced from the
  *   `MAPS_API_KEY` Gradle project property (`-PMAPS_API_KEY=…` or `gradle.properties`/
  *   `local.properties`, both gitignored — see `app/build.gradle.kts`'s `mapsApiKey` local val and
- *   `docs/security-review-checklist.md` §5), **never** hardcoded or committed. Blank means "no
- *   real map-tile SDK is configured" — [com.findly.android.ui.map.PlaceholderMapRenderer] is
- *   used regardless of this value in A2; a future real [com.findly.android.ui.map.MapRenderer]
- *   would read this to decide whether it can initialize.
+ *   `docs/security-review-checklist.md` §5), **never** hardcoded or committed. This field exists
+ *   for completeness/parity with the other `BuildConfig` wrappers, but A12's
+ *   [com.findly.android.ui.map.GoogleMapRenderer] does NOT read it — the Google Maps SDK reads
+ *   the key once, at process start, straight from the manifest's `com.google.android.geo.API_KEY`
+ *   meta-data (fed by the same Gradle property via `manifestPlaceholders["mapsApiKey"]`). Blank
+ *   means "no real key configured yet" — the map still builds and runs, it simply renders a
+ *   tile-less grey surface.
  * @property joinLinkHost the public join-link deployment constant (specs/007-public-join-links.md
  *   §1, specs/003-android-client.md §12.3, A6) — `https://{joinLinkHost}/g#{CODE}`. Recorded at
  *   provisioning time (H4, done 2026-07-22 — see `app/build.gradle.kts`'s `joinLinkHost` val for

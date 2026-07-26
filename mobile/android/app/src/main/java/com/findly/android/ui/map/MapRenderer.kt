@@ -6,12 +6,16 @@ import com.findly.android.ui.groups.GroupMapMemberUi
 
 /**
  * Abstraction over the actual map-tile view (A2 task brief: "put the actual map-tile view behind
- * a `MapRenderer` interface with a stub/placeholder implementation now"). A real tile renderer
- * (Google Maps SDK) needs an API key that only exists once H1 (`docs/azure-setup.md`) provisions
- * one — see `config/AppConfig.kt`'s `mapsApiKey`, sourced from a gitignored/config-injected
- * Gradle property, never committed (docs/security-review-checklist.md §5). [PlaceholderMapRenderer]
- * is the only implementation today; a real one drops in later behind this same interface with no
- * call-site change, the same seam every other H1-waived dependency in this codebase uses
+ * a `MapRenderer` interface with a stub/placeholder implementation now"). [GoogleMapRenderer] is
+ * the real Google Maps SDK implementation (A12) wired at
+ * [com.findly.android.AppContainer]'s composition root; [PlaceholderMapRenderer] remains as a
+ * lightweight fallback used by Compose previews/tests (no real projection, no Maps SDK view). A
+ * real tile renderer needs an API key that only exists once H1 (`docs/azure-setup.md`)
+ * provisions one — see `config/AppConfig.kt`'s `mapsApiKey`, sourced from a
+ * gitignored/config-injected Gradle property, never committed
+ * (docs/security-review-checklist.md §5) — but [GoogleMapRenderer] builds and runs fine with an
+ * empty key too (it simply renders a tile-less grey map), the same "degrade gracefully without
+ * secrets" seam every other H1-waived dependency in this codebase uses
  * ([com.findly.android.auth.AuthProvider], [com.findly.android.push.PushTokenProvider]).
  *
  * Markers and the roster list are always rendered through `ui/designsystem` components

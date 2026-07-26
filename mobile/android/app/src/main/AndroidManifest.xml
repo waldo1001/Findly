@@ -31,6 +31,19 @@
         android:networkSecurityConfig="@xml/network_security_config"
         android:theme="@style/Theme.Findly">
 
+        <!-- A12 (specs/003-android-client.md §12): the Google Maps SDK reads its API key from
+             this meta-data tag at process start (GoogleMapRenderer's only key touch-point — it
+             never reads AppConfig.mapsApiKey directly). ${mapsApiKey} is a Gradle manifest
+             placeholder sourced from the same MAPS_API_KEY project property as
+             BuildConfig.MAPS_API_KEY (app/build.gradle.kts), so the two can never drift apart.
+             Empty by default until H1 provisions a real key (docs/azure-setup.md) — the map still
+             builds and runs with an empty value, it simply renders a tile-less grey surface (same
+             "degrade gracefully without secrets" pattern as every other H1-waived dependency
+             here); never hardcoded, never committed (docs/security-review-checklist.md §5). -->
+        <meta-data
+            android:name="com.google.android.geo.API_KEY"
+            android:value="${mapsApiKey}" />
+
         <activity
             android:name=".MainActivity"
             android:exported="true"
