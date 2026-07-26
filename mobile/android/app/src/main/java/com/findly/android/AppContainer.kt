@@ -13,12 +13,22 @@ import com.findly.android.device.AndroidDeviceInfoProvider
 import com.findly.android.device.DeviceIdProvider
 import com.findly.android.device.DeviceRegistrar
 import com.findly.android.device.SharedPreferencesDeviceIdStore
+import com.findly.android.location.UnimplementedLocationCapturer
 import com.findly.android.network.RetrofitFactory
 import com.findly.android.network.FindlyApiClient
 import com.findly.android.push.PushTokenProvider
-import com.findly.android.push.StubPushTokenProvider
+import com.findly.android.push.RealPushTokenProvider
+import com.findly.android.pushmessages.GeofenceConfigChangedPushHandler
+import com.findly.android.pushmessages.GeofenceEventNotifier
+import com.findly.android.pushmessages.GeofenceEventPushHandler
+import com.findly.android.pushmessages.LocateRequestPushHandler
+import com.findly.android.pushmessages.PushMessageDispatcher
+import com.findly.android.pushmessages.SettingsChangedPushHandler
+import com.findly.android.pushmessages.UnimplementedGeofenceRegistrar
 import com.findly.android.queue.FixQueueStore
 import com.findly.android.queue.InMemoryFixQueueStore
+import com.findly.android.queue.worker.LocationSyncScheduler
+import com.findly.android.queue.worker.ScheduleRebuilder
 import com.findly.android.ui.map.MapRenderer
 import com.findly.android.ui.map.PlaceholderMapRenderer
 import com.findly.android.ui.settings.ColdStartExportCleanup
@@ -68,7 +78,7 @@ class AppContainer(context: Context) {
         FirebaseAuthProvider(FirebaseAuth.getInstance(), currentActivityProvider)
     }
 
-    val pushTokenProvider: PushTokenProvider = StubPushTokenProvider()
+    val pushTokenProvider: PushTokenProvider = RealPushTokenProvider()
 
     private val findlyApiService = RetrofitFactory.create(appConfig.baseUrl, authProvider)
     val findlyApiClient: FindlyApiClient = FindlyApiClient(findlyApiService, authProvider)
@@ -107,9 +117,47 @@ class AppContainer(context: Context) {
      * the only implementation until H1 provisions a real Maps API key (`appConfig.mapsApiKey`). */
     val mapRenderer: MapRenderer = PlaceholderMapRenderer()
 
+    /** A9 (specs/009-device-runtime.md §3): still the A2-scaffolded no-op `schedule()` (see its
+     * own doc) — only `cancel()` does anything real today. Shared between `settingsChangedHandler`
+     * below and whatever A10 eventually wires up for the other two §3.5 settings-arrival paths. */
+    private val locationSyncScheduler = LocationSyncScheduler(context)
+
+    /** A9 (specs/009-device-runtime.md §5): routes every FCM data message to its 001 §8 handler.
+     * `FindlyMessagingService` (the real `FirebaseMessagingService`) is this class's one
+     * production caller. [UnimplementedLocationCapturer]/[UnimplementedGeofenceRegistrar] are
+     * placeholder seams — swapped for real implementations by A10/A11 respectively, no call-site
+     * change needed here beyond that one constructor argument. */
+    val pushMessageDispatcher: PushMessageDispatcher = PushMessageDispatcher(
+        locateRequestHandler = LocateRequestPushHandler(
+            locationCapturer = UnimplementedLocationCapturer, // TODO(A10)
+            locateApi = findlyApiClient,
+            deviceIdProvider = {
+                (authProvider.authState.value as? AuthState.SignedIn)?.uid?.let { uid ->
+                    deviceRegistrar.deviceIdFor(uid)
+                }
+            },
+        ),
+        settingsChangedHandler = SettingsChangedPushHandler(
+            scheduleRebuilder = ScheduleRebuilder { syncIntervalMinutes, trackingEnabled ->
+                // TODO(A10): apply the full pause sequence (009 §4 - stop worker/service,
+                // unregister geofences), not just the schedule call itself.
+                if (trackingEnabled) {
+                    locationSyncScheduler.schedule(syncIntervalMinutes)
+                } else {
+                    locationSyncScheduler.cancel()
+                }
+            },
+        ),
+        geofenceEventHandler = GeofenceEventPushHandler(GeofenceEventNotifier(context)),
+        geofenceConfigChangedHandler = GeofenceConfigChangedPushHandler(
+            geofenceApi = findlyApiClient,
+            geofenceRegistrar = UnimplementedGeofenceRegistrar, // TODO(A11)
+        ),
+    )
+
     init {
-        // 001 §4.1 / 000 §O4: re-POST /devices on every push-token refresh. Fixed wiring point
-        // regardless of whether pushTokenProvider is the A1 stub or a real FCM-backed class.
+        // 001 §4.1 / 000 §O4: re-POST /devices on every push-token refresh. Fixed wiring point,
+        // unchanged since the A1 stub was swapped for the real FCM-backed RealPushTokenProvider.
         pushTokenProvider.addRefreshListener { token ->
             val uid = (authProvider.authState.value as? AuthState.SignedIn)?.uid
             if (uid != null) {

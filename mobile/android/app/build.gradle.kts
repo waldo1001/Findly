@@ -169,7 +169,11 @@ dependencies {
     // Real Firebase Auth (specs/003 §7, H1) — FirebaseAuthProvider's only consumer.
     implementation(platform("com.google.firebase:firebase-bom:34.16.0"))
     implementation("com.google.firebase:firebase-auth")
-    // `Task<T>.await()` bridge so FirebaseAuthProvider can be a plain suspend-based AuthProvider.
+    // A9 (specs/003 §9, specs/009-device-runtime.md §5): real FCM — RealPushTokenProvider +
+    // FindlyMessagingService's only new dependency (the BOM above pins its version).
+    implementation("com.google.firebase:firebase-messaging")
+    // `Task<T>.await()` bridge so FirebaseAuthProvider/RealPushTokenProvider can be plain
+    // suspend-based classes.
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.10.1")
 
     // Networking (specs/003 §5): Retrofit + OkHttp + kotlinx.serialization, chosen over Ktor for

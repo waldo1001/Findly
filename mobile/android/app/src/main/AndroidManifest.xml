@@ -77,6 +77,17 @@
             </intent-filter>
         </activity>
 
+        <!-- A9 (specs/003-android-client.md §9; specs/009-device-runtime.md §5): the real FCM
+             entry point. android:exported="false" — only the FCM SDK itself (via the
+             com.google.firebase.MESSAGING_EVENT intent) ever binds to this; no other app may. -->
+        <service
+            android:name=".push.FindlyMessagingService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
+
         <!-- specs/003-android-client.md §12.4 / 001-api-contract.md §13.1: the export share-sheet
              handoff needs a content:// URI for the downloaded file (ExportFileWriter.kt). Only
              cacheDir/exports/ is exposed (res/xml/file_paths.xml) — nothing else in the app's

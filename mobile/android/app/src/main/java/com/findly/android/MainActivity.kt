@@ -1,8 +1,13 @@
 package com.findly.android
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.findly.android.ui.designsystem.FindlyTheme
 import com.findly.android.ui.groups.GroupJoinHttpsLinkParser
@@ -42,10 +47,24 @@ class MainActivity : ComponentActivity() {
 
     private val container get() = (application as FindlyApplication).container
 
+    /** A9 (specs/003-android-client.md §11 point 4; specs/009-device-runtime.md §5.3/§5.1):
+     * `POST_NOTIFICATIONS` (API 33+) requested independently of the fine/background location
+     * staging sequence (points 1-3 of §11, still unimplemented — a pre-existing gap this task
+     * does not close), since geofence/locate push alerts need it regardless of location
+     * permission state. The callback is intentionally a no-op either way: denial just means no
+     * alert is shown (§5.3's [com.findly.android.pushmessages.GeofenceEventNotifier] already
+     * swallows the resulting `SecurityException`), never a crash.
+     *
+     * TODO(A2): a prominent disclosure before this OS prompt, and a persistent denial banner, are
+     * both still missing for every permission in this codebase (009 §7) — not just this one. */
+    private val notificationPermissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { /* no-op */ }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
         container.onActivityStarted(this)
+        requestNotificationPermissionIfNeeded()
 
         val launchingUri = intent?.data
         val httpsJoinLinkResult = GroupJoinHttpsLinkParser.parseIfFreshLaunch(
@@ -76,5 +95,14 @@ class MainActivity : ComponentActivity() {
     override fun onDestroy() {
         container.onActivityStopped(this)
         super.onDestroy()
+    }
+
+    private fun requestNotificationPermissionIfNeeded() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return // granted at install time below API 33
+        val granted = ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) ==
+            PackageManager.PERMISSION_GRANTED
+        if (!granted) {
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
     }
 }

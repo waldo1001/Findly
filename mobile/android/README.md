@@ -8,7 +8,7 @@ Native Android app, Kotlin + Jetpack Compose, single Gradle module (`app/`), min
 
 **Done (A2):** live map (§5.2, behind a swappable `MapRenderer` — `PlaceholderMapRenderer` until H1 provisions a Maps API key), history replay with cursor pagination (§5.3), geofence editor with ETag-aware save + 409-conflict reconciliation (§7.1–7.2), locate-to-request UI polling every 2 s until terminal (§6), device/family settings with parent-vs-owner gating (§4.2–4.3/§3.5–3.6), invites — create + accept (§3.3–3.4). Three new design-system components (`FindlyTextField`, `FindlySwitchRow`, `FindlySectionHeader`, specs/003 §4.3). The A1 review's duplicated auth-retry logic across `FindlyApiClient` is now a single `withAuthRetry` helper (specs/003 §6.4). Same pattern as A1 throughout: pure `<Feature>StateHolder` + thin `<Feature>ViewModel`, JUnit-tested with fakes, no Robolectric/emulator. **Still not started:** real permission-request UI, real WorkManager/foreground-service scheduling, Room-backed queue persistence, real platform geofencing/foreground service (all explicitly deferred per specs/003 §2/§11).
 
-**Waived (H1 — Azure/Firebase provisioning, still `human`/pending):** no real `google-services.json` (stays gitignored/absent), no real backend base URL, no real Firebase project, no real Maps API key. Everything that needs these is stubbed behind an interface — `AuthProvider`, `PushTokenProvider`, `MapRenderer`, `AppConfig`'s `BASE_URL`/`FIREBASE_PROJECT_ID`/`MAPS_API_KEY` — and documented in specs/003 §13. Wiring the real thing is a same-interface swap, not a redesign.
+**Waived (H1 — Azure/Firebase provisioning, still `human`/pending):** no real `google-services.json` (stays gitignored/absent — CI and local builds alike generate an obviously-fake placeholder at build time, `.github/workflows/android.yml`), no real backend base URL, no real Firebase project, no real Maps API key. Everything that needs these is stubbed behind an interface — `AuthProvider`, `MapRenderer`, `AppConfig`'s `BASE_URL`/`FIREBASE_PROJECT_ID`/`MAPS_API_KEY` — and documented in specs/003 §13. Wiring the real thing is a same-interface swap, not a redesign. `PushTokenProvider` is no longer one of these: A9 (specs/009-device-runtime.md §5) wired the real `RealPushTokenProvider`/`FindlyMessagingService` against the placeholder `google-services.json` — it compiles and runs against a real (if fake) Firebase project either way, the only thing H1 still gates is push actually reaching a real device.
 
 ## Design-swappable UX
 
@@ -22,16 +22,17 @@ cd mobile/android
 ./gradlew build    # full compile
 ```
 
-Gradle (Kotlin DSL), AGP 9.2.0, Kotlin 2.3.0, Gradle 9.4.1, JDK 17. `gradlew`/`gradle-wrapper.jar` are **not** committed — this repo's dev/CI sandboxes had no JDK/Gradle toolchain to produce a verified wrapper jar. CI (`.github/workflows/android.yml`) installs Gradle directly (`gradle/actions/setup-gradle` with a pinned `gradle-version`) and runs `gradle wrapper --gradle-version 9.4.1 --distribution-type bin` to generate it before every build; do the same locally the first time (`gradle wrapper --gradle-version 9.4.1 --distribution-type bin`, requires a local Gradle install) — after that `./gradlew` works normally.
+Gradle (Kotlin DSL), AGP 9.2.0, Kotlin 2.3.0, Gradle 9.4.1, JDK 17. `gradlew`/`gradle-wrapper.jar` are committed as of A9 — the first task run against a real JDK/Gradle/Android-SDK toolchain generated them (`gradle wrapper --gradle-version 9.4.1 --distribution-type bin`) and `./gradlew` works directly from a checkout now. CI (`.github/workflows/android.yml`) still installs Gradle directly rather than relying on the wrapper, since that predates this change and is harmless either way.
 
 ## Shape (implemented — see specs/003 §3 for the full package tree)
 
 - **`network/`** — DTOs matching every 001 §3–§7 wire shape, `ApiError`/`ApiErrorMapper` (the §10 catalog), `ApiResult`, five port interfaces (`FamilyApi`/`DevicesApi`/`LocationsApi`/`LocateApi`/`GeofenceApi`) implemented by `FindlyApiClient` on top of the raw `FindlyApiService` Retrofit interface (Retrofit + OkHttp + kotlinx.serialization).
 - **`auth/`** — `AuthProvider` (Firebase Auth ID-token source), `DevAuthProvider` (unsigned-JWT dev stub), `FirebaseAuthProviderStub` (H1 placeholder).
-- **`push/`** — `PushTokenProvider` (FCM registration-token source, distinct from the auth ID token), `StubPushTokenProvider`.
+- **`push/`** — `PushTokenProvider` (FCM registration-token source, distinct from the auth ID token), `RealPushTokenProvider` (A9), `FindlyMessagingService` (A9, the real `FirebaseMessagingService`).
 - **`device/`** — `DeviceIdProvider`/`DeviceIdStore` (per-uid UUIDv4), `DeviceInfoProvider`, `DeviceRegistrar` (§4.1).
-- **`queue/`** — `FixQueueStore`/`InMemoryFixQueueStore` (§5.1's `batchId` idempotency model), `LocationSyncCoordinator`, `worker/` (WorkManager scaffold, untested by design).
-- **`pushmessages/`** — FCM `data.type` discriminator parser (§8).
+- **`queue/`** — `FixQueueStore`/`InMemoryFixQueueStore` (§5.1's `batchId` idempotency model), `LocationSyncCoordinator`, `worker/` (WorkManager scaffold, untested by design; `ScheduleRebuilder` seam added by A9).
+- **`pushmessages/`** — FCM `data.type` discriminator parser (§8); A9 adds the four per-type handlers + `PushMessageDispatcher` (specs/009-device-runtime.md §5).
+- **`location/`** — A9's `LocationCapturer` seam (specs/009-device-runtime.md §1) for one-shot fix capture, awaiting A10's real `FusedLocationProviderClient`-backed implementation.
 - **`ui/designsystem/`, `ui/nav/`, `ui/home/`** — see above.
 - **A2:** `ui/map/` (`MapStateHolder`/`MapViewModel`/`MapScreen`, `MapRenderer`/`PlaceholderMapRenderer`), `ui/history/`, `ui/geofences/`, `ui/locate/`, `ui/settings/`, `ui/invites/` — each following the same `StateHolder` (pure) + `ViewModel` (thin) + `Screen` (Compose) shape as `ui/home/`, specs/003 §12.1.
 
