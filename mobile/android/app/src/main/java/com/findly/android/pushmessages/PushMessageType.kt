@@ -1,10 +1,10 @@
 package com.findly.android.pushmessages
 
 /**
- * The `data.type` discriminator of every FCM data message (001-api-contract.md §8). Parsing
- * lives here, decoupled from any real `FirebaseMessagingService`, so a future
- * `onMessageReceived` override (A2/H1) has a typed `when` instead of comparing raw strings —
- * and so it's unit-testable without any Firebase SDK or emulator.
+ * The `data.type` discriminator of every FCM data message (001-api-contract.md §8). Parsing lives
+ * here, decoupled from `FirebaseMessagingService`, so [PushMessageDispatcher] (A9,
+ * specs/009-device-runtime.md §5) has a typed `when` instead of comparing raw strings — and so
+ * it's unit-testable without any Firebase SDK or emulator.
  */
 sealed class PushMessageType {
     data object LocateRequest : PushMessageType()

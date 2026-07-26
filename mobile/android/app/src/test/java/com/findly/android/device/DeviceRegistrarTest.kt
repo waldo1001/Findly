@@ -60,4 +60,22 @@ class DeviceRegistrarTest {
         assertEquals(1, fakeApi.registerDeviceCalls.size)
         assertEquals("new-fcm-token", fakeApi.registerDeviceCalls.single().pushToken)
     }
+
+    /** A9 (specs/009-device-runtime.md §5.1): push handlers (e.g. `LocateRequestPushHandler`) need
+     * the current device's `deviceId` without going through a full `registerOrUpdate` call. */
+    @Test
+    fun `deviceIdFor returns the same stable id registerOrUpdate would have used`() = runTest {
+        val fakeApi = FakeDevicesApi()
+        val registrar = DeviceRegistrar(
+            devicesApi = fakeApi,
+            deviceIdProvider = DeviceIdProvider(InMemoryDeviceIdStore(), idGenerator = { "fixed-device-id" }),
+            deviceInfoProvider = FakeDeviceInfoProvider(),
+        )
+
+        val direct = registrar.deviceIdFor("uid-1")
+        registrar.registerOrUpdate(uid = "uid-1")
+
+        assertEquals("fixed-device-id", direct)
+        assertEquals(direct, fakeApi.registerDeviceCalls.single().deviceId)
+    }
 }
