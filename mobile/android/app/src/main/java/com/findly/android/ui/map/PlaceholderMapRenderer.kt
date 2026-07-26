@@ -46,7 +46,7 @@ class PlaceholderMapRenderer : MapRenderer {
                 markers.forEach { (displayName, device) ->
                     FindlyMapMarkerBubble(
                         label = "$displayName · ${device.deviceName}",
-                        isStale = device.isStale ?: false,
+                        state = device.markerState,
                     )
                 }
             }
@@ -77,7 +77,7 @@ class PlaceholderMapRenderer : MapRenderer {
                 located.forEach { member ->
                     FindlyMapMarkerBubble(
                         label = member.displayName,
-                        isStale = member.isStale ?: false,
+                        state = member.markerState,
                     )
                 }
             }

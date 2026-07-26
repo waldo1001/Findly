@@ -48,8 +48,9 @@ private fun ComponentGallery(modifier: Modifier = Modifier) {
             FindlyStatusChip(label = "Paused", tone = FindlyStatusTone.Neutral)
         }
 
-        FindlyMapMarkerBubble(label = "Eric", isStale = false)
-        FindlyMapMarkerBubble(label = "Noor", isStale = true)
+        FindlyMapMarkerBubble(label = "Eric", state = FindlyMapMarkerState.Online)
+        FindlyMapMarkerBubble(label = "Noor", state = FindlyMapMarkerState.Stale)
+        FindlyMapMarkerBubble(label = "?", state = FindlyMapMarkerState.NoLocation)
 
         FindlyTextField(
             value = "Home",
