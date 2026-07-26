@@ -122,6 +122,8 @@ Register **all** configured geofences with the platform (`GeofencingClient` / `C
 
 Devices MUST register and report **all** transitions regardless of the `notifyOnEnter`/`notifyOnExit` flags — those control server-side fan-out only (001 §7.1), and reporting everything keeps history complete and lets flag changes take effect with no device round-trip.
 
+**Non-atomicity is accepted, not a bug to solve (normative).** "Unregister all, register all" is two separate platform calls on both `GeofencingClient` and `CLLocationManager`; neither platform makes the sequence atomic. If the process dies between them, the device is left with **zero** geofences registered — a real, reachable state, not a hypothetical. Implementations MUST NOT attempt to make this atomic (there is no platform primitive for it). The self-healing bound is the existing trigger set (§6.2): the very next location report's `geofenceEtag` piggyback (001 §5.1) — which fires on the device's own sync cadence, independent of geofencing — detects the mismatch and re-triggers a full re-registration. Worst case is a gap in geofence detection bounded by one sync interval, not indefinite silence.
+
 ### 6.3 Transition handling
 
 On an enter/exit callback: build one event (001 §7.3 shape, client-generated UUIDv4 `eventId`) and queue it; **additionally capture one fix with `source: "geofence"`** so the map has a position matching the event (001 §5.1). Events are flushed like fixes, batched 1–20 per call, idempotent on `eventId`. If the response's `geofenceEtag` differs from the cached one, re-sync config (§6.2) — this is how a device with stale config self-heals after reporting an unknown `geofenceId` (001 §7.3).
