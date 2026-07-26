@@ -2,7 +2,7 @@
 
 Delivered design handoff (2026-07-25). A soft location pin holding three shortening bars: read one way the letter **F**, read another a signal resolving, inside a dashed halo.
 
-Integration tasks: **A13** (Android launcher + notification icons), **I9** (iOS asset catalogue, which is where the app target is created). Spec pointers: [`specs/003 §4.4`](../../specs/003-android-client.md), [`specs/004 §2.5`](../../specs/004-ios-client.md), notification-icon rule in [`specs/009 §8`](../../specs/009-device-runtime.md).
+Integration tasks: **A13** (Android launcher + notification icons — done, see `docs/implementation-handoff.md`'s backlog row), **I9** (iOS asset catalogue, which is where the app target is created). Neither `specs/003` nor `specs/004` owns app-launcher-icon integration as a dedicated section — the backlog rows above are the authoritative task definitions; the one spec rule that does apply is the notification-icon rule in [`specs/009 §8`](../../specs/009-device-runtime.md) (status-bar icon must be the monochrome silhouette, since Android renders status icons as a mask).
 
 ## What was in the handoff, and what was already done
 
