@@ -22,7 +22,7 @@ cd mobile/android
 ./gradlew build    # full compile
 ```
 
-Gradle (Kotlin DSL), AGP 9.2.0, Kotlin 2.3.0, Gradle 9.4.1, JDK 17. `gradlew`/`gradle-wrapper.jar` are committed as of A9 — the first task run against a real JDK/Gradle/Android-SDK toolchain generated them (`gradle wrapper --gradle-version 9.4.1 --distribution-type bin`) and `./gradlew` works directly from a checkout now. CI (`.github/workflows/android.yml`) still installs Gradle directly rather than relying on the wrapper, since that predates this change and is harmless either way.
+Gradle (Kotlin DSL), AGP 9.2.0, Kotlin 2.3.0, Gradle 9.4.1, JDK 17. `gradlew`/`gradle-wrapper.jar` are **not** committed — this repo's dev/CI sandboxes had no JDK/Gradle toolchain to produce a verified wrapper jar. CI (`.github/workflows/android.yml`) installs Gradle directly (`gradle/actions/setup-gradle` with a pinned `gradle-version`) and runs `gradle wrapper --gradle-version 9.4.1 --distribution-type bin` to generate it before every build; do the same locally the first time (`gradle wrapper --gradle-version 9.4.1 --distribution-type bin`, requires a local Gradle install) — after that `./gradlew` works normally. A9 verified `./gradlew test`/`assembleDebug` this way against a real local toolchain; the generated wrapper files were deliberately **not** committed (same reasoning as above still holds — see A8/A12/A13 for the same pattern).
 
 ## Shape (implemented — see specs/003 §3 for the full package tree)
 
