@@ -7,6 +7,8 @@ plugins {
     // H1 (specs/003 §13): requires app/google-services.json (gitignored, real file supplied by
     // the user from the Firebase console) to be present at build time.
     id("com.google.gms.google-services")
+    // A10 (specs/009-device-runtime.md §2): Room's annotation processor (queue/room/).
+    id("com.google.devtools.ksp")
 }
 
 // A2/A12 (specs/003-android-client.md §13, `ui/map/MapRenderer.kt`): the real map-tile SDK
@@ -167,8 +169,17 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("androidx.navigation:navigation-compose:2.8.5")
 
-    // Offline fix-queue periodic worker scaffold (specs/003 §10.5) — no enqueue call sites wired yet.
+    // Periodic/foreground-service scheduling (specs/009-device-runtime.md §3).
     implementation("androidx.work:work-runtime-ktx:2.10.0")
+
+    // A10 (specs/009 §2): durable fix-queue storage, replacing the A1 in-memory placeholder
+    // (specs/003 §10.4) behind the unchanged FixQueueStore interface (queue/room/).
+    implementation("androidx.room:room-runtime:2.8.4")
+    implementation("androidx.room:room-ktx:2.8.4")
+    ksp("androidx.room:room-compiler:2.8.4")
+
+    // A10 (specs/009 §1): FusedLocationProviderClient-backed real fix capture (location/).
+    implementation("com.google.android.gms:play-services-location:21.3.0")
 
     // Real Firebase Auth (specs/003 §7, H1) — FirebaseAuthProvider's only consumer.
     implementation(platform("com.google.firebase:firebase-bom:34.16.0"))

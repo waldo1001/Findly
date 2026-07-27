@@ -13,4 +13,7 @@ plugins {
     id("org.jetbrains.kotlin.plugin.serialization") version "2.3.0" apply false
     // H1 (specs/003 §13): reads app/google-services.json to configure the real Firebase project.
     id("com.google.gms.google-services") version "4.5.0" apply false
+    // A10 (specs/009-device-runtime.md §2): Room's annotation processor, for the durable
+    // fix-queue (queue/room/). KSP2, matching the 2.3.x Kotlin compiler above.
+    id("com.google.devtools.ksp") version "2.3.10" apply false
 }
