@@ -79,7 +79,11 @@ class MainActivity : ComponentActivity() {
         setContent {
             FindlyTheme {
                 val homeViewModel: HomeViewModel = viewModel(
-                    factory = HomeViewModelFactory(container.authProvider, container.deviceRegistrar),
+                    factory = HomeViewModelFactory(
+                        container.authProvider,
+                        container.deviceRegistrar,
+                        container.pushTokenProvider,
+                    ),
                 )
                 // Sign-in navigation lives inside FindlyNavHost itself (specs/003 §7, §12) — it
                 // owns the NavController the real path needs.
