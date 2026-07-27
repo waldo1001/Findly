@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.findly.android.auth.AuthProvider
 import com.findly.android.device.DeviceRegistrar
+import com.findly.android.push.PushTokenProvider
 import kotlinx.coroutines.flow.StateFlow
 
 /**
@@ -16,18 +17,20 @@ import kotlinx.coroutines.flow.StateFlow
 class HomeViewModel(
     authProvider: AuthProvider,
     deviceRegistrar: DeviceRegistrar,
+    pushTokenProvider: PushTokenProvider,
 ) : ViewModel() {
-    private val stateHolder = HomeStateHolder(authProvider, deviceRegistrar, viewModelScope)
+    private val stateHolder = HomeStateHolder(authProvider, deviceRegistrar, pushTokenProvider, viewModelScope)
     val state: StateFlow<HomeUiState> = stateHolder.state
 }
 
 /** No DI framework in A1 (specs/003 §3) — a plain [ViewModelProvider.Factory] constructs
- * [HomeViewModel] with its two dependencies. */
+ * [HomeViewModel] with its three dependencies. */
 class HomeViewModelFactory(
     private val authProvider: AuthProvider,
     private val deviceRegistrar: DeviceRegistrar,
+    private val pushTokenProvider: PushTokenProvider,
 ) : ViewModelProvider.Factory {
     @Suppress("UNCHECKED_CAST")
     override fun <T : ViewModel> create(modelClass: Class<T>): T =
-        HomeViewModel(authProvider, deviceRegistrar) as T
+        HomeViewModel(authProvider, deviceRegistrar, pushTokenProvider) as T
 }
