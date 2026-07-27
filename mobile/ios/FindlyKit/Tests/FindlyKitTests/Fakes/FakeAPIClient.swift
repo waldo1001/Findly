@@ -84,7 +84,12 @@ final class FakeAPIClient: FindlyAPIClient {
         return try await getLatestLocationsHandler()
     }
 
-    func reportLocations(deviceId: String, batchId: String, fixes: [LocationFix]) async throws -> Envelope<ReportLocationsResponse> { fatalError("not configured") }
+    private(set) var reportLocationsCalls: [(deviceId: String, batchId: String, fixes: [LocationFix])] = []
+    var reportLocationsHandler: (String, String, [LocationFix]) async throws -> Envelope<ReportLocationsResponse> = { _, _, _ in fatalError("not configured") }
+    func reportLocations(deviceId: String, batchId: String, fixes: [LocationFix]) async throws -> Envelope<ReportLocationsResponse> {
+        reportLocationsCalls.append((deviceId, batchId, fixes))
+        return try await reportLocationsHandler(deviceId, batchId, fixes)
+    }
 
     private(set) var getLocationHistoryCalls: [(userId: String, deviceId: String?, from: String, to: String, limit: Int?, cursor: String?)] = []
     var getLocationHistoryHandler: (String, String?, String, String, Int?, String?) async throws -> Envelope<LocationHistoryResponse> = { _, _, _, _, _, _ in fatalError("not configured") }
