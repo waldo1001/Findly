@@ -101,6 +101,16 @@
             </intent-filter>
         </service>
 
+        <!-- A10 (specs/009-device-runtime.md §3.2): the 5/10-minute foreground service.
+             android:foregroundServiceType="location" is required alongside the
+             FOREGROUND_SERVICE_LOCATION permission above (Android 14+ hard-enforces the type
+             declaration matching the permission). Never started/stopped except through
+             ForegroundServiceController -> not exported. -->
+        <service
+            android:name=".queue.worker.LocationForegroundService"
+            android:exported="false"
+            android:foregroundServiceType="location" />
+
         <!-- specs/003-android-client.md §12.4 / 001-api-contract.md §13.1: the export share-sheet
              handoff needs a content:// URI for the downloaded file (ExportFileWriter.kt). Only
              cacheDir/exports/ is exposed (res/xml/file_paths.xml) — nothing else in the app's

@@ -3,26 +3,31 @@ package com.findly.android.queue.worker
 import android.content.Context
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
-import com.findly.android.queue.LocationSyncCoordinator
 
 /**
- * Periodic upload worker **scaffold** (specs/003-android-client.md §10.5). All actual
- * sync-decision logic lives in the tested [LocationSyncCoordinator] — this class's only job,
- * once wired, is to invoke it on WorkManager's schedule.
- *
- * TODO(A2/H1): construct a real [LocationSyncCoordinator] (needs the signed-in user's live
- * `deviceId` + `LocationsApi` from `AppContainer`) and call `syncOnce()` in a loop until
- * `SyncOutcome.NothingToSync`/`Paused`/`TransientFailure`. Not wired or enqueued anywhere yet
- * (see [LocationSyncScheduler]). Untested Android-framework glue by design — mirrors the
- * backend's untested `src/functions` (backend/README.md's hexagonal split).
+ * WorkManager glue for the ≥15-minute / once-daily schedule (specs/009-device-runtime.md §3.1/
+ * §3.3). All actual sync-cycle logic lives in the tested [LocationSyncRunner]; this class's only
+ * job is to invoke it once per WorkManager-triggered run and map [RunResult] onto WorkManager's
+ * `Result` (`RunResult.Retry` → `Result.retry()`, which WorkManager backs off per the
+ * `setBackoffCriteria` configured in [LocationSyncScheduler] — §9: "exponential, 30s initial").
+ * Constructed by [FindlyWorkerFactory] (not WorkManager's default no-arg path) so [runner] can be
+ * a real, fully-wired [LocationSyncRunner] from `AppContainer`. [runner] is nullable because
+ * WorkManager can in principle replay a scheduled run after sign-out, when there is no
+ * signed-in device to build one for — that's a clean no-op, never a crash. Untested
+ * Android-framework glue by design — mirrors the backend's untested `src/functions`
+ * (backend/README.md's hexagonal split).
  */
 class LocationSyncWorker(
     context: Context,
     workerParams: WorkerParameters,
+    private val runner: LocationSyncRunner?,
 ) : CoroutineWorker(context, workerParams) {
 
     override suspend fun doWork(): Result {
-        // TODO(A2/H1): wire a real LocationSyncCoordinator and drain the queue here.
-        return Result.success()
+        val runner = runner ?: return Result.success()
+        return when (runner.runOnce()) {
+            RunResult.Success -> Result.success()
+            RunResult.Retry -> Result.retry()
+        }
     }
 }

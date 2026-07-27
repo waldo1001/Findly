@@ -1,3 +1,8 @@
 <resources>
     <string name="app_name">Findly</string>
+
+    <!-- specs/009-device-runtime.md §3.2 - exact normative copy for the 5/10-minute foreground-
+         service notification. Never silenced or disguised (Play policy). -->
+    <string name="foreground_sync_notification_title">Findly is sharing your location</string>
+    <string name="foreground_sync_notification_body">Your family can see where you are.</string>
 </resources>

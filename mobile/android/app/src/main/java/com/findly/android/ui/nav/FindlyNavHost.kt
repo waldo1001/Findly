@@ -118,6 +118,11 @@ fun FindlyNavHost(
     homeViewModel: HomeViewModel,
     navController: NavHostController = rememberNavController(),
     httpsJoinLinkResult: GroupJoinHttpsLinkParser.Result = GroupJoinHttpsLinkParser.Result.NoMatch,
+    /** A10 (specs/009-device-runtime.md §3.2): true when this composition was launched by tapping
+     * the foreground-service's persistent notification — [com.findly.android.MainActivity] already
+     * gates this to a fresh launch (same idiom as [httpsJoinLinkResult]'s own freshness guard, its
+     * doc above), so the one-time navigation below never re-fires on rotation/recreation. */
+    openSettingsOnLaunch: Boolean = false,
 ) {
     var pendingLocateTarget by remember { mutableStateOf<Pair<String, String>?>(null) }
     var pendingCreateContext by remember { mutableStateOf<GroupsListUiState.Content?>(null) }
@@ -154,6 +159,17 @@ fun FindlyNavHost(
         val matched = httpsJoinLinkResult as? GroupJoinHttpsLinkParser.Result.Matched ?: return@LaunchedEffect
         val route = matched.sanitizedCode?.let { "group-join?code=$it" } ?: Destinations.GroupJoin.route
         navController.navigate(route) {
+            popUpTo(Destinations.Home.route)
+            launchSingleTop = true
+        }
+    }
+
+    // A10 (specs/009 §3.2): one-time navigation to Settings when this composition was launched by
+    // tapping the foreground-service notification — same "fire once per fresh composition" idiom
+    // as the https-join-link effect above.
+    LaunchedEffect(Unit) {
+        if (!openSettingsOnLaunch) return@LaunchedEffect
+        navController.navigate(Destinations.Settings.route) {
             popUpTo(Destinations.Home.route)
             launchSingleTop = true
         }

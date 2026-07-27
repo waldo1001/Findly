@@ -2,12 +2,24 @@ package com.findly.android.queue
 
 import com.findly.android.network.ApiError
 import com.findly.android.network.ApiResult
+import com.findly.android.network.DeviceSettingsSnapshot
 import com.findly.android.network.ports.LocationsApi
 
 /** The outcome of a single [LocationSyncCoordinator.syncOnce] call. */
 sealed class SyncOutcome {
     data object NothingToSync : SyncOutcome()
-    data class Synced(val accepted: Int, val duplicates: Int) : SyncOutcome()
+
+    /** 001-api-contract.md §5.1: **every** accepted response carries the current
+     * `deviceSettings` + `geofenceEtag` piggyback — this is the mandatory, primary way settings
+     * and geofence changes reach the device (specs/009-device-runtime.md §1), not an optional
+     * extra. Callers MUST apply [deviceSettings] on every `Synced` outcome, not just [Paused]. */
+    data class Synced(
+        val accepted: Int,
+        val duplicates: Int,
+        val deviceSettings: DeviceSettingsSnapshot,
+        val geofenceEtag: String,
+    ) : SyncOutcome()
+
     data object TransientFailure : SyncOutcome()
     data class Rejected(val droppedFixIds: Set<String>) : SyncOutcome()
     data class Paused(val syncIntervalMinutes: Int, val trackingEnabled: Boolean) : SyncOutcome()
@@ -31,7 +43,15 @@ class LocationSyncCoordinator(
         return when (val result = locationsApi.reportLocations(deviceId, batch.batchId, fixDtos)) {
             is ApiResult.Success -> {
                 queueStore.markBatchAccepted(batch.batchId)
-                SyncOutcome.Synced(result.data.accepted, result.data.duplicates)
+                SyncOutcome.Synced(
+                    accepted = result.data.accepted,
+                    duplicates = result.data.duplicates,
+                    deviceSettings = DeviceSettingsSnapshot(
+                        result.data.deviceSettings.syncIntervalMinutes,
+                        result.data.deviceSettings.trackingEnabled,
+                    ),
+                    geofenceEtag = result.data.geofenceEtag,
+                )
             }
             is ApiResult.Failure -> handleFailure(batch, result.error)
         }
