@@ -6,9 +6,9 @@ import com.findly.android.fakes.FakeLocationsApi
 import com.findly.android.fakes.FakeSyncScheduler
 import com.findly.android.fakes.InMemoryDeviceSettingsStateStore
 import com.findly.android.fakes.InMemoryLastCaptureDateStore
-import com.findly.android.location.AccuracyTier
 import com.findly.android.location.CapturedFix
 import com.findly.android.location.FixCaptureCoordinator
+import com.findly.android.location.LocationAccuracyTier
 import com.findly.android.location.settings.DeviceSettingsCoordinator
 import com.findly.android.network.ApiError
 import com.findly.android.network.ApiResult
@@ -30,7 +30,7 @@ import org.junit.Test
 class LocationSyncRunnerTest {
 
     private val today = LocalDate.of(2026, 7, 19)
-    private val fix = CapturedFix(lat = 51.0, lon = 3.7, accuracyM = 10.0, recordedAt = "2026-07-19T09:00:00Z")
+    private val fix = CapturedFix(lat = 51.0, lon = 3.7, accuracyM = 10.0, recordedAt = "2026-07-19T09:00:00Z", batteryPct = 80)
 
     private class Harness(
         syncIntervalMinutes: Int = 15,
@@ -44,7 +44,7 @@ class LocationSyncRunnerTest {
         val geofenceRegistry = FakeGeofenceRegistry()
         val settingsCoordinator = DeviceSettingsCoordinator(scheduler, geofenceRegistry, InMemoryDeviceSettingsStateStore())
         val lastCaptureDateStore = InMemoryLastCaptureDateStore(lastCaptureDate)
-        val capturer = FakeLocationCapturer().apply { nextFix = capturedFix }
+        val capturer = FakeLocationCapturer(fixToReturn = capturedFix)
         val reRegisterCalls = mutableListOf<Unit>()
         val signedOutCalls = mutableListOf<Unit>()
 
@@ -55,7 +55,6 @@ class LocationSyncRunnerTest {
             captureCoordinator = FixCaptureCoordinator(
                 capturer = capturer,
                 queueStore = queueStore,
-                batteryLevelProvider = { 80 },
                 pauseState = { false },
                 permissionState = { true },
             ),
@@ -84,7 +83,7 @@ class LocationSyncRunnerTest {
 
         assertEquals(RunResult.Success, result)
         assertEquals(0, harness.queueStore.pendingCount()) // accepted and removed
-        assertEquals(AccuracyTier.Periodic, harness.capturer.calls.single().first)
+        assertEquals(LocationAccuracyTier.BALANCED, harness.capturer.requestedTiers.single())
         val reportedFix = harness.locationsApi.reportLocationsCalls.single().third.single()
         assertEquals(FixSource.Periodic.toWireValue(), reportedFix.source)
     }
@@ -95,7 +94,7 @@ class LocationSyncRunnerTest {
 
         harness.runner.runOnce()
 
-        assertTrue("no capture should be attempted", harness.capturer.calls.isEmpty())
+        assertTrue("no capture should be attempted", harness.capturer.requestedTiers.isEmpty())
     }
 
     @Test
@@ -108,7 +107,7 @@ class LocationSyncRunnerTest {
 
         harness.runner.runOnce()
 
-        assertEquals(1, harness.capturer.calls.size)
+        assertEquals(1, harness.capturer.requestedTiers.size)
         assertEquals(today, harness.lastCaptureDateStore.lastCaptureDate())
     }
 

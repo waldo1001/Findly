@@ -38,8 +38,12 @@ data class CapturedFix(
  * separately. Do not change this shape without checking every caller.
  *
  * [FusedLocationCapturer] is the real, `FusedLocationProviderClient`-backed implementation (A10).
+ *
+ * A plain `interface`, not `fun interface`: Kotlin doesn't allow a default parameter value
+ * ([timeoutMillis]'s) on a functional-interface's single abstract method. Nothing constructs this
+ * via SAM-conversion (a bare trailing lambda) anywhere in the codebase, so this costs nothing.
  */
-fun interface LocationCapturer {
+interface LocationCapturer {
     suspend fun captureFix(accuracy: LocationAccuracyTier, timeoutMillis: Long = 30_000L): CapturedFix?
 }
 

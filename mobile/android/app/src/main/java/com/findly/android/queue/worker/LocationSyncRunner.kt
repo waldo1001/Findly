@@ -1,6 +1,5 @@
 package com.findly.android.queue.worker
 
-import com.findly.android.location.AccuracyTier
 import com.findly.android.location.FixCaptureCoordinator
 import com.findly.android.location.settings.DeviceSettingsCoordinator
 import com.findly.android.queue.FixSource
@@ -49,7 +48,7 @@ class LocationSyncRunner(
         val today = today()
         if (OnceDailyGate.shouldSkipCapture(interval, today, lastCaptureDateStore.lastCaptureDate())) return
 
-        val captured = captureCoordinator.captureAndQueue(FixSource.Periodic, AccuracyTier.Periodic)
+        val captured = captureCoordinator.captureAndQueue(FixSource.Periodic)
         if (captured != null) lastCaptureDateStore.recordCaptureDate(today)
     }
 
