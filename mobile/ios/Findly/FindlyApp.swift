@@ -25,6 +25,22 @@ struct FindlyApp: App {
         // matched by filename pattern, not in-memory state, so it finds exactly what `RootView`'s
         // separately-constructed instance (same default directory) would.
         FileManagerExportArtifactStore().removeCurrentArtifact()
+
+        // specs/009-device-runtime.md §3.4 (I10) — Apple requires
+        // `BGTaskScheduler.register(forTaskWithIdentifier:using:launchHandler:)` to run before
+        // `App.init` returns, which is exactly this point — long before `RootView` has constructed
+        // the real `LocationRuntimeContainer` (it needs the API client/auth provider/deviceId,
+        // none of which exist yet here). The launch handler closure below only actually *runs*
+        // later, when the system fires the task — by which point `RootView.init()` has always
+        // already executed at least once (SwiftUI builds the view hierarchy on every launch,
+        // including a background-task-triggered one), so resolving the container lazily through
+        // `LocationRuntimeContainerHolder` here is safe. This is the one piece of "logic" beyond
+        // scene/window wiring the app target is allowed (specs/004 §1.1: "passing the OS
+        // lifecycle... into FindlyKit types through their public protocols") — register, then
+        // delegate straight into the FindlyKit type; no business logic lives here.
+        SystemBackgroundSyncScheduler.registerLaunchHandler {
+            await LocationRuntimeContainerHolder.shared.container?.handleBackgroundRefresh()
+        }
     }
 
     var body: some Scene {
