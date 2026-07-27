@@ -15,12 +15,14 @@ import com.findly.android.ui.designsystem.components.FindlyMapMarkerBubble
 import com.findly.android.ui.groups.GroupMapMemberUi
 
 /**
- * The A2 stub [MapRenderer] (no Google Maps SDK/API key exists yet — H1-gated, see [MapRenderer]'s
- * doc). Renders a placeholder surface plus every device with a known location as a
- * [FindlyMapMarkerBubble] — no real geographic projection, but the roster's marker set is visible
- * end-to-end so the screen composes correctly today and only the tile layer needs replacing
- * later. Stateless; composes only `ui/designsystem` components and reads only [FindlyTheme] tokens
- * (specs/003-android-client.md §4.3) — no raw Material3 primitive appears in this file.
+ * The A2 stub [MapRenderer] — kept post-A12 as a lightweight fallback for Compose previews/tests
+ * that don't want a real `GoogleMap` view (see [MapRenderer]'s doc; [GoogleMapRenderer] is the
+ * real implementation wired at [com.findly.android.AppContainer]'s composition root). Renders a
+ * placeholder surface plus every device with a known location as a [FindlyMapMarkerBubble] — no
+ * real geographic projection, but the roster's marker set is visible end-to-end so previews
+ * compose without needing the Maps SDK. Stateless; composes only `ui/designsystem` components and
+ * reads only [FindlyTheme] tokens (specs/003-android-client.md §4.3) — no raw Material3 primitive
+ * appears in this file.
  */
 class PlaceholderMapRenderer : MapRenderer {
     @Composable
@@ -46,7 +48,7 @@ class PlaceholderMapRenderer : MapRenderer {
                 markers.forEach { (displayName, device) ->
                     FindlyMapMarkerBubble(
                         label = "$displayName · ${device.deviceName}",
-                        isStale = device.isStale ?: false,
+                        state = device.markerState,
                     )
                 }
             }
@@ -77,7 +79,7 @@ class PlaceholderMapRenderer : MapRenderer {
                 located.forEach { member ->
                     FindlyMapMarkerBubble(
                         label = member.displayName,
-                        isStale = member.isStale ?: false,
+                        state = member.markerState,
                     )
                 }
             }

@@ -29,8 +29,8 @@ import com.findly.android.queue.FixQueueStore
 import com.findly.android.queue.InMemoryFixQueueStore
 import com.findly.android.queue.worker.LocationSyncScheduler
 import com.findly.android.queue.worker.ScheduleRebuilder
+import com.findly.android.ui.map.GoogleMapRenderer
 import com.findly.android.ui.map.MapRenderer
-import com.findly.android.ui.map.PlaceholderMapRenderer
 import com.findly.android.ui.settings.ColdStartExportCleanup
 import com.findly.android.ui.settings.DefaultLocalStateWiper
 import com.findly.android.ui.settings.ExportArtifactCleaner
@@ -113,9 +113,11 @@ class AppContainer(context: Context) {
      * share target). Run once, below, from `init`. */
     private val coldStartExportCleanup = ColdStartExportCleanup(exportArtifactCleaner)
 
-    /** A2's live-map tile renderer seam (`ui/map/MapRenderer.kt`) — [PlaceholderMapRenderer] is
-     * the only implementation until H1 provisions a real Maps API key (`appConfig.mapsApiKey`). */
-    val mapRenderer: MapRenderer = PlaceholderMapRenderer()
+    /** A12: the real Google Maps tile renderer (`ui/map/MapRenderer.kt`'s seam) — an empty
+     * `appConfig.mapsApiKey` (until H1 provisions a real one, docs/azure-setup.md) still renders
+     * fine, just with no tiles; `PlaceholderMapRenderer` remains available for
+     * Compose previews/tests (specs/003-android-client.md §12.1). */
+    val mapRenderer: MapRenderer = GoogleMapRenderer()
 
     /** A9 (specs/009-device-runtime.md §3): still the A2-scaffolded no-op `schedule()` (see its
      * own doc) — only `cancel()` does anything real today. Shared between `settingsChangedHandler`
