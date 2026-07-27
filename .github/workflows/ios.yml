@@ -46,29 +46,84 @@ jobs:
     # Unique job name: required status checks match on job names, and "build" would
     # collide with the android workflow's job.
     name: ios-build
-    # Structure check runs on ubuntu (cheap); switch to macos-14 when the Xcode project exists.
-    runs-on: ubuntu-latest
+    # I9: the Findly.xcodeproj app target now exists (generated via xcodegen, specs/004 §1.1) —
+    # real xcodebuild CI, not a structure check. Needs a real macOS/Xcode runner.
+    runs-on: macos-14
+    defaults:
+      run:
+        working-directory: mobile/ios
     steps:
       - uses: actions/checkout@v4
-      # Structure check only — the Findly.xcodeproj app target does not exist yet (specs/004
-      # §1.1: hand-authoring a project.pbxproj with no Xcode available to validate it is worse
-      # than not shipping one; create it in Xcode once available). The FindlyKit package itself is
-      # real-CI-tested by the `package` job above.
-      - name: structure check
+      # Same Xcode-selection logic as the `package` job above (H1 CI note) — kept in sync
+      # deliberately rather than factored out, since each job's `defaults.run.working-directory`
+      # differs and a shared step needs its own working-directory handling either way.
+      - name: select a Swift-6-capable Xcode
         run: |
-          test -f mobile/ios/README.md
-          test -f mobile/ios/.gitignore
-          test -f mobile/ios/FindlyKit/Package.swift
-          test -f mobile/ios/Findly/FindlyApp.swift
-          test -f mobile/ios/Findly/RootView.swift
-          test -f mobile/ios/Findly/Info.plist
-          echo "ios scaffold OK (FindlyKit package is real-CI-tested by the 'package' job; no Xcode project yet)"
-      # TODO(session-ios): replace the structure check with the real app-target build once the
-      # Xcode project exists. Runs on macos-14. Expected shape:
+          XCODE_APP=$(ls -d /Applications/Xcode_16*.app 2>/dev/null | sort -V | tail -1)
+          if [ -z "$XCODE_APP" ]; then
+            echo "::error::No Xcode 16.x found on this runner. Available Xcode installs:"
+            ls -d /Applications/Xcode*.app 2>/dev/null
+            exit 1
+          fi
+          echo "Selecting $XCODE_APP"
+          sudo xcode-select -s "$XCODE_APP/Contents/Developer"
+          xcodebuild -version
+      # The google-services Firebase SPM plugin (FirebaseAuthProvider, specs/004 §4.1) needs
+      # mobile/ios/GoogleService-Info.plist to exist at build time once the real Firebase SPM
+      # dependency lands (H1 follow-up); today's project has no Firebase package dependency yet,
+      # so this file isn't actually consumed by the build below, but the placeholder is added now
+      # (mirroring android.yml's "generate placeholder google-services.json" step) so this job
+      # doesn't silently start depending on an untracked, gitignored file the moment that
+      # dependency is added. Obviously-fake throughout (docs/security-review-checklist.md §1 —
+      # no `AIza…`-prefixed key, which the checklist's own secret-scan grep matches); this file
+      # never authenticates against anything real. The real file (gitignored, developer-machine
+      # only) has the actual `com.findly.ios` / `findly-71f7b` project values.
+      - name: generate placeholder GoogleService-Info.plist
+        run: |
+          cat > GoogleService-Info.plist <<'PLIST'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>API_KEY</key>
+            <string>CI-PLACEHOLDER-NOT-A-REAL-API-KEY</string>
+            <key>GCM_SENDER_ID</key>
+            <string>000000000000</string>
+            <key>PLIST_VERSION</key>
+            <string>1</string>
+            <key>BUNDLE_ID</key>
+            <string>com.findly.ios</string>
+            <key>PROJECT_ID</key>
+            <string>findly-ci-placeholder</string>
+            <key>STORAGE_BUCKET</key>
+            <string>findly-ci-placeholder.appspot.com</string>
+            <key>IS_ADS_ENABLED</key>
+            <false/>
+            <key>IS_ANALYTICS_ENABLED</key>
+            <false/>
+            <key>IS_APPINVITE_ENABLED</key>
+            <true/>
+            <key>IS_GCM_ENABLED</key>
+            <true/>
+            <key>IS_SIGNIN_ENABLED</key>
+            <true/>
+            <key>GOOGLE_APP_ID</key>
+            <string>1:000000000000:ios:0000000000000000000000</string>
+          </dict>
+          </plist>
+          PLIST
+      # Real build (not just a structure check): compiles the Findly app target + links FindlyKit
+      # as a local SPM dependency. `iPhone 15` matches the simulator name commonly preinstalled on
+      # GitHub's macos-14 runner image (same choice `actions/runner-images`' macos-14 image
+      # documents as available) — this session generated/validated Findly.xcodeproj on a real
+      # Xcode 26.6 host but has no macos-14 GitHub-hosted runner to verify this exact simulator
+      # name against; if `iPhone 15` isn't present on the actual runner image, swap for whatever
+      # `xcrun simctl list devicetypes` shows there.
+      - name: build
+        run: xcodebuild build -scheme Findly -destination 'platform=iOS Simulator,name=iPhone 15'
+      # TODO(H6): archive + sign (main only) — real signing secrets don't exist yet (store-readiness
+      # §2 / docs/implementation-handoff.md H6). Expected shape:
       #
-      # - name: unit tests
-      #   run: xcodebuild test -scheme Findly -destination 'platform=iOS Simulator,name=iPhone 15'
-      #   working-directory: mobile/ios
       # - name: archive + sign (main only)
       #   run: xcodebuild archive -scheme Findly ...
       #   env:
