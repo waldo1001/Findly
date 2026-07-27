@@ -16,6 +16,11 @@ import os
 @MainActor
 struct RootView: View {
     @Environment(\.colorScheme) private var colorScheme
+    // specs/009-device-runtime.md §3.4 (trigger 3: foreground) / §4 (the paused-device poll's
+    // "every app foreground" requirement) — the one bit of genuine OS-lifecycle *signal* (not
+    // logic: the reaction lives entirely in `LocationRuntimeContainer.onAppForeground()`) the app
+    // target needs to observe.
+    @Environment(\.scenePhase) private var scenePhase
     @ObservedObject var coordinator: AppCoordinator
 
     private let authProvider: AuthProviding
@@ -254,6 +259,16 @@ struct RootView: View {
             }
         }
         .environment(\.theme, colorScheme == .dark ? .dark : .light)
+        // specs/009-device-runtime.md §3.4/§4 — the foreground opportunistic trigger + the
+        // paused-device poll's "on every app foreground" requirement. `.active` fires on cold
+        // launch too (harmless — `LocationSyncRunner.runOnce()` is idempotent-safe when there's
+        // nothing queued, and `PausedDevicePoller.poll()` is a no-op unless something changed).
+        // The single-parameter closure form (not the iOS 17+ two-parameter one) — this target's
+        // deploymentTarget is iOS 16 (project.yml).
+        .onChange(of: scenePhase) { newPhase in
+            guard newPhase == .active else { return }
+            Task { await locationRuntimeContainer.onAppForeground() }
+        }
     }
 
     private var defaultMapRenderer: any MapRendering {
