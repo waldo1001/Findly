@@ -16,6 +16,11 @@ class FakeLocateApi : LocateApi {
     val createLocateRequestCalls = mutableListOf<Pair<String?, String?>>()
     val getLocateRequestCalls = mutableListOf<String>()
 
+    /** A9 (specs/009-device-runtime.md §5.1): records every [fulfillLocateRequest] call so
+     * `LocateRequestPushHandlerTest` can assert the exact `requestId`/`deviceId`/`fix` sent. */
+    data class FulfillCall(val requestId: String, val deviceId: String, val fix: FulfillFixDto)
+    val fulfillLocateRequestCalls = mutableListOf<FulfillCall>()
+
     var createLocateRequestResult: ApiResult<LocateRequestDto> = ApiResult.Success(
         LocateRequestDto(
             requestId = "lr_test",
@@ -56,5 +61,8 @@ class FakeLocateApi : LocateApi {
         requestId: String,
         deviceId: String,
         fix: FulfillFixDto,
-    ): ApiResult<FulfillResponseDto> = fulfillLocateRequestResult
+    ): ApiResult<FulfillResponseDto> {
+        fulfillLocateRequestCalls.add(FulfillCall(requestId, deviceId, fix))
+        return fulfillLocateRequestResult
+    }
 }

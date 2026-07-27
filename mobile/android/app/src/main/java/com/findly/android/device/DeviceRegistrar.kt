@@ -38,4 +38,10 @@ class DeviceRegistrar(
      * 000-overview.md §O4: "Clients MUST re-POST /devices on token refresh"). */
     suspend fun onPushTokenRefreshed(uid: String, newToken: String): ApiResult<DeviceDto> =
         registerOrUpdate(uid = uid, pushToken = newToken)
+
+    /** A9 (specs/009-device-runtime.md §5.1): push handlers (e.g. `LocateRequestPushHandler`)
+     * need this device's `deviceId` to call a `deviceId`-addressed endpoint without going through
+     * a full `registerOrUpdate` round trip. Same stable id [registerOrUpdate] would use for
+     * [uid]. */
+    fun deviceIdFor(uid: String): String = deviceIdProvider.deviceIdFor(uid)
 }
