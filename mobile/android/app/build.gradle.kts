@@ -235,4 +235,14 @@ dependencies {
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.1")
     testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
+    // A11 code-review fix: real Room.Migration(1, 2) verification (FindlyDatabaseMigrationTest)
+    // needs an actual SQLite engine to run against on plain JVM (no Robolectric/instrumentation,
+    // specs/003-android-client.md §14) - Room's bundled driver (BundledSQLiteDriver) provides
+    // exactly that: a real, file-backed SQLite database constructible from a plain JUnit test.
+    // The plain `androidx.sqlite:sqlite-bundled` coordinate resolves to the Android-target variant
+    // by default in this Android application module (its native library is built for Android
+    // ABIs, e.g. arm64-v8a - unusable in the host JVM process `./gradlew test` actually runs in,
+    // UnsatisfiedLinkError otherwise) - `sqlite-bundled-jvm` is the explicit desktop/host-JVM
+    // artifact coordinate that ships a native library for this machine's own OS instead.
+    testImplementation("androidx.sqlite:sqlite-bundled-jvm:2.6.2")
 }

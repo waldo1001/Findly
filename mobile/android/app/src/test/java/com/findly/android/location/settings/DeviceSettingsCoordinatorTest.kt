@@ -60,6 +60,33 @@ class DeviceSettingsCoordinatorTest {
     }
 
     @Test
+    fun `resume also re-registers geofences (specs 009 §6_2 - resume from pause)`() = runTest {
+        val scheduler = FakeSyncScheduler()
+        val geofenceRegistry = FakeGeofenceRegistry()
+        val stateStore = InMemoryDeviceSettingsStateStore(DeviceSettingsSnapshot(15, false))
+        var onResumeCallCount = 0
+        val coordinator = DeviceSettingsCoordinator(scheduler, geofenceRegistry, stateStore, onResume = { onResumeCallCount++ })
+
+        coordinator.applySettings(DeviceSettingsSnapshot(15, true))
+
+        assertEquals(1, onResumeCallCount)
+    }
+
+    @Test
+    fun `onResume is never called on a plain interval change or on pause`() = runTest {
+        val scheduler = FakeSyncScheduler()
+        val geofenceRegistry = FakeGeofenceRegistry()
+        val stateStore = InMemoryDeviceSettingsStateStore(DeviceSettingsSnapshot(15, true))
+        var onResumeCallCount = 0
+        val coordinator = DeviceSettingsCoordinator(scheduler, geofenceRegistry, stateStore, onResume = { onResumeCallCount++ })
+
+        coordinator.applySettings(DeviceSettingsSnapshot(30, true)) // interval change only
+        coordinator.applySettings(DeviceSettingsSnapshot(30, false)) // pause
+
+        assertEquals(0, onResumeCallCount)
+    }
+
+    @Test
     fun `applying identical settings twice is a no-op the second time`() = runTest {
         val scheduler = FakeSyncScheduler()
         val geofenceRegistry = FakeGeofenceRegistry()

@@ -23,12 +23,17 @@ import com.findly.android.network.DeviceSettingsSnapshot
  * capturing", and "stop capturing" is already a natural consequence of [stateStore] being the
  * same source of truth a real `TrackingPauseState` reads (specs/009 §1.2) — no separate signal is
  * needed. Resume (§4) restores the schedule via the same [rebuildSchedule][SettingsChangeActions]
- * path an interval change uses; geofence **re**-registration on resume is A11 scope (§6.2).
+ * path an interval change uses, and calls [onResume] — `AppContainer` wires this to
+ * `GeofenceConfigSyncCoordinator.sync` (specs/009 §6.2: "resume from pause" is one of the five
+ * geofence re-registration triggers). Kept as a thin functional seam (like [ScheduleRebuilder]
+ * elsewhere) rather than an import of the concrete coordinator, so this class stays decoupled from
+ * geofencing's own dependency graph — it only needs to know "call this on resume".
  */
 class DeviceSettingsCoordinator(
     private val scheduler: SyncScheduler,
     private val geofenceRegistry: GeofenceRegistry,
     private val stateStore: DeviceSettingsStateStore,
+    private val onResume: suspend () -> Unit = {},
 ) {
     suspend fun applySettings(next: DeviceSettingsSnapshot) {
         val previous = stateStore.current()
@@ -44,7 +49,8 @@ class DeviceSettingsCoordinator(
                 scheduler.cancelAll()
                 geofenceRegistry.unregisterAll()
             }
-            PauseAction.RESUME, PauseAction.NONE -> Unit
+            PauseAction.RESUME -> onResume()
+            PauseAction.NONE -> Unit
         }
 
         if (actions.rebuildSchedule) {

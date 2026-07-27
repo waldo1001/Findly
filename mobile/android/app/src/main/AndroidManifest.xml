@@ -111,6 +111,14 @@
             android:exported="false"
             android:foregroundServiceType="location" />
 
+        <!-- A11 (specs/009-device-runtime.md §6.3): GeofencingClient's transition callback
+             target. Fired only via the PendingIntent GeofencingClientManager registers with every
+             addGeofences call (AppContainer) - exported="false" is safe because delivery goes
+             through that PendingIntent's own identity, never a raw external broadcast. -->
+        <receiver
+            android:name=".location.geofence.GeofenceTransitionReceiver"
+            android:exported="false" />
+
         <!-- specs/003-android-client.md §12.4 / 001-api-contract.md §13.1: the export share-sheet
              handoff needs a content:// URI for the downloaded file (ExportFileWriter.kt). Only
              cacheDir/exports/ is exposed (res/xml/file_paths.xml) — nothing else in the app's

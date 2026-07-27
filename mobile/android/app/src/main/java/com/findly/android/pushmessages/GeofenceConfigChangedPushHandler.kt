@@ -1,26 +1,17 @@
 package com.findly.android.pushmessages
 
-import com.findly.android.network.ApiResult
-import com.findly.android.network.ports.GeofenceApi
+import com.findly.android.location.settings.GeofenceConfigSyncCoordinator
 
 /**
- * `GEOFENCE_CONFIG_CHANGED` (001-api-contract.md §8.4; specs/009-device-runtime.md §5.4):
- * `GET /geofences` and, on a fresh (non-304) body, hand the config off to [geofenceRegistrar] for
- * platform re-registration (009 §6.2, A11 scope).
- *
- * No local cached ETag exists yet to pass as `If-None-Match` — no config cache has landed (A11
- * owns that per 009 §6.1) — so this always fetches unconditionally; a `304` (`null` body) or a
- * failed fetch are both silently ignored, same best-effort treatment as the piggyback path (009
- * §1).
+ * `GEOFENCE_CONFIG_CHANGED` (001-api-contract.md §8.4; specs/009-device-runtime.md §5.4): a thin
+ * delegate onto the consolidated fetch-cache-register sequence
+ * ([GeofenceConfigSyncCoordinator.sync], §6.2) — this push is just one of that class's five
+ * triggers. `AppContainer` wires the real, ETag-cache-backed coordinator here now; A9's original
+ * version of this handler (which had no cache to read/write yet and always fetched unconditionally)
+ * predates A11 landing that cache.
  */
 class GeofenceConfigChangedPushHandler(
-    private val geofenceApi: GeofenceApi,
-    private val geofenceRegistrar: GeofenceRegistrar,
+    private val geofenceConfigSyncCoordinator: GeofenceConfigSyncCoordinator,
 ) {
-    suspend fun handle() {
-        val result = geofenceApi.getGeofences(ifNoneMatch = null)
-        if (result !is ApiResult.Success) return
-        val etagged = result.data ?: return
-        geofenceRegistrar.registerAll(etagged.value.geofences, etagged.etag)
-    }
+    suspend fun handle() = geofenceConfigSyncCoordinator.sync()
 }
