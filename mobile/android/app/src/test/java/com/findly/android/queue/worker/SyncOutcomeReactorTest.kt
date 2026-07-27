@@ -11,9 +11,22 @@ import org.junit.Test
 class SyncOutcomeReactorTest {
 
     @Test
-    fun `nothing to sync and a clean sync both just continue`() {
+    fun `nothing to sync just continues`() {
         assertEquals(SyncReaction.Continue, SyncOutcomeReactor.reactionFor(SyncOutcome.NothingToSync))
-        assertEquals(SyncReaction.Continue, SyncOutcomeReactor.reactionFor(SyncOutcome.Synced(1, 0)))
+    }
+
+    @Test
+    fun `a successful sync applies its mandatory deviceSettings piggyback (001 §5_1) - every accepted response carries it, not just a 403`() {
+        val outcome = SyncOutcome.Synced(
+            accepted = 1,
+            duplicates = 0,
+            deviceSettings = DeviceSettingsSnapshot(30, true),
+            geofenceEtag = "\"1\"",
+        )
+
+        val reaction = SyncOutcomeReactor.reactionFor(outcome)
+
+        assertEquals(SyncReaction.Synced(DeviceSettingsSnapshot(30, true), "\"1\""), reaction)
     }
 
     @Test

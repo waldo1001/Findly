@@ -100,10 +100,14 @@ class FixCaptureCoordinator(
         const val DEFAULT_TIMEOUT_MILLIS = 30_000L
         const val GEOFENCE_TIMEOUT_MILLIS = 15_000L
 
-        /** §1.1's "Accuracy request" column for the sources that reach this class. */
+        /** §1.1's "Accuracy request" column. `Locate` never actually reaches this class in
+         * practice — [com.findly.android.pushmessages.LocateRequestPushHandler] correctly
+         * bypasses [FixCaptureCoordinator] and calls [LocationCapturer.captureFix] directly (see
+         * class doc) — but the mapping is kept spec-correct (`HIGH`, not `BALANCED`) rather than
+         * relying on that unreachability, so it isn't a landmine for whoever wires it next. */
         fun accuracyFor(source: FixSource): LocationAccuracyTier = when (source) {
-            FixSource.Manual -> LocationAccuracyTier.HIGH
-            FixSource.Periodic, FixSource.Geofence, FixSource.Locate -> LocationAccuracyTier.BALANCED
+            FixSource.Manual, FixSource.Locate -> LocationAccuracyTier.HIGH
+            FixSource.Periodic, FixSource.Geofence -> LocationAccuracyTier.BALANCED
         }
 
         /** §1.1's "Timeout" column — the only reason this class doesn't just rely on

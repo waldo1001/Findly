@@ -86,10 +86,15 @@ class LocationForegroundService : Service() {
     }
 
     private fun buildNotification(): Notification {
+        // 009 §3.2: "a tap action opening the app's device-settings screen" - MainActivity reads
+        // this extra (gated to a fresh launch, same idiom as the https-join-link intent handling,
+        // MainActivity.kt's doc) and navigates FindlyNavHost to Destinations.Settings once.
+        val settingsIntent = Intent(this, MainActivity::class.java)
+            .putExtra(EXTRA_OPEN_SETTINGS, true)
         val contentIntent = PendingIntent.getActivity(
             this,
             0,
-            Intent(this, MainActivity::class.java),
+            settingsIntent,
             PendingIntent.FLAG_IMMUTABLE,
         )
         return NotificationCompat.Builder(this, CHANNEL_ID)
@@ -111,6 +116,10 @@ class LocationForegroundService : Service() {
 
     companion object {
         const val EXTRA_SYNC_INTERVAL_MINUTES = "syncIntervalMinutes"
+
+        /** Read by [com.findly.android.MainActivity] off its launching `Intent` (009 §3.2's
+         * notification tap target). */
+        const val EXTRA_OPEN_SETTINGS = "openSettings"
         private const val CHANNEL_ID = "findly_location_sharing"
         private const val CHANNEL_NAME = "Location sharing"
         private const val NOTIFICATION_ID = 1001

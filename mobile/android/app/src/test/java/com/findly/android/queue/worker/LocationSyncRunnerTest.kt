@@ -37,12 +37,17 @@ class LocationSyncRunnerTest {
         lastCaptureDate: LocalDate? = null,
         capturedFix: CapturedFix? = null,
         fixedToday: LocalDate = LocalDate.of(2026, 7, 19),
+        initialDeviceSettings: DeviceSettingsSnapshot? = null,
     ) {
         val queueStore = InMemoryFixQueueStore()
         val locationsApi = FakeLocationsApi()
         val scheduler = FakeSyncScheduler()
         val geofenceRegistry = FakeGeofenceRegistry()
-        val settingsCoordinator = DeviceSettingsCoordinator(scheduler, geofenceRegistry, InMemoryDeviceSettingsStateStore())
+        val settingsCoordinator = DeviceSettingsCoordinator(
+            scheduler,
+            geofenceRegistry,
+            InMemoryDeviceSettingsStateStore(initialDeviceSettings),
+        )
         val lastCaptureDateStore = InMemoryLastCaptureDateStore(lastCaptureDate)
         val capturer = FakeLocationCapturer(fixToReturn = capturedFix)
         val reRegisterCalls = mutableListOf<Unit>()
@@ -86,6 +91,33 @@ class LocationSyncRunnerTest {
         assertEquals(LocationAccuracyTier.BALANCED, harness.capturer.requestedTiers.single())
         val reportedFix = harness.locationsApi.reportLocationsCalls.single().third.single()
         assertEquals(FixSource.Periodic.toWireValue(), reportedFix.source)
+    }
+
+    @Test
+    fun `a successful sync's mandatory settings piggyback is applied even though the device is not paused (001 §5_1, 009 §1)`() = runTest {
+        val harness = Harness(capturedFix = fix, initialDeviceSettings = DeviceSettingsSnapshot(15, true))
+        // The server echoes back a CHANGED interval on this otherwise-successful 2xx response -
+        // no 403 TRACKING_PAUSED involved at all.
+        harness.locationsApi.nextResult = ApiResult.Success(
+            ReportLocationsResponseDto(
+                accepted = 1,
+                duplicates = 0,
+                lastKnownUpdated = true,
+                deviceSettings = DeviceSettingsDto(30, true),
+                geofenceEtag = "\"0\"",
+            ),
+            features = null,
+        )
+
+        val result = harness.runner.runOnce()
+
+        assertEquals(RunResult.Success, result)
+        assertEquals(
+            "the schedule must rebuild to the new interval even on a plain accepted flush",
+            listOf(30),
+            harness.scheduler.rescheduleCalls,
+        )
+        assertEquals(0, harness.scheduler.cancelAllCallCount)
     }
 
     @Test

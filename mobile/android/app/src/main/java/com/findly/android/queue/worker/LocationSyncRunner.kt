@@ -26,7 +26,10 @@ sealed class RunResult {
  * capture; (2) capture-and-queue one `source: "periodic"` fix (silently skipped by
  * [FixCaptureCoordinator] itself if paused/no permission/debounced, §1.2); (3) drain the queue via
  * [syncCoordinator], reacting to each [SyncOutcome] via [SyncOutcomeReactor] until the queue is
- * empty, a settings change needs applying, or a non-retryable condition is hit.
+ * empty, a stop-worthy condition is hit (paused, re-registration, sign-out, transient failure), or
+ * the per-run batch cap is reached. Every successful flush applies its mandatory `deviceSettings`
+ * piggyback (§5.1 — [SyncReaction.Synced]) without stopping the run; only `403 TRACKING_PAUSED`
+ * ([SyncReaction.ApplySettings]) does.
  */
 class LocationSyncRunner(
     private val currentSyncIntervalMinutes: suspend () -> Int,
@@ -59,6 +62,12 @@ class LocationSyncRunner(
 
             when (val reaction = SyncOutcomeReactor.reactionFor(outcome)) {
                 SyncReaction.Continue -> Unit // more of the queue may remain - loop again
+                is SyncReaction.Synced -> {
+                    // 001 §5.1's mandatory piggyback - apply on every successful sync, not just
+                    // on a 403. A successful flush never stops the run: loop again below in case
+                    // more of the queue remains. geofenceEtag is intentionally unused here (A11).
+                    settingsCoordinator.applySettings(reaction.deviceSettings)
+                }
                 is SyncReaction.ApplySettings -> {
                     settingsCoordinator.applySettings(reaction.settings)
                     return RunResult.Success

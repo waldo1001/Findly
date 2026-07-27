@@ -10,6 +10,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.findly.android.ui.designsystem.FindlyTheme
+import com.findly.android.queue.worker.LocationForegroundService
 import com.findly.android.ui.groups.GroupJoinHttpsLinkParser
 import com.findly.android.ui.home.HomeViewModel
 import com.findly.android.ui.home.HomeViewModelFactory
@@ -75,6 +76,11 @@ class MainActivity : ComponentActivity() {
             fragment = launchingUri?.fragment,
             joinLinkHost = container.appConfig.joinLinkHost,
         )
+        // specs/009-device-runtime.md §3.2: the foreground-service notification's tap action
+        // opens the device-settings screen. Same freshness guard as httpsJoinLinkResult above
+        // (savedInstanceState == null) so a rotation/recreation doesn't re-fire the navigation.
+        val openSettingsOnLaunch = savedInstanceState == null &&
+            intent?.getBooleanExtra(LocationForegroundService.EXTRA_OPEN_SETTINGS, false) == true
 
         setContent {
             FindlyTheme {
@@ -87,6 +93,7 @@ class MainActivity : ComponentActivity() {
                     container = container,
                     homeViewModel = homeViewModel,
                     httpsJoinLinkResult = httpsJoinLinkResult,
+                    openSettingsOnLaunch = openSettingsOnLaunch,
                 )
             }
         }
