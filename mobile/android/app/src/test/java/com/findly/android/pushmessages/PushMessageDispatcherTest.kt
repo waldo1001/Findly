@@ -6,6 +6,8 @@ import com.findly.android.fakes.FakeGeofenceRegistrar
 import com.findly.android.fakes.FakeLocateApi
 import com.findly.android.fakes.FakeLocationCapturer
 import com.findly.android.fakes.FakeScheduleRebuilder
+import com.findly.android.fakes.InMemoryGeofenceConfigStateStore
+import com.findly.android.location.settings.GeofenceConfigSyncCoordinator
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -23,6 +25,11 @@ class PushMessageDispatcherTest {
         val geofenceNotifier = FakeGeofenceNotifier()
         val geofenceApi = FakeGeofenceApi()
         val geofenceRegistrar = FakeGeofenceRegistrar()
+        val geofenceConfigSyncCoordinator = GeofenceConfigSyncCoordinator(
+            geofenceApi,
+            InMemoryGeofenceConfigStateStore(),
+            geofenceRegistrar,
+        )
 
         val dispatcher = PushMessageDispatcher(
             locateRequestHandler = LocateRequestPushHandler(
@@ -32,7 +39,7 @@ class PushMessageDispatcherTest {
             ),
             settingsChangedHandler = SettingsChangedPushHandler(scheduleRebuilder),
             geofenceEventHandler = GeofenceEventPushHandler(geofenceNotifier),
-            geofenceConfigChangedHandler = GeofenceConfigChangedPushHandler(geofenceApi, geofenceRegistrar),
+            geofenceConfigChangedHandler = GeofenceConfigChangedPushHandler(geofenceConfigSyncCoordinator),
         )
 
         fun assertNothingElseRan(except: String) {

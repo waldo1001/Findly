@@ -2,6 +2,7 @@ package com.findly.android.queue.worker
 
 import com.findly.android.network.ApiError
 import com.findly.android.network.DeviceSettingsSnapshot
+import com.findly.android.queue.GeofenceEventSyncOutcome
 import com.findly.android.queue.SyncOutcome
 import org.junit.Assert.assertEquals
 import org.junit.Test
@@ -65,5 +66,70 @@ class SyncOutcomeReactorTest {
         val error = ApiError.InternalError(message = "boom", requestId = null)
 
         assertEquals(SyncReaction.RetryTransient, SyncOutcomeReactor.reactionFor(SyncOutcome.OtherFailure(error)))
+    }
+
+    // ---- reactionForGeofenceEvents (specs/009-device-runtime.md §6.3/§9) ----
+
+    @Test
+    fun `geofence events - nothing to sync just continues`() {
+        assertEquals(
+            SyncReaction.Continue,
+            SyncOutcomeReactor.reactionForGeofenceEvents(GeofenceEventSyncOutcome.NothingToSync),
+        )
+    }
+
+    @Test
+    fun `geofence events - a successful report applies its mandatory piggyback`() {
+        val outcome = GeofenceEventSyncOutcome.Synced(1, 0, DeviceSettingsSnapshot(30, true), "\"1\"")
+
+        assertEquals(
+            SyncReaction.Synced(DeviceSettingsSnapshot(30, true), "\"1\""),
+            SyncOutcomeReactor.reactionForGeofenceEvents(outcome),
+        )
+    }
+
+    @Test
+    fun `geofence events - transient failure retries`() {
+        assertEquals(
+            SyncReaction.RetryTransient,
+            SyncOutcomeReactor.reactionForGeofenceEvents(GeofenceEventSyncOutcome.TransientFailure),
+        )
+    }
+
+    @Test
+    fun `geofence events - paused applies the echoed settings immediately`() {
+        val reaction = SyncOutcomeReactor.reactionForGeofenceEvents(GeofenceEventSyncOutcome.Paused(30, false))
+
+        assertEquals(SyncReaction.ApplySettings(DeviceSettingsSnapshot(30, false)), reaction)
+    }
+
+    @Test
+    fun `geofence events - DEVICE_NOT_FOUND re-registers`() {
+        val error = ApiError.DeviceNotFound(message = "not found", requestId = null)
+
+        assertEquals(
+            SyncReaction.ReRegisterDevice,
+            SyncOutcomeReactor.reactionForGeofenceEvents(GeofenceEventSyncOutcome.OtherFailure(error)),
+        )
+    }
+
+    @Test
+    fun `geofence events - a second AUTH_TOKEN_EXPIRED signs out`() {
+        val error = ApiError.AuthTokenExpired(message = "expired", requestId = null)
+
+        assertEquals(
+            SyncReaction.SignedOut,
+            SyncOutcomeReactor.reactionForGeofenceEvents(GeofenceEventSyncOutcome.OtherFailure(error)),
+        )
+    }
+
+    @Test
+    fun `geofence events - any other error falls back to retry`() {
+        val error = ApiError.InternalError(message = "boom", requestId = null)
+
+        assertEquals(
+            SyncReaction.RetryTransient,
+            SyncOutcomeReactor.reactionForGeofenceEvents(GeofenceEventSyncOutcome.OtherFailure(error)),
+        )
     }
 }

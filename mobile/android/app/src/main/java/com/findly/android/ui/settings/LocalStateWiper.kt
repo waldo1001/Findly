@@ -1,7 +1,9 @@
 package com.findly.android.ui.settings
 
 import com.findly.android.device.DeviceIdStore
+import com.findly.android.location.settings.GeofenceConfigStateStore
 import com.findly.android.queue.FixQueueStore
+import com.findly.android.queue.GeofenceEventQueueStore
 
 /**
  * Wipes every piece of local client state after a successful account deletion
@@ -28,21 +30,25 @@ fun interface ExportArtifactCleaner {
 /**
  * The real [LocalStateWiper], wired by `AppContainer`. Covers every piece of concrete, persisted
  * client state that exists in this codebase today: the fix queue, the per-uid `deviceId` store,
- * and the export artifact directory (specs/008 §3.1). There is still no separate cached-
- * config/ETag store or `androidx.datastore` usage anywhere (geofence ETags live only in
- * `GeofencesStateHolder`'s in-memory session state, already gone on process death; `AppConfig` is
- * a `BuildConfig` wrapper, not a persisted DataStore) — this mirrors
- * [com.findly.android.queue.FixQueueStore]'s own documented deferral (specs/003 §10.4): a future
- * persisted cache/DataStore slots in here with zero call-site changes.
+ * the export artifact directory (specs/008 §3.1), and — as of A11 — the durable geofence-event
+ * queue and the cached geofence config document/ETag (specs/009-device-runtime.md §6.1). The
+ * "any cached config/ETags" wording this class's doc has always quoted had nothing concrete to
+ * wire until [GeofenceConfigStateStore] landed; a plaintext cache of a family's configured
+ * geofence names/coordinates must not outlive the account it belongs to, same reasoning as the
+ * export-artifact rule right above it.
  */
 class DefaultLocalStateWiper(
     private val fixQueueStore: FixQueueStore,
     private val deviceIdStore: DeviceIdStore,
     private val exportArtifactCleaner: ExportArtifactCleaner,
+    private val geofenceEventQueueStore: GeofenceEventQueueStore,
+    private val geofenceConfigStateStore: GeofenceConfigStateStore,
 ) : LocalStateWiper {
     override suspend fun wipeAll(uid: String) {
         fixQueueStore.clearAll()
         deviceIdStore.clear(uid)
         exportArtifactCleaner.clear()
+        geofenceEventQueueStore.clearAll()
+        geofenceConfigStateStore.clear()
     }
 }

@@ -2,6 +2,7 @@ package com.findly.android.queue.worker
 
 import com.findly.android.network.ApiError
 import com.findly.android.network.DeviceSettingsSnapshot
+import com.findly.android.queue.GeofenceEventSyncOutcome
 import com.findly.android.queue.SyncOutcome
 
 /** What a caller of [com.findly.android.queue.LocationSyncCoordinator.syncOnce] must do next
@@ -56,6 +57,24 @@ object SyncOutcomeReactor {
             DeviceSettingsSnapshot(outcome.syncIntervalMinutes, outcome.trackingEnabled),
         )
         is SyncOutcome.OtherFailure -> when (outcome.error) {
+            is ApiError.DeviceNotFound -> SyncReaction.ReRegisterDevice
+            is ApiError.AuthTokenExpired -> SyncReaction.SignedOut
+            else -> SyncReaction.RetryTransient
+        }
+    }
+
+    /** [GeofenceEventSyncOutcome] -> [SyncReaction] (specs/009-device-runtime.md §6.3/§9) — a
+     * second mapping over the exact same [SyncReaction] shape rather than a shared supertype with
+     * [SyncOutcome], so the two flush loops ([LocationSyncRunner]'s fix drain and its geofence-event
+     * drain) can react identically without coupling the two outcome hierarchies together. */
+    fun reactionForGeofenceEvents(outcome: GeofenceEventSyncOutcome): SyncReaction = when (outcome) {
+        is GeofenceEventSyncOutcome.NothingToSync -> SyncReaction.Continue
+        is GeofenceEventSyncOutcome.Synced -> SyncReaction.Synced(outcome.deviceSettings, outcome.geofenceEtag)
+        is GeofenceEventSyncOutcome.TransientFailure -> SyncReaction.RetryTransient
+        is GeofenceEventSyncOutcome.Paused -> SyncReaction.ApplySettings(
+            DeviceSettingsSnapshot(outcome.syncIntervalMinutes, outcome.trackingEnabled),
+        )
+        is GeofenceEventSyncOutcome.OtherFailure -> when (outcome.error) {
             is ApiError.DeviceNotFound -> SyncReaction.ReRegisterDevice
             is ApiError.AuthTokenExpired -> SyncReaction.SignedOut
             else -> SyncReaction.RetryTransient

@@ -2,7 +2,10 @@ package com.findly.android.queue.worker
 
 import com.findly.android.location.FixCaptureCoordinator
 import com.findly.android.location.settings.DeviceSettingsCoordinator
+import com.findly.android.location.settings.GeofenceConfigSyncCoordinator
 import com.findly.android.queue.FixSource
+import com.findly.android.queue.GeofenceEventSyncCoordinator
+import com.findly.android.queue.GeofenceEventSyncOutcome
 import com.findly.android.queue.LocationSyncCoordinator
 import com.findly.android.queue.SyncOutcome
 import java.time.LocalDate
@@ -24,12 +27,14 @@ sealed class RunResult {
  *
  * Order per run: (1) the once-per-local-day gate (§3.3) before ever attempting a periodic
  * capture; (2) capture-and-queue one `source: "periodic"` fix (silently skipped by
- * [FixCaptureCoordinator] itself if paused/no permission/debounced, §1.2); (3) drain the queue via
- * [syncCoordinator], reacting to each [SyncOutcome] via [SyncOutcomeReactor] until the queue is
- * empty, a stop-worthy condition is hit (paused, re-registration, sign-out, transient failure), or
- * the per-run batch cap is reached. Every successful flush applies its mandatory `deviceSettings`
- * piggyback (§5.1 — [SyncReaction.Synced]) without stopping the run; only `403 TRACKING_PAUSED`
- * ([SyncReaction.ApplySettings]) does.
+ * [FixCaptureCoordinator] itself if paused/no permission/debounced, §1.2); (3) drain the fix queue
+ * via [syncCoordinator]; (4) drain the geofence-event queue via [geofenceEventSyncCoordinator]
+ * (§6.3: "Events are flushed like fixes... on the same cadence") — the natural fit found by
+ * piggybacking onto this same per-cycle drain rather than a second independent scheduler. Every
+ * successful flush of *either* queue applies its mandatory `deviceSettings` piggyback (§5.1/§7.3)
+ * without stopping the run, and re-syncs the geofence config when the piggybacked `geofenceEtag`
+ * differs from the cached one (§6.2/§6.3's ETag-mismatch self-heal); only `403 TRACKING_PAUSED`
+ * stops early.
  */
 class LocationSyncRunner(
     private val currentSyncIntervalMinutes: suspend () -> Int,
@@ -37,13 +42,19 @@ class LocationSyncRunner(
     private val today: () -> LocalDate,
     private val captureCoordinator: FixCaptureCoordinator,
     private val syncCoordinator: LocationSyncCoordinator,
+    private val geofenceEventSyncCoordinator: GeofenceEventSyncCoordinator,
     private val settingsCoordinator: DeviceSettingsCoordinator,
+    private val geofenceConfigSyncCoordinator: GeofenceConfigSyncCoordinator,
     private val onReRegisterDevice: suspend () -> Unit,
     private val onSignedOut: suspend () -> Unit,
 ) {
     suspend fun runOnce(): RunResult {
         maybeCapturePeriodicFix()
-        return drainQueue()
+        val fixDrainResult = drainFixQueue()
+        // A transient failure on the fix queue backs off the whole run (§9) - no point hammering
+        // the geofence-event endpoint too in the same cycle; the next run retries both.
+        if (fixDrainResult == RunResult.Retry) return RunResult.Retry
+        return drainGeofenceEventQueue()
     }
 
     private suspend fun maybeCapturePeriodicFix() {
@@ -55,19 +66,14 @@ class LocationSyncRunner(
         if (captured != null) lastCaptureDateStore.recordCaptureDate(today)
     }
 
-    private suspend fun drainQueue(): RunResult {
+    private suspend fun drainFixQueue(): RunResult {
         repeat(MAX_BATCHES_PER_RUN) {
             val outcome = syncCoordinator.syncOnce()
             if (outcome is SyncOutcome.NothingToSync) return RunResult.Success
 
             when (val reaction = SyncOutcomeReactor.reactionFor(outcome)) {
                 SyncReaction.Continue -> Unit // more of the queue may remain - loop again
-                is SyncReaction.Synced -> {
-                    // 001 §5.1's mandatory piggyback - apply on every successful sync, not just
-                    // on a 403. A successful flush never stops the run: loop again below in case
-                    // more of the queue remains. geofenceEtag is intentionally unused here (A11).
-                    settingsCoordinator.applySettings(reaction.deviceSettings)
-                }
+                is SyncReaction.Synced -> applySyncedPiggyback(reaction)
                 is SyncReaction.ApplySettings -> {
                     settingsCoordinator.applySettings(reaction.settings)
                     return RunResult.Success
@@ -86,6 +92,42 @@ class LocationSyncRunner(
         // Defensively bounded (§3.1: "MUST... complete in well under 10 minutes") - a
         // pathologically large backlog is picked up again next run rather than looping forever.
         return RunResult.Success
+    }
+
+    /** specs/009-device-runtime.md §6.3: "Events are flushed like fixes, batched 1-20 per call". */
+    private suspend fun drainGeofenceEventQueue(): RunResult {
+        repeat(MAX_BATCHES_PER_RUN) {
+            val outcome = geofenceEventSyncCoordinator.syncOnce()
+            if (outcome is GeofenceEventSyncOutcome.NothingToSync) return RunResult.Success
+
+            when (val reaction = SyncOutcomeReactor.reactionForGeofenceEvents(outcome)) {
+                SyncReaction.Continue -> Unit
+                is SyncReaction.Synced -> applySyncedPiggyback(reaction)
+                is SyncReaction.ApplySettings -> {
+                    settingsCoordinator.applySettings(reaction.settings)
+                    return RunResult.Success
+                }
+                SyncReaction.ReRegisterDevice -> {
+                    onReRegisterDevice()
+                    return RunResult.Success
+                }
+                SyncReaction.SignedOut -> {
+                    onSignedOut()
+                    return RunResult.Success
+                }
+                SyncReaction.RetryTransient -> return RunResult.Retry
+            }
+        }
+        return RunResult.Success
+    }
+
+    /** The shared "apply the mandatory piggyback" step both drain loops' `Synced` branch needs
+     * (001-api-contract.md §5.1/§7.3): settings apply unconditionally; the geofence config only
+     * re-syncs when the observed etag actually differs from the cached one
+     * ([GeofenceConfigSyncCoordinator.syncIfEtagChanged], §6.2/§6.3). */
+    private suspend fun applySyncedPiggyback(synced: SyncReaction.Synced) {
+        settingsCoordinator.applySettings(synced.deviceSettings)
+        geofenceConfigSyncCoordinator.syncIfEtagChanged(synced.geofenceEtag)
     }
 
     private companion object {
