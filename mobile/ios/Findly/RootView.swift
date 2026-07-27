@@ -117,9 +117,13 @@ struct RootView: View {
                 _ = try? await deviceRegistrationService.registerOrUpdate()
             },
             // specs/009 §9: a second AUTH_TOKEN_EXPIRED means signed-out - stop the runtime and
-            // return to sign-in.
+            // return to sign-in. Reads the container back through the holder (populated a few
+            // lines below, but only ever CALLED once a real failure happens, long after that
+            // assignment has run) rather than capturing `container` directly, which doesn't exist
+            // yet at this point inside its own initializer argument list.
             onSignedOut: { [weak authProviderRef] in
                 try? authProviderRef?.signOut()
+                await LocationRuntimeContainerHolder.shared.container?.stop()
                 await coordinatorRef.showSignIn()
             }
         )
@@ -249,7 +253,13 @@ struct RootView: View {
                         deviceIdProvider: deviceIdProvider, fixQueue: fixQueue,
                         exportArtifactStore: exportArtifactStore
                     ),
-                    onCompleted: { coordinator.showSignIn() }
+                    // specs/008-privacy-endpoints.md §3.1/§4.4 local wipe already clears fixQueue
+                    // (the same shared instance locationRuntimeContainer uses, per this file's
+                    // earlier doc comment) — stopping the runtime here additionally halts
+                    // significant-location-change monitoring and cancels the scheduled
+                    // BGAppRefreshTask, so a deleted account's device doesn't keep quietly
+                    // capturing fixes into a freshly-emptied queue until the app is relaunched.
+                    onCompleted: { locationRuntimeContainer.stop(); coordinator.showSignIn() }
                 )
             case .deleteFamily:
                 DeleteFamilyScreen(
