@@ -16,12 +16,6 @@ import com.findly.android.R
  * No notification channel infrastructure existed before this class — `ensureChannel` creates one
  * lazily, idempotently (`createNotificationChannel` is itself a safe no-op if the channel already
  * exists).
- *
- * TODO(A13): swap the `ic_launcher` smallIcon placeholder below for the real monochrome
- * `ic_stat_findly` asset (009 §8 — a colored icon renders as a white blob in the status bar,
- * Android draws status icons as a mask) once A13 copies
- * `design/findly-icon/android/ic_stat_findly.xml` into `res/drawable`
- * (design/findly-icon/README.md assigns that integration to A13, not this task).
  */
 class GeofenceEventNotifier(private val context: Context) : GeofenceNotifier {
 
@@ -29,7 +23,7 @@ class GeofenceEventNotifier(private val context: Context) : GeofenceNotifier {
         ensureChannel()
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
             .setContentTitle(title)
-            .setSmallIcon(R.mipmap.ic_launcher)
+            .setSmallIcon(R.drawable.ic_stat_findly)
             .setAutoCancel(true)
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .build()
