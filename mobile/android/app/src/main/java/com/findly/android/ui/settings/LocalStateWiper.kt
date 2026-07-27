@@ -36,6 +36,15 @@ fun interface ExportArtifactCleaner {
  * wire until [GeofenceConfigStateStore] landed; a plaintext cache of a family's configured
  * geofence names/coordinates must not outlive the account it belongs to, same reasoning as the
  * export-artifact rule right above it.
+ *
+ * Security-review fix (post-A11 review): each step runs independently of the others'
+ * success/failure ([runCatching], swallowing only the exception itself — nothing sensitive is
+ * logged). Five unguarded sequential suspend calls meant one throwing (e.g. a Room `deleteAll()`
+ * disk I/O error) silently skipped every step after it — worst case, the geofence config cache
+ * (the most sensitive of the local stores: a family's named places) could survive an account
+ * deletion that otherwise appeared to complete. Reordering alone would not have fixed this — a
+ * failure anywhere still skips everything *after* it, wherever "after" is — so every step is
+ * wrapped, not just reordered.
  */
 class DefaultLocalStateWiper(
     private val fixQueueStore: FixQueueStore,
@@ -45,10 +54,10 @@ class DefaultLocalStateWiper(
     private val geofenceConfigStateStore: GeofenceConfigStateStore,
 ) : LocalStateWiper {
     override suspend fun wipeAll(uid: String) {
-        fixQueueStore.clearAll()
-        deviceIdStore.clear(uid)
-        exportArtifactCleaner.clear()
-        geofenceEventQueueStore.clearAll()
-        geofenceConfigStateStore.clear()
+        runCatching { fixQueueStore.clearAll() }
+        runCatching { deviceIdStore.clear(uid) }
+        runCatching { exportArtifactCleaner.clear() }
+        runCatching { geofenceEventQueueStore.clearAll() }
+        runCatching { geofenceConfigStateStore.clear() }
     }
 }

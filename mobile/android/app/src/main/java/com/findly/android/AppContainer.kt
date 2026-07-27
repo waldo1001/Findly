@@ -54,6 +54,7 @@ import com.findly.android.queue.GeofenceEventQueueStore
 import com.findly.android.queue.GeofenceEventSyncCoordinator
 import com.findly.android.queue.LocationSyncCoordinator
 import com.findly.android.queue.room.FindlyDatabase
+import com.findly.android.queue.room.MIGRATION_1_2
 import com.findly.android.queue.room.RoomFixQueueStore
 import com.findly.android.queue.room.RoomGeofenceEventQueueStore
 import com.findly.android.queue.worker.DefaultForegroundServiceController
@@ -129,11 +130,12 @@ class AppContainer(context: Context) {
      * the A1 in-memory placeholder (specs/003 §10.4) behind the unchanged [FixQueueStore]
      * interface. One drop event per overflow is logged at debug level with a **count only**
      * (never coordinates, docs/security-review-checklist.md). A11 adds the `geofence_events`
-     * table to the same database (queue/room/FindlyDatabase.kt) — version 1 -> 2,
-     * `fallbackToDestructiveMigration()` is the pragmatic pre-release choice (H1 still pending,
-     * no real users/data to preserve across the schema change) over a hand-written `Migration`. */
+     * table to the same database (queue/room/FindlyDatabase.kt) — version 1 -> 2, via the real
+     * [MIGRATION_1_2] (code-review fix, post-A11 review: `fallbackToDestructiveMigration` would
+     * have silently wiped this pre-existing `fixes` table on every upgrade too, not just the new
+     * empty one). */
     private val findlyDatabase = Room.databaseBuilder(context, FindlyDatabase::class.java, FindlyDatabase.DATABASE_NAME)
-        .fallbackToDestructiveMigration(dropAllTables = true)
+        .addMigrations(MIGRATION_1_2)
         .build()
     val fixQueueStore: FixQueueStore = RoomFixQueueStore(
         dao = findlyDatabase.fixQueueDao(),
