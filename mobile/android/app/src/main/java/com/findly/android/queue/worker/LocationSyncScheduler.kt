@@ -1,38 +1,69 @@
 package com.findly.android.queue.worker
 
 import android.content.Context
+import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
+import com.findly.android.location.settings.SyncScheduler
+import java.time.Duration
+import java.util.concurrent.TimeUnit
+import androidx.work.BackoffPolicy as WorkManagerBackoffPolicy
 
 /**
- * Holds the WorkManager periodic-request-building TODO (specs/003-android-client.md §10.5).
- * `syncIntervalMinutes` ∈ {5, 10} additionally needs the persistent-notification foreground
- * service path instead of WorkManager (000-overview.md §O2, specs/003 §11) — neither path is
- * implemented here; both are A2 scope.
+ * Real [SyncScheduler] (specs/009-device-runtime.md §3): a single **unique**
+ * `findly-location-sync` `PeriodicWorkRequest` for WorkManager-eligible intervals (§3.1: ≥15 min,
+ * §3.3: 1440 too — the once-per-day semantics live in [OnceDailyGate] inside
+ * [LocationSyncRunner], not in a different scheduling primitive), or the §3.2 foreground service
+ * for 5/10-minute intervals via [foregroundServiceController]. [SyncStrategySelector] makes the
+ * actual interval→strategy decision (tested in isolation, `SyncStrategySelectorTest`). Thin,
+ * untested Android-framework glue by design — mirrors the backend's untested `src/functions`
+ * (backend/README.md's hexagonal split).
  *
- * TODO(A2/A10): for ≥15-minute intervals, build a
- * `PeriodicWorkRequestBuilder<LocationSyncWorker>(syncIntervalMinutes, TimeUnit.MINUTES)` and
- * call `WorkManager.getInstance(context).enqueueUniquePeriodicWork(UNIQUE_WORK_NAME,
- * ExistingPeriodicWorkPolicy.UPDATE, request)`; for 5/10-minute intervals, start the foreground
- * service instead (000 §O2). [cancel] is real (used on pause / sign-out) — the rest is scaffold.
- * Untested Android-framework glue by design.
- *
- * A13 note for whoever builds that foreground service (A10): its persistent notification
- * (specs/009-device-runtime.md §3.2, normative copy "Findly is sharing your location") MUST use
- * `R.drawable.ic_stat_locating` as the small icon, per 009 §8 — not `ic_stat_findly`, which is
- * reserved for the general/geofence-alert notifications.
+ * Per A13's note (specs/009 §8): the §3.2 foreground-service notification
+ * ([LocationForegroundService]) uses `R.drawable.ic_stat_locating`, not `ic_stat_findly` (which
+ * is reserved for the general/geofence-alert notifications).
  */
-class LocationSyncScheduler(private val context: Context) {
+class LocationSyncScheduler(
+    private val context: Context,
+    private val foregroundServiceController: ForegroundServiceController,
+) : SyncScheduler {
 
-    fun schedule(syncIntervalMinutes: Int) {
-        // TODO(A2): WorkManager.getInstance(context).enqueueUniquePeriodicWork(...) for >=15 min,
-        // or start the foreground service for 5/10-min intervals (000 §O2).
+    override fun reschedule(syncIntervalMinutes: Int) {
+        when (val strategy = SyncStrategySelector.strategyFor(syncIntervalMinutes)) {
+            is SyncStrategy.WorkManager -> {
+                foregroundServiceController.stop()
+                enqueueWorkManager(strategy.intervalMinutes)
+            }
+            is SyncStrategy.ForegroundService -> {
+                WorkManager.getInstance(context).cancelUniqueWork(UNIQUE_WORK_NAME)
+                foregroundServiceController.start(strategy.intervalMinutes)
+            }
+        }
     }
 
-    fun cancel() {
+    override fun cancelAll() {
         WorkManager.getInstance(context).cancelUniqueWork(UNIQUE_WORK_NAME)
+        foregroundServiceController.stop()
     }
 
-    private companion object {
-        const val UNIQUE_WORK_NAME = "location-sync"
+    private fun enqueueWorkManager(intervalMinutes: Int) {
+        // specs/009 §3.1: "flex interval = min(5 min, period/3)" - always exactly 5 in practice
+        // (every WorkManager-eligible interval is >= 15, so period/3 is always >= 5), spelled out
+        // as the spec's own formula rather than hardcoded so the intent stays obvious.
+        val flexMinutes = minOf(5, intervalMinutes / 3)
+        val request = PeriodicWorkRequestBuilder<LocationSyncWorker>(
+            intervalMinutes.toLong(), TimeUnit.MINUTES,
+            flexMinutes.toLong(), TimeUnit.MINUTES,
+        )
+            // §3.1: "Constraints: none on network - the worker captures a fix and queues it even
+            // offline" - deliberately no setConstraints(...) call.
+            .setBackoffCriteria(WorkManagerBackoffPolicy.EXPONENTIAL, Duration.ofSeconds(30))
+            .build()
+        WorkManager.getInstance(context)
+            .enqueueUniquePeriodicWork(UNIQUE_WORK_NAME, ExistingPeriodicWorkPolicy.UPDATE, request)
+    }
+
+    companion object {
+        const val UNIQUE_WORK_NAME = "findly-location-sync"
     }
 }

@@ -2,6 +2,9 @@ package com.findly.android
 
 import android.app.Activity
 import android.content.Context
+import android.util.Log
+import androidx.room.Room
+import com.google.android.gms.location.LocationServices
 import com.google.firebase.auth.FirebaseAuth
 import com.findly.android.auth.AuthProvider
 import com.findly.android.auth.AuthProviderFactory
@@ -13,7 +16,21 @@ import com.findly.android.device.AndroidDeviceInfoProvider
 import com.findly.android.device.DeviceIdProvider
 import com.findly.android.device.DeviceRegistrar
 import com.findly.android.device.SharedPreferencesDeviceIdStore
-import com.findly.android.location.UnimplementedLocationCapturer
+import com.findly.android.location.AndroidBatteryLevelProvider
+import com.findly.android.location.AndroidLocationPermissionChecker
+import com.findly.android.location.FixCaptureCoordinator
+import com.findly.android.location.FusedLocationCapturer
+import com.findly.android.location.LocationCapturer
+import com.findly.android.location.TrackingPauseState
+import com.findly.android.location.settings.DeviceSettingsCoordinator
+import com.findly.android.location.settings.DeviceSettingsStateStore
+import com.findly.android.location.settings.GeofenceRegistry
+import com.findly.android.location.settings.NoopGeofenceRegistry
+import com.findly.android.location.settings.SettingsPoller
+import com.findly.android.location.settings.SharedPreferencesDeviceSettingsStateStore
+import com.findly.android.location.settings.SyncScheduler
+import com.findly.android.network.ApiResult
+import com.findly.android.network.DeviceSettingsSnapshot
 import com.findly.android.network.RetrofitFactory
 import com.findly.android.network.FindlyApiClient
 import com.findly.android.push.PushTokenProvider
@@ -26,9 +43,17 @@ import com.findly.android.pushmessages.PushMessageDispatcher
 import com.findly.android.pushmessages.SettingsChangedPushHandler
 import com.findly.android.pushmessages.UnimplementedGeofenceRegistrar
 import com.findly.android.queue.FixQueueStore
-import com.findly.android.queue.InMemoryFixQueueStore
+import com.findly.android.queue.LocationSyncCoordinator
+import com.findly.android.queue.room.FindlyDatabase
+import com.findly.android.queue.room.RoomFixQueueStore
+import com.findly.android.queue.worker.DefaultForegroundServiceController
+import com.findly.android.queue.worker.FindlyWorkerFactory
+import com.findly.android.queue.worker.LastCaptureDateStore
+import com.findly.android.queue.worker.LocationSyncRunner
 import com.findly.android.queue.worker.LocationSyncScheduler
 import com.findly.android.queue.worker.ScheduleRebuilder
+import com.findly.android.queue.worker.SettingsPollScheduler
+import com.findly.android.queue.worker.SharedPreferencesLastCaptureDateStore
 import com.findly.android.ui.map.GoogleMapRenderer
 import com.findly.android.ui.map.MapRenderer
 import com.findly.android.ui.settings.ColdStartExportCleanup
@@ -36,6 +61,7 @@ import com.findly.android.ui.settings.DefaultLocalStateWiper
 import com.findly.android.ui.settings.ExportArtifactCleaner
 import com.findly.android.ui.settings.ExportFileWriter
 import com.findly.android.ui.settings.LocalStateWiper
+import java.time.LocalDate
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -68,6 +94,8 @@ class AppContainer(context: Context) {
 
     fun onActivityStarted(activity: Activity) {
         currentActivity = activity
+        // specs/009-device-runtime.md §4: "re-check settings... on every app foreground".
+        onAppForeground()
     }
 
     fun onActivityStopped(activity: Activity) {
@@ -86,12 +114,136 @@ class AppContainer(context: Context) {
     private val deviceIdStore = SharedPreferencesDeviceIdStore(context)
     private val deviceIdProvider = DeviceIdProvider(deviceIdStore)
     private val deviceInfoProvider = AndroidDeviceInfoProvider()
-    val deviceRegistrar: DeviceRegistrar =
-        DeviceRegistrar(findlyApiClient, deviceIdProvider, deviceInfoProvider)
 
-    /** Offline fix-queue (specs/003 §10) — not yet drained by anything; `LocationSyncWorker`
-     * wiring is A2/H1 scope (§10.5). */
-    val fixQueueStore: FixQueueStore = InMemoryFixQueueStore()
+    /** A10 (specs/009-device-runtime.md §2): durable, Room-backed offline fix-queue — replaces
+     * the A1 in-memory placeholder (specs/003 §10.4) behind the unchanged [FixQueueStore]
+     * interface. One drop event per overflow is logged at debug level with a **count only**
+     * (never coordinates, docs/security-review-checklist.md). */
+    private val findlyDatabase = Room.databaseBuilder(context, FindlyDatabase::class.java, FindlyDatabase.DATABASE_NAME).build()
+    val fixQueueStore: FixQueueStore = RoomFixQueueStore(
+        dao = findlyDatabase.fixQueueDao(),
+        onOverflowDropped = { droppedCount ->
+            Log.d("FindlyFixQueue", "1000-fix cap reached, dropped $droppedCount oldest fix(es)")
+        },
+    )
+
+    /** A10 (specs/009 §3.5/§4): the settings-application entry point — **this is the seam A9's
+     * `SETTINGS_CHANGED` push handler calls**, alongside the `POST /locations` piggyback
+     * ([LocationSyncRunner], via [com.findly.android.queue.worker.SyncOutcomeReactor]) and the
+     * paused-device poll ([settingsPoller] below). */
+    private val deviceSettingsStateStore: DeviceSettingsStateStore = SharedPreferencesDeviceSettingsStateStore(context)
+
+    /** TODO(A11): replace with a real `GeofencingClient`-backed [GeofenceRegistry] (specs/009 §6.2).
+     * Pause (§4) already calls `unregisterAll()` unconditionally through this seam. */
+    private val geofenceRegistry: GeofenceRegistry = NoopGeofenceRegistry()
+
+    private val foregroundServiceController = DefaultForegroundServiceController(context)
+    private val syncScheduler: SyncScheduler = LocationSyncScheduler(context, foregroundServiceController)
+    val deviceSettingsCoordinator = DeviceSettingsCoordinator(syncScheduler, geofenceRegistry, deviceSettingsStateStore)
+
+    /** [DeviceRegistrar.onRegistered] applies the response's settings immediately (specs/009 §6.2:
+     * "first config sync after sign-in") — the same [DeviceSettingsCoordinator.applySettings]
+     * entry point every other settings-arrival path uses. */
+    val deviceRegistrar: DeviceRegistrar = DeviceRegistrar(
+        findlyApiClient,
+        deviceIdProvider,
+        deviceInfoProvider,
+        onRegistered = { device ->
+            deviceSettingsCoordinator.applySettings(
+                DeviceSettingsSnapshot(device.syncIntervalMinutes, device.trackingEnabled),
+            )
+        },
+    )
+
+    private val batteryLevelProvider = AndroidBatteryLevelProvider(context)
+    private val locationPermissionState = AndroidLocationPermissionChecker(context)
+
+    /** Real [TrackingPauseState] — reads the same cache [deviceSettingsCoordinator] writes to, so
+     * a pause takes effect for the very next capture attempt with no extra signal needed (specs/009
+     * §1.2's "stop capturing" — see `DeviceSettingsCoordinator`'s doc for the full ordering
+     * argument). */
+    private val trackingPauseState = TrackingPauseState { deviceSettingsStateStore.current()?.trackingEnabled == false }
+
+    /** A9's [LocationCapturer] seam (specs/009 §1.1), now backed by the real
+     * `FusedLocationProviderClient` — shared by [fixCaptureCoordinator] below (periodic/manual,
+     * suppression-gated) and `pushMessageDispatcher`'s `LocateRequestPushHandler` (locate,
+     * deliberately ungated — see [LocationCapturer]'s doc). */
+    private val locationCapturer: LocationCapturer =
+        FusedLocationCapturer(LocationServices.getFusedLocationProviderClient(context), batteryLevelProvider)
+
+    /** A10 (specs/009 §1): the real capture-and-queue pipeline — **this is the seam A11's
+     * geofence-transition handling calls** for its `source: "geofence"` fix
+     * (`fixCaptureCoordinator.captureAndQueue(FixSource.Geofence, hint = ...)`). */
+    val fixCaptureCoordinator = FixCaptureCoordinator(
+        capturer = locationCapturer,
+        queueStore = fixQueueStore,
+        pauseState = trackingPauseState,
+        permissionState = locationPermissionState,
+    )
+
+    private val lastCaptureDateStore: LastCaptureDateStore = SharedPreferencesLastCaptureDateStore(context)
+    private val settingsPollScheduler = SettingsPollScheduler(context)
+
+    /** Resolves the signed-in user's stable per-uid `deviceId` (specs/001-api-contract.md §1.4) —
+     * `null` when nobody is signed in. Backs both [locationSyncRunnerOrNull] and
+     * [settingsPollerOrNull], which every real trigger (WorkManager, the foreground service, app
+     * foreground) goes through rather than each re-deriving it. */
+    private fun currentDeviceIdOrNull(): String? =
+        (authProvider.authState.value as? AuthState.SignedIn)?.uid?.let { deviceIdProvider.deviceIdFor(it) }
+
+    /** Built fresh on every call (never cached) so it always reflects whoever is currently
+     * signed in — see [FindlyWorkerFactory]'s doc for why. */
+    fun locationSyncRunnerOrNull(): LocationSyncRunner? {
+        val deviceId = currentDeviceIdOrNull() ?: return null
+        return LocationSyncRunner(
+            currentSyncIntervalMinutes = { deviceSettingsStateStore.current()?.syncIntervalMinutes ?: DEFAULT_SYNC_INTERVAL_MINUTES },
+            lastCaptureDateStore = lastCaptureDateStore,
+            today = LocalDate::now,
+            captureCoordinator = fixCaptureCoordinator,
+            syncCoordinator = LocationSyncCoordinator(fixQueueStore, findlyApiClient, deviceId),
+            settingsCoordinator = deviceSettingsCoordinator,
+            // specs/009 §9: DEVICE_NOT_FOUND -> stop the schedule, clear local device state,
+            // re-run registration; if that also fails, treat as signed-out.
+            onReRegisterDevice = {
+                syncScheduler.cancelAll()
+                val uid = (authProvider.authState.value as? AuthState.SignedIn)?.uid
+                if (uid == null) {
+                    authProvider.signOut()
+                } else {
+                    deviceIdStore.clear(uid)
+                    val result = deviceRegistrar.registerOrUpdate(uid)
+                    if (result is ApiResult.Failure) authProvider.signOut()
+                }
+            },
+            // specs/009 §9: a second AUTH_TOKEN_EXPIRED (the retry-once path already failed once,
+            // specs/003 §6.4) means signed-out.
+            onSignedOut = {
+                syncScheduler.cancelAll()
+                authProvider.signOut()
+            },
+        )
+    }
+
+    fun settingsPollerOrNull(): SettingsPoller? {
+        val deviceId = currentDeviceIdOrNull() ?: return null
+        return SettingsPoller(findlyApiClient, deviceId, deviceSettingsCoordinator)
+    }
+
+    /** Registered with WorkManager via `FindlyApplication`'s `Configuration.Provider`. */
+    val workerFactory = FindlyWorkerFactory(
+        locationSyncRunnerProvider = ::locationSyncRunnerOrNull,
+        settingsPollerProvider = ::settingsPollerOrNull,
+    )
+
+    /** specs/009 §4: "re-check settings... on every app foreground" — `MainActivity`/
+     * [onActivityStarted] calls this. Harmless no-op when not paused. */
+    fun onAppForeground() {
+        applicationScope.launch { settingsPollerOrNull()?.poll() }
+    }
+
+    private companion object {
+        const val DEFAULT_SYNC_INTERVAL_MINUTES = 15
+    }
 
     /** The one `Context`-touching implementation of [ExportArtifactCleaner], shared by both of
      * 008 §3.1 rule 2 (amended)'s non-racing cleanup triggers: [localStateWiper]'s
@@ -119,19 +271,14 @@ class AppContainer(context: Context) {
      * Compose previews/tests (specs/003-android-client.md §12.1). */
     val mapRenderer: MapRenderer = GoogleMapRenderer()
 
-    /** A9 (specs/009-device-runtime.md §3): still the A2-scaffolded no-op `schedule()` (see its
-     * own doc) — only `cancel()` does anything real today. Shared between `settingsChangedHandler`
-     * below and whatever A10 eventually wires up for the other two §3.5 settings-arrival paths. */
-    private val locationSyncScheduler = LocationSyncScheduler(context)
-
     /** A9 (specs/009-device-runtime.md §5): routes every FCM data message to its 001 §8 handler.
      * `FindlyMessagingService` (the real `FirebaseMessagingService`) is this class's one
-     * production caller. [UnimplementedLocationCapturer]/[UnimplementedGeofenceRegistrar] are
-     * placeholder seams — swapped for real implementations by A10/A11 respectively, no call-site
-     * change needed here beyond that one constructor argument. */
+     * production caller. [locationCapturer] and [deviceSettingsCoordinator] are A10's real
+     * implementations of A9's placeholder seams (`UnimplementedLocationCapturer`/
+     * `ScheduleRebuilder`'s TODO body); [UnimplementedGeofenceRegistrar] remains A11's to replace. */
     val pushMessageDispatcher: PushMessageDispatcher = PushMessageDispatcher(
         locateRequestHandler = LocateRequestPushHandler(
-            locationCapturer = UnimplementedLocationCapturer, // TODO(A10)
+            locationCapturer = locationCapturer,
             locateApi = findlyApiClient,
             deviceIdProvider = {
                 (authProvider.authState.value as? AuthState.SignedIn)?.uid?.let { uid ->
@@ -140,13 +287,15 @@ class AppContainer(context: Context) {
             },
         ),
         settingsChangedHandler = SettingsChangedPushHandler(
+            // specs/009 §3.5 path 1 - the same DeviceSettingsCoordinator.applySettings entry
+            // point every other settings-arrival path uses, so SETTINGS_CHANGED gets the full
+            // §4 pause sequence (stop worker/service, unregister geofences) for free, not just a
+            // bare schedule call.
             scheduleRebuilder = ScheduleRebuilder { syncIntervalMinutes, trackingEnabled ->
-                // TODO(A10): apply the full pause sequence (009 §4 - stop worker/service,
-                // unregister geofences), not just the schedule call itself.
-                if (trackingEnabled) {
-                    locationSyncScheduler.schedule(syncIntervalMinutes)
-                } else {
-                    locationSyncScheduler.cancel()
+                applicationScope.launch {
+                    deviceSettingsCoordinator.applySettings(
+                        DeviceSettingsSnapshot(syncIntervalMinutes, trackingEnabled),
+                    )
                 }
             },
         ),
@@ -175,5 +324,11 @@ class AppContainer(context: Context) {
         // `AppContainer` is constructed exactly once per process, in `FindlyApplication.onCreate`
         // (never per-Activity/per-screen), so this is the one true "next app cold start" hook.
         coldStartExportCleanup.run()
+
+        // specs/009-device-runtime.md §4: the low-frequency (>=6h) half of the pull-based resume
+        // poll must keep running independent of pause/sign-in state (it's the one thing that
+        // detects resume) - ExistingPeriodicWorkPolicy.KEEP inside makes this call idempotent, and
+        // SettingsPollWorker itself no-ops cleanly while signed out (settingsPollerOrNull() null).
+        settingsPollScheduler.ensureScheduled()
     }
 }
