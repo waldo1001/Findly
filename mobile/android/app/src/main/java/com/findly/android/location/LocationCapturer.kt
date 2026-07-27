@@ -25,22 +25,27 @@ data class CapturedFix(
  * Seam for one-shot location capture, deliberately decoupled from the periodic queue pipeline
  * (`queue/FixQueueStore`) and its pause/permission suppression rules (specs/009-device-runtime.md
  * §1.2) — a `LOCATE_REQUEST` push (009 §5.1) MUST capture a fix even while the device is paused,
- * so this seam has no pause check of its own; callers that DO need suppression (periodic capture,
- * A10) are expected to apply it themselves before calling this.
+ * so this seam has no pause check of its own; callers that DO need suppression (periodic capture)
+ * apply it themselves before calling this — see [com.findly.android.location.FixCaptureCoordinator]
+ * (A10).
  *
- * No production implementation exists yet. A10 (specs/009-device-runtime.md §1) owns the real
- * `FusedLocationProviderClient`-backed one, respecting the §1.1 timeout table (30 s for
- * `HIGH`/`locate`-`manual`, 15 s for the `geofence` trigger's `BALANCED` request, 30 s for
- * `periodic`'s `BALANCED` request). [com.findly.android.pushmessages.LocateRequestPushHandler] is
- * this seam's first caller — do not change this shape without checking every caller.
+ * [timeoutMillis] defaults to 30 s (§1.1's value for `HIGH`/`locate`-`manual` and `periodic`'s
+ * `BALANCED` request) — [com.findly.android.pushmessages.LocateRequestPushHandler] (A9) calls
+ * `captureFix(LocationAccuracyTier.HIGH)` without overriding it, which is exactly §1.1's `locate`
+ * timeout. Only the `geofence` trigger's `BALANCED` request needs the shorter 15 s (§6.3), passed
+ * explicitly by [FixCaptureCoordinator] — `LocationAccuracyTier` alone can't distinguish
+ * `periodic`'s and `geofence`'s both-`BALANCED` requests, so the timeout has to travel
+ * separately. Do not change this shape without checking every caller.
+ *
+ * [FusedLocationCapturer] is the real, `FusedLocationProviderClient`-backed implementation (A10).
  */
 fun interface LocationCapturer {
-    suspend fun captureFix(accuracy: LocationAccuracyTier): CapturedFix?
+    suspend fun captureFix(accuracy: LocationAccuracyTier, timeoutMillis: Long = 30_000L): CapturedFix?
 }
 
 /** A9's placeholder wiring target (`AppContainer`) until A10 lands the real implementation above —
  * always "no fix obtainable", which every §1.1 trigger's own contract already treats as a safe,
  * silent give-up (009 §5.1: "give up silently"). */
 object UnimplementedLocationCapturer : LocationCapturer {
-    override suspend fun captureFix(accuracy: LocationAccuracyTier): CapturedFix? = null
+    override suspend fun captureFix(accuracy: LocationAccuracyTier, timeoutMillis: Long): CapturedFix? = null
 }
