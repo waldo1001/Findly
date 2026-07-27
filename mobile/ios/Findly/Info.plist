@@ -2,6 +2,18 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<!-- I9 (specs/004 §1.1): required for any installable bundle, not business logic — this file
+	     predates a real Xcode project (I1-era, only ever validated via `swiftc -typecheck`), so
+	     the standard Xcode-template keys that make a real .app bundle installable were never
+	     added. Without these two, `xcodebuild build` still succeeds (it doesn't validate runtime
+	     bundle keys) but `simctl install`/a real device install fails with "Missing bundle ID".
+	     Values are the standard Xcode-template build-setting substitutions, not hardcoded. -->
+	<key>CFBundleExecutable</key>
+	<string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundleIdentifier</key>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<key>CFBundlePackageType</key>
+	<string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
 	<key>CFBundleDisplayName</key>
 	<string>Findly</string>
 	<key>CFBundleShortVersionString</key>

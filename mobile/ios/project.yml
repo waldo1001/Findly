@@ -1,0 +1,55 @@
+# xcodegen project spec — generates Findly.xcodeproj (specs/004-ios-client.md §1.1).
+#
+# Why xcodegen instead of a hand-authored project.pbxproj: 004 §1.1 explicitly deferred creating
+# the .xcodeproj until a session had real Xcode to validate the result. This session does
+# (Xcode 26.6). xcodegen generates a real project deterministically from this declarative spec,
+# which we then validate with real `xcodebuild` calls — see mobile/ios/README.md.
+#
+# Regenerate after editing this file: `xcodegen generate` (run from mobile/ios/).
+name: Findly
+options:
+  bundleIdPrefix: com.findly
+  developmentLanguage: en
+  deploymentTarget:
+    iOS: "16.0"
+  createIntermediateGroups: true
+
+# FindlyKit (specs/004 §1.1) — the local Swift Package holding all logic + the design system.
+# Referenced as a local package one level up from this project.yml is wrong; FindlyKit is a
+# sibling of this project file (mobile/ios/FindlyKit), hence the plain relative path below.
+packages:
+  FindlyKit:
+    path: FindlyKit
+
+targets:
+  Findly:
+    type: application
+    platform: iOS
+    deploymentTarget: "16.0"
+    sources:
+      - path: Findly
+        excludes:
+          - Info.plist
+          - Findly.entitlements
+    settings:
+      base:
+        PRODUCT_NAME: Findly
+        PRODUCT_BUNDLE_IDENTIFIER: com.findly.ios
+        INFOPLIST_FILE: Findly/Info.plist
+        CODE_SIGN_ENTITLEMENTS: Findly/Findly.entitlements
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        MARKETING_VERSION: "1.0.0"
+        CURRENT_PROJECT_VERSION: "1"
+        SWIFT_VERSION: "5.0"
+        TARGETED_DEVICE_FAMILY: "1"
+        # No Apple Developer Team wired in yet (H5/H6 own real signing — docs/implementation-handoff.md
+        # H6). Automatic signing with no team is sufficient for a debug/simulator build; set
+        # DEVELOPMENT_TEAM to a real Team ID (92A2K3Q7NH per H6) once signing is actually needed.
+        CODE_SIGN_STYLE: Automatic
+        # DEVELOPMENT_TEAM: 92A2K3Q7NH  # TODO(H6): uncomment once real device signing is wired up.
+    dependencies:
+      - package: FindlyKit
+        product: FindlyKit
+    scheme:
+      testTargets: []
+      gatherCoverageData: false
