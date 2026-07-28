@@ -9,6 +9,49 @@ private final class FakeBackgroundSyncScheduler: BackgroundSyncScheduling {
     func cancelScheduledSync() { cancelCallCount += 1 }
 }
 
+/// **Post-review addition (concurrency re-review).** Widens the window between
+/// `wipeLocalState()`'s own actor-hop suspension points and a concurrently-firing transition, so
+/// `wipeLocalState_racingAConcurrentTransition_stillDropsIt` can reliably interleave them without
+/// depending on winning an unlikely scheduling coin-flip — mirrors a slow on-disk `SQLiteFixStore.
+/// removeAll()` genuinely taking wall-clock time (specs/009 §2), rather than the in-memory store's
+/// effectively-instant one. `Thread.sleep` is deliberate here (not `Task.sleep`): it blocks this
+/// call's own synchronous execution exactly the way a real blocking disk write would, without
+/// itself introducing a new `await`/suspension point that would change what's being tested.
+private final class DelayedFixStore: FixStoring {
+    private let wrapped = InMemoryFixStore()
+    private let delaySeconds: TimeInterval
+    init(delaySeconds: TimeInterval) { self.delaySeconds = delaySeconds }
+    func loadAll() -> [LocationFix] { wrapped.loadAll() }
+    @discardableResult func append(_ fix: LocationFix) -> Int { wrapped.append(fix) }
+    func remove(fixIds: Set<String>) { wrapped.remove(fixIds: fixIds) }
+    func currentBatch() -> PendingBatch? { wrapped.currentBatch() }
+    func freezeNextBatch(maxSize: Int, newBatchId: () -> String) -> PendingBatch? { wrapped.freezeNextBatch(maxSize: maxSize, newBatchId: newBatchId) }
+    func markAccepted(batchId: String) { wrapped.markAccepted(batchId: batchId) }
+    func markRejected(batchId: String, dropFixIds: Set<String>?) { wrapped.markRejected(batchId: batchId, dropFixIds: dropFixIds) }
+    func removeAll() {
+        Thread.sleep(forTimeInterval: delaySeconds)
+        wrapped.removeAll()
+    }
+}
+
+/// The `GeofenceEventQueueStoring` counterpart to `DelayedFixStore` above — same rationale, mirrors
+/// a slow `SQLiteGeofenceEventQueueStore.removeAll()`.
+private final class DelayedGeofenceEventQueueStore: GeofenceEventQueueStoring {
+    private let wrapped = InMemoryGeofenceEventQueueStore()
+    private let delaySeconds: TimeInterval
+    init(delaySeconds: TimeInterval) { self.delaySeconds = delaySeconds }
+    func loadAll() -> [GeofenceEventReport] { wrapped.loadAll() }
+    func enqueue(_ event: GeofenceEventReport) { wrapped.enqueue(event) }
+    func currentBatch() -> GeofenceEventBatch? { wrapped.currentBatch() }
+    func freezeNextBatch(maxSize: Int, newBatchId: () -> String) -> GeofenceEventBatch? { wrapped.freezeNextBatch(maxSize: maxSize, newBatchId: newBatchId) }
+    func markSent(batchId: String) { wrapped.markSent(batchId: batchId) }
+    func markFailedTransient(batchId: String) { wrapped.markFailedTransient(batchId: batchId) }
+    func removeAll() {
+        Thread.sleep(forTimeInterval: delaySeconds)
+        wrapped.removeAll()
+    }
+}
+
 /// specs/009-device-runtime.md §1/§3.4/§4/§9 — the composition root's own orchestration surface
 /// (start/stop/background-refresh/foreground), exercised end-to-end against fakes for every
 /// CoreLocation/BackgroundTasks-touching collaborator.
@@ -415,5 +458,46 @@ struct LocationRuntimeContainerTests {
 
         #expect(await container.geofenceEventQueue.pendingCount() == 0, "a transition detected after wipeLocalState() must be dropped, not queued")
         #expect(await container.fixQueue.queuedCount() == 0, "the accompanying source: .geofence fix must also be dropped")
+    }
+
+    /// **Post-review addition (concurrency re-review).** The sequential test above only proves the
+    /// already-easy case (wipe fully completes, THEN a transition arrives) — it never exercises the
+    /// real-world delivery mechanism: `SystemGeofenceRegistrar.forwardTransition` fires a transition
+    /// via an **unstructured** `Task { await transitionHandler?.handle(event) }`, decoupled from
+    /// `wipeLocalState()`'s own isolation and step order. Before the fix (`stateStore.clear()`
+    /// moved to be `wipeLocalState()`'s FIRST step, synchronous, before either SQLite-backed
+    /// `await`), a transition racing those suspension points could read the still-stale
+    /// `trackingEnabled: true`, enqueue its event, and have that enqueue land on the
+    /// `GeofenceEventQueue`/`FixQueue` actor's mailbox AFTER the corresponding `clearAll()` call had
+    /// already run — surviving `wipeLocalState()` entirely. `DelayedFixStore`/
+    /// `DelayedGeofenceEventQueueStore` widen that window to make the race deterministic to test
+    /// rather than a coin-flip; the 5 ms head start below lands comfortably inside the 50 ms delay,
+    /// simulating "a transition fires right after `unregisterAll()`" — exactly the scenario the
+    /// security review's concurrency walkthrough described.
+    @Test func wipeLocalState_racingAConcurrentTransition_stillDropsIt() async {
+        let stateStore = InMemoryDeviceSettingsStateStore(initial: DeviceSettingsSnapshot(syncIntervalMinutes: 15, trackingEnabled: true))
+        let container = LocationRuntimeContainer(
+            apiClient: FakeAPIClient(), deviceId: { "device-1" },
+            fixStore: DelayedFixStore(delaySeconds: 0.05),
+            stateStore: stateStore,
+            geofenceRegistrar: FakeGeofenceRegistering(),
+            geofenceEventStore: DelayedGeofenceEventQueueStore(delaySeconds: 0.05),
+            isPermissionGranted: { true }
+        )
+        let event = GeofenceTransitionEvent(geofenceId: "gf_home", transition: .enter, lat: 51.0, lon: 3.7, accuracyM: 10)
+
+        async let wipe: () = container.wipeLocalState()
+        async let racedTransition: () = {
+            // A brief head start so wipeLocalState()'s Task has actually begun executing (and, per
+            // the fix, already run its synchronous stateStore.clear()) by the time the transition's
+            // own isPaused() check runs, while wipeLocalState() itself is still mid-flight in its
+            // (deliberately slowed) queue-clearing awaits.
+            try? await Task.sleep(nanoseconds: 5_000_000) // 5 ms, well inside the 50 ms store delay
+            await container.geofenceTransitionHandler.handle(event)
+        }()
+        _ = await (wipe, racedTransition)
+
+        #expect(await container.geofenceEventQueue.pendingCount() == 0, "a transition racing wipeLocalState()'s own suspension points must still be dropped, not leaked into whichever session signs in next")
+        #expect(await container.fixQueue.queuedCount() == 0)
     }
 }

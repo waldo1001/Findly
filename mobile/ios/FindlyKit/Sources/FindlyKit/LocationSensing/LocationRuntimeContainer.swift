@@ -259,21 +259,41 @@ public final class LocationRuntimeContainer {
     /// its own previously-separate, now-removed ad-hoc partial wipe — one implementation, three
     /// call sites, not two independently-maintained ones.
     ///
-    /// `stateStore.clear()` is the piece that makes a stray geofence transition arriving after this
-    /// method returns (a callback already in flight when `geofenceRegistrar.unregisterAll()` was
-    /// called — the same non-atomicity specs/009 §6.2 already accepts as normal) get dropped by
-    /// `GeofenceTransitionHandler.isPaused`/`FixCaptureCoordinator.isPaused` rather than queued: see
-    /// `DeviceSettingsStateStoring.clear()`'s doc for why that requires an explicit
-    /// `trackingEnabled: false` write, not a bare "forget everything".
+    /// `stateStore.clear()` is the piece that makes a stray geofence transition — arriving either
+    /// after this method returns, or **racing this method's own suspension points while it's still
+    /// running** (`SystemGeofenceRegistrar.forwardTransition` delivers transitions via an
+    /// unstructured `Task`, decoupled from this method's step order — see the concurrency note on
+    /// the method body itself) — get dropped by `GeofenceTransitionHandler.isPaused`/
+    /// `FixCaptureCoordinator.isPaused` rather than queued: see `DeviceSettingsStateStoring.clear()`'s
+    /// doc for why that requires an explicit `trackingEnabled: false` write, not a bare "forget
+    /// everything". This is why `clear()` runs as this method's **first** step, synchronously,
+    /// before any `await`.
     ///
     /// Idempotent-safe to call more than once (every step it delegates to already is).
     public func wipeLocalState() async {
+        // Post-review fix (concurrency re-review): `stateStore.clear()` MUST run FIRST, before
+        // `stop()`/`unregisterAll()`/either `await` below — it's the step that actually makes
+        // `FixCaptureCoordinator`/`GeofenceTransitionHandler`'s `isPaused()` gates read "paused".
+        // `SystemGeofenceRegistrar.forwardTransition` delivers a transition via an unstructured
+        // `Task { await transitionHandler?.handle(event) }`, decoupled from this method's own
+        // isolation and step order — `handle()`'s `isPaused()` check is a fast, synchronous,
+        // in-memory/UserDefaults read that can easily complete before this method's SQLite-backed
+        // `fixQueue.clearAll()`/`geofenceEventQueue.clearAll()` awaits finish. With `clear()` run
+        // FIRST (synchronously, before this method's own first suspension point), any transition
+        // whose `isPaused()` check runs anytime after THIS method starts executing observes the
+        // definite paused state immediately — the only remaining race is a callback whose
+        // `isPaused()` check was already in flight *before* `wipeLocalState()` was even called,
+        // which is the same non-atomicity specs/009 §6.2 already accepts as normal, not a new gap.
+        // Previously this ran LAST, leaving a real (if narrow) window where a transition racing
+        // this method's own suspension points could enqueue an event that survives the very
+        // `clearAll()` call meant to remove it — see
+        // `wipeLocalState_racingAConcurrentTransition_stillDropsIt` for the regression test.
+        stateStore.clear()
         stop()
         geofenceRegistrar.unregisterAll()
         await fixQueue.clearAll()
         await geofenceEventQueue.clearAll()
         geofenceConfigStore.clear()
-        stateStore.clear()
     }
 
     /// specs/009 §4: "at least every 6 hours" — the ONE explicit cadence number the spec gives for
