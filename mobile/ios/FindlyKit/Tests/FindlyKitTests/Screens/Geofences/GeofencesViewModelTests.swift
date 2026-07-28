@@ -19,7 +19,7 @@ struct GeofencesViewModelTests {
         let api = FakeAPIClient()
         api.getGeofencesHandler = { ifNoneMatch in
             #expect(ifNoneMatch == nil, "first load has no cached ETag yet")
-            return .ok(GeofenceConfig(version: 4, geofences: [self.makeGeofence()]), etag: "\"0x1\"")
+            return .ok(GeofenceConfig(version: 4, geofences: [self.makeGeofence()]), etag: "\"0x1\"", features: TestFeatures.free)
         }
         let viewModel = GeofencesViewModel(apiClient: api)
 
@@ -38,7 +38,7 @@ struct GeofencesViewModelTests {
 
     @Test func save_success_updatesStateAndClearsConflict() async {
         let api = FakeAPIClient()
-        api.getGeofencesHandler = { _ in .ok(GeofenceConfig(version: 1, geofences: []), etag: "\"0\"") }
+        api.getGeofencesHandler = { _ in .ok(GeofenceConfig(version: 1, geofences: []), etag: "\"0\"", features: TestFeatures.free) }
         api.replaceGeofencesHandler = { geofences, ifMatch in
             #expect(ifMatch == "\"0\"")
             return (TestFeatures.envelope(GeofenceConfig(version: 2, geofences: geofences)), "\"0x2\"")
@@ -68,7 +68,7 @@ struct GeofencesViewModelTests {
 
     @Test func save_versionConflict_refetchesAndSurfacesServerCopy() async {
         let api = FakeAPIClient()
-        api.getGeofencesHandler = { _ in .ok(GeofenceConfig(version: 1, geofences: [self.makeGeofence()]), etag: "\"0x1\"") }
+        api.getGeofencesHandler = { _ in .ok(GeofenceConfig(version: 1, geofences: [self.makeGeofence()]), etag: "\"0x1\"", features: TestFeatures.free) }
         let viewModel = GeofencesViewModel(apiClient: api)
         await viewModel.load()
 
@@ -78,7 +78,7 @@ struct GeofencesViewModelTests {
         let serverCopy = [makeGeofence("gf_home"), makeGeofence("gf_school")]
         api.getGeofencesHandler = { ifNoneMatch in
             #expect(ifNoneMatch == nil, "conflict recovery must force a fresh copy, not rely on a cached ETag")
-            return .ok(GeofenceConfig(version: 3, geofences: serverCopy), etag: "\"0x3\"")
+            return .ok(GeofenceConfig(version: 3, geofences: serverCopy), etag: "\"0x3\"", features: TestFeatures.free)
         }
 
         await viewModel.save([makeGeofence("gf_home")])
@@ -96,7 +96,7 @@ struct GeofencesViewModelTests {
 
     @Test func acceptServerVersion_adoptsTheConflictingCopyAndClearsConflict() async {
         let api = FakeAPIClient()
-        api.getGeofencesHandler = { _ in .ok(GeofenceConfig(version: 1, geofences: [self.makeGeofence()]), etag: "\"0x1\"") }
+        api.getGeofencesHandler = { _ in .ok(GeofenceConfig(version: 1, geofences: [self.makeGeofence()]), etag: "\"0x1\"", features: TestFeatures.free) }
         let viewModel = GeofencesViewModel(apiClient: api)
         await viewModel.load()
 
@@ -104,7 +104,7 @@ struct GeofencesViewModelTests {
             throw APIError.server(APIErrorBody(code: .geofenceVersionConflict, message: "stale", details: nil, requestId: "r1"), httpStatus: 409)
         }
         let serverCopy = [makeGeofence("gf_school")]
-        api.getGeofencesHandler = { _ in .ok(GeofenceConfig(version: 5, geofences: serverCopy), etag: "\"0x5\"") }
+        api.getGeofencesHandler = { _ in .ok(GeofenceConfig(version: 5, geofences: serverCopy), etag: "\"0x5\"", features: TestFeatures.free) }
         await viewModel.save([makeGeofence()])
 
         viewModel.acceptServerVersion()
@@ -115,7 +115,7 @@ struct GeofencesViewModelTests {
 
     @Test func save_nonConflictError_setsErrorState() async {
         let api = FakeAPIClient()
-        api.getGeofencesHandler = { _ in .ok(GeofenceConfig(version: 1, geofences: []), etag: "\"0\"") }
+        api.getGeofencesHandler = { _ in .ok(GeofenceConfig(version: 1, geofences: []), etag: "\"0\"", features: TestFeatures.free) }
         let viewModel = GeofencesViewModel(apiClient: api)
         await viewModel.load()
 
