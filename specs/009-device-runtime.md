@@ -128,6 +128,8 @@ Devices MUST register and report **all** transitions regardless of the `notifyOn
 
 On an enter/exit callback: build one event (001 §7.3 shape, client-generated UUIDv4 `eventId`) and queue it; **additionally capture one fix with `source: "geofence"`** so the map has a position matching the event (001 §5.1). Events are flushed like fixes, batched 1–20 per call, idempotent on `eventId`. If the response's `geofenceEtag` differs from the cached one, re-sync config (§6.2) — this is how a device with stale config self-heals after reporting an unknown `geofenceId` (001 §7.3).
 
+**The durable geofence-event queue has no overflow cap, unlike the fix queue's 1 000-fix cap (§2) — deliberately, not an oversight.** A queued fix is a decaying position snapshot: past some backlog size, the oldest ones are no longer useful (the device will report a fresher position soon anyway), so dropping them is an acceptable, spec'd trade-off. A queued geofence event is a discrete accountability fact — "this device crossed this boundary at this instant" — with no equivalent decay; silently dropping one would produce a false negative in a family's activity history with no way to detect or recover it later, which is a materially worse failure than a stale position. Implementations MUST NOT impose an overflow cap on the geofence-event queue analogous to the fix queue's.
+
 ## 7. Permissions
 
 Android staging is already normative in 003 §11 (fine → background as a separate later request, rationale first, `POST_NOTIFICATIONS` independently). iOS mirrors it: **When-In-Use first**, then a deliberate **Always** upgrade prompt shown only after an in-app explanation of family/group background tracking, plus a separate notification-authorization request.
