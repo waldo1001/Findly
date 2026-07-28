@@ -51,17 +51,30 @@ public final class DeleteAccountViewModel: ObservableObject {
     private let deviceIdProvider: DeviceIdProviding
     private let fixQueue: FixQueue
     private let exportArtifactStore: ExportArtifactStoring
+    /// specs/009-device-runtime.md §6.3 (I11) — the durable geofence-event queue, wiped alongside
+    /// `fixQueue` for the same "clear all local state" reason (008 §4.4). Defaulted so every
+    /// pre-I11 call site (incl. every existing test) keeps constructing this view model exactly as
+    /// before.
+    private let geofenceEventQueue: GeofenceEventQueue
+    /// specs/009-device-runtime.md §6.1 (I11) — the cached geofence config document + ETag,
+    /// likewise wiped as local state (008 §4.4) — mirrors Android's `GeofenceConfigStateStore.clear()`
+    /// being part of its own account-deletion local wipe.
+    private let geofenceConfigStore: GeofenceConfigStateStoring
     private var pendingWipeUserId: String?
 
     public init(
         apiClient: FindlyAPIClient, authProvider: AuthProviding, deviceIdProvider: DeviceIdProviding,
-        fixQueue: FixQueue, exportArtifactStore: ExportArtifactStoring = InMemoryExportArtifactStore()
+        fixQueue: FixQueue, exportArtifactStore: ExportArtifactStoring = InMemoryExportArtifactStore(),
+        geofenceEventQueue: GeofenceEventQueue = GeofenceEventQueue(),
+        geofenceConfigStore: GeofenceConfigStateStoring = InMemoryGeofenceConfigStateStore()
     ) {
         self.apiClient = apiClient
         self.authProvider = authProvider
         self.deviceIdProvider = deviceIdProvider
         self.fixQueue = fixQueue
         self.exportArtifactStore = exportArtifactStore
+        self.geofenceEventQueue = geofenceEventQueue
+        self.geofenceConfigStore = geofenceConfigStore
     }
 
     public func load() async {
@@ -119,6 +132,13 @@ public final class DeleteAccountViewModel: ObservableObject {
             deviceIdProvider.clearDeviceId(forUserId: uid)
         }
         await fixQueue.clearAll()
+        // I11 additions — the geofence-event queue and cached geofence config/ETag are local
+        // state exactly as much as the fix queue is (008 §4.4: "clear all local state"); a stale
+        // batch or cache surviving deletion could otherwise resurface a since-deleted user's
+        // geofence data, or leave a re-signed-in account's re-registration skipped because a
+        // now-meaningless ETag still looks "unchanged".
+        await geofenceEventQueue.clearAll()
+        geofenceConfigStore.clear()
         // specs/008-privacy-endpoints.md §3.1 rule 2 (finding #1) — any export artifact must not
         // survive the account it belongs to.
         exportArtifactStore.removeCurrentArtifact()

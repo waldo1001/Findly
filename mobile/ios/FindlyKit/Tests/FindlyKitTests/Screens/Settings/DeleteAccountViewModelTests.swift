@@ -18,9 +18,14 @@ struct DeleteAccountViewModelTests {
         api: FakeAPIClient, auth: FakeAuthProviding,
         deviceIdProvider: DeviceIdProviding = InMemoryDeviceIdProvider(),
         fixQueue: FixQueue = FixQueue(),
-        exportArtifactStore: InMemoryExportArtifactStore = InMemoryExportArtifactStore()
+        exportArtifactStore: InMemoryExportArtifactStore = InMemoryExportArtifactStore(),
+        geofenceEventQueue: GeofenceEventQueue = GeofenceEventQueue(),
+        geofenceConfigStore: GeofenceConfigStateStoring = InMemoryGeofenceConfigStateStore()
     ) -> DeleteAccountViewModel {
-        DeleteAccountViewModel(apiClient: api, authProvider: auth, deviceIdProvider: deviceIdProvider, fixQueue: fixQueue, exportArtifactStore: exportArtifactStore)
+        DeleteAccountViewModel(
+            apiClient: api, authProvider: auth, deviceIdProvider: deviceIdProvider, fixQueue: fixQueue,
+            exportArtifactStore: exportArtifactStore, geofenceEventQueue: geofenceEventQueue, geofenceConfigStore: geofenceConfigStore
+        )
     }
 
     // MARK: - Cascade-warning detection (008 §4.2)
@@ -173,6 +178,42 @@ struct DeleteAccountViewModelTests {
         #expect(deviceIdProvider.deviceId(forUserId: "u1") != "dev-1")
         #expect(exportArtifactStore.currentURL == nil, "008 §3.1 rule 2 (finding #1) — any export artifact is removed by the account-deletion wipe")
         #expect(viewModel.phase == .completed)
+    }
+
+    /// I11 addition — specs/009-device-runtime.md §6.1/§6.3's local state (the geofence-event
+    /// queue and cached geofence config/ETag) is "local state" exactly as much as the fix queue
+    /// is (008 §4.4), so the account-deletion wipe must clear it too.
+    @Test func confirmDelete_success_alsoWipesTheGeofenceEventQueueAndConfigCache() async {
+        let api = FakeAPIClient()
+        api.deleteAccountHandler = {}
+        let auth = FakeAuthProviding()
+        let geofenceEventQueue = GeofenceEventQueue()
+        await geofenceEventQueue.enqueue(GeofenceEventReport(eventId: "e1", geofenceId: "gf_home", transition: .enter, recordedAt: "2026-07-19T09:00:00Z"))
+        let geofenceConfigStore = InMemoryGeofenceConfigStateStore(initial: CachedGeofenceConfig(etag: "\"0x1\"", geofences: []))
+        let viewModel = makeViewModel(api: api, auth: auth, geofenceEventQueue: geofenceEventQueue, geofenceConfigStore: geofenceConfigStore)
+
+        await viewModel.confirmDelete()
+
+        #expect(await geofenceEventQueue.pendingCount() == 0)
+        #expect(geofenceConfigStore.current() == nil)
+        #expect(viewModel.phase == .completed)
+    }
+
+    @Test func confirmDelete_firebaseDeleteFails_doesNotWipeTheGeofenceEventQueueOrConfigCache() async {
+        let api = FakeAPIClient()
+        api.deleteAccountHandler = {}
+        let auth = FakeAuthProviding()
+        auth.deleteCurrentUserResult = .failure(NSError(domain: "test", code: 1))
+        let geofenceEventQueue = GeofenceEventQueue()
+        await geofenceEventQueue.enqueue(GeofenceEventReport(eventId: "e1", geofenceId: "gf_home", transition: .enter, recordedAt: "2026-07-19T09:00:00Z"))
+        let geofenceConfigStore = InMemoryGeofenceConfigStateStore(initial: CachedGeofenceConfig(etag: "\"0x1\"", geofences: []))
+        let viewModel = makeViewModel(api: api, auth: auth, geofenceEventQueue: geofenceEventQueue, geofenceConfigStore: geofenceConfigStore)
+
+        await viewModel.confirmDelete()
+
+        #expect(viewModel.phase == .firebaseDeleteFailed)
+        #expect(await geofenceEventQueue.pendingCount() == 1, "local state must survive an unrecovered Firebase-delete failure")
+        #expect(geofenceConfigStore.current() != nil)
     }
 
     @Test func confirmDelete_backendFailure_setsErrorPhase_neverCallsFirebaseDelete() async {
