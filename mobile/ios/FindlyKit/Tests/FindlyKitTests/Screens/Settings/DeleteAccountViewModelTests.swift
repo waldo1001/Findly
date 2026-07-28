@@ -165,7 +165,11 @@ struct DeleteAccountViewModelTests {
         api.deleteAccountHandler = {}
         let auth = FakeAuthProviding()
         auth.currentUserId = "u1"
-        let deviceIdProvider = InMemoryDeviceIdProvider(generateUUID: { "dev-1" })
+        var deviceIdCounter = 0
+        let deviceIdProvider = InMemoryDeviceIdProvider(generateUUID: {
+            deviceIdCounter += 1
+            return "dev-\(deviceIdCounter)"
+        })
         _ = deviceIdProvider.deviceId(forUserId: "u1") // pre-register, so clearing is observable
         let exportArtifactStore = InMemoryExportArtifactStore()
         _ = try? exportArtifactStore.write(Data("leftover export".utf8))
