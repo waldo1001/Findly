@@ -278,9 +278,10 @@ struct RequestBuildingTests {
             """))
         }
         let result = try await client.getGeofences(ifNoneMatch: "\"0x1\"")
-        guard case let .ok(config, etag) = result else { Issue.record("expected .ok"); return }
+        guard case let .ok(config, etag, features) = result else { Issue.record("expected .ok"); return }
         #expect(config.version == 4)
         #expect(etag == "\"0x2\"")
+        #expect(features.limits.maxGeofences == 20)
     }
 
     @Test func getGeofences_returnsNotModifiedOn304() async throws {

@@ -9,6 +9,49 @@ private final class FakeBackgroundSyncScheduler: BackgroundSyncScheduling {
     func cancelScheduledSync() { cancelCallCount += 1 }
 }
 
+/// **Post-review addition (concurrency re-review).** Widens the window between
+/// `wipeLocalState()`'s own actor-hop suspension points and a concurrently-firing transition, so
+/// `wipeLocalState_racingAConcurrentTransition_stillDropsIt` can reliably interleave them without
+/// depending on winning an unlikely scheduling coin-flip — mirrors a slow on-disk `SQLiteFixStore.
+/// removeAll()` genuinely taking wall-clock time (specs/009 §2), rather than the in-memory store's
+/// effectively-instant one. `Thread.sleep` is deliberate here (not `Task.sleep`): it blocks this
+/// call's own synchronous execution exactly the way a real blocking disk write would, without
+/// itself introducing a new `await`/suspension point that would change what's being tested.
+private final class DelayedFixStore: FixStoring {
+    private let wrapped = InMemoryFixStore()
+    private let delaySeconds: TimeInterval
+    init(delaySeconds: TimeInterval) { self.delaySeconds = delaySeconds }
+    func loadAll() -> [LocationFix] { wrapped.loadAll() }
+    @discardableResult func append(_ fix: LocationFix) -> Int { wrapped.append(fix) }
+    func remove(fixIds: Set<String>) { wrapped.remove(fixIds: fixIds) }
+    func currentBatch() -> PendingBatch? { wrapped.currentBatch() }
+    func freezeNextBatch(maxSize: Int, newBatchId: () -> String) -> PendingBatch? { wrapped.freezeNextBatch(maxSize: maxSize, newBatchId: newBatchId) }
+    func markAccepted(batchId: String) { wrapped.markAccepted(batchId: batchId) }
+    func markRejected(batchId: String, dropFixIds: Set<String>?) { wrapped.markRejected(batchId: batchId, dropFixIds: dropFixIds) }
+    func removeAll() {
+        Thread.sleep(forTimeInterval: delaySeconds)
+        wrapped.removeAll()
+    }
+}
+
+/// The `GeofenceEventQueueStoring` counterpart to `DelayedFixStore` above — same rationale, mirrors
+/// a slow `SQLiteGeofenceEventQueueStore.removeAll()`.
+private final class DelayedGeofenceEventQueueStore: GeofenceEventQueueStoring {
+    private let wrapped = InMemoryGeofenceEventQueueStore()
+    private let delaySeconds: TimeInterval
+    init(delaySeconds: TimeInterval) { self.delaySeconds = delaySeconds }
+    func loadAll() -> [GeofenceEventReport] { wrapped.loadAll() }
+    func enqueue(_ event: GeofenceEventReport) { wrapped.enqueue(event) }
+    func currentBatch() -> GeofenceEventBatch? { wrapped.currentBatch() }
+    func freezeNextBatch(maxSize: Int, newBatchId: () -> String) -> GeofenceEventBatch? { wrapped.freezeNextBatch(maxSize: maxSize, newBatchId: newBatchId) }
+    func markSent(batchId: String) { wrapped.markSent(batchId: batchId) }
+    func markFailedTransient(batchId: String) { wrapped.markFailedTransient(batchId: batchId) }
+    func removeAll() {
+        Thread.sleep(forTimeInterval: delaySeconds)
+        wrapped.removeAll()
+    }
+}
+
 /// specs/009-device-runtime.md §1/§3.4/§4/§9 — the composition root's own orchestration surface
 /// (start/stop/background-refresh/foreground), exercised end-to-end against fakes for every
 /// CoreLocation/BackgroundTasks-touching collaborator.
@@ -79,6 +122,9 @@ struct LocationRuntimeContainerTests {
         api.reportLocationsHandler = { _, _, _ in
             TestFeatures.envelope(ReportLocationsResponse(accepted: 1, duplicates: 0, lastKnownUpdated: true, deviceSettings: DeviceSettingsSnapshot(syncIntervalMinutes: 15, trackingEnabled: true), geofenceEtag: "0"))
         }
+        // I11: the accepted-flush piggyback now also triggers a geofenceEtag mismatch check
+        // (nothing cached yet, "0" != nil) - stub the resulting GET /geofences call.
+        api.getGeofencesHandler = { _ in .notModified }
         let container = LocationRuntimeContainer(
             apiClient: api, deviceId: { "device-1" },
             backgroundScheduler: scheduler, fixStore: queue0, stateStore: stateStore
@@ -105,6 +151,10 @@ struct LocationRuntimeContainerTests {
         api.reportLocationsHandler = { _, _, _ in
             TestFeatures.envelope(ReportLocationsResponse(accepted: 1, duplicates: 0, lastKnownUpdated: true, deviceSettings: DeviceSettingsSnapshot(syncIntervalMinutes: 15, trackingEnabled: true), geofenceEtag: "0"))
         }
+        // I11: this test's "everything changed" first-ever settings application triggers BOTH
+        // onResume's geofence re-sync AND the accepted-flush geofenceEtag mismatch check - stub
+        // the resulting GET /geofences call(s).
+        api.getGeofencesHandler = { _ in .notModified }
         let container = LocationRuntimeContainer(
             apiClient: api, deviceId: { "device-1" },
             locationProvider: provider, backgroundScheduler: scheduler, fixStore: queue0
@@ -147,6 +197,8 @@ struct LocationRuntimeContainerTests {
             if shouldFail { throw APIError.transport("offline") }
             return TestFeatures.envelope(ReportLocationsResponse(accepted: fixes.count, duplicates: 0, lastKnownUpdated: true, deviceSettings: DeviceSettingsSnapshot(syncIntervalMinutes: 15, trackingEnabled: true), geofenceEtag: "0"))
         }
+        // I11: the eventual accepted flush's geofenceEtag mismatch check needs a stub too.
+        api.getGeofencesHandler = { _ in .notModified }
         let container = LocationRuntimeContainer(
             apiClient: api, deviceId: { "device-1" },
             backgroundScheduler: scheduler, fixStore: queue0
@@ -228,6 +280,8 @@ struct LocationRuntimeContainerTests {
         }
         let scheduler = FakeBackgroundSyncScheduler()
         let stateStore = InMemoryDeviceSettingsStateStore(initial: DeviceSettingsSnapshot(syncIntervalMinutes: 15, trackingEnabled: false))
+        // I11: the detected resume triggers onResume's geofence config re-sync (specs/009 §6.2).
+        api.getGeofencesHandler = { _ in .notModified }
         let container = LocationRuntimeContainer(
             apiClient: api, deviceId: { "device-1" },
             locationProvider: provider, backgroundScheduler: scheduler, stateStore: stateStore
@@ -253,5 +307,197 @@ struct LocationRuntimeContainerTests {
         await container.onAppForeground()
 
         #expect(listDevicesCallCount == 1)
+    }
+
+    // MARK: - I11: geofence config sync triggers (specs/009 §6.2)
+
+    @Test func syncGeofenceConfigOnColdStart_notPaused_registersFromTheFreshlyFetchedConfig() async {
+        let api = FakeAPIClient()
+        var getGeofencesCallCount = 0
+        api.getGeofencesHandler = { _ in
+            getGeofencesCallCount += 1
+            return .ok(GeofenceConfig(version: 1, geofences: []), etag: "\"0x1\"", features: TestFeatures.free)
+        }
+        let registrar = FakeGeofenceRegistering()
+        let container = LocationRuntimeContainer(apiClient: api, deviceId: { "device-1" }, geofenceRegistrar: registrar)
+
+        await container.syncGeofenceConfigOnColdStart()
+
+        #expect(getGeofencesCallCount == 1)
+        #expect(registrar.registerAllCalls.count == 1)
+    }
+
+    @Test func syncGeofenceConfigOnColdStart_paused_isANoOp() async {
+        // specs/009 §4: a paused device has zero geofences registered by contract - cold start
+        // must not re-register while still paused.
+        let api = FakeAPIClient()
+        var getGeofencesCallCount = 0
+        api.getGeofencesHandler = { _ in getGeofencesCallCount += 1; return .notModified }
+        let stateStore = InMemoryDeviceSettingsStateStore(initial: DeviceSettingsSnapshot(syncIntervalMinutes: 15, trackingEnabled: false))
+        let container = LocationRuntimeContainer(apiClient: api, deviceId: { "device-1" }, stateStore: stateStore)
+
+        await container.syncGeofenceConfigOnColdStart()
+
+        #expect(getGeofencesCallCount == 0)
+    }
+
+    @Test func onSignedIn_notPaused_syncsGeofenceConfig() async {
+        let api = FakeAPIClient()
+        var getGeofencesCallCount = 0
+        api.getGeofencesHandler = { _ in getGeofencesCallCount += 1; return .notModified }
+        let container = LocationRuntimeContainer(apiClient: api, deviceId: { "device-1" })
+
+        await container.onSignedIn()
+
+        #expect(getGeofencesCallCount == 1)
+    }
+
+    @Test func resumeFromPause_alsoReSyncsGeofenceConfig() async {
+        // specs/009 §6.2: "resume from pause" is one of the five re-registration triggers - wired
+        // via DeviceSettingsCoordinator's onResume seam.
+        let api = FakeAPIClient()
+        var getGeofencesCallCount = 0
+        api.getGeofencesHandler = { _ in getGeofencesCallCount += 1; return .notModified }
+        api.listDevicesHandler = {
+            TestFeatures.envelope(ListDevicesResponse(devices: [
+                DeviceListItem(
+                    deviceId: "device-1", ownerUserId: "user-1", platform: "ios", deviceName: "iPhone",
+                    model: "iPhone15,2", appVersion: "1.0.0", syncIntervalMinutes: 15, trackingEnabled: true,
+                    pushInvalid: false, ownerDisplayName: "Alex", lastSeenAt: "2026-07-19T09:00:00Z"
+                )
+            ]))
+        }
+        let stateStore = InMemoryDeviceSettingsStateStore(initial: DeviceSettingsSnapshot(syncIntervalMinutes: 15, trackingEnabled: false))
+        let container = LocationRuntimeContainer(apiClient: api, deviceId: { "device-1" }, stateStore: stateStore)
+
+        await container.onAppForeground() // polls GET /devices -> observes the resume
+
+        #expect(stateStore.current()?.trackingEnabled == true)
+        #expect(getGeofencesCallCount == 1)
+    }
+
+    @Test func geofenceTransitionHandler_isExposedAndSharesTheContainersFixCaptureCoordinator() async {
+        // A smoke test that the exposed handler is genuinely wired to this container's own
+        // fixQueue/geofenceEventQueue - a full behavioral suite lives in
+        // GeofenceTransitionHandlerTests; this just proves the composition-root wiring is correct.
+        let container = LocationRuntimeContainer(
+            apiClient: FakeAPIClient(), deviceId: { "device-1" },
+            isPermissionGranted: { true }
+        )
+
+        await container.geofenceTransitionHandler.handle(
+            GeofenceTransitionEvent(geofenceId: "gf_home", transition: .enter, lat: 51.0, lon: 3.7, accuracyM: 10)
+        )
+
+        #expect(await container.geofenceEventQueue.pendingCount() == 1)
+        #expect(await container.fixQueue.queuedCount() == 1)
+    }
+
+    // MARK: - Post-review: wipeLocalState() (security review, High finding — no local state was
+    // wiped on sign-out, only on account deletion, a real deterministic cross-account data leak)
+
+    @Test func wipeLocalState_clearsEveryPieceOfLocalStateItClaimsTo() async {
+        let provider = FakeLocationProviding()
+        let scheduler = FakeBackgroundSyncScheduler()
+        let registrar = FakeGeofenceRegistering()
+        let geofenceConfigStore = InMemoryGeofenceConfigStateStore(
+            initial: CachedGeofenceConfig(etag: "\"0x1\"", geofences: [])
+        )
+        let stateStore = InMemoryDeviceSettingsStateStore(initial: DeviceSettingsSnapshot(syncIntervalMinutes: 15, trackingEnabled: true))
+        let container = LocationRuntimeContainer(
+            apiClient: FakeAPIClient(), deviceId: { "device-1" },
+            locationProvider: provider, backgroundScheduler: scheduler,
+            stateStore: stateStore, geofenceRegistrar: registrar, geofenceConfigStore: geofenceConfigStore
+        )
+        await container.fixQueue.enqueue(makeFix())
+        await container.geofenceEventQueue.enqueue(
+            GeofenceEventReport(eventId: "e1", geofenceId: "gf_home", transition: .enter, recordedAt: "2026-07-19T09:00:00Z")
+        )
+
+        await container.wipeLocalState()
+
+        #expect(await container.fixQueue.queuedCount() == 0, "the fix queue must be cleared")
+        #expect(await container.geofenceEventQueue.pendingCount() == 0, "the geofence-event queue must be cleared")
+        #expect(geofenceConfigStore.current() == nil, "the cached geofence config/ETag must be cleared")
+        #expect(
+            stateStore.current()?.trackingEnabled == false,
+            "cached device settings must read as a DEFINITE paused state, not merely 'unknown' — see DeviceSettingsStateStoring.clear()'s doc for why nil alone wouldn't be enough"
+        )
+        #expect(registrar.unregisterAllCallCount == 1, "the registered CLLocationManager geofences must be unregistered")
+        #expect(provider.stopBackgroundMonitoringCallCount == 1, "significant-location-change monitoring must stop")
+        #expect(scheduler.cancelCallCount == 1, "the scheduled BGAppRefreshTask must be canceled")
+    }
+
+    @Test func wipeLocalState_calledTwice_isIdempotentSafe() async {
+        let registrar = FakeGeofenceRegistering()
+        let container = LocationRuntimeContainer(apiClient: FakeAPIClient(), deviceId: { "device-1" }, geofenceRegistrar: registrar)
+
+        await container.wipeLocalState()
+        await container.wipeLocalState()
+
+        #expect(registrar.unregisterAllCallCount == 2, "each call performs its own unregister — no crash/inconsistency from calling twice")
+        #expect(await container.fixQueue.queuedCount() == 0)
+    }
+
+    /// The concrete acceptance criterion for the security review's High finding: a geofence
+    /// transition delegate callback that fires AFTER `wipeLocalState()` returns (the exact race
+    /// specs/009 §6.2 already accepts as normal — the platform unregister call and the callback
+    /// aren't atomic) must be dropped, not durably queued under whatever *different* account signs
+    /// in next.
+    @Test func wipeLocalState_thenATransitionArrives_isDroppedNotQueued() async {
+        let stateStore = InMemoryDeviceSettingsStateStore(initial: DeviceSettingsSnapshot(syncIntervalMinutes: 15, trackingEnabled: true))
+        let container = LocationRuntimeContainer(
+            apiClient: FakeAPIClient(), deviceId: { "device-1" }, stateStore: stateStore,
+            isPermissionGranted: { true }
+        )
+
+        await container.wipeLocalState()
+        await container.geofenceTransitionHandler.handle(
+            GeofenceTransitionEvent(geofenceId: "gf_home", transition: .enter, lat: 51.0, lon: 3.7, accuracyM: 10)
+        )
+
+        #expect(await container.geofenceEventQueue.pendingCount() == 0, "a transition detected after wipeLocalState() must be dropped, not queued")
+        #expect(await container.fixQueue.queuedCount() == 0, "the accompanying source: .geofence fix must also be dropped")
+    }
+
+    /// **Post-review addition (concurrency re-review).** The sequential test above only proves the
+    /// already-easy case (wipe fully completes, THEN a transition arrives) — it never exercises the
+    /// real-world delivery mechanism: `SystemGeofenceRegistrar.forwardTransition` fires a transition
+    /// via an **unstructured** `Task { await transitionHandler?.handle(event) }`, decoupled from
+    /// `wipeLocalState()`'s own isolation and step order. Before the fix (`stateStore.clear()`
+    /// moved to be `wipeLocalState()`'s FIRST step, synchronous, before either SQLite-backed
+    /// `await`), a transition racing those suspension points could read the still-stale
+    /// `trackingEnabled: true`, enqueue its event, and have that enqueue land on the
+    /// `GeofenceEventQueue`/`FixQueue` actor's mailbox AFTER the corresponding `clearAll()` call had
+    /// already run — surviving `wipeLocalState()` entirely. `DelayedFixStore`/
+    /// `DelayedGeofenceEventQueueStore` widen that window to make the race deterministic to test
+    /// rather than a coin-flip; the 5 ms head start below lands comfortably inside the 50 ms delay,
+    /// simulating "a transition fires right after `unregisterAll()`" — exactly the scenario the
+    /// security review's concurrency walkthrough described.
+    @Test func wipeLocalState_racingAConcurrentTransition_stillDropsIt() async {
+        let stateStore = InMemoryDeviceSettingsStateStore(initial: DeviceSettingsSnapshot(syncIntervalMinutes: 15, trackingEnabled: true))
+        let container = LocationRuntimeContainer(
+            apiClient: FakeAPIClient(), deviceId: { "device-1" },
+            fixStore: DelayedFixStore(delaySeconds: 0.05),
+            stateStore: stateStore,
+            geofenceRegistrar: FakeGeofenceRegistering(),
+            geofenceEventStore: DelayedGeofenceEventQueueStore(delaySeconds: 0.05),
+            isPermissionGranted: { true }
+        )
+        let event = GeofenceTransitionEvent(geofenceId: "gf_home", transition: .enter, lat: 51.0, lon: 3.7, accuracyM: 10)
+
+        async let wipe: () = container.wipeLocalState()
+        async let racedTransition: () = {
+            // A brief head start so wipeLocalState()'s Task has actually begun executing (and, per
+            // the fix, already run its synchronous stateStore.clear()) by the time the transition's
+            // own isPaused() check runs, while wipeLocalState() itself is still mid-flight in its
+            // (deliberately slowed) queue-clearing awaits.
+            try? await Task.sleep(nanoseconds: 5_000_000) // 5 ms, well inside the 50 ms store delay
+            await container.geofenceTransitionHandler.handle(event)
+        }()
+        _ = await (wipe, racedTransition)
+
+        #expect(await container.geofenceEventQueue.pendingCount() == 0, "a transition racing wipeLocalState()'s own suspension points must still be dropped, not leaked into whichever session signs in next")
+        #expect(await container.fixQueue.queuedCount() == 0)
     }
 }

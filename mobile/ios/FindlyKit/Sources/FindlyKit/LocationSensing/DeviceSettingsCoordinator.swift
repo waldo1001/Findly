@@ -18,11 +18,14 @@ public protocol SyncScheduling {
     func reschedule(syncIntervalMinutes: Int)
 }
 
-/// I11's not-yet-built region-monitoring lifecycle seam (specs/009 §6.2's "unregister all"
-/// half only — full re-registration is I11's scope, not this task's). Stubbed the same way
-/// Android's A9 stubbed `GeofenceRegistry`/`GeofenceRegistrar` for A10/A11: a documented no-op
-/// implementation a future I11 session replaces with the real `CLLocationManager` region-monitoring
-/// unregister-all call.
+/// The region-monitoring lifecycle seam (specs/009 §6.2's "unregister all" half). Originally
+/// stubbed the same way Android's A9 stubbed `GeofenceRegistry`/`GeofenceRegistrar` for A10/A11 —
+/// I11 has since landed the real `CLLocationManager` region-monitoring implementation
+/// (`SystemGeofenceRegistrar`, `LocationSensing/SystemGeofenceRegistrar.swift`) and its full
+/// "register all" half (`GeofenceRegistering`, which extends this protocol). This narrower
+/// protocol is kept as-is (rather than widened in place) because `DeviceSettingsCoordinator`'s
+/// pause path only ever needs the unregister half — the same shape split Android's
+/// `GeofenceRegistry`/`GeofenceRegistrar` still keep for the identical reason.
 public protocol GeofenceRegistrarStub {
     func unregisterAll()
 }
@@ -54,8 +57,8 @@ public final class NoOpGeofenceRegistrarStub: GeofenceRegistrarStub {
 /// `SyncScheduling`'s doc). Resume (§4) restores the schedule via the same `rebuildSchedule` path
 /// an interval change uses, and calls `onResume` — `LocationRuntimeContainer` wires both
 /// `onPause`/`onResume` to `LocationProviding.stopBackgroundMonitoring()`/
-/// `startBackgroundMonitoring(coordinator:)` (and, once I11 lands, geofence config re-sync on
-/// resume — specs/009 §6.2: "resume from pause" is one of its five re-registration triggers).
+/// `startBackgroundMonitoring(coordinator:)` and (I11) `GeofenceConfigSyncCoordinator.sync()` on
+/// resume — specs/009 §6.2: "resume from pause" is one of its five re-registration triggers.
 /// Mirrors Android's `DeviceSettingsCoordinator`, with the one deliberate iOS-specific divergence
 /// documented on `SyncScheduling`.
 public actor DeviceSettingsCoordinator: DeviceSettingsApplying {

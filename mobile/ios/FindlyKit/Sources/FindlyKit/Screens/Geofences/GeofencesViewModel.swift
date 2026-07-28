@@ -48,7 +48,7 @@ public final class GeofencesViewModel: ObservableObject {
         switch result {
         case .notModified:
             break
-        case .ok(let config, let etag):
+        case .ok(let config, let etag, _):
             cachedETag = etag
             state = .loaded(geofences: config.geofences, version: config.version)
         }
@@ -84,7 +84,7 @@ public final class GeofencesViewModel: ObservableObject {
             // Force a fresh copy regardless of any cached ETag so the conflict UX always compares
             // against the true current server state.
             let result = try await apiClient.getGeofences(ifNoneMatch: nil)
-            if case .ok(let config, let etag) = result {
+            if case .ok(let config, let etag, _) = result {
                 cachedETag = etag
                 conflict = .versionConflict(serverGeofences: config.geofences, serverVersion: config.version)
             }

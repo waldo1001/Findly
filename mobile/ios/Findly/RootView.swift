@@ -34,15 +34,17 @@ struct RootView: View {
     // specs/004-ios-client.md §3.5, specs/007-public-join-links.md §1 — threaded into
     // `GroupDetailScreen` for its share link/QR (`AppConfig.joinLinkHost`).
     private let joinLinkHost: String
-    // specs/004-ios-client.md §3.6, specs/008-privacy-endpoints.md §4.4 — the local-state-wipe
-    // dependency `DeleteAccountViewModel` clears after a successful account deletion. As of I10,
-    // this is also the SAME instance `LocationRuntimeContainer`'s `deviceId` closure and
-    // `onReRegisterDevice`'s re-registration path read/clear (built once, in `FindlyApp.init()`).
+    // specs/004-ios-client.md §3.6, specs/008-privacy-endpoints.md §4.4 — as of I10, this is also
+    // the SAME instance `LocationRuntimeContainer`'s `deviceId` closure and `onReRegisterDevice`'s
+    // re-registration path read/clear (built once, in `FindlyApp.init()`).
     private let deviceIdProvider: DeviceIdProviding
-    private let fixQueue: FixQueue
     // specs/009-device-runtime.md (I10) — the real capture/sync engine, built once in
     // `FindlyApp.init()` and passed in here (see this type's top doc for why it can no longer be
-    // constructed in THIS init).
+    // constructed in THIS init). Post-review (security review, High finding): `DeleteAccountViewModel`
+    // no longer takes `fixQueue`/`geofenceEventQueue`/`geofenceConfigStore` directly — it takes the
+    // single consolidated `locationRuntimeContainer.wipeLocalState()` closure instead (see the
+    // `.deleteAccount` case below), so this type no longer needs a separate `fixQueue` property of
+    // its own at all.
     private let locationRuntimeContainer: LocationRuntimeContainer
     // specs/008-privacy-endpoints.md §3.1 — ONE shared instance between `ExportViewModel` (which
     // writes the artifact) and `DeleteAccountViewModel` (whose local wipe must remove it, rule 2)
@@ -58,7 +60,6 @@ struct RootView: View {
         authProvider: AuthProviding,
         apiClient: FindlyAPIClient,
         deviceIdProvider: DeviceIdProviding,
-        fixQueue: FixQueue,
         exportArtifactStore: ExportArtifactStoring,
         locationRuntimeContainer: LocationRuntimeContainer
     ) {
@@ -67,7 +68,6 @@ struct RootView: View {
         self.authProvider = authProvider
         self.apiClient = apiClient
         self.deviceIdProvider = deviceIdProvider
-        self.fixQueue = fixQueue
         self.exportArtifactStore = exportArtifactStore
         self.locationRuntimeContainer = locationRuntimeContainer
     }
@@ -79,6 +79,11 @@ struct RootView: View {
                 SignInScreen(
                     viewModel: SignInViewModel(authProvider: authProvider, onSignedIn: {
                         coordinator.showHome()
+                        // specs/009-device-runtime.md §6.2 (I11) — "first config sync after
+                        // sign-in" is one of the five geofence re-registration triggers; see
+                        // `LocationRuntimeContainer.onSignedIn()`'s doc for why this in-app
+                        // callback (rather than the cold-start hook alone) is the trigger's home.
+                        Task { await locationRuntimeContainer.onSignedIn() }
                     })
                 )
             case .home:
@@ -165,16 +170,21 @@ struct RootView: View {
                 DeleteAccountScreen(
                     viewModel: DeleteAccountViewModel(
                         apiClient: apiClient, authProvider: authProvider,
-                        deviceIdProvider: deviceIdProvider, fixQueue: fixQueue,
-                        exportArtifactStore: exportArtifactStore
+                        deviceIdProvider: deviceIdProvider,
+                        exportArtifactStore: exportArtifactStore,
+                        // Post-review (security review, High finding): the ONE consolidated
+                        // LocationRuntimeContainer.wipeLocalState() — covers the fix queue,
+                        // geofence-event queue, cached geofence config/ETag, cached device
+                        // settings, AND unregisters this device's CLLocationManager geofences (that
+                        // last part was unreachable from here entirely before this fix — see
+                        // wipeLocalState()'s doc). The same closure FindlyApp's forced-sign-out path
+                        // and DeleteAccountViewModel's own signOutForRetry() now call too.
+                        wipeLocalState: { await locationRuntimeContainer.wipeLocalState() }
                     ),
-                    // specs/008-privacy-endpoints.md §3.1/§4.4 local wipe already clears fixQueue
-                    // (the same shared instance locationRuntimeContainer uses, per this file's
-                    // earlier doc comment) — stopping the runtime here additionally halts
-                    // significant-location-change monitoring and cancels the scheduled
-                    // BGAppRefreshTask, so a deleted account's device doesn't keep quietly
-                    // capturing fixes into a freshly-emptied queue until the app is relaunched.
-                    onCompleted: { locationRuntimeContainer.stop(); coordinator.showSignIn() }
+                    // wipeLocalState() (called inside the view model's own local-wipe step) already
+                    // stops monitoring/cancels the BG task as part of the consolidated wipe — no
+                    // separate stop() call needed here any more.
+                    onCompleted: { coordinator.showSignIn() }
                 )
             case .deleteFamily:
                 DeleteFamilyScreen(

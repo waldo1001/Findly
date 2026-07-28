@@ -7,6 +7,28 @@ private final class FakeDeviceSettingsApplying: DeviceSettingsApplying {
     func applySettings(_ settings: DeviceSettingsSnapshot) async { appliedSettings.append(settings) }
 }
 
+/// I11 addition — records every `syncIfEtagChanged` call so tests can assert `LocationSyncRunner`
+/// actually threads the piggybacked `geofenceEtag` through (specs/009 §6.2/§6.3), without needing
+/// a real `GeofenceConfigSyncCoordinator`/`FakeAPIClient.getGeofencesHandler` round trip - that
+/// sequence has its own dedicated coverage in `GeofenceConfigSyncCoordinatorTests`.
+private final class FakeGeofenceConfigSyncing: GeofenceConfigSyncing {
+    private(set) var syncIfEtagChangedCalls: [String] = []
+    func syncIfEtagChanged(_ observedEtag: String) async { syncIfEtagChangedCalls.append(observedEtag) }
+}
+
+/// I11 addition — a scriptable `GeofenceEventDraining` so `LocationSyncRunner`'s own
+/// orchestration of the geofence-event drain loop (§6.3) can be tested without a real
+/// `GeofenceEventSyncCoordinator`/queue/API round trip (that has its own dedicated coverage in
+/// `GeofenceEventSyncCoordinatorTests`).
+private final class FakeGeofenceEventDraining: GeofenceEventDraining {
+    var outcomes: [GeofenceEventSyncOutcome] = [.nothingToSync]
+    private(set) var syncOnceCallCount = 0
+    func syncOnce() async -> GeofenceEventSyncOutcome {
+        defer { syncOnceCallCount += 1 }
+        return outcomes[min(syncOnceCallCount, outcomes.count - 1)]
+    }
+}
+
 /// specs/009-device-runtime.md §1/§3.4/§9 — the per-trigger orchestration: maybe-capture-a-periodic-
 /// fix (gated by `SyncTriggerPolicy`'s 0.8 rule) then drain the queue, applying the mandatory
 /// settings piggyback and reacting to `SyncOutcome` per §9's table. Mirrors Android's
@@ -194,5 +216,124 @@ struct LocationSyncRunnerTests {
 
         #expect(result == .success)
         #expect(callCount == 2, "an unmappable rejection un-freezes the batch (nothing dropped) - the run must retry it within the same cycle")
+    }
+
+    // MARK: - I11: geofence-event queue drain + geofenceEtag re-sync trigger (specs/009 §6.2/§6.3)
+
+    @Test func fixSynced_threadsTheGeofenceEtagIntoTheReSyncTrigger() async {
+        let queue = FixQueue(generateBatchId: { "batch-1" })
+        await queue.enqueue(makeFix())
+        let api = FakeAPIClient()
+        api.reportLocationsHandler = { _, _, _ in
+            TestFeatures.envelope(ReportLocationsResponse(accepted: 1, duplicates: 0, lastKnownUpdated: true, deviceSettings: DeviceSettingsSnapshot(syncIntervalMinutes: 15, trackingEnabled: true), geofenceEtag: "\"gf-etag-1\""))
+        }
+        let geofenceConfigSyncing = FakeGeofenceConfigSyncing()
+        let runner = LocationSyncRunner(
+            currentSyncIntervalMinutes: { 15 }, lastQueuedFixAtStore: InMemoryLastQueuedFixAtStore(),
+            captureCoordinator: FixCaptureCoordinator(provider: FakeLocationProviding(), queue: queue, isPaused: { true }, isPermissionGranted: { true }),
+            syncCoordinator: LocationSyncCoordinator(queue: queue, apiClient: api, deviceId: { "device-1" }),
+            settingsApplying: FakeDeviceSettingsApplying(), geofenceConfigSyncing: geofenceConfigSyncing,
+            onReRegisterDevice: {}, onSignedOut: {}
+        )
+
+        _ = await runner.runOnce()
+
+        #expect(geofenceConfigSyncing.syncIfEtagChangedCalls == ["\"gf-etag-1\""])
+    }
+
+    @Test func afterDrainingTheFixQueue_alsoDrainsTheGeofenceEventQueue() async {
+        // Fix queue empty (.nothingToSync immediately) - the geofence-event drain must still run.
+        let api = FakeAPIClient()
+        let geofenceEventDraining = FakeGeofenceEventDraining()
+        geofenceEventDraining.outcomes = [.nothingToSync]
+        let runner = LocationSyncRunner(
+            currentSyncIntervalMinutes: { 15 }, lastQueuedFixAtStore: InMemoryLastQueuedFixAtStore(initial: Date()),
+            captureCoordinator: FixCaptureCoordinator(provider: FakeLocationProviding(), queue: FixQueue(), isPaused: { true }, isPermissionGranted: { true }),
+            syncCoordinator: LocationSyncCoordinator(queue: FixQueue(), apiClient: api, deviceId: { "device-1" }),
+            settingsApplying: FakeDeviceSettingsApplying(), geofenceEventDraining: geofenceEventDraining,
+            onReRegisterDevice: {}, onSignedOut: {}
+        )
+
+        let result = await runner.runOnce()
+
+        #expect(result == .success)
+        #expect(geofenceEventDraining.syncOnceCallCount == 1)
+    }
+
+    @Test func geofenceEventSynced_appliesSettings_andThreadsTheGeofenceEtag() async {
+        let settingsApplying = FakeDeviceSettingsApplying()
+        let geofenceConfigSyncing = FakeGeofenceConfigSyncing()
+        let geofenceEventDraining = FakeGeofenceEventDraining()
+        geofenceEventDraining.outcomes = [
+            .synced(accepted: 1, duplicates: 0, deviceSettings: DeviceSettingsSnapshot(syncIntervalMinutes: 20, trackingEnabled: true), geofenceEtag: "\"gf-etag-2\""),
+            .nothingToSync
+        ]
+        let runner = LocationSyncRunner(
+            currentSyncIntervalMinutes: { 15 }, lastQueuedFixAtStore: InMemoryLastQueuedFixAtStore(initial: Date()),
+            captureCoordinator: FixCaptureCoordinator(provider: FakeLocationProviding(), queue: FixQueue(), isPaused: { true }, isPermissionGranted: { true }),
+            syncCoordinator: LocationSyncCoordinator(queue: FixQueue(), apiClient: FakeAPIClient(), deviceId: { "device-1" }),
+            settingsApplying: settingsApplying, geofenceConfigSyncing: geofenceConfigSyncing, geofenceEventDraining: geofenceEventDraining,
+            onReRegisterDevice: {}, onSignedOut: {}
+        )
+
+        let result = await runner.runOnce()
+
+        #expect(result == .success)
+        #expect(settingsApplying.appliedSettings == [DeviceSettingsSnapshot(syncIntervalMinutes: 20, trackingEnabled: true)])
+        #expect(geofenceConfigSyncing.syncIfEtagChangedCalls == ["\"gf-etag-2\""])
+    }
+
+    @Test func fixQueueTransientFailure_neverAttemptsTheGeofenceEventDrainInTheSameCycle() async {
+        let queue = FixQueue()
+        await queue.enqueue(makeFix())
+        let api = FakeAPIClient()
+        api.reportLocationsHandler = { _, _, _ in throw APIError.transport("offline") }
+        let geofenceEventDraining = FakeGeofenceEventDraining()
+        let runner = LocationSyncRunner(
+            currentSyncIntervalMinutes: { 15 }, lastQueuedFixAtStore: InMemoryLastQueuedFixAtStore(),
+            captureCoordinator: FixCaptureCoordinator(provider: FakeLocationProviding(), queue: queue, isPaused: { true }, isPermissionGranted: { true }),
+            syncCoordinator: LocationSyncCoordinator(queue: queue, apiClient: api, deviceId: { "device-1" }),
+            settingsApplying: FakeDeviceSettingsApplying(), geofenceEventDraining: geofenceEventDraining,
+            onReRegisterDevice: {}, onSignedOut: {}
+        )
+
+        let result = await runner.runOnce()
+
+        #expect(result == .retry)
+        #expect(geofenceEventDraining.syncOnceCallCount == 0, "the fix queue's transient failure backs off the whole run - specs/009 §9")
+    }
+
+    @Test func geofenceEventQueueTransientFailure_returnsRetry() async {
+        let geofenceEventDraining = FakeGeofenceEventDraining()
+        geofenceEventDraining.outcomes = [.transientFailure]
+        let runner = LocationSyncRunner(
+            currentSyncIntervalMinutes: { 15 }, lastQueuedFixAtStore: InMemoryLastQueuedFixAtStore(initial: Date()),
+            captureCoordinator: FixCaptureCoordinator(provider: FakeLocationProviding(), queue: FixQueue(), isPaused: { true }, isPermissionGranted: { true }),
+            syncCoordinator: LocationSyncCoordinator(queue: FixQueue(), apiClient: FakeAPIClient(), deviceId: { "device-1" }),
+            settingsApplying: FakeDeviceSettingsApplying(), geofenceEventDraining: geofenceEventDraining,
+            onReRegisterDevice: {}, onSignedOut: {}
+        )
+
+        let result = await runner.runOnce()
+
+        #expect(result == .retry)
+    }
+
+    @Test func geofenceEventDeviceNotFound_callsOnReRegisterDevice() async {
+        var reRegisterCallCount = 0
+        let geofenceEventDraining = FakeGeofenceEventDraining()
+        geofenceEventDraining.outcomes = [.reRegisterDevice]
+        let runner = LocationSyncRunner(
+            currentSyncIntervalMinutes: { 15 }, lastQueuedFixAtStore: InMemoryLastQueuedFixAtStore(initial: Date()),
+            captureCoordinator: FixCaptureCoordinator(provider: FakeLocationProviding(), queue: FixQueue(), isPaused: { true }, isPermissionGranted: { true }),
+            syncCoordinator: LocationSyncCoordinator(queue: FixQueue(), apiClient: FakeAPIClient(), deviceId: { "device-1" }),
+            settingsApplying: FakeDeviceSettingsApplying(), geofenceEventDraining: geofenceEventDraining,
+            onReRegisterDevice: { reRegisterCallCount += 1 }, onSignedOut: {}
+        )
+
+        let result = await runner.runOnce()
+
+        #expect(result == .success)
+        #expect(reRegisterCallCount == 1)
     }
 }
