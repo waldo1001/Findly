@@ -33,7 +33,11 @@ struct LocationRuntimeContainerTests {
         #expect(scheduler.scheduleCalls == [nil])
     }
 
-    @Test func start_whenPaused_startsNothing() {
+    @Test func start_whenPaused_doesNotArmMonitoring_butStillSchedulesTheBoundedBackgroundCheck() {
+        // Blocking-finding regression test: a cold start that's ALREADY paused (e.g. relaunching
+        // after a remote pause applied while the app wasn't running) must still arm the BG task -
+        // specs/009 §4's "a low-frequency worker/BG task is the ONLY thing that keeps running
+        // while paused" would otherwise never get a first chance to run at all.
         let provider = FakeLocationProviding()
         let scheduler = FakeBackgroundSyncScheduler()
         let stateStore = InMemoryDeviceSettingsStateStore(initial: DeviceSettingsSnapshot(syncIntervalMinutes: 15, trackingEnabled: false))
@@ -44,8 +48,8 @@ struct LocationRuntimeContainerTests {
 
         container.start()
 
-        #expect(provider.startBackgroundMonitoringCallCount == 0)
-        #expect(scheduler.scheduleCalls.isEmpty)
+        #expect(provider.startBackgroundMonitoringCallCount == 0, "significant-location-change monitoring stays off while paused")
+        #expect(scheduler.scheduleCalls == [6 * 60 * 60], "the BG task must still be scheduled, bounded to specs/009 §4's 'at least every 6 hours'")
     }
 
     @Test func stop_stopsMonitoringAndCancelsTheSchedule() {
@@ -156,6 +160,85 @@ struct LocationRuntimeContainerTests {
         await container.handleBackgroundRefresh() // fails again -> should be attempt 1 again, not 3
 
         #expect(scheduler.scheduleCalls.last == 30, "the counter must reset after a success, not keep climbing")
+    }
+
+    // MARK: - Blocking finding: the paused device must self-heal via the BG task (specs/009 §4)
+
+    @Test func handleBackgroundRefresh_whilePaused_pollsInsteadOfSyncing_andNeverAttemptsAFlush() async {
+        let api = FakeAPIClient()
+        var listDevicesCallCount = 0
+        api.listDevicesHandler = {
+            listDevicesCallCount += 1
+            return TestFeatures.envelope(ListDevicesResponse(devices: [
+                DeviceListItem(
+                    deviceId: "device-1", ownerUserId: "user-1", platform: "ios", deviceName: "iPhone",
+                    model: "iPhone15,2", appVersion: "1.0.0", syncIntervalMinutes: 15, trackingEnabled: false,
+                    pushInvalid: false, ownerDisplayName: "Alex", lastSeenAt: "2026-07-19T09:00:00Z"
+                )
+            ]))
+        }
+        let scheduler = FakeBackgroundSyncScheduler()
+        let queue0 = InMemoryFixStore()
+        queue0.append(makeFix()) // a pre-pause fix, must stay queued and untouched
+        let stateStore = InMemoryDeviceSettingsStateStore(initial: DeviceSettingsSnapshot(syncIntervalMinutes: 15, trackingEnabled: false))
+        let container = LocationRuntimeContainer(
+            apiClient: api, deviceId: { "device-1" },
+            backgroundScheduler: scheduler, fixStore: queue0, stateStore: stateStore
+        )
+
+        await container.handleBackgroundRefresh()
+
+        #expect(listDevicesCallCount == 1, "must poll GET /devices while paused (specs/009 §4)")
+        #expect(api.reportLocationsCalls.isEmpty, "a paused device must not attempt to flush at all")
+        #expect(queue0.loadAll().count == 1, "pre-pause fixes stay queued, untouched")
+    }
+
+    @Test func handleBackgroundRefresh_whilePaused_reschedulesBoundedToAtLeastSixHours() async {
+        // The specific numeric bound specs/009 §12 calls out as a required test case.
+        let api = FakeAPIClient()
+        api.listDevicesHandler = {
+            TestFeatures.envelope(ListDevicesResponse(devices: [
+                DeviceListItem(
+                    deviceId: "device-1", ownerUserId: "user-1", platform: "ios", deviceName: "iPhone",
+                    model: "iPhone15,2", appVersion: "1.0.0", syncIntervalMinutes: 15, trackingEnabled: false,
+                    pushInvalid: false, ownerDisplayName: "Alex", lastSeenAt: "2026-07-19T09:00:00Z"
+                )
+            ]))
+        }
+        let scheduler = FakeBackgroundSyncScheduler()
+        let stateStore = InMemoryDeviceSettingsStateStore(initial: DeviceSettingsSnapshot(syncIntervalMinutes: 15, trackingEnabled: false))
+        let container = LocationRuntimeContainer(apiClient: api, deviceId: { "device-1" }, backgroundScheduler: scheduler, stateStore: stateStore)
+
+        await container.handleBackgroundRefresh()
+
+        #expect(scheduler.scheduleCalls == [6 * 60 * 60], "specs/009 §4: 'at least every 6 hours'")
+    }
+
+    @Test func handleBackgroundRefresh_pausedPollDetectsResume_reschedulesImmediately_notSixHoursOut() async {
+        let provider = FakeLocationProviding()
+        let api = FakeAPIClient()
+        api.listDevicesHandler = {
+            TestFeatures.envelope(ListDevicesResponse(devices: [
+                DeviceListItem(
+                    deviceId: "device-1", ownerUserId: "user-1", platform: "ios", deviceName: "iPhone",
+                    model: "iPhone15,2", appVersion: "1.0.0", syncIntervalMinutes: 15, trackingEnabled: true,
+                    pushInvalid: false, ownerDisplayName: "Alex", lastSeenAt: "2026-07-19T09:00:00Z"
+                )
+            ]))
+        }
+        let scheduler = FakeBackgroundSyncScheduler()
+        let stateStore = InMemoryDeviceSettingsStateStore(initial: DeviceSettingsSnapshot(syncIntervalMinutes: 15, trackingEnabled: false))
+        let container = LocationRuntimeContainer(
+            apiClient: api, deviceId: { "device-1" },
+            locationProvider: provider, backgroundScheduler: scheduler, stateStore: stateStore
+        )
+
+        await container.handleBackgroundRefresh()
+
+        #expect(stateStore.current()?.trackingEnabled == true)
+        #expect(provider.startBackgroundMonitoringCallCount == 1, "the detected resume must re-arm significant-location-change monitoring")
+        #expect(scheduler.scheduleCalls.allSatisfy { $0 == nil }, "a detected resume reschedules immediately, never with the paused 6h bound")
+        #expect(!scheduler.scheduleCalls.isEmpty)
     }
 
     @Test func onAppForeground_pollsPausedSettings_andRunsTheSyncCycle() async {

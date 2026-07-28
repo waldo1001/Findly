@@ -3,9 +3,7 @@ import Testing
 
 private final class FakeSyncScheduling: SyncScheduling {
     private(set) var rescheduleCalls: [Int] = []
-    private(set) var cancelAllCallCount = 0
     func reschedule(syncIntervalMinutes: Int) { rescheduleCalls.append(syncIntervalMinutes) }
-    func cancelAll() { cancelAllCallCount += 1 }
 }
 
 private final class FakeGeofenceRegistrarStub: GeofenceRegistrarStub {
@@ -15,16 +13,19 @@ private final class FakeGeofenceRegistrarStub: GeofenceRegistrarStub {
 
 /// specs/009-device-runtime.md §3.5/§4 — **the single settings-application entry point** every
 /// arrival path (SETTINGS_CHANGED push [I12], the POST /locations piggyback, the paused-device
-/// poll) calls. Mirrors Android's `DeviceSettingsCoordinator`.
+/// poll) calls. Mirrors Android's `DeviceSettingsCoordinator`, with one deliberate iOS-specific
+/// divergence: pausing does NOT cancel the BG task (see `SyncScheduling`'s doc for why — the BG
+/// task is the only thing keeping the pull-based resume alive while paused, specs/009 §4).
 struct DeviceSettingsCoordinatorTests {
 
     fileprivate func makeCoordinator(
         scheduler: FakeSyncScheduling = FakeSyncScheduling(),
         geofenceRegistrar: FakeGeofenceRegistrarStub = FakeGeofenceRegistrarStub(),
         stateStore: InMemoryDeviceSettingsStateStore = InMemoryDeviceSettingsStateStore(),
+        onPause: @escaping () -> Void = {},
         onResume: @escaping () async -> Void = {}
     ) -> DeviceSettingsCoordinator {
-        DeviceSettingsCoordinator(scheduler: scheduler, geofenceRegistrar: geofenceRegistrar, stateStore: stateStore, onResume: onResume)
+        DeviceSettingsCoordinator(scheduler: scheduler, geofenceRegistrar: geofenceRegistrar, stateStore: stateStore, onPause: onPause, onResume: onResume)
     }
 
     @Test func firstApplication_rebuildsScheduleWithTheGivenInterval() async {
@@ -36,17 +37,21 @@ struct DeviceSettingsCoordinatorTests {
         #expect(scheduler.rescheduleCalls == [15])
     }
 
-    @Test func trackingTurnedOff_cancelsScheduleAndUnregistersGeofences() async {
+    @Test func trackingTurnedOff_unregistersGeofencesAndStopsCapturing_butDoesNotTouchTheSchedule() async {
         let scheduler = FakeSyncScheduling()
         let geofenceRegistrar = FakeGeofenceRegistrarStub()
         let stateStore = InMemoryDeviceSettingsStateStore()
-        let coordinator = makeCoordinator(scheduler: scheduler, geofenceRegistrar: geofenceRegistrar, stateStore: stateStore)
+        var pauseCallCount = 0
+        let coordinator = makeCoordinator(scheduler: scheduler, geofenceRegistrar: geofenceRegistrar, stateStore: stateStore, onPause: { pauseCallCount += 1 })
         await coordinator.applySettings(DeviceSettingsSnapshot(syncIntervalMinutes: 15, trackingEnabled: true))
 
         await coordinator.applySettings(DeviceSettingsSnapshot(syncIntervalMinutes: 15, trackingEnabled: false))
 
-        #expect(scheduler.cancelAllCallCount == 1)
+        #expect(pauseCallCount == 1, "specs/009 §4 'and stop capturing' - onPause is what stops significant-location-change monitoring")
         #expect(geofenceRegistrar.unregisterAllCallCount == 1)
+        // Blocking-finding regression guard: pausing MUST NOT touch the BG task schedule at all -
+        // it's the only thing that keeps running while paused (specs/009 §4's pull-based resume).
+        #expect(scheduler.rescheduleCalls == [15], "only the first (active) apply should have rescheduled; pausing must not reschedule OR cancel")
     }
 
     @Test func trackingTurnedOn_callsOnResume_andRebuildsSchedule() async {

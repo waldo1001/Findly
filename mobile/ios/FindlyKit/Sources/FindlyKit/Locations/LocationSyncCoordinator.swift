@@ -51,17 +51,41 @@ public final class LocationSyncCoordinator {
     /// `nil` means "no deviceId to sync under" (not yet registered / signed out) - `.nothingToSync`
     /// rather than attempting (and failing) a call the server would reject anyway.
     private let deviceId: () -> String?
+    /// Post-review addition: specs/009 §4 — "A paused device MUST NOT flush (`POST /locations`
+    /// would return `403 TRACKING_PAUSED`)" is a client-side behavioral requirement, not merely a
+    /// description of server-side enforcement. Reads the LOCALLY cached settings (no network round
+    /// trip needed to know we're already paused) rather than a bare `Bool`, so the client-side-gated
+    /// outcome can carry the same `.paused(deviceSettings:)` shape a real 403 response would,
+    /// letting every caller (`LocationSyncRunner`) react identically either way. Defaults to
+    /// `{ nil }` ("unknown, don't gate client-side") so every existing call site/test that predates
+    /// this parameter keeps behaving exactly as before — the actual server-side 403 handling below
+    /// is unconditional and unchanged regardless.
+    private let cachedSettings: () -> DeviceSettingsSnapshot?
     private let maxBatchSize: Int
 
-    public init(queue: FixQueue, apiClient: FindlyAPIClient, deviceId: @escaping () -> String?, maxBatchSize: Int = 100) {
+    public init(
+        queue: FixQueue,
+        apiClient: FindlyAPIClient,
+        deviceId: @escaping () -> String?,
+        cachedSettings: @escaping () -> DeviceSettingsSnapshot? = { nil },
+        maxBatchSize: Int = 100
+    ) {
         self.queue = queue
         self.apiClient = apiClient
         self.deviceId = deviceId
+        self.cachedSettings = cachedSettings
         self.maxBatchSize = maxBatchSize
     }
 
     public func syncOnce() async -> SyncOutcome {
         guard let deviceId = deviceId() else { return .nothingToSync }
+        // Client-side pause gate (specs/009 §4) - checked BEFORE touching the queue at all, so a
+        // paused device doesn't even freeze a batch it isn't allowed to send; the queue stays
+        // exactly as it was, ready to resend once resumed. A real 403 (handled further below)
+        // remains the ultimate source of truth if this cache is ever stale.
+        if let settings = cachedSettings(), settings.trackingEnabled == false {
+            return .paused(deviceSettings: settings)
+        }
         guard let batch = await queue.nextBatchToSend(maxBatchSize: maxBatchSize) else { return .nothingToSync }
 
         do {

@@ -36,6 +36,61 @@ struct LocationSyncCoordinatorTests {
         #expect(api.reportLocationsCalls.isEmpty)
     }
 
+    // MARK: - Major finding (post-review): client-side pause gate (specs/009 §4)
+
+    @Test func cachedSettingsShowPaused_skipsTheFlushWithoutCallingTheApi_batchStaysQueued() async {
+        let api = FakeAPIClient()
+        let queue = FixQueue()
+        await queue.enqueue(makeFix("f1"))
+        let pausedSettings = DeviceSettingsSnapshot(syncIntervalMinutes: 15, trackingEnabled: false)
+        let coordinator = LocationSyncCoordinator(queue: queue, apiClient: api, deviceId: { "device-1" }, cachedSettings: { pausedSettings })
+
+        let outcome = await coordinator.syncOnce()
+
+        #expect(outcome == .paused(deviceSettings: pausedSettings))
+        #expect(api.reportLocationsCalls.isEmpty, "specs/009 §4: a paused device MUST NOT even attempt to flush")
+        // The batch must stay queued, untouched, exactly as it was pre-pause - not frozen into
+        // an in-flight batch it isn't allowed to send.
+        #expect(await queue.queuedCount() == 1)
+        let stillPending = await queue.nextBatchToSend()
+        #expect(stillPending == nil || stillPending?.fixes.map(\.fixId) == ["f1"], "resuming later must still be able to send it")
+    }
+
+    @Test func cachedSettingsShowActive_proceedsNormally() async {
+        let api = FakeAPIClient()
+        let queue = FixQueue(generateBatchId: { "batch-1" })
+        await queue.enqueue(makeFix("f1"))
+        api.reportLocationsHandler = { _, _, _ in
+            TestFeatures.envelope(ReportLocationsResponse(accepted: 1, duplicates: 0, lastKnownUpdated: true, deviceSettings: DeviceSettingsSnapshot(syncIntervalMinutes: 15, trackingEnabled: true), geofenceEtag: "0"))
+        }
+        let coordinator = LocationSyncCoordinator(
+            queue: queue, apiClient: api, deviceId: { "device-1" },
+            cachedSettings: { DeviceSettingsSnapshot(syncIntervalMinutes: 15, trackingEnabled: true) }
+        )
+
+        let outcome = await coordinator.syncOnce()
+
+        #expect(outcome != .paused(deviceSettings: DeviceSettingsSnapshot(syncIntervalMinutes: 15, trackingEnabled: false)))
+        #expect(api.reportLocationsCalls.count == 1)
+    }
+
+    @Test func cachedSettingsUnknown_defaultBehavior_doesNotGateClientSide() async {
+        // The default `cachedSettings: { nil }` - every pre-existing call site/test that predates
+        // this parameter must keep behaving exactly as before (gating only ever happens when the
+        // caller actually wires a real cache).
+        let api = FakeAPIClient()
+        let queue = FixQueue(generateBatchId: { "batch-1" })
+        await queue.enqueue(makeFix("f1"))
+        api.reportLocationsHandler = { _, _, _ in
+            TestFeatures.envelope(ReportLocationsResponse(accepted: 1, duplicates: 0, lastKnownUpdated: true, deviceSettings: DeviceSettingsSnapshot(syncIntervalMinutes: 15, trackingEnabled: true), geofenceEtag: "0"))
+        }
+        let coordinator = LocationSyncCoordinator(queue: queue, apiClient: api, deviceId: { "device-1" })
+
+        _ = await coordinator.syncOnce()
+
+        #expect(api.reportLocationsCalls.count == 1)
+    }
+
     @Test func noDeviceId_returnsNothingToSync_neverCallsTheApi() async {
         let api = FakeAPIClient()
         let queue = FixQueue()

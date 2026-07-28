@@ -1,15 +1,21 @@
 import Foundation
 
-/// specs/009-device-runtime.md §3.4/§4 — the schedule-rebuild half of settings application:
-/// canceling/rescheduling the opportunistic sync triggers. `SystemBackgroundSyncScheduler`
-/// implements this for real (`BGTaskScheduler`); significant-location-change monitoring is
-/// started/stopped by whoever owns the `LocationProviding` instance (`LocationRuntimeContainer`),
-/// which is why `cancelAll`/`reschedule` alone don't fully implement §4's teardown — the
-/// coordinator below composes this WITH stopping/starting background monitoring at its one call
-/// site.
+/// specs/009-device-runtime.md §3.4/§4 — the schedule-rebuild half of settings application.
+///
+/// **Deliberately has no `cancelAll`/"stop the BG task" method (post-review correction).** An
+/// earlier version of this protocol had one, and `DeviceSettingsCoordinator`'s `.pause` case
+/// called it — which is exactly backwards for iOS. specs/009 §4's first paragraph ("cancel the BG
+/// task... and stop capturing") describes Android's WorkManager/foreground-service model; its
+/// SECOND paragraph is the one that actually governs iOS: "a low-frequency worker/BG task is the
+/// **only thing that keeps running while paused**" — the very mechanism that makes the pull-based
+/// resume possible. Canceling the only surviving background trigger on pause would strand a
+/// remotely-paused device with no way to ever notice a resume short of the user manually
+/// reopening the app, directly violating "MUST re-check its settings... at least every 6 hours."
+/// `LocationRuntimeContainer.handleBackgroundRefresh()` is what actually varies behavior by pause
+/// state (poll-and-reschedule-within-6h vs. the normal capture-and-sync cycle) — this protocol's
+/// only remaining job is rescheduling on an interval/resume change.
 public protocol SyncScheduling {
     func reschedule(syncIntervalMinutes: Int)
-    func cancelAll()
 }
 
 /// I11's not-yet-built region-monitoring lifecycle seam (specs/009 §6.2's "unregister all"
@@ -42,29 +48,34 @@ public final class NoOpGeofenceRegistrarStub: GeofenceRegistrarStub {
 /// a delta"). An `actor` so concurrent arrivals from more than one of the three paths above don't
 /// race the state-store read/decide/write sequence.
 ///
-/// Pause (§4) is implemented here directly: canceling the schedule and unregistering geofences are
-/// the only two actions §4 lists beyond "stop capturing", and "stop capturing" is already a natural
-/// consequence of `stateStore` being the same source of truth a real pause-check closure reads
-/// (specs/009 §1.2) — no separate signal is needed. Resume (§4) restores the schedule via the same
-/// `rebuildSchedule` path an interval change uses, and calls `onResume` — `LocationRuntimeContainer`
-/// wires this to re-arm significant-location-change monitoring (and, once I11 lands, geofence
-/// config re-sync — specs/009 §6.2: "resume from pause" is one of its five re-registration
-/// triggers). Mirrors Android's `DeviceSettingsCoordinator` exactly.
+/// Pause (§4) is implemented here directly: unregistering geofences and **stopping
+/// significant-location-change monitoring** (via `onPause`, post-review addition — see below) are
+/// the two teardown actions this actor performs; the BG task is deliberately left scheduled (see
+/// `SyncScheduling`'s doc). Resume (§4) restores the schedule via the same `rebuildSchedule` path
+/// an interval change uses, and calls `onResume` — `LocationRuntimeContainer` wires both
+/// `onPause`/`onResume` to `LocationProviding.stopBackgroundMonitoring()`/
+/// `startBackgroundMonitoring(coordinator:)` (and, once I11 lands, geofence config re-sync on
+/// resume — specs/009 §6.2: "resume from pause" is one of its five re-registration triggers).
+/// Mirrors Android's `DeviceSettingsCoordinator`, with the one deliberate iOS-specific divergence
+/// documented on `SyncScheduling`.
 public actor DeviceSettingsCoordinator: DeviceSettingsApplying {
     private let scheduler: SyncScheduling
     private let geofenceRegistrar: GeofenceRegistrarStub
     private let stateStore: DeviceSettingsStateStoring
+    private let onPause: () -> Void
     private let onResume: () async -> Void
 
     public init(
         scheduler: SyncScheduling,
         geofenceRegistrar: GeofenceRegistrarStub = NoOpGeofenceRegistrarStub(),
         stateStore: DeviceSettingsStateStoring,
+        onPause: @escaping () -> Void = {},
         onResume: @escaping () async -> Void = {}
     ) {
         self.scheduler = scheduler
         self.geofenceRegistrar = geofenceRegistrar
         self.stateStore = stateStore
+        self.onPause = onPause
         self.onResume = onResume
     }
 
@@ -72,15 +83,21 @@ public actor DeviceSettingsCoordinator: DeviceSettingsApplying {
         let previous = stateStore.current()
         let actions = SettingsChangeDecision.decide(previous: previous, next: next)
 
-        // Order matters: cache the new settings BEFORE touching the schedule/geofences, so any
+        // Order matters: cache the new settings BEFORE touching geofences/monitoring, so any
         // capture that races this call already observes the new paused state (§1.2's "stop
         // capturing" is enforced by every capture attempt reading stateStore fresh).
         stateStore.update(next)
 
         switch actions.pauseAction {
         case .pause:
-            scheduler.cancelAll()
             geofenceRegistrar.unregisterAll()
+            // specs/009 §4: "...and stop capturing" — post-review fix: this used to be missing
+            // entirely, leaving significant-location-change monitoring armed while paused (the
+            // device would keep waking for every significant move purely to have
+            // FixCaptureCoordinator's own pause check discard the result — no data leak, but a
+            // real, avoidable battery cost). The BG task itself is deliberately NOT stopped here —
+            // see `SyncScheduling`'s doc for why that would be wrong on iOS.
+            onPause()
         case .resume:
             await onResume()
         case .none:
