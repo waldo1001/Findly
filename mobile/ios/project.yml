@@ -17,9 +17,20 @@ options:
 # FindlyKit (specs/004 §1.1) — the local Swift Package holding all logic + the design system.
 # Referenced as a local package one level up from this project.yml is wrong; FindlyKit is a
 # sibling of this project file (mobile/ios/FindlyKit), hence the plain relative path below.
+#
+# firebase-ios-sdk (specs/009 §5, I12) — real FCM-routed push. Only the two products this task
+# actually needs (FirebaseMessaging + its FirebaseCore dependency) are linked below; FirebaseAuth
+# is deliberately NOT added here (that's I3's own already-written, `#if canImport(FirebaseAuth)`-
+# gated `FirebaseAuthProvider` code, left inert on purpose until a future session's task adds that
+# product — not this one's scope). Pinned with `.upToNextMajor` off the last release published
+# before this session (`11.15.0`) so `xcodegen generate` + `xcodebuild` resolve a real, reproducible
+# version rather than "whatever is newest today".
 packages:
   FindlyKit:
     path: FindlyKit
+  FirebaseSDK:
+    url: https://github.com/firebase/firebase-ios-sdk
+    from: 11.15.0
 
 targets:
   Findly:
@@ -31,6 +42,14 @@ targets:
         excludes:
           - Info.plist
           - Findly.entitlements
+      # Firebase's config file, gitignored (docs/security-review-checklist.md), lives at
+      # mobile/ios/GoogleService-Info.plist — a sibling of this project.yml, NOT inside Findly/ —
+      # matching both the real, gitignored developer-machine file and .github/workflows/ios.yml's
+      # pre-existing "generate placeholder GoogleService-Info.plist" CI step (added ahead of this
+      # task by I9, written to the SAME path: the job's working-directory is mobile/ios). Listed as
+      # its own explicit source entry (rather than moving/duplicating the file into Findly/) so
+      # `xcodegen generate` bundles it as an app resource without disturbing that established path.
+      - path: GoogleService-Info.plist
     settings:
       base:
         PRODUCT_NAME: Findly
@@ -50,6 +69,10 @@ targets:
     dependencies:
       - package: FindlyKit
         product: FindlyKit
+      - package: FirebaseSDK
+        product: FirebaseMessaging
+      - package: FirebaseSDK
+        product: FirebaseCore
     scheme:
       testTargets: []
       gatherCoverageData: false

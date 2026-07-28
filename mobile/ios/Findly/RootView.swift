@@ -53,6 +53,11 @@ struct RootView: View {
     // exclusion, specs/008 §3.1 rules 1/4) — never the in-memory test fake — is what a real device
     // build always gets here.
     private let exportArtifactStore: ExportArtifactStoring
+    // specs/009-device-runtime.md §5 (I12) — device re-registration + push-notification
+    // registration, run once at cold launch (in `FindlyApp.init()`, if already signed in) and
+    // again here once `SignInViewModel` reports a fresh interactive sign-in (a session that starts
+    // at the sign-in screen never got the cold-launch call, since nobody was signed in yet then).
+    private let onSignedIn: () async -> Void
 
     init(
         coordinator: AppCoordinator,
@@ -61,7 +66,8 @@ struct RootView: View {
         apiClient: FindlyAPIClient,
         deviceIdProvider: DeviceIdProviding,
         exportArtifactStore: ExportArtifactStoring,
-        locationRuntimeContainer: LocationRuntimeContainer
+        locationRuntimeContainer: LocationRuntimeContainer,
+        onSignedIn: @escaping () async -> Void
     ) {
         self.coordinator = coordinator
         self.joinLinkHost = config.joinLinkHost
@@ -70,6 +76,7 @@ struct RootView: View {
         self.deviceIdProvider = deviceIdProvider
         self.exportArtifactStore = exportArtifactStore
         self.locationRuntimeContainer = locationRuntimeContainer
+        self.onSignedIn = onSignedIn
     }
 
     var body: some View {
@@ -79,6 +86,9 @@ struct RootView: View {
                 SignInScreen(
                     viewModel: SignInViewModel(authProvider: authProvider, onSignedIn: {
                         coordinator.showHome()
+                        // specs/009-device-runtime.md §5 (I12) — device re-registration +
+                        // push-notification registration on first launch after sign-in.
+                        Task { await onSignedIn() }
                         // specs/009-device-runtime.md §6.2 (I11) — "first config sync after
                         // sign-in" is one of the five geofence re-registration triggers; see
                         // `LocationRuntimeContainer.onSignedIn()`'s doc for why this in-app

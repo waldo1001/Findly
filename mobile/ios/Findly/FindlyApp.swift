@@ -1,5 +1,6 @@
 import SwiftUI
 import FindlyKit
+import UIKit
 import os
 
 /// specs/004-ios-client.md §1.1 — the app target's App-lifecycle-wiring entry point.
@@ -20,6 +21,12 @@ import os
 @main
 @MainActor
 struct FindlyApp: App {
+    // specs/009-device-runtime.md §5 (I12) — bridges Firebase/APNs delegate callbacks and passes
+    // OS-lifecycle push events into FindlyKit's `PushMessageDispatcher` (specs/004 §1.1's allowance:
+    // "passing... push-registration callbacks... into FindlyKit types through their public
+    // protocols"). Zero business logic lives in `AppDelegate` itself.
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+
     // specs/004-ios-client.md §8 — the one shared `AppConfig`, so `AppCoordinator` (deep-link host
     // matching) and `RootView` (share link/QR) agree on the same `joinLinkHost` (specs/007 §1).
     private let config: AppConfig
@@ -37,6 +44,13 @@ struct FindlyApp: App {
     // desync (the same class of bug specs/009 §2 exists to prevent one layer down).
     private let fixQueue: FixQueue
     private let locationRuntimeContainer: LocationRuntimeContainer
+    // specs/009-device-runtime.md §5 (I12) — first-launch-after-sign-in / app-update device
+    // re-registration plus push-notification registration, run once at cold launch (if already
+    // signed in) and again from `RootView`'s sign-in completion (a session that begins signed OUT).
+    // A plain closure (not a stored dependency) keeps `RootView`'s own parameter list from having
+    // to grow by `DeviceRegistrationService` + `AppVersionRegistrationTracking` just to thread this
+    // one call through.
+    private let onSignedIn: () async -> Void
 
     init() {
         let config = AppConfig()
@@ -138,10 +152,9 @@ struct FindlyApp: App {
             lastQueuedFixAtStore: UserDefaultsLastQueuedFixAtStore(),
             isPermissionGranted: { [weak locationProvider] in locationProvider?.isAuthorized ?? false },
             // specs/009 §9: 404 DEVICE_NOT_FOUND -> stop the schedule, clear local device state,
-            // re-run registration. This is also what self-heals the (pre-existing, not an I10
-            // regression) gap that nothing yet calls DeviceRegistrationService on first launch
-            // after sign-in: the very first sync attempt for a client-generated-but-never-
-            // registered deviceId 404s once, registers here, then succeeds from then on.
+            // re-run registration. `onSignedIn` below (I12) now also explicitly registers on first
+            // launch after sign-in and on every app update, per specs/004 §5's trigger list — this
+            // remains the backstop for any registration `onSignedIn` missed or that failed silently.
             onReRegisterDevice: { [weak authProvider] in
                 guard let uid = authProvider?.currentUserId else { return }
                 deviceIdProvider.clearDeviceId(forUserId: uid)
@@ -199,6 +212,50 @@ struct FindlyApp: App {
         // async work racing its own synchronous side effects (see `syncGeofenceConfigOnColdStart`'s
         // doc for the full rationale).
         Task { await container.syncGeofenceConfigOnColdStart() }
+
+        // specs/009-device-runtime.md §5 (I12) — the push runtime: wires the four per-type
+        // handlers into one dispatcher (`AppDelegate.didReceiveRemoteNotification` reaches it via
+        // `PushRuntimeContainerHolder`), and connects the real FCM-backed `PushTokenProviding` to
+        // `DeviceRegistrationService`'s existing (already-tested, I1) refresh-triggered
+        // re-registration path — no call-site change needed there, exactly like Android's
+        // `RealPushTokenProvider` swap-in.
+        //
+        // Reconciliation with I11 (post-merge fix): `GEOFENCE_CONFIG_CHANGED`'s handler now shares
+        // `container.geofenceConfigSyncCoordinator` — the SAME instance `LocationRuntimeContainer`
+        // already built and drains through every other §6.2 trigger — instead of constructing a
+        // second, independent one. Two instances would each own their own `GeofenceConfigStateStoring`
+        // read/write of the SAME `UserDefaults` keys and could race/disagree about the cached ETag,
+        // defeating the "single source of truth" §6.1 requires; sharing one instance mirrors exactly
+        // how `settingsApplying` above is already shared between the location and push sides.
+        let pushRuntimeContainer = PushRuntimeContainer(
+            apiClient: apiClient,
+            locationProvider: locationProvider,
+            deviceId: deviceIdClosure,
+            settingsApplying: container.settingsApplying,
+            geofenceConfigSyncCoordinator: container.geofenceConfigSyncCoordinator,
+            geofenceEventNotifier: SystemGeofenceEventNotifier()
+        )
+        PushRuntimeContainerHolder.shared.container = pushRuntimeContainer
+        deviceRegistrationService.observePushTokenRefreshes(FirebasePushTokenProvider.shared)
+
+        // specs/004-ios-client.md §5's remaining two triggers (first launch after sign-in, every
+        // app update) + specs/004 §1.1's "push-registration callbacks" allowance:
+        // `UIApplication.registerForRemoteNotifications()` starts the APNs handshake that
+        // eventually yields an FCM token via `FirebasePushTokenProvider`. Gated on already being
+        // signed in so this is a no-op for a session that starts at the sign-in screen — `RootView`
+        // calls this same closure again once `SignInViewModel` reports success.
+        let appVersionTracker = UserDefaultsAppVersionRegistrationTracker()
+        // A local `let`, not `self.onSignedIn` directly - capturing `self` in the `Task` closure
+        // below would be an escaping-closure-captures-mutating-self error inside a struct's
+        // `init()`. Assigned to the stored property immediately after, so both this cold-launch
+        // call and `RootView`'s later interactive-sign-in call end up invoking the identical logic.
+        let onSignedInClosure: () async -> Void = { [weak authProvider] in
+            guard authProvider?.currentUserId != nil else { return }
+            UIApplication.shared.registerForRemoteNotifications()
+            await deviceRegistrationService.registerOnLaunchIfNeeded(appVersionTracker: appVersionTracker)
+        }
+        self.onSignedIn = onSignedInClosure
+        Task { await onSignedInClosure() }
     }
 
     var body: some Scene {
@@ -210,7 +267,8 @@ struct FindlyApp: App {
                 apiClient: apiClient,
                 deviceIdProvider: deviceIdProvider,
                 exportArtifactStore: exportArtifactStore,
-                locationRuntimeContainer: locationRuntimeContainer
+                locationRuntimeContainer: locationRuntimeContainer,
+                onSignedIn: onSignedIn
             )
                 // specs/004-ios-client.md §3.4/§3.5 — both the `findly://group-join?code=…` deep
                 // link and, since specs/007, the `https://{joinLinkHost}/g#CODE` universal link are

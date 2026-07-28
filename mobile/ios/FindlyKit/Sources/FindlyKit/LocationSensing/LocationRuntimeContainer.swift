@@ -42,8 +42,11 @@ public final class LocationRuntimeContainer {
     // I11 (specs/009-device-runtime.md §6.2) — the fetch/cache/full-replace-register sequence.
     // Held so `start()`/`onSignedIn()` (cold start, first sync after sign-in) and `onResume` below
     // (resume from pause) can all call through the same instance `LocationSyncRunner` also drains
-    // the ETag-mismatch trigger through.
-    private let geofenceConfigSyncCoordinator: GeofenceConfigSyncCoordinator
+    // the ETag-mismatch trigger through. `public` (I12 reconciliation): the app target's composition
+    // root hands this SAME instance to `PushRuntimeContainer` so the `GEOFENCE_CONFIG_CHANGED` push
+    // handler shares one source of truth with every other §6.2 registration trigger, rather than
+    // each side owning an independent cache that could disagree — mirrors `settingsApplying` below.
+    public let geofenceConfigSyncCoordinator: GeofenceConfigSyncCoordinator
     // Post-review addition (security review, High finding) — previously only ever a local `let`
     // inside `FindlyApp.init()`, with no path from anywhere in the sign-out flow able to reach it
     // at all. `wipeLocalState()` below needs it directly for the unregister-all half of the fix.
@@ -71,6 +74,13 @@ public final class LocationRuntimeContainer {
     /// closure, since `SystemGeofenceRegistrar` (like `SystemLocationProvider`) is built OUTSIDE
     /// this container, in `FindlyApp.init()`.
     public let geofenceTransitionHandler: GeofenceTransitionHandler
+
+    /// specs/009-device-runtime.md §5.2/§3.5 — the seam I12's `SETTINGS_CHANGED` push handler calls
+    /// into (`DeviceSettingsCoordinator`'s own doc names this exactly: "I12's scope to wire the
+    /// push arrival itself, but this is the seam it calls into"). Exposed read-only so the app
+    /// target's composition root (`FindlyApp.init()`) can hand the SAME coordinator instance this
+    /// container already built to `PushRuntimeContainer`, rather than constructing a second one.
+    public var settingsApplying: DeviceSettingsApplying { settingsCoordinator }
 
     public init(
         apiClient: FindlyAPIClient,

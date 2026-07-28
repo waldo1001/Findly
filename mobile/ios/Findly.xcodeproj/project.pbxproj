@@ -8,20 +8,28 @@
 
 /* Begin PBXBuildFile section */
 		1212706638CC72A1A448E57C /* KeychainStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 933698B18341B5B93F960141 /* KeychainStore.swift */; };
+		220125CCC68EB48569672CA1 /* FirebaseCore in Frameworks */ = {isa = PBXBuildFile; productRef = E5F9E685A2737D7E01168F16 /* FirebaseCore */; };
 		2927A0E0F956AE3E0708D444 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 1DA559770EEB71FE9D4E4731 /* Assets.xcassets */; };
 		2E1B11D96FD0432BBF16C66C /* FindlyApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A469252C0F62EA27A5A96C8 /* FindlyApp.swift */; };
+		680F3A8A8F5B9384D3E27E33 /* FirebasePushTokenProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0CFCAEA06AA257D2BD8FD4EC /* FirebasePushTokenProvider.swift */; };
 		B02F8EA427CC832CDAD5222E /* FirebaseAuthProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB7E3B29A1DEB20EAF23B1F7 /* FirebaseAuthProvider.swift */; };
 		C260FCFC518F028EBF7BBA4A /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 116AE311B80835894993CDAC /* RootView.swift */; };
+		C9507C73AF152EF9C3355B39 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = E76AF327094EE2AF4787E446 /* AppDelegate.swift */; };
 		CB8C07C58DEB2D7E127CAF82 /* FindlyKit in Frameworks */ = {isa = PBXBuildFile; productRef = 9442267E30BDEB32B226E1B5 /* FindlyKit */; };
+		E0BB8FB47DD4963B529B77B3 /* FirebaseMessaging in Frameworks */ = {isa = PBXBuildFile; productRef = FB971569453E73404BF940F5 /* FirebaseMessaging */; };
+		F508E58763FB60F25015ADCD /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = 222ABA473205FAA462451553 /* GoogleService-Info.plist */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		0CFCAEA06AA257D2BD8FD4EC /* FirebasePushTokenProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FirebasePushTokenProvider.swift; sourceTree = "<group>"; };
 		116AE311B80835894993CDAC /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
 		1DA559770EEB71FE9D4E4731 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		222ABA473205FAA462451553 /* GoogleService-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = "GoogleService-Info.plist"; sourceTree = "<group>"; };
 		360976CF9D45F33462D845E1 /* Findly.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Findly.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		7A469252C0F62EA27A5A96C8 /* FindlyApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FindlyApp.swift; sourceTree = "<group>"; };
 		933698B18341B5B93F960141 /* KeychainStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainStore.swift; sourceTree = "<group>"; };
 		9515587061357626BB7B1D90 /* FindlyKit */ = {isa = PBXFileReference; lastKnownFileType = folder; name = FindlyKit; path = FindlyKit; sourceTree = SOURCE_ROOT; };
+		E76AF327094EE2AF4787E446 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		EB7E3B29A1DEB20EAF23B1F7 /* FirebaseAuthProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FirebaseAuthProvider.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -31,6 +39,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				CB8C07C58DEB2D7E127CAF82 /* FindlyKit in Frameworks */,
+				E0BB8FB47DD4963B529B77B3 /* FirebaseMessaging in Frameworks */,
+				220125CCC68EB48569672CA1 /* FirebaseCore in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -40,6 +50,7 @@
 		3CC0EAE8E0A4D97999B38108 = {
 			isa = PBXGroup;
 			children = (
+				222ABA473205FAA462451553 /* GoogleService-Info.plist */,
 				6A42350ACED47A91740C2749 /* Findly */,
 				6171207FFC9987B47E3C6F6E /* Packages */,
 				DF8D92856590906E565827DE /* Products */,
@@ -61,8 +72,18 @@
 				7A469252C0F62EA27A5A96C8 /* FindlyApp.swift */,
 				116AE311B80835894993CDAC /* RootView.swift */,
 				B3347B5FC65CF11B7CF3F671 /* Auth */,
+				8EEE33EA1C28197C64950E03 /* Push */,
 			);
 			path = Findly;
+			sourceTree = "<group>";
+		};
+		8EEE33EA1C28197C64950E03 /* Push */ = {
+			isa = PBXGroup;
+			children = (
+				E76AF327094EE2AF4787E446 /* AppDelegate.swift */,
+				0CFCAEA06AA257D2BD8FD4EC /* FirebasePushTokenProvider.swift */,
+			);
+			path = Push;
 			sourceTree = "<group>";
 		};
 		B3347B5FC65CF11B7CF3F671 /* Auth */ = {
@@ -100,6 +121,8 @@
 			name = Findly;
 			packageProductDependencies = (
 				9442267E30BDEB32B226E1B5 /* FindlyKit */,
+				FB971569453E73404BF940F5 /* FirebaseMessaging */,
+				E5F9E685A2737D7E01168F16 /* FirebaseCore */,
 			);
 			productName = Findly;
 			productReference = 360976CF9D45F33462D845E1 /* Findly.app */;
@@ -129,6 +152,7 @@
 			mainGroup = 3CC0EAE8E0A4D97999B38108;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
+				55ACDD30D11FF8B12DF6B695 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */,
 				08F80C9F2E365B21D1D2281B /* XCLocalSwiftPackageReference "FindlyKit" */,
 			);
 			preferredProjectObjectVersion = 77;
@@ -147,6 +171,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				2927A0E0F956AE3E0708D444 /* Assets.xcassets in Resources */,
+				F508E58763FB60F25015ADCD /* GoogleService-Info.plist in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -157,8 +182,10 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				C9507C73AF152EF9C3355B39 /* AppDelegate.swift in Sources */,
 				2E1B11D96FD0432BBF16C66C /* FindlyApp.swift in Sources */,
 				B02F8EA427CC832CDAD5222E /* FirebaseAuthProvider.swift in Sources */,
+				680F3A8A8F5B9384D3E27E33 /* FirebasePushTokenProvider.swift in Sources */,
 				1212706638CC72A1A448E57C /* KeychainStore.swift in Sources */,
 				C260FCFC518F028EBF7BBA4A /* RootView.swift in Sources */,
 			);
@@ -362,10 +389,31 @@
 		};
 /* End XCLocalSwiftPackageReference section */
 
+/* Begin XCRemoteSwiftPackageReference section */
+		55ACDD30D11FF8B12DF6B695 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/firebase/firebase-ios-sdk";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 11.15.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
 /* Begin XCSwiftPackageProductDependency section */
 		9442267E30BDEB32B226E1B5 /* FindlyKit */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = FindlyKit;
+		};
+		E5F9E685A2737D7E01168F16 /* FirebaseCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 55ACDD30D11FF8B12DF6B695 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseCore;
+		};
+		FB971569453E73404BF940F5 /* FirebaseMessaging */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 55ACDD30D11FF8B12DF6B695 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseMessaging;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
