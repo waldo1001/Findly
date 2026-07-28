@@ -113,14 +113,14 @@ jobs:
           </plist>
           PLIST
       # Real build (not just a structure check): compiles the Findly app target + links FindlyKit
-      # as a local SPM dependency. `iPhone 15` matches the simulator name commonly preinstalled on
-      # GitHub's macos-14 runner image (same choice `actions/runner-images`' macos-14 image
-      # documents as available) — this session generated/validated Findly.xcodeproj on a real
-      # Xcode 26.6 host but has no macos-14 GitHub-hosted runner to verify this exact simulator
-      # name against; if `iPhone 15` isn't present on the actual runner image, swap for whatever
-      # `xcrun simctl list devicetypes` shows there.
+      # as a local SPM dependency. A pinned device name + `OS:latest` (the previous form) broke
+      # when the runner image's newest simulator runtime (18.2) stopped pairing with "iPhone 15"
+      # (only "iPhone 16"+ ship at that OS) — confirmed via CI log, `xcodebuild: error: Unable to
+      # find a device matching the provided destination specifier`. This job only builds (never
+      # runs on the simulator), so `generic/platform=iOS Simulator` sidesteps the whole
+      # device/OS-availability pairing and can't go stale the same way again.
       - name: build
-        run: xcodebuild build -scheme Findly -destination 'platform=iOS Simulator,name=iPhone 15'
+        run: xcodebuild build -scheme Findly -destination 'generic/platform=iOS Simulator'
       # TODO(H6): archive + sign (main only) — real signing secrets don't exist yet (store-readiness
       # §2 / docs/implementation-handoff.md H6). Expected shape:
       #

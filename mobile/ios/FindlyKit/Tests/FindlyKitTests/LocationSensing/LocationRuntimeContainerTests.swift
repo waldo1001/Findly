@@ -92,7 +92,7 @@ struct LocationRuntimeContainerTests {
         container.start()
 
         #expect(provider.startBackgroundMonitoringCallCount == 0, "significant-location-change monitoring stays off while paused")
-        #expect(scheduler.scheduleCalls == [6 * 60 * 60], "the BG task must still be scheduled, bounded to specs/009 §4's 'at least every 6 hours'")
+        #expect(scheduler.scheduleCalls == [TimeInterval(6 * 60 * 60)], "the BG task must still be scheduled, bounded to specs/009 §4's 'at least every 6 hours'")
     }
 
     @Test func stop_stopsMonitoringAndCancelsTheSchedule() {
@@ -263,7 +263,7 @@ struct LocationRuntimeContainerTests {
 
         await container.handleBackgroundRefresh()
 
-        #expect(scheduler.scheduleCalls == [6 * 60 * 60], "specs/009 §4: 'at least every 6 hours'")
+        #expect(scheduler.scheduleCalls == [TimeInterval(6 * 60 * 60)], "specs/009 §4: 'at least every 6 hours'")
     }
 
     @Test func handleBackgroundRefresh_pausedPollDetectsResume_reschedulesImmediately_notSixHoursOut() async {
