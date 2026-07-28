@@ -16,7 +16,17 @@ private final class FakeGeofenceEventNotifying: GeofenceEventNotifying {
 /// one `PushMessageDispatcher`. Mirrors `LocationRuntimeContainerTests`: exercised end-to-end
 /// against fakes for every real collaborator, confirming the wiring itself (not re-testing each
 /// handler's own parsing logic, already covered by their dedicated test files).
+///
+/// **I11 reconciliation:** `geofenceConfigSyncCoordinator` is now a REQUIRED constructor
+/// parameter — the real production wiring shares the exact instance `LocationRuntimeContainer`
+/// builds (see `PushRuntimeContainer`'s own doc for why); these tests build their own throwaway
+/// instance per test (fakes underneath), since there's no `LocationRuntimeContainer` in scope here
+/// and the sharing behavior itself isn't this file's concern.
 struct PushRuntimeContainerTests {
+
+    private func makeGeofenceConfigSyncCoordinator(apiClient: FindlyAPIClient) -> GeofenceConfigSyncCoordinator {
+        GeofenceConfigSyncCoordinator(apiClient: apiClient, configStore: InMemoryGeofenceConfigStateStore(), registrar: FakeGeofenceRegistering())
+    }
 
     @Test func locateRequestPush_reachesLocationProviderAndApiClient() async {
         let location = FakeLocationProviding()
@@ -25,7 +35,9 @@ struct PushRuntimeContainerTests {
         api.fulfillLocateRequestHandler = { _, _, _ in TestFeatures.envelope(FulfillLocateRequestResponse(status: "fulfilled")) }
         let container = PushRuntimeContainer(
             apiClient: api, locationProvider: location, deviceId: { "device-1" },
-            settingsApplying: FakeDeviceSettingsApplying(), geofenceEventNotifier: FakeGeofenceEventNotifying()
+            settingsApplying: FakeDeviceSettingsApplying(),
+            geofenceConfigSyncCoordinator: makeGeofenceConfigSyncCoordinator(apiClient: api),
+            geofenceEventNotifier: FakeGeofenceEventNotifying()
         )
 
         // `now` isn't injectable through the container (the real app always uses the real clock),
@@ -38,10 +50,13 @@ struct PushRuntimeContainerTests {
     }
 
     @Test func settingsChangedPush_reachesSettingsApplying() async {
+        let api = FakeAPIClient()
         let settingsApplying = FakeDeviceSettingsApplying()
         let container = PushRuntimeContainer(
-            apiClient: FakeAPIClient(), locationProvider: FakeLocationProviding(), deviceId: { "device-1" },
-            settingsApplying: settingsApplying, geofenceEventNotifier: FakeGeofenceEventNotifying()
+            apiClient: api, locationProvider: FakeLocationProviding(), deviceId: { "device-1" },
+            settingsApplying: settingsApplying,
+            geofenceConfigSyncCoordinator: makeGeofenceConfigSyncCoordinator(apiClient: api),
+            geofenceEventNotifier: FakeGeofenceEventNotifying()
         )
 
         await container.dispatcher.dispatch(["type": "SETTINGS_CHANGED", "syncIntervalMinutes": "30", "trackingEnabled": "false"])
@@ -50,10 +65,13 @@ struct PushRuntimeContainerTests {
     }
 
     @Test func geofenceEventPush_reachesTheNotifier() async {
+        let api = FakeAPIClient()
         let notifier = FakeGeofenceEventNotifying()
         let container = PushRuntimeContainer(
-            apiClient: FakeAPIClient(), locationProvider: FakeLocationProviding(), deviceId: { "device-1" },
-            settingsApplying: FakeDeviceSettingsApplying(), geofenceEventNotifier: notifier
+            apiClient: api, locationProvider: FakeLocationProviding(), deviceId: { "device-1" },
+            settingsApplying: FakeDeviceSettingsApplying(),
+            geofenceConfigSyncCoordinator: makeGeofenceConfigSyncCoordinator(apiClient: api),
+            geofenceEventNotifier: notifier
         )
 
         await container.dispatcher.dispatch(["type": "GEOFENCE_EVENT", "displayName": "Noor", "geofenceName": "Home", "transition": "enter"])
@@ -66,7 +84,9 @@ struct PushRuntimeContainerTests {
         api.getGeofencesHandler = { _ in .notModified }
         let container = PushRuntimeContainer(
             apiClient: api, locationProvider: FakeLocationProviding(), deviceId: { "device-1" },
-            settingsApplying: FakeDeviceSettingsApplying(), geofenceEventNotifier: FakeGeofenceEventNotifying()
+            settingsApplying: FakeDeviceSettingsApplying(),
+            geofenceConfigSyncCoordinator: makeGeofenceConfigSyncCoordinator(apiClient: api),
+            geofenceEventNotifier: FakeGeofenceEventNotifying()
         )
 
         await container.dispatcher.dispatch(["type": "GEOFENCE_CONFIG_CHANGED", "etag": "\"e1\""])

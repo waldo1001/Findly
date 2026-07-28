@@ -11,6 +11,18 @@ import Foundation
 /// `FirebaseAuthProvider`'s precedent) so `FindlyKit` stays Firebase-SDK-free and `swift test` keeps
 /// running headless (specs/004 §9) — this container only needs the already-Firebase-free
 /// `LocationProviding`/`FindlyAPIClient`/`DeviceSettingsApplying`/`GeofenceEventNotifying` seams.
+///
+/// **Reconciliation with I11 (post-merge):** `geofenceConfigSyncCoordinator` is REQUIRED, not
+/// defaulted/constructed here — I12 originally built its own placeholder
+/// `GeofenceConfigCaching`/`GeofenceConfigRegistering`/`GeofenceConfigSyncCoordinator` trio (deleted
+/// now that I11 landed the real thing at `LocationSensing/GeofenceConfigSyncCoordinator.swift`, same
+/// module, same public `sync()` shape `GeofenceConfigChangedPushHandler` already called). The caller
+/// (`FindlyApp.init()`) MUST pass the exact same instance `LocationRuntimeContainer` already built
+/// and exposes (`container.geofenceConfigSyncCoordinator`) — a second, independently-constructed
+/// coordinator would carry its own `GeofenceConfigStateStoring` read/write of the same cached
+/// ETag/geofence list and could disagree with the one every other §6.2 trigger drains through,
+/// defeating the "single source of truth" specs/009 §6.1 requires. Mirrors how `settingsApplying`
+/// below is already shared the same way.
 public final class PushRuntimeContainer {
     public let dispatcher: PushMessageDispatcher
 
@@ -19,14 +31,12 @@ public final class PushRuntimeContainer {
         locationProvider: LocationProviding,
         deviceId: @escaping () -> String?,
         settingsApplying: DeviceSettingsApplying,
-        geofenceEventNotifier: GeofenceEventNotifying,
-        geofenceConfigRegistrar: GeofenceConfigRegistering = NoOpGeofenceConfigRegistering(),
-        geofenceConfigCache: GeofenceConfigCaching = InMemoryGeofenceConfigCache()
+        geofenceConfigSyncCoordinator: GeofenceConfigSyncCoordinator,
+        geofenceEventNotifier: GeofenceEventNotifying
     ) {
         let locateRequestHandler = LocateRequestPushHandler(locationProvider: locationProvider, apiClient: apiClient, deviceId: deviceId)
         let settingsChangedHandler = SettingsChangedPushHandler(settingsApplying: settingsApplying)
         let geofenceEventHandler = GeofenceEventPushHandler(notifier: geofenceEventNotifier)
-        let geofenceConfigSyncCoordinator = GeofenceConfigSyncCoordinator(apiClient: apiClient, cache: geofenceConfigCache, registrar: geofenceConfigRegistrar)
         let geofenceConfigChangedHandler = GeofenceConfigChangedPushHandler(syncCoordinator: geofenceConfigSyncCoordinator)
 
         self.dispatcher = PushMessageDispatcher(

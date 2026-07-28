@@ -137,7 +137,13 @@ final class FakeAPIClient: FindlyAPIClient {
         return try await replaceGeofencesHandler(geofences, ifMatch)
     }
 
-    func reportGeofenceEvents(deviceId: String, events: [GeofenceEventReport]) async throws -> Envelope<ReportGeofenceEventsResponse> { fatalError("not configured") }
+    private(set) var reportGeofenceEventsCalls: [(deviceId: String, events: [GeofenceEventReport])] = []
+    var reportGeofenceEventsHandler: (String, [GeofenceEventReport]) async throws -> Envelope<ReportGeofenceEventsResponse> = { _, _ in fatalError("not configured") }
+    func reportGeofenceEvents(deviceId: String, events: [GeofenceEventReport]) async throws -> Envelope<ReportGeofenceEventsResponse> {
+        reportGeofenceEventsCalls.append((deviceId, events))
+        return try await reportGeofenceEventsHandler(deviceId, events)
+    }
+
     func getGeofenceEventHistory(from: String, to: String, userId: String?, limit: Int?, cursor: String?) async throws -> Envelope<GeofenceEventHistoryResponse> { fatalError("not configured") }
 
     // MARK: - §12 Groups

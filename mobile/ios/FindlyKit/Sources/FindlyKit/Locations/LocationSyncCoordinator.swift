@@ -155,8 +155,11 @@ public final class LocationSyncCoordinator {
 
     /// specs/009 §9: "403 TRACKING_PAUSED... using the error.details.deviceSettings echoed in the
     /// response." `details` is untyped JSON (`[String: JSONValue]?`, specs/001 §1.3) since its
-    /// shape varies per error code.
-    private static func deviceSettings(from details: [String: JSONValue]?) -> DeviceSettingsSnapshot? {
+    /// shape varies per error code. Internal (not `private`, I11 addition) so
+    /// `GeofenceEventSyncCoordinator` — which decodes the identical `TRACKING_PAUSED` shape from
+    /// `POST /geofence-events` (001 §7.3: "same piggyback fields as §5.1") — can reuse this exact
+    /// parsing rather than duplicating it.
+    static func deviceSettings(from details: [String: JSONValue]?) -> DeviceSettingsSnapshot? {
         guard case .object(let settingsObject)? = details?["deviceSettings"] else { return nil }
         guard case .number(let interval)? = settingsObject["syncIntervalMinutes"],
               case .bool(let tracking)? = settingsObject["trackingEnabled"] else { return nil }

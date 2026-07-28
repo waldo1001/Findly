@@ -33,10 +33,15 @@ public struct GeofenceConfig: Decodable, Equatable {
 }
 
 /// §7.1 result — a `304` carries no body; modeled as a distinct case rather than an optional so
-/// callers can't mistake "not modified" for "empty config".
+/// callers can't mistake "not modified" for "empty config". `.ok` carries `features` (specs/001
+/// §9's envelope, widened here by I11) alongside the config/etag so `GeofenceConfigSyncCoordinator`
+/// can read `features.limits.maxGeofences` — the project convention (CLAUDE.md: "limits are always
+/// read from the features object... never hardcoded at call sites") applied to the 20-region
+/// platform ceiling (000 §O9) the same way Android's `GeofenceConfigSyncCoordinator` reads
+/// `result.features?.limits?.maxGeofences`.
 public enum GeofencesResult: Equatable {
     case notModified
-    case ok(GeofenceConfig, etag: String)
+    case ok(GeofenceConfig, etag: String, features: Features)
 }
 
 public struct ReplaceGeofencesRequest: Encodable, Equatable {
@@ -105,7 +110,7 @@ extension URLSessionAPIClient {
         )
         guard let value else { return .notModified }
         let etag = response.value(forHTTPHeaderField: "ETag") ?? ""
-        return .ok(value.data, etag: etag)
+        return .ok(value.data, etag: etag, features: value.features)
     }
 
     public func replaceGeofences(_ geofences: [Geofence], ifMatch: String) async throws -> (config: Envelope<GeofenceConfig>, etag: String) {

@@ -1,6 +1,6 @@
 # Findly — iOS app (Swift)
 
-**I1 (foundation) + I2 (feature screens) + I3 (phone sign-in) + I7 (Keychain hardening) + I8 (privacy: export/delete) + I9 (Xcode app-target project) + I10 (real device runtime) + I12 (push registration + handling) implemented.** Normative design: [`specs/004-ios-client.md`](../../specs/004-ios-client.md) — read that first; it owns the architecture, the design-system token contract, the full 001 endpoint mapping, auth/token-refresh, and the fix-queue model's *rules* (batch/idempotency — the *runtime* behind those rules, incl. persistence, capture, scheduling, and push/geofence handling, is normative in [`specs/009-device-runtime.md`](../../specs/009-device-runtime.md), which 004 §7 points to rather than duplicating). Phone sign-in is normative in [`specs/006-phone-auth.md`](../../specs/006-phone-auth.md) (004 §4 owns only the iOS shapes). Wire contract: [`specs/001-api-contract.md`](../../specs/001-api-contract.md). Product context: [`specs/000-overview.md`](../../specs/000-overview.md), esp. open items **O1–O4, O9**.
+**I1 (foundation) + I2 (feature screens) + I3 (phone sign-in) + I7 (Keychain hardening) + I8 (privacy: export/delete) + I9 (Xcode app-target project) + I10 (real device runtime) + I11 (geofencing) + I12 (push registration + handling) implemented.** Normative design: [`specs/004-ios-client.md`](../../specs/004-ios-client.md) — read that first; it owns the architecture, the design-system token contract, the full 001 endpoint mapping, auth/token-refresh, and the fix-queue model's *rules* (batch/idempotency — the *runtime* behind those rules, incl. persistence, capture, scheduling, and push/geofence handling, is normative in [`specs/009-device-runtime.md`](../../specs/009-device-runtime.md), which 004 §7 points to rather than duplicating). Phone sign-in is normative in [`specs/006-phone-auth.md`](../../specs/006-phone-auth.md) (004 §4 owns only the iOS shapes). Wire contract: [`specs/001-api-contract.md`](../../specs/001-api-contract.md). Product context: [`specs/000-overview.md`](../../specs/000-overview.md), esp. open items **O1–O4, O9**.
 
 ## What's here
 
@@ -12,11 +12,18 @@ mobile/ios/
 │   │                       sign-in: AuthProviding, PhoneAuthError, PhoneNumberNormalizer,
 │   │                       StubAuthProvider — specs/006), Device, Locations (the durable offline
 │   │                       fix-queue — `FixQueue`/`FixStoring`/`SQLiteFixStore` — plus the sync
-│   │                       runner: `LocationSyncCoordinator`/`LocationSyncRunner`, I10),
+│   │                       runner: `LocationSyncCoordinator`/`LocationSyncRunner`, I10; and the
+│   │                       durable geofence-event queue — `GeofenceEventQueue`/
+│   │                       `GeofenceEventQueueStoring`/`SQLiteGeofenceEventQueueStore` +
+│   │                       `GeofenceEventSyncCoordinator`, I11),
 │   │                       LocationSensing (real CoreLocation/BackgroundTasks wiring +
-│   │                       `LocationRuntimeContainer`, I10), Push (I12 — `PushMessageType`/
-│   │                       `PushMessageDispatcher` + the four per-type handlers, `PushRuntimeContainer`
-│   │                       composition root, `LocationPushTokenHandling` scaffolding), DesignSystem
+│   │                       `LocationRuntimeContainer`, I10; region-monitoring registration +
+│   │                       transition handling — `GeofenceConfigSyncCoordinator`,
+│   │                       `SystemGeofenceRegistrar`, `GeofenceTransitionHandler`, I11), Push (I12 —
+│   │                       `PushMessageType`/`PushMessageDispatcher` + the four per-type handlers,
+│   │                       `PushRuntimeContainer` composition root, `LocationPushTokenHandling`
+│   │                       scaffolding — its `GEOFENCE_CONFIG_CHANGED` handler shares I11's real
+│   │                       `GeofenceConfigSyncCoordinator` instance, not a second one), DesignSystem
 │   │                       (tokens/theme/11 components), Navigation, Screens/ — two-step phone sign-in (I3) + Home, Map (live
 │   │                       map + swappable MapKit/list `MapRendering`), History (cursor
 │   │                       pagination), Geofences (list/editor, ETag-aware save + version-conflict
@@ -113,14 +120,116 @@ hardcoded values — plist plumbing, not business logic.
   queues over the same file would desync) and publishes it to `LocationRuntimeContainerHolder`,
   which `FindlyApp.init()`'s `BGTaskScheduler.register(...)` call (MUST run before `init` returns,
   Apple's own requirement) reads lazily when the system actually fires the task.
-- **Deferred/not this task's scope:** geofence region-monitoring lifecycle and `source: "geofence"`
-  captures (I11 — a `GeofenceRegistrarStub` no-op seam is left for it, mirroring Android's A9→A11
-  pattern; I12 additionally leaves a second, `GEOFENCE_CONFIG_CHANGED`-specific seam,
-  `GeofenceConfigRegistering`, for the same I11 session to replace); a manual-refresh UI call site
-  for `source: "manual"` (no I2 screen currently calls it — the seam accepts a source/accuracy pair
-  regardless, `requestSingleFix(source:)`, ready for whenever one lands). The "first launch after
-  sign-in" gap noted here originally is now closed by I12 (see below) — `onReRegisterDevice` (the
-  `009 §9` `DEVICE_NOT_FOUND` reaction) remains as an additional backstop.
+- **Deferred/not this task's scope (at the time):** geofence region-monitoring lifecycle and
+  `source: "geofence"` captures — a `GeofenceRegistrarStub` no-op seam was left for it, mirroring
+  Android's A9→A11 pattern. **I11 (below) has since landed this.** `SETTINGS_CHANGED`/
+  `LOCATE_REQUEST`/`GEOFENCE_*` push routing (I12 — `DeviceSettingsApplying` is the seam a push
+  handler plugs into, and I11 adds `GeofenceConfigSyncCoordinator.sync()` as the identical seam for
+  `GEOFENCE_CONFIG_CHANGED`); a manual-refresh UI call site for `source: "manual"` (no
+  I2 screen currently calls it — the seam accepts a source/accuracy pair regardless, `requestSingleFix(source:)`,
+  ready for whenever one lands). Also noted: nothing in I1–I9 ever wired `DeviceRegistrationService`
+  to a "first launch after sign-in" trigger — a pre-existing gap, not an I10 regression — so this
+  task wired `onReRegisterDevice` (the `009 §9` `DEVICE_NOT_FOUND` reaction) to call it, which
+  self-heals a never-registered `deviceId` on the very first sync attempt; a proper eager trigger
+  right after sign-in is still a good follow-up (I11's own "first config sync after sign-in"
+  geofence trigger has the identical gap and works around it the same way — see below).
+
+**I11** implements geofencing end to end (specs/009-device-runtime.md §6, §7). Summary — see the
+file-level doc comments for the full rationale on each:
+
+- **The registration seam** — `GeofenceRegistering` (`LocationSensing/GeofenceRegistering.swift`)
+  widens I10's `GeofenceRegistrarStub` (`unregisterAll()` only) with `registerAll(geofences:etag:)`.
+  `SystemGeofenceRegistrar` (`LocationSensing/SystemGeofenceRegistrar.swift`) is the one real class
+  implementing both halves, mirroring how Android's A11 ended up with one `GeofencingClientManager`
+  implementing both `GeofenceRegistry`/`GeofenceRegistrar` — a dedicated `CLLocationManager`
+  instance (separate from `SystemLocationProvider`'s), so I11 never touches I10's already-reviewed
+  single-fix/significant-location-change code at all. Full replace ("unregister all, then register
+  all") on every call; non-atomicity between the two platform calls is accepted, not fixed
+  (specs/009 §6.2, normative) — the self-healing bound is the existing `geofenceEtag` piggyback
+  trigger set. Defensively capped at `min(features.limits.maxGeofences, 20)` — the CLLocationManager
+  platform ceiling (000 §O9) — even though its only caller already caps there first.
+- **The local geofence-config cache** — `GeofenceConfigStateStoring` (`CachedGeofenceConfig`
+  doc+ETag, `InMemoryGeofenceConfigStateStore`/`UserDefaultsGeofenceConfigStateStore`) — the same
+  protocol+real/fake split as `DeviceSettingsStateStoring`. `GeofenceConfigSyncCoordinator`
+  (`LocationSensing/GeofenceConfigSyncCoordinator.swift`) is the consolidated "fetch (`If-None-Match`)
+  → cache → full re-register" sequence every trigger below calls through — a `304`/failed fetch
+  still re-registers from cache (resume/cold-start need the OS-level registrations rebuilt even when
+  the config itself didn't change).
+- **All five registration triggers (specs/009 §6.2) are wired:**
+  1. *First config sync after sign-in* — `LocationRuntimeContainer.onSignedIn()`, called from
+     `RootView`'s `SignInViewModel(onSignedIn:)` completion callback. (iOS has no
+     `DeviceRegistrar.onRegistered`-shaped hook the way Android does — a pre-existing gap flagged in
+     I10's own section above — so this in-app sign-in-flow callback is the closest unambiguous
+     signal; it also correctly covers an in-app sign-out→sign-in cycle that never re-runs
+     `FindlyApp.init()`, which a cold-start-only trigger would miss.)
+  2. *`geofenceEtag` mismatch from the `POST /locations` piggyback* — `LocationSyncRunner`'s fix-queue
+     drain now applies `GeofenceConfigSyncing.syncIfEtagChanged(_:)` on every `.synced` outcome,
+     alongside the pre-existing mandatory `deviceSettings` piggyback.
+  3. *`geofenceEtag` mismatch from `POST /geofence-events` responses* — `LocationSyncRunner` gained a
+     second drain loop (`drainGeofenceEventQueue()`, run right after the fix-queue drain, both against
+     the identical `MAX_BATCHES_PER_RUN`/piggyback-application pattern) applying the same trigger.
+  4. *Resume from pause* — `DeviceSettingsCoordinator`'s `onResume` closure (wired in
+     `LocationRuntimeContainer.init`) now also calls `GeofenceConfigSyncCoordinator.sync()`, alongside
+     restarting significant-location-change monitoring/the BG schedule.
+  5. *App cold start* (covers reboot/reinstall, both of which lose OS-level geofence registrations
+     without changing anything server-side) — `LocationRuntimeContainer.syncGeofenceConfigOnColdStart()`,
+     called from `FindlyApp.init()` in its own `Task` right after `container.start()`. Deliberately
+     **not** folded into `start()` itself — `start()` stays a plain synchronous call with no
+     fire-and-forget async work racing its own synchronous side effects (every existing `start()`
+     test asserts those immediately after calling it).
+- **Transition handling (specs/009 §6.3).** `GeofenceTransitionHandler`
+  (`LocationSensing/GeofenceTransitionHandler.swift`, pure/tested, mirrors `FixCaptureCoordinator`'s
+  CoreLocation-free split) builds one durable event per callback (client-generated UUIDv4 `eventId`,
+  assigned once at enqueue and never regenerated on retry) and additionally calls
+  `fixCaptureCoordinator.captureAndQueue(source: .geofence, hint:)` — I10's own seam, built exactly
+  for this — using the region's own center/`manager.location` as "the transition's own coordinates"
+  (iOS's `CLLocationManagerDelegate` region callbacks carry no triggering-location field the way
+  Android's `GeofencingEvent` does; a documented judgment call). A transition detected while paused
+  is dropped, not queued (specs/009 §4) — checked here directly since the event-queue enqueue
+  bypasses `FixCaptureCoordinator`'s own pause gate entirely. `SystemGeofenceRegistrar`'s
+  `CLLocationManagerDelegate` conformance is the thin, untested glue that forwards
+  `didEnterRegion`/`didExitRegion` into this handler (a `weak`, post-construction-settable reference
+  — `SystemGeofenceRegistrar` is built before `LocationRuntimeContainer`/the handler exist, same
+  "settable reference wired after the fact" pattern I10 established for
+  `SystemLocationProvider`/`FixCaptureCoordinator`).
+- **The durable geofence-event queue (specs/009 §6.3), same durability bar as I10's fix queue
+  (specs/009 §2).** `GeofenceEventQueueStoring` mirrors `FixStoring`'s freeze-on-first-ask shape
+  (`InMemoryGeofenceEventQueueStore`/`SQLiteGeofenceEventQueueStore`) — simpler than the fix store in
+  two ways: no overflow cap (not specified for events; a detected transition must never be dropped
+  for capacity reasons) and no per-event rejection method (001 §7.3 defines none — every
+  non-`TRACKING_PAUSED` failure just retries the whole frozen batch). `SQLiteGeofenceEventQueueStore`
+  follows `SQLiteFixStore`'s exact pattern: one atomic `BEGIN IMMEDIATE...COMMIT` transaction per
+  composite operation, every runtime value bound via `sqlite3_bind_*` (never string-interpolated —
+  I10's review caught and fixed one violation of that rule; this file was written with the same
+  discipline from the start). `GeofenceEventQueue` (actor, stateless, mirrors `FixQueue`) +
+  `GeofenceEventSyncCoordinator` (mirrors `LocationSyncCoordinator`) complete the parallel.
+- **Local-state wipe (specs/008 §4.4).** `DeleteAccountViewModel` now also clears the geofence-event
+  queue and cached geofence config/ETag, the same "local state" reasoning that already covered
+  `FixQueue` — a stale batch or a now-meaningless-but-still-"unchanged"-looking ETag surviving
+  deletion could otherwise resurface a since-deleted user's data or silently skip a re-signed-in
+  account's re-registration.
+- **Permissions (specs/009 §7).** `SystemGeofenceRegistrar.registerAll` checks current authorization
+  (`.authorizedWhenInUse`/`.authorizedAlways`) before calling `startMonitoring(for:)` — a proactive
+  gate, mirroring `FixCaptureCoordinator.isPermissionGranted`, not just letting `CLLocationManager`
+  silently no-op. Does not itself request authorization — `SystemLocationProvider`'s staged
+  When-In-Use → Always flow (I10) already owns that, and duplicating a request here would risk a
+  second, redundant system prompt.
+- **`GEOFENCE_CONFIG_CHANGED` push arrival (I12, reconciled post-merge):** `GeofenceConfigSyncCoordinator.sync()`
+  (this section, above) is exactly the seam `GeofenceConfigChangedPushHandler` (I12, below) calls —
+  I12 originally built its own placeholder trio ahead of I11 landing; once I11 merged, that trio was
+  deleted and the push handler retargeted at this real coordinator, sharing the SAME instance
+  `LocationRuntimeContainer` builds (see the I12 section below for the reconciliation detail). I11
+  itself never touched any push-message DTO/handler file — the actual merge conflicts, as predicted,
+  were limited to `FindlyApp.swift`/`RootView.swift` (both sessions' additive composition-root
+  wiring landing near the same lines) plus the `Push/GeofenceConfig*` naming collision, not any
+  logical disagreement.
+- **A spec judgment call worth flagging:** iOS's `CLLocationManagerDelegate` region-monitoring
+  callbacks (`didEnterRegion`/`didExitRegion`) carry no triggering-location field, unlike Android's
+  `GeofencingEvent.triggeringLocation`. specs/009 §6.3's "MAY reuse the transition's own coordinates"
+  is interpreted here as: prefer `CLLocationManager`'s own last-known `location` (a real GPS
+  observation) when CoreLocation happens to have one cached, falling back to the triggering
+  `CLCircularRegion`'s own `center`/`radius` otherwise. This is the best available proxy on this
+  platform, not a literal reading of a field the platform doesn't provide.
 
 **I12** wires up real push handling (specs/009-device-runtime.md §5, specs/001-api-contract.md §8).
 Summary — see the file-level doc comments (`FindlyKit/Sources/FindlyKit/Push/`) for the full
@@ -177,12 +286,21 @@ rationale on each:
   separate, larger task, out of scope tonight; this code stays as the tested logic it would plug
   into once that extension exists. No custom icon needed either way — iOS uses the app icon
   directly (009 §8).
-- **`GeofenceConfigChangedPushHandler`/`GeofenceConfigSyncCoordinator`** — the ETag-conditional
-  `GET /geofences` fetch-cache sequence (`GeofenceConfigCaching`, in-memory + `UserDefaults`
-  implementations); actual platform re-registration is I11's scope, stubbed behind a new
-  `GeofenceConfigRegistering` seam (`NoOpGeofenceConfigRegistering` default) with the exact same
-  "I12 builds the seam, I11 replaces the no-op" pattern Android's A9→A11 established for
-  `GeofenceRegistrar`.
+- **`GeofenceConfigChangedPushHandler`** — a thin delegate onto `GeofenceConfigSyncCoordinator.sync()`.
+  **Reconciled post-I11-merge:** I12 originally shipped its own placeholder
+  `GeofenceConfigCaching`/`GeofenceConfigRegistering`/`GeofenceConfigSyncCoordinator` trio ahead of
+  I11 landing (same "build the seam, a later session replaces the no-op" pattern Android's A9→A11
+  established for `GeofenceRegistrar`). Once I11 merged with the real
+  `LocationSensing/GeofenceConfigSyncCoordinator.swift` — same module, same public `sync()` shape —
+  the placeholder trio was deleted outright and `GeofenceConfigChangedPushHandler.handle(_:)` needed
+  **zero body changes** (it already just called `syncCoordinator.sync()`). `PushRuntimeContainer`
+  now takes `geofenceConfigSyncCoordinator: GeofenceConfigSyncCoordinator` as a required parameter
+  and `FindlyApp.init()` passes it the exact SAME instance `LocationRuntimeContainer` builds
+  (`container.geofenceConfigSyncCoordinator`, exposed `public` for this) rather than constructing a
+  second, independent one — two instances would each own their own cached ETag/geofence-list read
+  from the same `UserDefaults` keys and could disagree about what's current, defeating the single
+  source of truth specs/009 §6.1 requires. Mirrors exactly how `settingsApplying` is already shared
+  between the location and push sides.
 - **Token lifecycle.** `FirebasePushTokenProvider` (app target) bridges the raw APNs device token
   (`AppDelegate.application(_:didRegisterForRemoteNotificationsWithDeviceToken:)` →
   `Messaging.messaging().apnsToken`) into the **FCM token** surfaced via `MessagingDelegate` — the
@@ -215,14 +333,21 @@ rationale on each:
   deliberately logs nothing at all rather than risk it, and `AppDelegate.application(_:
   didFailToRegisterForRemoteNotificationsWithError:)` is an intentional no-op body for the same
   reason.
-- **`onSignedIn` shared-file touches, for I11's awareness:** `FindlyApp.swift` gains
-  `@UIApplicationDelegateAdaptor(AppDelegate.self)`, the `PushRuntimeContainer` construction block,
-  and the `onSignedIn: () async -> Void` closure/property; `RootView.swift` gains one new init
-  parameter (`onSignedIn`) threaded into `SignInViewModel`'s existing `onSignedIn` callback.
-  `LocationRuntimeContainer.swift` gains one read-only computed property,
-  `settingsApplying: DeviceSettingsApplying { settingsCoordinator }` — no behavior change, just
-  exposure of an already-built instance. `project.yml` gains the `FirebaseSDK` package + two target
-  dependencies. None of these touch geofence-specific code paths I11 owns.
+- **Shared-file reconciliation with I11 (actual outcome, not the prediction):** `FindlyApp.swift`,
+  `RootView.swift`, and `LocationRuntimeContainer.swift` all landed real (textual, not logical)
+  merge conflicts once I11 merged — both sessions' additive composition-root wiring inserted near
+  the same lines (I11's `geofenceRegistrar`/`wipeLocalState()`/`syncGeofenceConfigOnColdStart()`
+  next to I12's `@UIApplicationDelegateAdaptor`/`PushRuntimeContainer`/`onSignedIn`), resolved by
+  keeping both sides' additions. `RootView`'s `SignInScreen(onSignedIn:)` closure now fires BOTH
+  `Task { await onSignedIn() }` (I12: push registration + device re-registration) and
+  `Task { await locationRuntimeContainer.onSignedIn() }` (I11: first geofence-config sync after
+  sign-in) — two independent, non-conflicting reactions to the same event.
+  `LocationRuntimeContainer.swift` gains two read-only exposed properties for this reconciliation:
+  `settingsApplying: DeviceSettingsApplying { settingsCoordinator }` (computed) and
+  `geofenceConfigSyncCoordinator: GeofenceConfigSyncCoordinator` (widened from `private` to
+  `public let`) — both exist so the app target can hand `PushRuntimeContainer` the SAME instances
+  `LocationRuntimeContainer` already built, never a second independently-constructed one.
+  `project.yml` gains the `FirebaseSDK` package + two target dependencies (no I11 overlap there).
 
 **I2** adds the feature screens on top of I1's foundation: live map (§5.2), history (§5.3),
 geofences list/editor (§7.1–7.2), locate-to-request (§6), device/family settings
@@ -291,9 +416,9 @@ dependency.
 
 - **Location sync (I10, real):** `SystemLocationProvider` wraps `CLLocationManager` with staged onboarding (When-In-Use on first use, an explicit `requestAlwaysAuthorizationUpgrade()` for the app to call after showing an in-app explanation — no I2 screen calls it yet, so it stays dormant until one does); background fixes via significant-change monitoring, routed through `FixCaptureCoordinator`'s suppression rather than straight into the queue; `SystemBackgroundSyncScheduler` submits opportunistic `BGAppRefreshTaskRequest`s under identifier `be.dynex.findly.refresh`. Verified for real: a booted iOS Simulator install triggers the genuine system When-In-Use prompt with the exact `Info.plist` copy, and the app stays alive with no crash. iOS does not honor exact periodic intervals — the interval is a *target*; the UI (I2) must document the delivered cadence honestly.
 - **Push-to-locate (000 §O1 — the #1 platform risk):** correct mechanism is the **Location Push Service Extension** (`com.apple.developer.location.push`, `apns-push-type: location`) — **apply to Apple for this entitlement immediately** (human/Apple-account action, not blocking). Until granted, the backend's data-only `LOCATE_REQUEST` push is used exactly as normatively specified; UI (I2) falls back to "last known, updating…". `LocationPushTokenHandling` scaffolds the token capture/registration path so wiring the extension in later is additive only.
-- **Geofencing:** `CLCircularRegion` monitoring (max 20 regions — `features.limits.maxGeofences`, 000 §O9) is an I2/I11 concern; `FindlyKit`'s geofences client methods exist now; I12 additionally lands the `GEOFENCE_CONFIG_CHANGED` push→`GET /geofences` fetch-cache half, with the platform-registration half stubbed behind `GeofenceConfigRegistering` for I11.
+- **Geofencing (I11, real):** `SystemGeofenceRegistrar` wraps a dedicated `CLLocationManager` for `CLCircularRegion` monitoring, capped at `min(features.limits.maxGeofences, 20)` (000 §O9's platform ceiling). `GeofenceConfigSyncCoordinator` drives the fetch/cache/full-replace-register sequence across all five specs/009 §6.2 triggers (first sync after sign-in, two `geofenceEtag`-piggyback mismatch paths, resume from pause, cold start) — I12's `GEOFENCE_CONFIG_CHANGED` push handler shares this SAME instance rather than building its own (see the I12 section above). `GeofenceTransitionHandler` builds the durable per-transition event (`SQLiteGeofenceEventQueueStore`, same durability bar as the fix queue) and the accompanying `source: "geofence"` fix via I10's `FixCaptureCoordinator` hint seam. See the I11 section above for the full breakdown.
 - **Push tokens (I12, real):** the real FCM token — bridged from APNs via `FirebasePushTokenProvider` (app target, `Messaging.messaging().apnsToken` → `MessagingDelegate`) — is registered via `PushTokenProviding` → `DeviceRegistrationService.observePushTokenRefreshes`, re-`POST /devices` on every refresh (001 §4.1, 000 §O4), plus on first launch after sign-in and every app update (`registerOnLaunchIfNeeded`, specs/004 §5).
-- **Push routing (I12, real):** `PushMessageDispatcher` (`FindlyKit/Push/`) routes all four `data.type` values (001 §8) to their handlers — `LOCATE_REQUEST` (bypasses `FixCaptureCoordinator`, fulfills even while paused), `SETTINGS_CHANGED` (full-state, idempotent, into `DeviceSettingsApplying`), `GEOFENCE_EVENT` (local `UNNotificationRequest` from the push's own `data`, matching Android's title template — **but currently unreached for real deliveries**, see the I12 section below: 001 §8.2's actual payload shape lets iOS auto-display its own embedded title before `PushMessageDispatcher` ever sees the push; the handler is correct/tested and would need a `UNNotificationServiceExtension` target to actually run), `GEOFENCE_CONFIG_CHANGED` (ETag-conditional re-fetch). `AppDelegate` (app target) is pure OS-lifecycle glue reaching this dispatcher via `PushRuntimeContainerHolder`.
+- **Push routing (I12, real):** `PushMessageDispatcher` (`FindlyKit/Push/`) routes all four `data.type` values (001 §8) to their handlers — `LOCATE_REQUEST` (bypasses `FixCaptureCoordinator`, fulfills even while paused), `SETTINGS_CHANGED` (full-state, idempotent, into `DeviceSettingsApplying`), `GEOFENCE_EVENT` (local `UNNotificationRequest` from the push's own `data`, matching Android's title template — **but currently unreached for real deliveries**, see the I12 section above: 001 §8.2's actual payload shape lets iOS auto-display its own embedded title before `PushMessageDispatcher` ever sees the push; the handler is correct/tested and would need a `UNNotificationServiceExtension` target to actually run), `GEOFENCE_CONFIG_CHANGED` (ETag-conditional re-fetch, delegating to I11's `GeofenceConfigSyncCoordinator`). `AppDelegate` (app target) is pure OS-lifecycle glue reaching this dispatcher via `PushRuntimeContainerHolder`.
 - **Auth (phone-only sign-in, specs/006):** `AuthProviding` gains `startPhoneVerification(phoneNumberE164:)`/`confirmCode(_:)` and the closed `PhoneAuthError` set (006 §4.2). `StubAuthProvider` implements the two-step dev shape (006 §5) and now emits a **real** unsigned JWT — base64url JSON header/payload with an empty signature, parseable by the backend's `AUTH_MODE=insecure-local` verifier; the previous `"stub-header.…"` shape was not valid base64url JSON and never actually worked against a local backend. `SignInViewModel`/`SignInScreen` implement the 006 §4.1 state machine (phone entry → code entry, 30 s resend cooldown via an injected virtual-time-testable sleep). `FirebaseAuthProvider` (app target) is the real implementation, wired in at the `RootView` seam via `AppConfig.authMode`/`firebaseProjectId` — it compiles to an inert fallback until the Firebase SDK dependency + `GoogleService-Info.plist` land (H1) and Firebase console phone-auth setup is done (H2).
 - **Offline (I10, durable):** `FixQueue` (actor, now stateless — every call delegates to `FixStoring`) — freeze-on-first-send `batchId` idempotency, batch upload per 001 §5.1. `SQLiteFixStore` (raw `SQLite3` C API, app-private `Library/Application Support/findly-fixqueue.sqlite`) persists both the fix rows *and* the frozen in-flight batch's identity, so a retry after a crash resends identical content (specs/009 §2) — proven by a test that reopens a fresh store instance against the same file and by a real on-simulator file inspection (see the I10 section above). 1 000-fix cap, oldest-pending-dropped-first, one debug-level count-only log line per drop.
 - **I7 hardening (Keychain, not UserDefaults):** `FirebaseAuthProvider`'s `verificationID` — previously plaintext in `UserDefaults` (flagged non-blocking in I3's security review) — now lives behind `KeychainStoring` (`FindlyKit`, protocol + `InMemoryKeychainStore` fake) with a real `Security`-framework `KeychainStore` (app target, generic-password item, `kSecAttrAccessibleWhenUnlockedThisDeviceOnly`). Storage-mechanism swap only; the verify/confirm lifecycle is unchanged.

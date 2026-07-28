@@ -106,11 +106,34 @@ struct FindlyApp: App {
             fixStore = InMemoryFixStore(onOverflowDropped: Self.logOverflowDrop)
         }
 
+        // specs/009-device-runtime.md §6.3 (I11) — the durable geofence-event queue, same fallback/
+        // hardening posture as fixStore above (a non-durable in-memory store beats crashing app
+        // launch on e.g. a full disk).
+        let geofenceEventStoreURL = Self.geofenceEventStoreDatabaseURL()
+        let geofenceEventStore: GeofenceEventQueueStoring
+        if let store = try? SQLiteGeofenceEventQueueStore(url: geofenceEventStoreURL) {
+            geofenceEventStore = store
+            try? FileManager.default.setAttributes([.protectionKey: FileProtectionType.complete], ofItemAtPath: geofenceEventStoreURL.path)
+            var mutableURL = geofenceEventStoreURL
+            var resourceValues = URLResourceValues()
+            resourceValues.isExcludedFromBackup = true
+            try? mutableURL.setResourceValues(resourceValues)
+        } else {
+            geofenceEventStore = InMemoryGeofenceEventQueueStore()
+        }
+
         let deviceInfoProvider = SystemDeviceInfoProvider()
         let deviceRegistrationService = DeviceRegistrationService(
             apiClient: apiClient, deviceIdProvider: deviceIdProvider, deviceInfoProvider: deviceInfoProvider, authProvider: authProvider
         )
         let locationProvider = SystemLocationProvider()
+        // specs/009-device-runtime.md §6.2 (I11) — the real, CLLocationManager-region-monitoring-
+        // backed registrar. Built here (like `locationProvider` above), BEFORE
+        // `LocationRuntimeContainer` exists, because `LocationRuntimeContainer.init` needs it as an
+        // init parameter — its `transitionHandler` is wired the same way
+        // `locationProvider`/`captureCoordinator` are (a settable reference, populated once the
+        // container's own object graph exists, see the assignment right after `container` below).
+        let geofenceRegistrar = SystemGeofenceRegistrar()
         let deviceIdClosure: () -> String? = { [weak authProvider] in
             guard let uid = authProvider?.currentUserId else { return nil }
             return deviceIdProvider.deviceId(forUserId: uid)
@@ -123,6 +146,9 @@ struct FindlyApp: App {
             backgroundScheduler: SystemBackgroundSyncScheduler(),
             fixStore: fixStore,
             stateStore: UserDefaultsDeviceSettingsStateStore(),
+            geofenceRegistrar: geofenceRegistrar,
+            geofenceConfigStore: UserDefaultsGeofenceConfigStateStore(),
+            geofenceEventStore: geofenceEventStore,
             lastQueuedFixAtStore: UserDefaultsLastQueuedFixAtStore(),
             isPermissionGranted: { [weak locationProvider] in locationProvider?.isAuthorized ?? false },
             // specs/009 §9: 404 DEVICE_NOT_FOUND -> stop the schedule, clear local device state,
@@ -134,21 +160,35 @@ struct FindlyApp: App {
                 deviceIdProvider.clearDeviceId(forUserId: uid)
                 _ = try? await deviceRegistrationService.registerOrUpdate()
             },
-            // specs/009 §9: a second AUTH_TOKEN_EXPIRED means signed-out - stop the runtime and
+            // specs/009 §9: a second AUTH_TOKEN_EXPIRED means signed-out - wipe local state and
             // return to sign-in. Reads the container back through the holder (populated a few
             // lines below, but only ever CALLED once a real failure happens, long after that
             // assignment has run) rather than capturing `container` directly, which doesn't exist
             // yet at this point inside its own initializer argument list — the same self-reference
             // problem the holder was originally built to solve, now narrowed to just this one use.
+            //
+            // Post-review fix (security review, High finding): previously called `.stop()`, which
+            // only halts monitoring/cancels the BG task — it left every piece of I10/I11 local
+            // state (fix queue, geofence-event queue, cached geofence config/ETag, cached device
+            // settings, registered CLLocationManager geofences) untouched across a forced sign-out,
+            // a real, deterministic cross-account data leak (see `wipeLocalState()`'s doc). Now
+            // calls the consolidated `wipeLocalState()` (which itself calls `stop()`), the same
+            // method `DeleteAccountViewModel`'s two sign-out-shaped paths use.
             onSignedOut: { [weak authProvider, weak coordinator] in
                 try? authProvider?.signOut()
-                await LocationRuntimeContainerHolder.shared.container?.stop()
+                await LocationRuntimeContainerHolder.shared.container?.wipeLocalState()
                 await coordinator?.showSignIn()
             }
         )
         self.locationRuntimeContainer = container
         self.fixQueue = container.fixQueue
         LocationRuntimeContainerHolder.shared.container = container
+
+        // specs/009-device-runtime.md §6.3 (I11) — `geofenceRegistrar` was built above, before the
+        // container (and therefore `GeofenceTransitionHandler`) existed; wire it now, the same
+        // "settable reference populated post-construction" pattern `SystemLocationProvider`/
+        // `captureCoordinator` already established (see `container.start()`'s internal wiring).
+        geofenceRegistrar.transitionHandler = container.geofenceTransitionHandler
 
         // specs/009-device-runtime.md §3.4 — Apple requires
         // `BGTaskScheduler.register(forTaskWithIdentifier:using:launchHandler:)` to run before
@@ -163,17 +203,36 @@ struct FindlyApp: App {
 
         container.start()
 
+        // specs/009-device-runtime.md §6.2 (I11) — "device reboot / app reinstall" (both lose
+        // OS-level geofence registrations without changing anything server-side) is covered by
+        // re-checking/re-registering on every cold start if `trackingEnabled`, matching Android
+        // A11's own reasoning. `FindlyApp.init()` is the one unambiguous "cold start" hook (runs
+        // exactly once per process launch) — deliberately a separate `Task` from `container.start()`
+        // itself rather than folded into it, so `start()` stays a plain synchronous call with no
+        // async work racing its own synchronous side effects (see `syncGeofenceConfigOnColdStart`'s
+        // doc for the full rationale).
+        Task { await container.syncGeofenceConfigOnColdStart() }
+
         // specs/009-device-runtime.md §5 (I12) — the push runtime: wires the four per-type
         // handlers into one dispatcher (`AppDelegate.didReceiveRemoteNotification` reaches it via
         // `PushRuntimeContainerHolder`), and connects the real FCM-backed `PushTokenProviding` to
         // `DeviceRegistrationService`'s existing (already-tested, I1) refresh-triggered
         // re-registration path — no call-site change needed there, exactly like Android's
         // `RealPushTokenProvider` swap-in.
+        //
+        // Reconciliation with I11 (post-merge fix): `GEOFENCE_CONFIG_CHANGED`'s handler now shares
+        // `container.geofenceConfigSyncCoordinator` — the SAME instance `LocationRuntimeContainer`
+        // already built and drains through every other §6.2 trigger — instead of constructing a
+        // second, independent one. Two instances would each own their own `GeofenceConfigStateStoring`
+        // read/write of the SAME `UserDefaults` keys and could race/disagree about the cached ETag,
+        // defeating the "single source of truth" §6.1 requires; sharing one instance mirrors exactly
+        // how `settingsApplying` above is already shared between the location and push sides.
         let pushRuntimeContainer = PushRuntimeContainer(
             apiClient: apiClient,
             locationProvider: locationProvider,
             deviceId: deviceIdClosure,
             settingsApplying: container.settingsApplying,
+            geofenceConfigSyncCoordinator: container.geofenceConfigSyncCoordinator,
             geofenceEventNotifier: SystemGeofenceEventNotifier()
         )
         PushRuntimeContainerHolder.shared.container = pushRuntimeContainer
@@ -207,7 +266,6 @@ struct FindlyApp: App {
                 authProvider: authProvider,
                 apiClient: apiClient,
                 deviceIdProvider: deviceIdProvider,
-                fixQueue: fixQueue,
                 exportArtifactStore: exportArtifactStore,
                 locationRuntimeContainer: locationRuntimeContainer,
                 onSignedIn: onSignedIn
@@ -237,5 +295,16 @@ struct FindlyApp: App {
         let directory = (try? fileManager.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true))
             ?? fileManager.temporaryDirectory
         return directory.appendingPathComponent("findly-fixqueue.sqlite")
+    }
+
+    /// specs/009-device-runtime.md §6.3 (I11) — the durable geofence-event queue's on-disk
+    /// location. Same app-private Application Support directory as `fixStoreDatabaseURL()` above,
+    /// a separate file (never Documents — this is raw geofence-transition history, not a
+    /// user-visible document).
+    private static func geofenceEventStoreDatabaseURL() -> URL {
+        let fileManager = FileManager.default
+        let directory = (try? fileManager.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true))
+            ?? fileManager.temporaryDirectory
+        return directory.appendingPathComponent("findly-geofenceevents.sqlite")
     }
 }
