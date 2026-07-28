@@ -1,6 +1,6 @@
 # Findly — iOS app (Swift)
 
-**I1 (foundation) + I2 (feature screens) + I3 (phone sign-in) + I7 (Keychain hardening) + I8 (privacy: export/delete) + I9 (Xcode app-target project) implemented.** Normative design: [`specs/004-ios-client.md`](../../specs/004-ios-client.md) — read that first; it owns the architecture, the design-system token contract, the full 001 endpoint mapping, auth/token-refresh, the fix-queue model, and the location/push strategy (000 §O1). Phone sign-in is normative in [`specs/006-phone-auth.md`](../../specs/006-phone-auth.md) (004 §4 owns only the iOS shapes). Wire contract: [`specs/001-api-contract.md`](../../specs/001-api-contract.md). Product context: [`specs/000-overview.md`](../../specs/000-overview.md), esp. open items **O1–O4, O9**.
+**I1 (foundation) + I2 (feature screens) + I3 (phone sign-in) + I7 (Keychain hardening) + I8 (privacy: export/delete) + I9 (Xcode app-target project) + I10 (real device runtime) implemented.** Normative design: [`specs/004-ios-client.md`](../../specs/004-ios-client.md) — read that first; it owns the architecture, the design-system token contract, the full 001 endpoint mapping, auth/token-refresh, and the fix-queue model's *rules* (batch/idempotency — the *runtime* behind those rules, incl. persistence, capture, scheduling, and push/geofence handling, is normative in [`specs/009-device-runtime.md`](../../specs/009-device-runtime.md), which 004 §7 points to rather than duplicating). Phone sign-in is normative in [`specs/006-phone-auth.md`](../../specs/006-phone-auth.md) (004 §4 owns only the iOS shapes). Wire contract: [`specs/001-api-contract.md`](../../specs/001-api-contract.md). Product context: [`specs/000-overview.md`](../../specs/000-overview.md), esp. open items **O1–O4, O9**.
 
 ## What's here
 
@@ -10,9 +10,12 @@ mobile/ios/
 │   │                    `cd FindlyKit && swift build && swift test`
 │   ├── Sources/FindlyKit/   Config, Networking (full 001 client, 19 endpoints), Auth (phone-only
 │   │                       sign-in: AuthProviding, PhoneAuthError, PhoneNumberNormalizer,
-│   │                       StubAuthProvider — specs/006), Device, Locations (offline fix-queue),
-│   │                       LocationSensing, Push, DesignSystem (tokens/theme/11 components),
-│   │                       Navigation, Screens/ — two-step phone sign-in (I3) + Home, Map (live
+│   │                       StubAuthProvider — specs/006), Device, Locations (the durable offline
+│   │                       fix-queue — `FixQueue`/`FixStoring`/`SQLiteFixStore` — plus the sync
+│   │                       runner: `LocationSyncCoordinator`/`LocationSyncRunner`, I10),
+│   │                       LocationSensing (real CoreLocation/BackgroundTasks wiring +
+│   │                       `LocationRuntimeContainer`, I10), Push, DesignSystem (tokens/theme/11
+│   │                       components), Navigation, Screens/ — two-step phone sign-in (I3) + Home, Map (live
 │   │                       map + swappable MapKit/list `MapRendering`), History (cursor
 │   │                       pagination), Geofences (list/editor, ETag-aware save + version-conflict
 │   │                       merge UX), Locate (create + poll-to-terminal), Settings (device +
@@ -58,6 +61,58 @@ validate these, but `simctl install` (and a real device install) fails outright 
 bundle ID" without them. Added as the standard Xcode-template build-setting substitutions
 (`$(EXECUTABLE_NAME)`/`$(PRODUCT_BUNDLE_IDENTIFIER)`/`$(PRODUCT_BUNDLE_PACKAGE_TYPE)`), not
 hardcoded values — plist plumbing, not business logic.
+
+**I10** replaces the I1 location-runtime *scaffolding* with the real thing (specs/009-device-runtime.md
+§1–§4, §9). Summary — see the file-level doc comments for the full rationale on each:
+
+- **Durable queue (§2), the central correctness property.** `FixStoring` was widened from
+  `loadAll`/`append`/`remove` to also own the frozen in-flight batch's identity
+  (`currentBatch`/`freezeNextBatch`/`markAccepted`/`markRejected`) — previously that identity lived
+  only in `FixQueue`'s own in-memory `inFlight` property, invisible to whatever store was plugged
+  in, so it never actually survived a process restart. `FixQueue` is now a thin, **stateless**
+  actor that delegates every call to the store (mirrors Android's `RoomFixQueueStore` exactly).
+  `SQLiteFixStore` (raw `SQLite3` C API — chosen over Core Data specifically to avoid hand-editing
+  a `.xcdatamodeld` with no GUI model editor in this session, the same class of risk I9 solved for
+  `.pbxproj` via `xcodegen`; see the file's doc for the full argument) performs `freezeNextBatch`/
+  `markAccepted`/`markRejected`/the 1 000-cap enforcement each as one atomic `BEGIN IMMEDIATE ...
+  COMMIT` transaction. `SQLiteFixStoreTests.swift`'s `survivesSimulatedProcessDeath...` tests close
+  the connection and reopen a fresh instance against the same file, proving the batch identity and
+  exact fix set survive — verified again for real on-device: the app's actual container shows
+  `findly-fixqueue.sqlite` (+ WAL files, correct schema) after a real simulator launch.
+- **Real `SystemLocationProvider`** (`LocationSensing/LocationProviding.swift`) — staged When-In-Use
+  → explicit Always-upgrade authorization, `requestSingleFix(source:)` bridging
+  `CLLocationManagerDelegate` to `async/await` via a checked continuation raced against a timeout
+  (`withThrowingTaskGroup`, never a leak/double-resume), significant-location-change monitoring
+  routed through `FixCaptureCoordinator` (not straight to `FixQueue.enqueue`) so every capture goes
+  through the same §1.2 suppression. `FixCaptureCoordinator` (pure, `LocationProviding`-fake
+  testable) owns pause/permission/<60s-debounce suppression, mirroring Android's
+  `FixCaptureCoordinator` split exactly.
+- **Real `SystemBackgroundSyncScheduler`** — registers/submits `BGAppRefreshTaskRequest` under
+  specs/009 §3.4's identifier `be.dynex.findly.refresh` (also added to `Info.plist`'s
+  `BGTaskSchedulerPermittedIdentifiers` — required or `submit()` throws). The 0.8-elapsed-time
+  trigger rule is pure (`SyncTriggerPolicy`); backoff is pure (`BackoffPolicy`, 30s initial,
+  doubling, capped at the sync interval).
+- **The sync runner** (`LocationSyncCoordinator` bridges `FixQueue`↔`LocationsEndpoints`;
+  `LocationSyncRunner` orchestrates capture-then-drain per opportunistic trigger) applies the
+  mandatory `deviceSettings` piggyback on every accepted response via `DeviceSettingsCoordinator`
+  (pure `SettingsChangeDecision` + pause/resume/reschedule), and reacts to `TRACKING_PAUSED`/
+  `DEVICE_NOT_FOUND`/a second `AUTH_TOKEN_EXPIRED` per specs/009 §9. `PausedDevicePoller` covers the
+  `GET /devices` resume path (app foreground + ≥6-hourly, per §4).
+- **`LocationRuntimeContainer`** (`@MainActor`) composes all of the above; `RootView` constructs the
+  one real instance (sharing its `FixQueue` with `DeleteAccountViewModel`'s wipe — two independent
+  queues over the same file would desync) and publishes it to `LocationRuntimeContainerHolder`,
+  which `FindlyApp.init()`'s `BGTaskScheduler.register(...)` call (MUST run before `init` returns,
+  Apple's own requirement) reads lazily when the system actually fires the task.
+- **Deferred/not this task's scope:** geofence region-monitoring lifecycle and `source: "geofence"`
+  captures (I11 — a `GeofenceRegistrarStub` no-op seam is left for it, mirroring Android's A9→A11
+  pattern); `SETTINGS_CHANGED`/`LOCATE_REQUEST`/`GEOFENCE_*` push routing (I12 — `DeviceSettingsApplying`
+  is the seam a push handler plugs into); a manual-refresh UI call site for `source: "manual"` (no
+  I2 screen currently calls it — the seam accepts a source/accuracy pair regardless, `requestSingleFix(source:)`,
+  ready for whenever one lands). Also noted: nothing in I1–I9 ever wired `DeviceRegistrationService`
+  to a "first launch after sign-in" trigger — a pre-existing gap, not an I10 regression — so this
+  task wired `onReRegisterDevice` (the `009 §9` `DEVICE_NOT_FOUND` reaction) to call it, which
+  self-heals a never-registered `deviceId` on the very first sync attempt; a proper eager trigger
+  right after sign-in is still a good follow-up.
 
 **I2** adds the feature screens on top of I1's foundation: live map (§5.2), history (§5.3),
 geofences list/editor (§7.1–7.2), locate-to-request (§6), device/family settings
@@ -117,11 +172,11 @@ Developer secrets H6 is provisioning).
 
 ## Key decisions (see specs/004 for the full normative text)
 
-- **Location sync:** `CLLocationManager` with Always authorization (staged onboarding: When-In-Use → Always upgrade prompt); background fixes via significant-change monitoring + `BGAppRefreshTask` opportunistic scheduling — scaffolded behind `LocationProviding`/`BackgroundSyncScheduling`, real on-device wiring is a runtime TODO (needs a device/simulator this session doesn't have). iOS does not honor exact periodic intervals — the interval is a *target*; the UI (I2) must document the delivered cadence honestly.
+- **Location sync (I10, real):** `SystemLocationProvider` wraps `CLLocationManager` with staged onboarding (When-In-Use on first use, an explicit `requestAlwaysAuthorizationUpgrade()` for the app to call after showing an in-app explanation — no I2 screen calls it yet, so it stays dormant until one does); background fixes via significant-change monitoring, routed through `FixCaptureCoordinator`'s suppression rather than straight into the queue; `SystemBackgroundSyncScheduler` submits opportunistic `BGAppRefreshTaskRequest`s under identifier `be.dynex.findly.refresh`. Verified for real: a booted iOS Simulator install triggers the genuine system When-In-Use prompt with the exact `Info.plist` copy, and the app stays alive with no crash. iOS does not honor exact periodic intervals — the interval is a *target*; the UI (I2) must document the delivered cadence honestly.
 - **Push-to-locate (000 §O1 — the #1 platform risk):** correct mechanism is the **Location Push Service Extension** (`com.apple.developer.location.push`, `apns-push-type: location`) — **apply to Apple for this entitlement immediately** (human/Apple-account action, not blocking). Until granted, the backend's data-only `LOCATE_REQUEST` push is used exactly as normatively specified; UI (I2) falls back to "last known, updating…". `LocationPushTokenHandling` scaffolds the token capture/registration path so wiring the extension in later is additive only.
 - **Geofencing:** `CLCircularRegion` monitoring (max 20 regions — `features.limits.maxGeofences`, 000 §O9) is an I2 concern; `FindlyKit`'s geofences client methods exist now.
 - **Push tokens:** FCM/APNs token registered via `PushTokenProviding` → `DeviceRegistrationService`, re-`POST /devices` on every refresh (001 §4.1, 000 §O4).
 - **Auth (phone-only sign-in, specs/006):** `AuthProviding` gains `startPhoneVerification(phoneNumberE164:)`/`confirmCode(_:)` and the closed `PhoneAuthError` set (006 §4.2). `StubAuthProvider` implements the two-step dev shape (006 §5) and now emits a **real** unsigned JWT — base64url JSON header/payload with an empty signature, parseable by the backend's `AUTH_MODE=insecure-local` verifier; the previous `"stub-header.…"` shape was not valid base64url JSON and never actually worked against a local backend. `SignInViewModel`/`SignInScreen` implement the 006 §4.1 state machine (phone entry → code entry, 30 s resend cooldown via an injected virtual-time-testable sleep). `FirebaseAuthProvider` (app target) is the real implementation, wired in at the `RootView` seam via `AppConfig.authMode`/`firebaseProjectId` — it compiles to an inert fallback until the Firebase SDK dependency + `GoogleService-Info.plist` land (H1) and Firebase console phone-auth setup is done (H2).
-- **Offline:** `FixQueue` (actor) — freeze-on-first-send `batchId` idempotency, in-memory queue today (Core Data/SQLite persistence is a runtime TODO), batch upload per 001 §5.1.
+- **Offline (I10, durable):** `FixQueue` (actor, now stateless — every call delegates to `FixStoring`) — freeze-on-first-send `batchId` idempotency, batch upload per 001 §5.1. `SQLiteFixStore` (raw `SQLite3` C API, app-private `Library/Application Support/findly-fixqueue.sqlite`) persists both the fix rows *and* the frozen in-flight batch's identity, so a retry after a crash resends identical content (specs/009 §2) — proven by a test that reopens a fresh store instance against the same file and by a real on-simulator file inspection (see the I10 section above). 1 000-fix cap, oldest-pending-dropped-first, one debug-level count-only log line per drop.
 - **I7 hardening (Keychain, not UserDefaults):** `FirebaseAuthProvider`'s `verificationID` — previously plaintext in `UserDefaults` (flagged non-blocking in I3's security review) — now lives behind `KeychainStoring` (`FindlyKit`, protocol + `InMemoryKeychainStore` fake) with a real `Security`-framework `KeychainStore` (app target, generic-password item, `kSecAttrAccessibleWhenUnlockedThisDeviceOnly`). Storage-mechanism swap only; the verify/confirm lifecycle is unchanged.
 - **I8 privacy (export/delete account/delete family, specs/004 §3.6, specs/008):** `Screens/Settings/` gains a hub (`PrivacySettingsScreen`, reachable unconditionally from Home — a store requirement, 008 §4.4) plus `ExportScreen`/`DeleteAccountScreen`/`DeleteFamilyScreen`. `FindlyAPIClient` gains `exportData(userId:)` (raw `Data`, the one unenveloped success response in the API, via a new `URLSessionAPIClient.sendRawData`), `deleteAccount()`, `deleteFamily()` (both bare-204). `AuthProviding` gains `deleteCurrentUser()` — the 008 §1.3 seam FindlyKit calls after `DELETE /users/me` returns 204; `FirebaseAuthProvider` (app target) implements it as `Auth.auth().currentUser?.delete()`, kept out of FindlyKit like the rest of the real Firebase surface. `DeleteAccountViewModel` derives the 008 §4.2 cascade-warning wording from the caller's own role/roster (last parent or sole member), orders backend-then-Firebase-then-local-wipe (`FixQueue.clearAll()` + `DeviceIdProviding.clearDeviceId` + `signOut()` for the Keychain entry), and offers a Firebase-step-only retry on failure. `DeleteFamilyScreen` layers a typed-family-name gate on top of the standard `.confirmationDialog` two-step (008 §5.4's recommended UX).

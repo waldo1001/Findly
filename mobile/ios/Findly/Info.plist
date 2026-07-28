@@ -41,6 +41,13 @@
 		<string>fetch</string>
 		<string>processing</string>
 	</array>
+	<!-- specs/009-device-runtime.md §3.4 (I10) — the opportunistic BGAppRefreshTask identifier.
+	     BGTaskScheduler.submit() throws BGTaskSchedulerError.notPermitted for any identifier
+	     missing from this array, even after a successful register(forTaskWithIdentifier:...) call. -->
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>be.dynex.findly.refresh</string>
+	</array>
 	<!-- specs/004-ios-client.md §3.4/§3.5, specs/005-temporary-groups.md §5 — the group-join deep
 	     link (findly://group-join?code=…), forwarded via onOpenURL to
 	     AppCoordinator.handleDeepLink. HTTPS universal links (specs/007-public-join-links.md,

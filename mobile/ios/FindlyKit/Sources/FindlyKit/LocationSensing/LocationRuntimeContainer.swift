@@ -1,0 +1,217 @@
+import Foundation
+
+/// Adapts `BackgroundSyncScheduling` (the `BGTaskScheduler`-facing shape, specs/009 §3.4) to
+/// `SyncScheduling` (the shape `DeviceSettingsCoordinator` composes with, specs/009 §3.5).
+/// `syncIntervalMinutes` is deliberately **not** forwarded to `BGTaskScheduler` — iOS has no period
+/// concept (§3.4: "the system decides actual frequency"); the interval is instead read live, fresh
+/// from `DeviceSettingsStateStoring`, by `SyncTriggerPolicy.shouldCapture` on every trigger. What
+/// `reschedule` actually needs to guarantee is "a `BGAppRefreshTask` request exists" — re-submitting
+/// with the same identifier silently replaces any still-pending one (no error, per
+/// `BGTaskScheduler`'s documented behavior), so this is a safe, idempotent no-op-if-redundant call.
+private final class BackgroundSyncSchedulingAdapter: SyncScheduling {
+    private let scheduler: BackgroundSyncScheduling
+    init(scheduler: BackgroundSyncScheduling) { self.scheduler = scheduler }
+    func reschedule(syncIntervalMinutes: Int) { scheduler.scheduleNextSync() }
+}
+
+/// The composition root for everything I10 builds (specs/009-device-runtime.md §1–§4, §9) — wires
+/// the durable queue, the real `LocationProviding`/`BackgroundSyncScheduling` implementations, the
+/// pure coordinators/policies, and the sync runner into one object with a small, app-target-facing
+/// public surface. Lives in `FindlyKit` (not the app target) per specs/004 §1.1's rule: this is
+/// composition/wiring, not UI.
+///
+/// **Constructed exactly once, in `FindlyApp.init()` — not in `RootView` (post-review
+/// correction).** An earlier version of this doc argued `RootView` was an equally safe place to
+/// build this, matching how it already constructs `FixQueue`/`exportArtifactStore`. That was
+/// wrong: a standalone minimal SwiftUI reproduction confirmed `RootView.init()` reruns on every
+/// `AppCoordinator.route` publish (`RootView` holds it via `@ObservedObject` while it's a
+/// `@StateObject` in `FindlyApp`), i.e. on every in-app navigation — which would have silently
+/// rebuilt this entire class (a live `CLLocationManager`, a fresh SQLite connection, a new
+/// `FixQueue` actor) on every screen change. `App.init()`, unlike a child `View`'s init, IS
+/// SwiftUI-guaranteed to run exactly once per process launch, so `FindlyApp` builds one instance
+/// and passes it into `RootView` as a plain parameter.
+@MainActor
+public final class LocationRuntimeContainer {
+    private let locationProvider: LocationProviding
+    private let backgroundScheduler: BackgroundSyncScheduling
+    private let stateStore: DeviceSettingsStateStoring
+    private let captureCoordinator: FixCaptureCoordinator
+    private let settingsCoordinator: DeviceSettingsCoordinator
+    private let syncRunner: LocationSyncRunner
+    private let pausedDevicePoller: PausedDevicePoller
+
+    /// Consecutive-transient-failure counter for `BackoffPolicy` (specs/009 §9) — reset to 0 on
+    /// any non-retry outcome. In-memory only: a process restart naturally resets backoff, which is
+    /// fine (spec is silent on this surviving restart, unlike the batch identity in `FixStoring`).
+    private var consecutiveTransientFailures = 0
+
+    private static let defaultSyncIntervalMinutes = 15 // the server's own first-registration default (001 §4.1)
+
+    public let fixQueue: FixQueue
+
+    public init(
+        apiClient: FindlyAPIClient,
+        deviceId: @escaping () -> String?,
+        locationProvider: LocationProviding = NoOpLocationProvider(),
+        backgroundScheduler: BackgroundSyncScheduling = NoOpBackgroundSyncScheduler(),
+        fixStore: FixStoring = InMemoryFixStore(),
+        stateStore: DeviceSettingsStateStoring = InMemoryDeviceSettingsStateStore(),
+        geofenceRegistrar: GeofenceRegistrarStub = NoOpGeofenceRegistrarStub(),
+        lastQueuedFixAtStore: LastQueuedFixAtStoring = InMemoryLastQueuedFixAtStore(),
+        isPermissionGranted: @escaping () -> Bool = { false },
+        onReRegisterDevice: @escaping () async -> Void = {},
+        onSignedOut: @escaping () async -> Void = {}
+    ) {
+        self.locationProvider = locationProvider
+        self.backgroundScheduler = backgroundScheduler
+        self.stateStore = stateStore
+
+        let queue = FixQueue(store: fixStore)
+        self.fixQueue = queue
+
+        let captureCoordinator = FixCaptureCoordinator(
+            provider: locationProvider,
+            queue: queue,
+            isPaused: { stateStore.current()?.trackingEnabled == false },
+            isPermissionGranted: isPermissionGranted
+        )
+        self.captureCoordinator = captureCoordinator
+
+        let schedulingAdapter = BackgroundSyncSchedulingAdapter(scheduler: backgroundScheduler)
+        let settingsCoordinator = DeviceSettingsCoordinator(
+            scheduler: schedulingAdapter,
+            geofenceRegistrar: geofenceRegistrar,
+            stateStore: stateStore,
+            onPause: {
+                // specs/009 §4 "...and stop capturing" (post-review fix — previously nothing
+                // stopped significant-location-change monitoring on pause). The BG task is
+                // deliberately left alone; see `SyncScheduling`'s doc.
+                locationProvider.stopBackgroundMonitoring()
+            },
+            onResume: {
+                // specs/009 §4: resume restores monitoring/scheduling. Geofence re-registration is
+                // I11's scope (geofenceRegistrar above is a no-op stub until then).
+                locationProvider.startBackgroundMonitoring(coordinator: captureCoordinator)
+                backgroundScheduler.scheduleNextSync()
+            }
+        )
+        self.settingsCoordinator = settingsCoordinator
+
+        let syncCoordinator = LocationSyncCoordinator(
+            queue: queue, apiClient: apiClient, deviceId: deviceId,
+            // specs/009 §4 (post-review fix): gate the flush client-side rather than relying
+            // solely on the server's 403 — see LocationSyncCoordinator's doc.
+            cachedSettings: { stateStore.current() }
+        )
+
+        self.syncRunner = LocationSyncRunner(
+            currentSyncIntervalMinutes: { stateStore.current()?.syncIntervalMinutes ?? Self.defaultSyncIntervalMinutes },
+            lastQueuedFixAtStore: lastQueuedFixAtStore,
+            captureCoordinator: captureCoordinator,
+            syncCoordinator: syncCoordinator,
+            settingsApplying: settingsCoordinator,
+            onReRegisterDevice: onReRegisterDevice,
+            onSignedOut: onSignedOut
+        )
+
+        self.pausedDevicePoller = PausedDevicePoller(apiClient: apiClient, deviceId: deviceId, settingsApplying: settingsCoordinator)
+    }
+
+    /// Call once at startup (after sign-in / whenever a `deviceId` becomes available). specs/009
+    /// §4: "a low-frequency worker/BG task is the ONLY thing that keeps running while paused" —
+    /// post-review fix: this method used to schedule NOTHING at all when starting up already
+    /// paused (e.g. the app relaunching while a previously-applied pause is still in effect),
+    /// which meant a device that never happened to be unpaused while the app was actually running
+    /// could never self-heal via the pull-based resume path. Now it always arms the BG task; only
+    /// significant-location-change monitoring is conditional on not being paused.
+    public func start() {
+        if stateStore.current()?.trackingEnabled != false {
+            locationProvider.startBackgroundMonitoring(coordinator: captureCoordinator)
+            backgroundScheduler.scheduleNextSync()
+        } else {
+            backgroundScheduler.scheduleNextSync(afterDelay: Self.pausedPollIntervalSeconds)
+        }
+    }
+
+    /// specs/009 §4's pause teardown, the parts this container owns: stop significant-location-
+    /// change monitoring and cancel the scheduled `BGAppRefreshTask`. Geofence unregistration and
+    /// the settings-cache update itself are `DeviceSettingsCoordinator.applySettings`'s job — this
+    /// method exists for a caller that wants to tear down without going through a settings change
+    /// (e.g. sign-out).
+    public func stop() {
+        locationProvider.stopBackgroundMonitoring()
+        backgroundScheduler.cancelScheduledSync()
+    }
+
+    /// specs/009 §4: "at least every 6 hours" — the ONE explicit cadence number the spec gives for
+    /// the paused-device poll, and (post-review fix) the bound this class actually enforces on the
+    /// BG task's `earliestBeginDate` while paused. §3.4's "the system decides actual frequency"
+    /// language governs the NON-paused case only — there is no equivalent numeric floor to honor
+    /// there, so that path deliberately keeps requesting no explicit delay (`nil`, unchanged).
+    private static let pausedPollIntervalSeconds: TimeInterval = 6 * 60 * 60
+
+    /// The `BGAppRefreshTask` launch-handler body (specs/009 §3.4, trigger 1) — registered via
+    /// `SystemBackgroundSyncScheduler.registerLaunchHandler` in the app target. Always reschedules
+    /// before returning (§3.4: "rescheduled at the end of every run").
+    ///
+    /// **Post-review fix — this is the Blocking finding's core correctness property.** Previously
+    /// this method ran `syncRunner.runOnce()` unconditionally and, on success, rescheduled with no
+    /// explicit delay — but `DeviceSettingsCoordinator`'s `.pause` case used to cancel the BG task
+    /// outright, so a paused device never got here again at all. Now the BG task is never
+    /// canceled by pause (see `SyncScheduling`'s doc), and THIS method is what makes that survival
+    /// meaningful: while paused, every firing does a `PausedDevicePoller.poll()` (specs/009 §4's
+    /// pull-based resume check) instead of attempting a capture-and-sync cycle, and reschedules
+    /// itself bounded to `pausedPollIntervalSeconds` — never leaving the device without a future
+    /// check more than 6 hours out.
+    public func handleBackgroundRefresh() async {
+        if stateStore.current()?.trackingEnabled == false {
+            _ = await pausedDevicePoller.poll()
+            // The poll may have just observed trackingEnabled: true and, via
+            // DeviceSettingsCoordinator's own `.resume` branch (onResume, wired in `init`), ALREADY
+            // rescheduled immediately. Only apply the paused >=6h bound if STILL paused after the
+            // poll, so a genuine resume isn't clobbered back onto a 6-hour wait.
+            if stateStore.current()?.trackingEnabled == false {
+                backgroundScheduler.scheduleNextSync(afterDelay: Self.pausedPollIntervalSeconds)
+            }
+            return
+        }
+
+        let result = await syncRunner.runOnce()
+        switch result {
+        case .success:
+            consecutiveTransientFailures = 0
+            backgroundScheduler.scheduleNextSync()
+        case .retry:
+            consecutiveTransientFailures += 1
+            let interval = stateStore.current()?.syncIntervalMinutes ?? Self.defaultSyncIntervalMinutes
+            let delay = BackoffPolicy.delay(forAttempt: consecutiveTransientFailures, syncIntervalMinutes: interval)
+            backgroundScheduler.scheduleNextSync(afterDelay: delay)
+        }
+    }
+
+    /// specs/009 §3.4 (trigger 3, foreground) + §4 (the paused-device poll's "every app
+    /// foreground" requirement) + §7 (permission re-checked on every foreground — a natural
+    /// consequence of `isPermissionGranted` being read fresh on every capture attempt, no extra
+    /// code needed here). Call from the app target's scene-phase/`onAppear` observation.
+    public func onAppForeground() async {
+        _ = await pausedDevicePoller.poll()
+        _ = await syncRunner.runOnce()
+    }
+}
+
+/// A plain settable reference to the one `LocationRuntimeContainer` instance, `@MainActor`-isolated
+/// to match it. Post-review narrowing: this used to also bridge Apple's "register before
+/// `App.init` returns" requirement with the container not existing yet at that point — now that
+/// `FindlyApp.init()` builds the container BEFORE calling
+/// `SystemBackgroundSyncScheduler.registerLaunchHandler`, that handler captures it directly and no
+/// longer needs this indirection. The one remaining reason this exists: a closure passed INTO
+/// `LocationRuntimeContainer.init(...)` (its `onSignedOut` parameter) cannot reference the
+/// `container` local variable that same init call is still in the middle of producing — reading it
+/// back through this holder (populated a few lines after construction, but only ever read once a
+/// real failure happens, long after) sidesteps that self-reference problem. Holds no logic.
+@MainActor
+public final class LocationRuntimeContainerHolder {
+    public static let shared = LocationRuntimeContainerHolder()
+    public var container: LocationRuntimeContainer?
+    private init() {}
+}
