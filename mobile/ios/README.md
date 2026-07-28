@@ -156,12 +156,27 @@ rationale on each:
   never a delta, exactly as 001 §8.3 requires.
 - **`GeofenceEventPushHandler`/`GeofenceEventNotificationTemplate`** — the exact 001 §8.2 title
   template (`"<name> arrived at <geofence>"` / `"<name> left <geofence>"`, no body/time text),
-  matched to Android's `GeofenceEventNotificationTemplate` wording. The real notifier
+  matched to Android's `GeofenceEventNotificationTemplate` wording; the real notifier
   (`SystemGeofenceEventNotifier`, `FindlyKit`, `#if os(iOS) && canImport(UserNotifications)`) posts
-  a genuine local `UNNotificationRequest` built from the push's own `data` — deliberately not
-  relying on the OS auto-bannering the FCM message's own `notification.title` (which the app cannot
-  fully control while foregrounded without a `UNUserNotificationCenterDelegate` opt-in, wired in
-  `AppDelegate`). No custom icon needed — iOS uses the app icon directly (009 §8).
+  a genuine local `UNNotificationRequest` built from the push's own `data`, and both are unit-tested.
+  **Correction (found via real `xcrun simctl push` injection against the foregrounded app, code
+  review): this path is currently dead code, not a deliberate alternative to the OS's own
+  rendering.** 001 §8.2's actual wire shape (`aps.alert.title` set, `mutable-content: 1`, **no**
+  `content-available`) means iOS auto-displays the push's own server-embedded `notification.title`
+  directly — `willPresent` (the pure show/suppress decision) is the only callback that fires;
+  `application(_:didReceiveRemoteNotification:fetchCompletionHandler:)`, the one thing wired to
+  `PushMessageDispatcher`, is never invoked for this shape, foreground or background (confirmed:
+  the displayed banner carried the push's own delivery identifier, not a freshly-generated `UUID()`
+  from `SystemGeofenceEventNotifier`). Not user-visibly broken today — server and client build the
+  identical title off the same template, so the content is correct regardless of which path
+  renders it — but `GeofenceEventPushHandler`/`GeofenceEventNotificationTemplate`/
+  `SystemGeofenceEventNotifier` don't actually run for any real `GEOFENCE_EVENT` delivery yet. The
+  architecturally correct mechanism for what `mutable-content: 1` is meant to enable is a
+  `UNNotificationServiceExtension` app-extension target (which doesn't exist) — re-rendering the
+  alert from `data` *before* display, per 000 §O8's own wording. That target is a genuinely
+  separate, larger task, out of scope tonight; this code stays as the tested logic it would plug
+  into once that extension exists. No custom icon needed either way — iOS uses the app icon
+  directly (009 §8).
 - **`GeofenceConfigChangedPushHandler`/`GeofenceConfigSyncCoordinator`** — the ETag-conditional
   `GET /geofences` fetch-cache sequence (`GeofenceConfigCaching`, in-memory + `UserDefaults`
   implementations); actual platform re-registration is I11's scope, stubbed behind a new
@@ -278,7 +293,7 @@ dependency.
 - **Push-to-locate (000 §O1 — the #1 platform risk):** correct mechanism is the **Location Push Service Extension** (`com.apple.developer.location.push`, `apns-push-type: location`) — **apply to Apple for this entitlement immediately** (human/Apple-account action, not blocking). Until granted, the backend's data-only `LOCATE_REQUEST` push is used exactly as normatively specified; UI (I2) falls back to "last known, updating…". `LocationPushTokenHandling` scaffolds the token capture/registration path so wiring the extension in later is additive only.
 - **Geofencing:** `CLCircularRegion` monitoring (max 20 regions — `features.limits.maxGeofences`, 000 §O9) is an I2/I11 concern; `FindlyKit`'s geofences client methods exist now; I12 additionally lands the `GEOFENCE_CONFIG_CHANGED` push→`GET /geofences` fetch-cache half, with the platform-registration half stubbed behind `GeofenceConfigRegistering` for I11.
 - **Push tokens (I12, real):** the real FCM token — bridged from APNs via `FirebasePushTokenProvider` (app target, `Messaging.messaging().apnsToken` → `MessagingDelegate`) — is registered via `PushTokenProviding` → `DeviceRegistrationService.observePushTokenRefreshes`, re-`POST /devices` on every refresh (001 §4.1, 000 §O4), plus on first launch after sign-in and every app update (`registerOnLaunchIfNeeded`, specs/004 §5).
-- **Push routing (I12, real):** `PushMessageDispatcher` (`FindlyKit/Push/`) routes all four `data.type` values (001 §8) to their handlers — `LOCATE_REQUEST` (bypasses `FixCaptureCoordinator`, fulfills even while paused), `SETTINGS_CHANGED` (full-state, idempotent, into `DeviceSettingsApplying`), `GEOFENCE_EVENT` (local `UNNotificationRequest` from the push's own `data`, matching Android's title template), `GEOFENCE_CONFIG_CHANGED` (ETag-conditional re-fetch). `AppDelegate` (app target) is pure OS-lifecycle glue reaching this dispatcher via `PushRuntimeContainerHolder`.
+- **Push routing (I12, real):** `PushMessageDispatcher` (`FindlyKit/Push/`) routes all four `data.type` values (001 §8) to their handlers — `LOCATE_REQUEST` (bypasses `FixCaptureCoordinator`, fulfills even while paused), `SETTINGS_CHANGED` (full-state, idempotent, into `DeviceSettingsApplying`), `GEOFENCE_EVENT` (local `UNNotificationRequest` from the push's own `data`, matching Android's title template — **but currently unreached for real deliveries**, see the I12 section below: 001 §8.2's actual payload shape lets iOS auto-display its own embedded title before `PushMessageDispatcher` ever sees the push; the handler is correct/tested and would need a `UNNotificationServiceExtension` target to actually run), `GEOFENCE_CONFIG_CHANGED` (ETag-conditional re-fetch). `AppDelegate` (app target) is pure OS-lifecycle glue reaching this dispatcher via `PushRuntimeContainerHolder`.
 - **Auth (phone-only sign-in, specs/006):** `AuthProviding` gains `startPhoneVerification(phoneNumberE164:)`/`confirmCode(_:)` and the closed `PhoneAuthError` set (006 §4.2). `StubAuthProvider` implements the two-step dev shape (006 §5) and now emits a **real** unsigned JWT — base64url JSON header/payload with an empty signature, parseable by the backend's `AUTH_MODE=insecure-local` verifier; the previous `"stub-header.…"` shape was not valid base64url JSON and never actually worked against a local backend. `SignInViewModel`/`SignInScreen` implement the 006 §4.1 state machine (phone entry → code entry, 30 s resend cooldown via an injected virtual-time-testable sleep). `FirebaseAuthProvider` (app target) is the real implementation, wired in at the `RootView` seam via `AppConfig.authMode`/`firebaseProjectId` — it compiles to an inert fallback until the Firebase SDK dependency + `GoogleService-Info.plist` land (H1) and Firebase console phone-auth setup is done (H2).
 - **Offline (I10, durable):** `FixQueue` (actor, now stateless — every call delegates to `FixStoring`) — freeze-on-first-send `batchId` idempotency, batch upload per 001 §5.1. `SQLiteFixStore` (raw `SQLite3` C API, app-private `Library/Application Support/findly-fixqueue.sqlite`) persists both the fix rows *and* the frozen in-flight batch's identity, so a retry after a crash resends identical content (specs/009 §2) — proven by a test that reopens a fresh store instance against the same file and by a real on-simulator file inspection (see the I10 section above). 1 000-fix cap, oldest-pending-dropped-first, one debug-level count-only log line per drop.
 - **I7 hardening (Keychain, not UserDefaults):** `FirebaseAuthProvider`'s `verificationID` — previously plaintext in `UserDefaults` (flagged non-blocking in I3's security review) — now lives behind `KeychainStoring` (`FindlyKit`, protocol + `InMemoryKeychainStore` fake) with a real `Security`-framework `KeychainStore` (app target, generic-password item, `kSecAttrAccessibleWhenUnlockedThisDeviceOnly`). Storage-mechanism swap only; the verify/confirm lifecycle is unchanged.
