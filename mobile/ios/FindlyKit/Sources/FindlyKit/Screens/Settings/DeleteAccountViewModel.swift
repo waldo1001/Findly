@@ -25,6 +25,11 @@ import Foundation
 /// itself, per 008 §1.3), sign back in through the normal app flow, then re-open this screen and
 /// tap Delete again — `DELETE /users/me` is an idempotent no-op by then (008 §4.1) and the now-
 /// fresh session lets `user.delete()` succeed. No in-place re-authentication sub-flow is built.
+/// `signOutForRetry()` also runs `wipeLocalState()` (security review addition — the backend account
+/// is already gone by this point, so this device's location/geofence local state has no live
+/// account to belong to either); `deviceIdProvider`/`exportArtifactStore` are deliberately left
+/// alone here, same as before — they're only cleared once `wipeLocalStateAndComplete()` confirms
+/// the account is FULLY torn down, including client-side.
 @MainActor
 public final class DeleteAccountViewModel: ObservableObject {
     public enum Phase: Equatable {
@@ -34,10 +39,12 @@ public final class DeleteAccountViewModel: ObservableObject {
         /// The backend erasure succeeded but the client-side Firebase step failed — local state is
         /// deliberately NOT wiped yet. The only way out is `signOutForRetry()`.
         case firebaseDeleteFailed
-        /// `signOutForRetry()` ran — the screen navigates to sign-in, same as `.completed`, but
-        /// local state (fix queue/deviceId/export artifact) was NOT wiped, since the account isn't
-        /// confirmed torn down client-side yet; the user re-opens this screen after signing back
-        /// in to finish (a no-op backend call + a now-succeeding Firebase delete).
+        /// `signOutForRetry()` ran — the screen navigates to sign-in, same as `.completed`.
+        /// Location/geofence local state WAS wiped (`wipeLocalState()`, security review addition —
+        /// the backend account is already gone by this point); `deviceId`/export artifact were NOT
+        /// (the account isn't confirmed torn down client-side yet) — the user re-opens this screen
+        /// after signing back in to finish (a no-op backend call + a now-succeeding Firebase
+        /// delete), at which point `wipeLocalStateAndComplete()` clears those too.
         case signedOutForRetry
         /// Both steps succeeded and local state has been wiped — the screen navigates to sign-in.
         case completed
@@ -49,32 +56,32 @@ public final class DeleteAccountViewModel: ObservableObject {
     private let apiClient: FindlyAPIClient
     private let authProvider: AuthProviding
     private let deviceIdProvider: DeviceIdProviding
-    private let fixQueue: FixQueue
     private let exportArtifactStore: ExportArtifactStoring
-    /// specs/009-device-runtime.md §6.3 (I11) — the durable geofence-event queue, wiped alongside
-    /// `fixQueue` for the same "clear all local state" reason (008 §4.4). Defaulted so every
-    /// pre-I11 call site (incl. every existing test) keeps constructing this view model exactly as
-    /// before.
-    private let geofenceEventQueue: GeofenceEventQueue
-    /// specs/009-device-runtime.md §6.1 (I11) — the cached geofence config document + ETag,
-    /// likewise wiped as local state (008 §4.4) — mirrors Android's `GeofenceConfigStateStore.clear()`
-    /// being part of its own account-deletion local wipe.
-    private let geofenceConfigStore: GeofenceConfigStateStoring
+    /// **Post-review addition (security review, High finding).** The single consolidated
+    /// `LocationRuntimeContainer.wipeLocalState()` call, injected as a closure rather than this
+    /// view model taking `fixQueue`/`geofenceEventQueue`/`geofenceConfigStore` directly (I11's
+    /// original shape) — the previous shape let this view model's own wipe drift out of sync with
+    /// what `LocationRuntimeContainer` actually needs to clear (it never reached
+    /// `geofenceRegistrar`/`stateStore` at all), and, worse, meant this was the ONLY call site that
+    /// wiped anything — sign-out (`FindlyApp.swift`'s forced `onSignedOut`) and `signOutForRetry()`
+    /// below did not. One implementation (`LocationRuntimeContainer.wipeLocalState()`), three call
+    /// sites, injected here as a closure the same way `onPause`/`onResume`/`onReRegisterDevice`
+    /// already are elsewhere in this codebase — no default value: every call site (production and
+    /// test) must consciously wire this, since a silently-absent wipe is exactly the bug this fix
+    /// closes.
+    private let wipeLocalState: () async -> Void
     private var pendingWipeUserId: String?
 
     public init(
         apiClient: FindlyAPIClient, authProvider: AuthProviding, deviceIdProvider: DeviceIdProviding,
-        fixQueue: FixQueue, exportArtifactStore: ExportArtifactStoring = InMemoryExportArtifactStore(),
-        geofenceEventQueue: GeofenceEventQueue = GeofenceEventQueue(),
-        geofenceConfigStore: GeofenceConfigStateStoring = InMemoryGeofenceConfigStateStore()
+        exportArtifactStore: ExportArtifactStoring = InMemoryExportArtifactStore(),
+        wipeLocalState: @escaping () async -> Void
     ) {
         self.apiClient = apiClient
         self.authProvider = authProvider
         self.deviceIdProvider = deviceIdProvider
-        self.fixQueue = fixQueue
         self.exportArtifactStore = exportArtifactStore
-        self.geofenceEventQueue = geofenceEventQueue
-        self.geofenceConfigStore = geofenceConfigStore
+        self.wipeLocalState = wipeLocalState
     }
 
     public func load() async {
@@ -119,7 +126,16 @@ public final class DeleteAccountViewModel: ObservableObject {
     /// below are best-effort: the account is already erased server-side, so there is no meaningful
     /// failure recovery left to offer if signing out itself fails — the screen still navigates to
     /// sign-in either way.
-    public func signOutForRetry() {
+    ///
+    /// **Post-review addition (security review, High finding) — now calls `wipeLocalState()`.**
+    /// This path previously wiped nothing at all: the backend account is already gone by the time
+    /// this runs (only the client-side Firebase step failed), but this device's local queues/caches
+    /// (this user's still-registered `CLLocationManager` geofences, queued fixes/events, cached
+    /// device settings) survived untouched, exactly the same deterministic leak-into-the-next-
+    /// session bug the forced-sign-out path had. Now `async` (was synchronous) to await the wipe —
+    /// callers use `Task { await viewModel.signOutForRetry() }` (see `DeleteAccountScreen`).
+    public func signOutForRetry() async {
+        await wipeLocalState()
         // clearStoredSession() is unconditional (finding #5) — NOT nested inside the swallowed
         // signOut() call below, so a signOut() failure can never strand it.
         authProvider.clearStoredSession()
@@ -131,14 +147,12 @@ public final class DeleteAccountViewModel: ObservableObject {
         if let uid = pendingWipeUserId {
             deviceIdProvider.clearDeviceId(forUserId: uid)
         }
-        await fixQueue.clearAll()
-        // I11 additions — the geofence-event queue and cached geofence config/ETag are local
-        // state exactly as much as the fix queue is (008 §4.4: "clear all local state"); a stale
-        // batch or cache surviving deletion could otherwise resurface a since-deleted user's
-        // geofence data, or leave a re-signed-in account's re-registration skipped because a
-        // now-meaningless ETag still looks "unchanged".
-        await geofenceEventQueue.clearAll()
-        geofenceConfigStore.clear()
+        // Post-review change (security review, High finding) — was three separate ad-hoc clear
+        // calls (fixQueue/geofenceEventQueue/geofenceConfigStore) that had already drifted out of
+        // sync with what LocationRuntimeContainer actually needs to clear (geofenceRegistrar/
+        // stateStore were unreachable from here). Now the same single wipe every sign-out path
+        // uses — see `wipeLocalState`'s doc.
+        await wipeLocalState()
         // specs/008-privacy-endpoints.md §3.1 rule 2 (finding #1) — any export artifact must not
         // survive the account it belongs to.
         exportArtifactStore.removeCurrentArtifact()

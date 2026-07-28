@@ -147,15 +147,23 @@ struct FindlyApp: App {
                 deviceIdProvider.clearDeviceId(forUserId: uid)
                 _ = try? await deviceRegistrationService.registerOrUpdate()
             },
-            // specs/009 §9: a second AUTH_TOKEN_EXPIRED means signed-out - stop the runtime and
+            // specs/009 §9: a second AUTH_TOKEN_EXPIRED means signed-out - wipe local state and
             // return to sign-in. Reads the container back through the holder (populated a few
             // lines below, but only ever CALLED once a real failure happens, long after that
             // assignment has run) rather than capturing `container` directly, which doesn't exist
             // yet at this point inside its own initializer argument list — the same self-reference
             // problem the holder was originally built to solve, now narrowed to just this one use.
+            //
+            // Post-review fix (security review, High finding): previously called `.stop()`, which
+            // only halts monitoring/cancels the BG task — it left every piece of I10/I11 local
+            // state (fix queue, geofence-event queue, cached geofence config/ETag, cached device
+            // settings, registered CLLocationManager geofences) untouched across a forced sign-out,
+            // a real, deterministic cross-account data leak (see `wipeLocalState()`'s doc). Now
+            // calls the consolidated `wipeLocalState()` (which itself calls `stop()`), the same
+            // method `DeleteAccountViewModel`'s two sign-out-shaped paths use.
             onSignedOut: { [weak authProvider, weak coordinator] in
                 try? authProvider?.signOut()
-                await LocationRuntimeContainerHolder.shared.container?.stop()
+                await LocationRuntimeContainerHolder.shared.container?.wipeLocalState()
                 await coordinator?.showSignIn()
             }
         )
@@ -201,7 +209,6 @@ struct FindlyApp: App {
                 authProvider: authProvider,
                 apiClient: apiClient,
                 deviceIdProvider: deviceIdProvider,
-                fixQueue: fixQueue,
                 exportArtifactStore: exportArtifactStore,
                 locationRuntimeContainer: locationRuntimeContainer
             )

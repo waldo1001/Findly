@@ -90,7 +90,7 @@ public struct DeleteAccountScreen: View {
             message: "Your data was deleted, but we couldn't finish removing your sign-in. Sign out, then sign back in and try deleting again.",
             retryTitle: "Sign out"
         ) {
-            viewModel.signOutForRetry()
+            Task { await viewModel.signOutForRetry() }
         }
         .padding(theme.spacing.xl)
     }

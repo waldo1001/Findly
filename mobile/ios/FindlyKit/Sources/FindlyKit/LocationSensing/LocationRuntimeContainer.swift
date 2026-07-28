@@ -44,6 +44,10 @@ public final class LocationRuntimeContainer {
     // (resume from pause) can all call through the same instance `LocationSyncRunner` also drains
     // the ETag-mismatch trigger through.
     private let geofenceConfigSyncCoordinator: GeofenceConfigSyncCoordinator
+    // Post-review addition (security review, High finding) — previously only ever a local `let`
+    // inside `FindlyApp.init()`, with no path from anywhere in the sign-out flow able to reach it
+    // at all. `wipeLocalState()` below needs it directly for the unregister-all half of the fix.
+    private let geofenceRegistrar: GeofenceRegistering
 
     /// Consecutive-transient-failure counter for `BackoffPolicy` (specs/009 §9) — reset to 0 on
     /// any non-retry outcome. In-memory only: a process restart naturally resets backoff, which is
@@ -88,6 +92,7 @@ public final class LocationRuntimeContainer {
         self.backgroundScheduler = backgroundScheduler
         self.stateStore = stateStore
         self.geofenceConfigStore = geofenceConfigStore
+        self.geofenceRegistrar = geofenceRegistrar
 
         let queue = FixQueue(store: fixStore)
         self.fixQueue = queue
@@ -217,11 +222,58 @@ public final class LocationRuntimeContainer {
     /// specs/009 §4's pause teardown, the parts this container owns: stop significant-location-
     /// change monitoring and cancel the scheduled `BGAppRefreshTask`. Geofence unregistration and
     /// the settings-cache update itself are `DeviceSettingsCoordinator.applySettings`'s job — this
-    /// method exists for a caller that wants to tear down without going through a settings change
-    /// (e.g. sign-out).
+    /// method exists for a caller that wants to tear down monitoring without going through a
+    /// settings change. **Not, on its own, what sign-out should call** — see `wipeLocalState()`
+    /// below, which calls this AND clears every piece of local state I10/I11 persist; `stop()`
+    /// alone leaves the fix queue, geofence-event queue, cached geofence config, and cached device
+    /// settings all untouched.
     public func stop() {
         locationProvider.stopBackgroundMonitoring()
         backgroundScheduler.cancelScheduledSync()
+    }
+
+    /// **Post-review addition (security review, High finding).** The one consolidated "this device
+    /// no longer belongs to a current session" wipe — covers everything I10+I11 persist locally.
+    /// Previously, only account deletion's `DeleteAccountViewModel.wipeLocalStateAndComplete()`
+    /// cleared any of this, and even that path never reached `geofenceRegistrar` (which had no
+    /// path to it at all — it lived only as a local `let` inside `FindlyApp.init()`) or
+    /// `stateStore`. Neither the forced-sign-out path (a second `AUTH_TOKEN_EXPIRED`, specs/009 §9)
+    /// nor the sign-out-for-retry recovery flow (specs/008 §1.3) wiped anything — a real,
+    /// deterministic bug, not a race: User A's cached `trackingEnabled: true` settings and
+    /// registered `CLLocationManager` regions survive her sign-out untouched, so a geofence
+    /// transition crossed in the window before a *different* trigger happens to re-sync gets
+    /// durably queued and, if that queue is still non-empty once User B signs in on the same
+    /// device, flushed under User B's `deviceId` — reporting a transition tagged with a
+    /// `geofenceId` from a family User B has no relationship to. `GeofenceConfigSyncCoordinator`'s
+    /// own network-failure fallback (`registerFromCache`) compounds this: if User B's very first
+    /// sign-in sync happens to fail while offline, it would re-register User A's stale cached
+    /// geofences under `CLLocationManager` — actively starting monitoring of a different family's
+    /// home/school under the new session.
+    ///
+    /// MUST be called on every path that ends a session on this device — this container has no way
+    /// to enforce that itself (it doesn't own sign-out), so every caller must be audited: as of
+    /// this fix, `FindlyApp.swift`'s forced `onSignedOut` closure and
+    /// `DeleteAccountViewModel.signOutForRetry()` (both previously did nothing local at all) now
+    /// call this; `DeleteAccountViewModel.wipeLocalStateAndComplete()` (account deletion) now calls
+    /// this too, via the same `wipeLocalState` closure injected into the view model, instead of
+    /// its own previously-separate, now-removed ad-hoc partial wipe — one implementation, three
+    /// call sites, not two independently-maintained ones.
+    ///
+    /// `stateStore.clear()` is the piece that makes a stray geofence transition arriving after this
+    /// method returns (a callback already in flight when `geofenceRegistrar.unregisterAll()` was
+    /// called — the same non-atomicity specs/009 §6.2 already accepts as normal) get dropped by
+    /// `GeofenceTransitionHandler.isPaused`/`FixCaptureCoordinator.isPaused` rather than queued: see
+    /// `DeviceSettingsStateStoring.clear()`'s doc for why that requires an explicit
+    /// `trackingEnabled: false` write, not a bare "forget everything".
+    ///
+    /// Idempotent-safe to call more than once (every step it delegates to already is).
+    public func wipeLocalState() async {
+        stop()
+        geofenceRegistrar.unregisterAll()
+        await fixQueue.clearAll()
+        await geofenceEventQueue.clearAll()
+        geofenceConfigStore.clear()
+        stateStore.clear()
     }
 
     /// specs/009 §4: "at least every 6 hours" — the ONE explicit cadence number the spec gives for

@@ -2,6 +2,14 @@ import Foundation
 import Testing
 @testable import FindlyKit
 
+/// A call-counting `wipeLocalState` test double — mirrors `LocationRuntimeContainer.wipeLocalState()`
+/// (security review addition) without needing a real container/CLLocationManager/SQLite stack in
+/// these tests; `LocationRuntimeContainerTests` owns proving what the real method actually clears.
+private final class WipeLocalStateRecorder {
+    private(set) var callCount = 0
+    func wipe() async { callCount += 1 }
+}
+
 /// specs/004-ios-client.md §3.6, specs/008-privacy-endpoints.md §4 — account deletion: the
 /// last-parent/sole-member cascade wording trigger (008 §4.2), the 008 §1.3 ordering
 /// (`DELETE /users/me` 204 → Firebase `user.delete()` → local wipe), the sign-out-then-retry
@@ -17,14 +25,12 @@ struct DeleteAccountViewModelTests {
     func makeViewModel(
         api: FakeAPIClient, auth: FakeAuthProviding,
         deviceIdProvider: DeviceIdProviding = InMemoryDeviceIdProvider(),
-        fixQueue: FixQueue = FixQueue(),
         exportArtifactStore: InMemoryExportArtifactStore = InMemoryExportArtifactStore(),
-        geofenceEventQueue: GeofenceEventQueue = GeofenceEventQueue(),
-        geofenceConfigStore: GeofenceConfigStateStoring = InMemoryGeofenceConfigStateStore()
+        wipeLocalState: @escaping () async -> Void = {}
     ) -> DeleteAccountViewModel {
         DeleteAccountViewModel(
-            apiClient: api, authProvider: auth, deviceIdProvider: deviceIdProvider, fixQueue: fixQueue,
-            exportArtifactStore: exportArtifactStore, geofenceEventQueue: geofenceEventQueue, geofenceConfigStore: geofenceConfigStore
+            apiClient: api, authProvider: auth, deviceIdProvider: deviceIdProvider,
+            exportArtifactStore: exportArtifactStore, wipeLocalState: wipeLocalState
         )
     }
 
@@ -161,11 +167,13 @@ struct DeleteAccountViewModelTests {
         auth.currentUserId = "u1"
         let deviceIdProvider = InMemoryDeviceIdProvider(generateUUID: { "dev-1" })
         _ = deviceIdProvider.deviceId(forUserId: "u1") // pre-register, so clearing is observable
-        let fixQueue = FixQueue()
-        await fixQueue.enqueue(LocationFix(fixId: "f1", recordedAt: "2026-07-19T09:00:00Z", lat: 51.0, lon: 3.7, accuracyM: 10, batteryPct: 80, source: .periodic))
         let exportArtifactStore = InMemoryExportArtifactStore()
         _ = try? exportArtifactStore.write(Data("leftover export".utf8))
-        let viewModel = makeViewModel(api: api, auth: auth, deviceIdProvider: deviceIdProvider, fixQueue: fixQueue, exportArtifactStore: exportArtifactStore)
+        let recorder = WipeLocalStateRecorder()
+        let viewModel = makeViewModel(
+            api: api, auth: auth, deviceIdProvider: deviceIdProvider, exportArtifactStore: exportArtifactStore,
+            wipeLocalState: { await recorder.wipe() }
+        )
 
         await viewModel.confirmDelete()
 
@@ -173,47 +181,15 @@ struct DeleteAccountViewModelTests {
         #expect(auth.deleteCurrentUserCallCount == 1)
         #expect(auth.clearStoredSessionCallCount == 1, "008 §1.3 (finding #5) — the Keychain-backed session is cleared as its own unconditional step")
         #expect(auth.signOutCallCount == 1)
-        #expect(await fixQueue.queuedCount() == 0)
+        // Post-review (security review, High finding): DeleteAccountViewModel no longer touches
+        // fixQueue/geofenceEventQueue/geofenceConfigStore directly — it calls the ONE consolidated
+        // LocationRuntimeContainer.wipeLocalState() every sign-out-shaped path now shares. What
+        // that method itself actually clears is proven by LocationRuntimeContainerTests.
+        #expect(recorder.callCount == 1, "the account-deletion local wipe must call the consolidated wipeLocalState exactly once")
         // A fresh id is issued for "u1" now — proof the old one was actually cleared, not reused.
         #expect(deviceIdProvider.deviceId(forUserId: "u1") != "dev-1")
         #expect(exportArtifactStore.currentURL == nil, "008 §3.1 rule 2 (finding #1) — any export artifact is removed by the account-deletion wipe")
         #expect(viewModel.phase == .completed)
-    }
-
-    /// I11 addition — specs/009-device-runtime.md §6.1/§6.3's local state (the geofence-event
-    /// queue and cached geofence config/ETag) is "local state" exactly as much as the fix queue
-    /// is (008 §4.4), so the account-deletion wipe must clear it too.
-    @Test func confirmDelete_success_alsoWipesTheGeofenceEventQueueAndConfigCache() async {
-        let api = FakeAPIClient()
-        api.deleteAccountHandler = {}
-        let auth = FakeAuthProviding()
-        let geofenceEventQueue = GeofenceEventQueue()
-        await geofenceEventQueue.enqueue(GeofenceEventReport(eventId: "e1", geofenceId: "gf_home", transition: .enter, recordedAt: "2026-07-19T09:00:00Z"))
-        let geofenceConfigStore = InMemoryGeofenceConfigStateStore(initial: CachedGeofenceConfig(etag: "\"0x1\"", geofences: []))
-        let viewModel = makeViewModel(api: api, auth: auth, geofenceEventQueue: geofenceEventQueue, geofenceConfigStore: geofenceConfigStore)
-
-        await viewModel.confirmDelete()
-
-        #expect(await geofenceEventQueue.pendingCount() == 0)
-        #expect(geofenceConfigStore.current() == nil)
-        #expect(viewModel.phase == .completed)
-    }
-
-    @Test func confirmDelete_firebaseDeleteFails_doesNotWipeTheGeofenceEventQueueOrConfigCache() async {
-        let api = FakeAPIClient()
-        api.deleteAccountHandler = {}
-        let auth = FakeAuthProviding()
-        auth.deleteCurrentUserResult = .failure(NSError(domain: "test", code: 1))
-        let geofenceEventQueue = GeofenceEventQueue()
-        await geofenceEventQueue.enqueue(GeofenceEventReport(eventId: "e1", geofenceId: "gf_home", transition: .enter, recordedAt: "2026-07-19T09:00:00Z"))
-        let geofenceConfigStore = InMemoryGeofenceConfigStateStore(initial: CachedGeofenceConfig(etag: "\"0x1\"", geofences: []))
-        let viewModel = makeViewModel(api: api, auth: auth, geofenceEventQueue: geofenceEventQueue, geofenceConfigStore: geofenceConfigStore)
-
-        await viewModel.confirmDelete()
-
-        #expect(viewModel.phase == .firebaseDeleteFailed)
-        #expect(await geofenceEventQueue.pendingCount() == 1, "local state must survive an unrecovered Firebase-delete failure")
-        #expect(geofenceConfigStore.current() != nil)
     }
 
     @Test func confirmDelete_backendFailure_setsErrorPhase_neverCallsFirebaseDelete() async {
@@ -237,14 +213,13 @@ struct DeleteAccountViewModelTests {
         let auth = FakeAuthProviding()
         auth.currentUserId = "u1"
         auth.deleteCurrentUserResult = .failure(AuthError.notSignedIn) // stand-in for requires-recent-login
-        let fixQueue = FixQueue()
-        await fixQueue.enqueue(LocationFix(fixId: "f1", recordedAt: "2026-07-19T09:00:00Z", lat: 51.0, lon: 3.7, accuracyM: 10, batteryPct: 80, source: .periodic))
-        let viewModel = makeViewModel(api: api, auth: auth, fixQueue: fixQueue)
+        let recorder = WipeLocalStateRecorder()
+        let viewModel = makeViewModel(api: api, auth: auth, wipeLocalState: { await recorder.wipe() })
 
         await viewModel.confirmDelete()
 
         #expect(viewModel.phase == .firebaseDeleteFailed)
-        #expect(await fixQueue.queuedCount() == 1, "local state must survive an unrecovered Firebase-delete failure")
+        #expect(recorder.callCount == 0, "local state must survive an unrecovered Firebase-delete failure")
         #expect(auth.signOutCallCount == 0)
         #expect(auth.clearStoredSessionCallCount == 0, "the Keychain clear is part of the wipe, which only runs once the flow actually completes")
     }
@@ -266,7 +241,7 @@ struct DeleteAccountViewModelTests {
         await viewModel.confirmDelete()
         #expect(viewModel.phase == .firebaseDeleteFailed)
 
-        viewModel.signOutForRetry()
+        await viewModel.signOutForRetry()
 
         #expect(viewModel.phase == .signedOutForRetry)
     }
@@ -280,13 +255,35 @@ struct DeleteAccountViewModelTests {
         let viewModel = makeViewModel(api: api, auth: auth)
         await viewModel.confirmDelete()
 
-        viewModel.signOutForRetry()
+        await viewModel.signOutForRetry()
 
         #expect(auth.clearStoredSessionCallCount == 1)
         #expect(auth.signOutCallCount == 1)
         // The trap this replaces: NOT a bare re-invocation of the failed calls.
         #expect(api.deleteAccountCallCount == 1, "still just the one original call — sign-out-for-retry is not a backend re-call")
         #expect(auth.deleteCurrentUserCallCount == 1, "still just the one original failed attempt — no blind re-invocation")
+    }
+
+    /// **Post-review addition (security review, High finding).** Previously `signOutForRetry()`
+    /// wiped nothing local at all — a real, deterministic gap: the backend account is already gone
+    /// by the time this runs, but this device's registered `CLLocationManager` geofences/queued
+    /// fixes/queued geofence-events/cached device settings survived untouched, so a geofence
+    /// transition detected in the window before a *different* trigger happens to re-sync could get
+    /// durably queued and later flushed under whichever *different* account signs in next.
+    @Test func signOutForRetry_wipesLocalState() async {
+        let api = FakeAPIClient()
+        api.deleteAccountHandler = {}
+        let auth = FakeAuthProviding()
+        auth.currentUserId = "u1"
+        auth.deleteCurrentUserResult = .failure(AuthError.notSignedIn)
+        let recorder = WipeLocalStateRecorder()
+        let viewModel = makeViewModel(api: api, auth: auth, wipeLocalState: { await recorder.wipe() })
+        await viewModel.confirmDelete()
+        #expect(recorder.callCount == 0, "not wiped yet — only the Firebase step has failed so far")
+
+        await viewModel.signOutForRetry()
+
+        #expect(recorder.callCount == 1)
     }
 
     /// Review finding #5 — proves the Keychain clear is genuinely unconditional: it still happens
@@ -302,7 +299,7 @@ struct DeleteAccountViewModelTests {
         await viewModel.confirmDelete()
 
         auth.signOutResult = .failure(AuthError.notSignedIn)
-        viewModel.signOutForRetry()
+        await viewModel.signOutForRetry()
 
         #expect(auth.clearStoredSessionCallCount == 1, "must run even though signOut() below it failed")
         #expect(viewModel.phase == .signedOutForRetry, "the screen still navigates to sign-in — there is nothing else to offer")

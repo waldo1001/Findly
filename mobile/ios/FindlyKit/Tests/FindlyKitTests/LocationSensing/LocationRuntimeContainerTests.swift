@@ -349,4 +349,71 @@ struct LocationRuntimeContainerTests {
         #expect(await container.geofenceEventQueue.pendingCount() == 1)
         #expect(await container.fixQueue.queuedCount() == 1)
     }
+
+    // MARK: - Post-review: wipeLocalState() (security review, High finding — no local state was
+    // wiped on sign-out, only on account deletion, a real deterministic cross-account data leak)
+
+    @Test func wipeLocalState_clearsEveryPieceOfLocalStateItClaimsTo() async {
+        let provider = FakeLocationProviding()
+        let scheduler = FakeBackgroundSyncScheduler()
+        let registrar = FakeGeofenceRegistering()
+        let geofenceConfigStore = InMemoryGeofenceConfigStateStore(
+            initial: CachedGeofenceConfig(etag: "\"0x1\"", geofences: [])
+        )
+        let stateStore = InMemoryDeviceSettingsStateStore(initial: DeviceSettingsSnapshot(syncIntervalMinutes: 15, trackingEnabled: true))
+        let container = LocationRuntimeContainer(
+            apiClient: FakeAPIClient(), deviceId: { "device-1" },
+            locationProvider: provider, backgroundScheduler: scheduler,
+            stateStore: stateStore, geofenceRegistrar: registrar, geofenceConfigStore: geofenceConfigStore
+        )
+        await container.fixQueue.enqueue(makeFix())
+        await container.geofenceEventQueue.enqueue(
+            GeofenceEventReport(eventId: "e1", geofenceId: "gf_home", transition: .enter, recordedAt: "2026-07-19T09:00:00Z")
+        )
+
+        await container.wipeLocalState()
+
+        #expect(await container.fixQueue.queuedCount() == 0, "the fix queue must be cleared")
+        #expect(await container.geofenceEventQueue.pendingCount() == 0, "the geofence-event queue must be cleared")
+        #expect(geofenceConfigStore.current() == nil, "the cached geofence config/ETag must be cleared")
+        #expect(
+            stateStore.current()?.trackingEnabled == false,
+            "cached device settings must read as a DEFINITE paused state, not merely 'unknown' — see DeviceSettingsStateStoring.clear()'s doc for why nil alone wouldn't be enough"
+        )
+        #expect(registrar.unregisterAllCallCount == 1, "the registered CLLocationManager geofences must be unregistered")
+        #expect(provider.stopBackgroundMonitoringCallCount == 1, "significant-location-change monitoring must stop")
+        #expect(scheduler.cancelCallCount == 1, "the scheduled BGAppRefreshTask must be canceled")
+    }
+
+    @Test func wipeLocalState_calledTwice_isIdempotentSafe() async {
+        let registrar = FakeGeofenceRegistering()
+        let container = LocationRuntimeContainer(apiClient: FakeAPIClient(), deviceId: { "device-1" }, geofenceRegistrar: registrar)
+
+        await container.wipeLocalState()
+        await container.wipeLocalState()
+
+        #expect(registrar.unregisterAllCallCount == 2, "each call performs its own unregister — no crash/inconsistency from calling twice")
+        #expect(await container.fixQueue.queuedCount() == 0)
+    }
+
+    /// The concrete acceptance criterion for the security review's High finding: a geofence
+    /// transition delegate callback that fires AFTER `wipeLocalState()` returns (the exact race
+    /// specs/009 §6.2 already accepts as normal — the platform unregister call and the callback
+    /// aren't atomic) must be dropped, not durably queued under whatever *different* account signs
+    /// in next.
+    @Test func wipeLocalState_thenATransitionArrives_isDroppedNotQueued() async {
+        let stateStore = InMemoryDeviceSettingsStateStore(initial: DeviceSettingsSnapshot(syncIntervalMinutes: 15, trackingEnabled: true))
+        let container = LocationRuntimeContainer(
+            apiClient: FakeAPIClient(), deviceId: { "device-1" }, stateStore: stateStore,
+            isPermissionGranted: { true }
+        )
+
+        await container.wipeLocalState()
+        await container.geofenceTransitionHandler.handle(
+            GeofenceTransitionEvent(geofenceId: "gf_home", transition: .enter, lat: 51.0, lon: 3.7, accuracyM: 10)
+        )
+
+        #expect(await container.geofenceEventQueue.pendingCount() == 0, "a transition detected after wipeLocalState() must be dropped, not queued")
+        #expect(await container.fixQueue.queuedCount() == 0, "the accompanying source: .geofence fix must also be dropped")
+    }
 }
