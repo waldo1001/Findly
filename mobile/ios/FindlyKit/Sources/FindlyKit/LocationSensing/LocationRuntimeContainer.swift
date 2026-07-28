@@ -39,6 +39,11 @@ public final class LocationRuntimeContainer {
     private let settingsCoordinator: DeviceSettingsCoordinator
     private let syncRunner: LocationSyncRunner
     private let pausedDevicePoller: PausedDevicePoller
+    // I11 (specs/009-device-runtime.md §6.2) — the fetch/cache/full-replace-register sequence.
+    // Held so `start()`/`onSignedIn()` (cold start, first sync after sign-in) and `onResume` below
+    // (resume from pause) can all call through the same instance `LocationSyncRunner` also drains
+    // the ETag-mismatch trigger through.
+    private let geofenceConfigSyncCoordinator: GeofenceConfigSyncCoordinator
 
     /// Consecutive-transient-failure counter for `BackoffPolicy` (specs/009 §9) — reset to 0 on
     /// any non-retry outcome. In-memory only: a process restart naturally resets backoff, which is
@@ -48,6 +53,20 @@ public final class LocationRuntimeContainer {
     private static let defaultSyncIntervalMinutes = 15 // the server's own first-registration default (001 §4.1)
 
     public let fixQueue: FixQueue
+    /// I11 (specs/009-device-runtime.md §6.3) — the durable geofence-event queue, exposed the same
+    /// way `fixQueue` is: `DeleteAccountViewModel`'s local-state wipe needs a direct reference
+    /// (specs/008-privacy-endpoints.md §4.4), same as `FixQueue`.
+    public let geofenceEventQueue: GeofenceEventQueue
+    /// I11 — the cached geofence config document + ETag, exposed for the same account-deletion
+    /// local-wipe reason as `geofenceEventQueue` above.
+    public let geofenceConfigStore: GeofenceConfigStateStoring
+    /// I11 (specs/009-device-runtime.md §6.3) — the tested decision logic behind a region-
+    /// monitoring enter/exit callback. Exposed so the app target can wire it into
+    /// `SystemGeofenceRegistrar.transitionHandler` AFTER this container is constructed — mirrors
+    /// how `fixQueue` is exposed as a plain property rather than threaded back out through a
+    /// closure, since `SystemGeofenceRegistrar` (like `SystemLocationProvider`) is built OUTSIDE
+    /// this container, in `FindlyApp.init()`.
+    public let geofenceTransitionHandler: GeofenceTransitionHandler
 
     public init(
         apiClient: FindlyAPIClient,
@@ -56,18 +75,25 @@ public final class LocationRuntimeContainer {
         backgroundScheduler: BackgroundSyncScheduling = NoOpBackgroundSyncScheduler(),
         fixStore: FixStoring = InMemoryFixStore(),
         stateStore: DeviceSettingsStateStoring = InMemoryDeviceSettingsStateStore(),
-        geofenceRegistrar: GeofenceRegistrarStub = NoOpGeofenceRegistrarStub(),
+        geofenceRegistrar: GeofenceRegistering = NoOpGeofenceRegistrar(),
+        geofenceConfigStore: GeofenceConfigStateStoring = InMemoryGeofenceConfigStateStore(),
+        geofenceEventStore: GeofenceEventQueueStoring = InMemoryGeofenceEventQueueStore(),
         lastQueuedFixAtStore: LastQueuedFixAtStoring = InMemoryLastQueuedFixAtStore(),
         isPermissionGranted: @escaping () -> Bool = { false },
+        batteryLevelProvider: @escaping () -> Int = { 100 },
         onReRegisterDevice: @escaping () async -> Void = {},
         onSignedOut: @escaping () async -> Void = {}
     ) {
         self.locationProvider = locationProvider
         self.backgroundScheduler = backgroundScheduler
         self.stateStore = stateStore
+        self.geofenceConfigStore = geofenceConfigStore
 
         let queue = FixQueue(store: fixStore)
         self.fixQueue = queue
+
+        let geofenceEventQueue = GeofenceEventQueue(store: geofenceEventStore)
+        self.geofenceEventQueue = geofenceEventQueue
 
         let captureCoordinator = FixCaptureCoordinator(
             provider: locationProvider,
@@ -76,6 +102,18 @@ public final class LocationRuntimeContainer {
             isPermissionGranted: isPermissionGranted
         )
         self.captureCoordinator = captureCoordinator
+
+        self.geofenceTransitionHandler = GeofenceTransitionHandler(
+            eventQueue: geofenceEventQueue,
+            fixCaptureCoordinator: captureCoordinator,
+            batteryLevelProvider: batteryLevelProvider,
+            isPaused: { stateStore.current()?.trackingEnabled == false }
+        )
+
+        let geofenceConfigSyncCoordinator = GeofenceConfigSyncCoordinator(
+            apiClient: apiClient, configStore: geofenceConfigStore, registrar: geofenceRegistrar
+        )
+        self.geofenceConfigSyncCoordinator = geofenceConfigSyncCoordinator
 
         let schedulingAdapter = BackgroundSyncSchedulingAdapter(scheduler: backgroundScheduler)
         let settingsCoordinator = DeviceSettingsCoordinator(
@@ -89,10 +127,13 @@ public final class LocationRuntimeContainer {
                 locationProvider.stopBackgroundMonitoring()
             },
             onResume: {
-                // specs/009 §4: resume restores monitoring/scheduling. Geofence re-registration is
-                // I11's scope (geofenceRegistrar above is a no-op stub until then).
+                // specs/009 §4/§6.2: resume restores monitoring/scheduling AND is one of the five
+                // geofence re-registration triggers (I11) — the OS may have already lost the
+                // platform registrations while paused (a paused device unregisters all geofences,
+                // §4), so resume must re-sync/re-register, not just restart location monitoring.
                 locationProvider.startBackgroundMonitoring(coordinator: captureCoordinator)
                 backgroundScheduler.scheduleNextSync()
+                await geofenceConfigSyncCoordinator.sync()
             }
         )
         self.settingsCoordinator = settingsCoordinator
@@ -104,12 +145,19 @@ public final class LocationRuntimeContainer {
             cachedSettings: { stateStore.current() }
         )
 
+        let geofenceEventSyncCoordinator = GeofenceEventSyncCoordinator(
+            queue: geofenceEventQueue, apiClient: apiClient, deviceId: deviceId,
+            cachedSettings: { stateStore.current() }
+        )
+
         self.syncRunner = LocationSyncRunner(
             currentSyncIntervalMinutes: { stateStore.current()?.syncIntervalMinutes ?? Self.defaultSyncIntervalMinutes },
             lastQueuedFixAtStore: lastQueuedFixAtStore,
             captureCoordinator: captureCoordinator,
             syncCoordinator: syncCoordinator,
             settingsApplying: settingsCoordinator,
+            geofenceConfigSyncing: geofenceConfigSyncCoordinator,
+            geofenceEventDraining: geofenceEventSyncCoordinator,
             onReRegisterDevice: onReRegisterDevice,
             onSignedOut: onSignedOut
         )
@@ -130,6 +178,39 @@ public final class LocationRuntimeContainer {
             backgroundScheduler.scheduleNextSync()
         } else {
             backgroundScheduler.scheduleNextSync(afterDelay: Self.pausedPollIntervalSeconds)
+        }
+    }
+
+    /// specs/009 §6.2's "device reboot / app reinstall" registration trigger — both lose OS-level
+    /// geofence registrations without changing anything server-side (unlike a plain reboot, which
+    /// iOS actually DOES persist region monitoring across — see this method's callers' doc for why
+    /// the safe, simple, idempotent choice is still "re-check/re-register on cold start regardless").
+    /// Deliberately a **separate, explicit** method from `start()` — NOT auto-invoked from it —
+    /// so `start()` stays a plain synchronous call with no fire-and-forget `Task` inside it (every
+    /// existing `start()` test asserts its synchronous side effects immediately after calling it;
+    /// spawning unawaited async work there would make those assertions race a background task that
+    /// might still be mid-flight, or might fail hard against a test's `FakeAPIClient` that never
+    /// anticipated a `getGeofences` call). The app target's cold-start path
+    /// (`FindlyApp.init()`, the one place a process launch is unambiguous) calls this once,
+    /// alongside `start()`, in its own `Task`.
+    public func syncGeofenceConfigOnColdStart() async {
+        if stateStore.current()?.trackingEnabled != false {
+            await geofenceConfigSyncCoordinator.sync()
+        }
+    }
+
+    /// specs/009 §6.2's "first config sync after sign-in" registration trigger. iOS has no
+    /// `DeviceRegistrar.onRegistered`-shaped hook yet (Android's own trigger for this — a
+    /// pre-existing gap this container's `onReRegisterDevice` doc already flags, not this task's to
+    /// close) — the closest available, unambiguous "the user just signed in" signal is the
+    /// sign-in flow's own completion callback, so the app target calls this from there
+    /// (`RootView`'s `SignInViewModel(onSignedIn:)`). Kept separate from `syncGeofenceConfigOnColdStart()`
+    /// because an in-app sign-out/sign-in cycle (e.g. `DeleteAccountViewModel.signOutForRetry()`
+    /// followed by signing back in) never re-runs `FindlyApp.init()`, so the cold-start trigger
+    /// alone would miss it.
+    public func onSignedIn() async {
+        if stateStore.current()?.trackingEnabled != false {
+            await geofenceConfigSyncCoordinator.sync()
         }
     }
 

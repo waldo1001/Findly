@@ -79,6 +79,9 @@ struct LocationRuntimeContainerTests {
         api.reportLocationsHandler = { _, _, _ in
             TestFeatures.envelope(ReportLocationsResponse(accepted: 1, duplicates: 0, lastKnownUpdated: true, deviceSettings: DeviceSettingsSnapshot(syncIntervalMinutes: 15, trackingEnabled: true), geofenceEtag: "0"))
         }
+        // I11: the accepted-flush piggyback now also triggers a geofenceEtag mismatch check
+        // (nothing cached yet, "0" != nil) - stub the resulting GET /geofences call.
+        api.getGeofencesHandler = { _ in .notModified }
         let container = LocationRuntimeContainer(
             apiClient: api, deviceId: { "device-1" },
             backgroundScheduler: scheduler, fixStore: queue0, stateStore: stateStore
@@ -105,6 +108,10 @@ struct LocationRuntimeContainerTests {
         api.reportLocationsHandler = { _, _, _ in
             TestFeatures.envelope(ReportLocationsResponse(accepted: 1, duplicates: 0, lastKnownUpdated: true, deviceSettings: DeviceSettingsSnapshot(syncIntervalMinutes: 15, trackingEnabled: true), geofenceEtag: "0"))
         }
+        // I11: this test's "everything changed" first-ever settings application triggers BOTH
+        // onResume's geofence re-sync AND the accepted-flush geofenceEtag mismatch check - stub
+        // the resulting GET /geofences call(s).
+        api.getGeofencesHandler = { _ in .notModified }
         let container = LocationRuntimeContainer(
             apiClient: api, deviceId: { "device-1" },
             locationProvider: provider, backgroundScheduler: scheduler, fixStore: queue0
@@ -147,6 +154,8 @@ struct LocationRuntimeContainerTests {
             if shouldFail { throw APIError.transport("offline") }
             return TestFeatures.envelope(ReportLocationsResponse(accepted: fixes.count, duplicates: 0, lastKnownUpdated: true, deviceSettings: DeviceSettingsSnapshot(syncIntervalMinutes: 15, trackingEnabled: true), geofenceEtag: "0"))
         }
+        // I11: the eventual accepted flush's geofenceEtag mismatch check needs a stub too.
+        api.getGeofencesHandler = { _ in .notModified }
         let container = LocationRuntimeContainer(
             apiClient: api, deviceId: { "device-1" },
             backgroundScheduler: scheduler, fixStore: queue0
@@ -228,6 +237,8 @@ struct LocationRuntimeContainerTests {
         }
         let scheduler = FakeBackgroundSyncScheduler()
         let stateStore = InMemoryDeviceSettingsStateStore(initial: DeviceSettingsSnapshot(syncIntervalMinutes: 15, trackingEnabled: false))
+        // I11: the detected resume triggers onResume's geofence config re-sync (specs/009 §6.2).
+        api.getGeofencesHandler = { _ in .notModified }
         let container = LocationRuntimeContainer(
             apiClient: api, deviceId: { "device-1" },
             locationProvider: provider, backgroundScheduler: scheduler, stateStore: stateStore
@@ -253,5 +264,89 @@ struct LocationRuntimeContainerTests {
         await container.onAppForeground()
 
         #expect(listDevicesCallCount == 1)
+    }
+
+    // MARK: - I11: geofence config sync triggers (specs/009 §6.2)
+
+    @Test func syncGeofenceConfigOnColdStart_notPaused_registersFromTheFreshlyFetchedConfig() async {
+        let api = FakeAPIClient()
+        var getGeofencesCallCount = 0
+        api.getGeofencesHandler = { _ in
+            getGeofencesCallCount += 1
+            return .ok(GeofenceConfig(version: 1, geofences: []), etag: "\"0x1\"", features: TestFeatures.free)
+        }
+        let registrar = FakeGeofenceRegistering()
+        let container = LocationRuntimeContainer(apiClient: api, deviceId: { "device-1" }, geofenceRegistrar: registrar)
+
+        await container.syncGeofenceConfigOnColdStart()
+
+        #expect(getGeofencesCallCount == 1)
+        #expect(registrar.registerAllCalls.count == 1)
+    }
+
+    @Test func syncGeofenceConfigOnColdStart_paused_isANoOp() async {
+        // specs/009 §4: a paused device has zero geofences registered by contract - cold start
+        // must not re-register while still paused.
+        let api = FakeAPIClient()
+        var getGeofencesCallCount = 0
+        api.getGeofencesHandler = { _ in getGeofencesCallCount += 1; return .notModified }
+        let stateStore = InMemoryDeviceSettingsStateStore(initial: DeviceSettingsSnapshot(syncIntervalMinutes: 15, trackingEnabled: false))
+        let container = LocationRuntimeContainer(apiClient: api, deviceId: { "device-1" }, stateStore: stateStore)
+
+        await container.syncGeofenceConfigOnColdStart()
+
+        #expect(getGeofencesCallCount == 0)
+    }
+
+    @Test func onSignedIn_notPaused_syncsGeofenceConfig() async {
+        let api = FakeAPIClient()
+        var getGeofencesCallCount = 0
+        api.getGeofencesHandler = { _ in getGeofencesCallCount += 1; return .notModified }
+        let container = LocationRuntimeContainer(apiClient: api, deviceId: { "device-1" })
+
+        await container.onSignedIn()
+
+        #expect(getGeofencesCallCount == 1)
+    }
+
+    @Test func resumeFromPause_alsoReSyncsGeofenceConfig() async {
+        // specs/009 §6.2: "resume from pause" is one of the five re-registration triggers - wired
+        // via DeviceSettingsCoordinator's onResume seam.
+        let api = FakeAPIClient()
+        var getGeofencesCallCount = 0
+        api.getGeofencesHandler = { _ in getGeofencesCallCount += 1; return .notModified }
+        api.listDevicesHandler = {
+            TestFeatures.envelope(ListDevicesResponse(devices: [
+                DeviceListItem(
+                    deviceId: "device-1", ownerUserId: "user-1", platform: "ios", deviceName: "iPhone",
+                    model: "iPhone15,2", appVersion: "1.0.0", syncIntervalMinutes: 15, trackingEnabled: true,
+                    pushInvalid: false, ownerDisplayName: "Alex", lastSeenAt: "2026-07-19T09:00:00Z"
+                )
+            ]))
+        }
+        let stateStore = InMemoryDeviceSettingsStateStore(initial: DeviceSettingsSnapshot(syncIntervalMinutes: 15, trackingEnabled: false))
+        let container = LocationRuntimeContainer(apiClient: api, deviceId: { "device-1" }, stateStore: stateStore)
+
+        await container.onAppForeground() // polls GET /devices -> observes the resume
+
+        #expect(stateStore.current()?.trackingEnabled == true)
+        #expect(getGeofencesCallCount == 1)
+    }
+
+    @Test func geofenceTransitionHandler_isExposedAndSharesTheContainersFixCaptureCoordinator() async {
+        // A smoke test that the exposed handler is genuinely wired to this container's own
+        // fixQueue/geofenceEventQueue - a full behavioral suite lives in
+        // GeofenceTransitionHandlerTests; this just proves the composition-root wiring is correct.
+        let container = LocationRuntimeContainer(
+            apiClient: FakeAPIClient(), deviceId: { "device-1" },
+            isPermissionGranted: { true }
+        )
+
+        await container.geofenceTransitionHandler.handle(
+            GeofenceTransitionEvent(geofenceId: "gf_home", transition: .enter, lat: 51.0, lon: 3.7, accuracyM: 10)
+        )
+
+        #expect(await container.geofenceEventQueue.pendingCount() == 1)
+        #expect(await container.fixQueue.queuedCount() == 1)
     }
 }

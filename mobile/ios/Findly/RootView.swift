@@ -79,6 +79,11 @@ struct RootView: View {
                 SignInScreen(
                     viewModel: SignInViewModel(authProvider: authProvider, onSignedIn: {
                         coordinator.showHome()
+                        // specs/009-device-runtime.md §6.2 (I11) — "first config sync after
+                        // sign-in" is one of the five geofence re-registration triggers; see
+                        // `LocationRuntimeContainer.onSignedIn()`'s doc for why this in-app
+                        // callback (rather than the cold-start hook alone) is the trigger's home.
+                        Task { await locationRuntimeContainer.onSignedIn() }
                     })
                 )
             case .home:
@@ -166,7 +171,12 @@ struct RootView: View {
                     viewModel: DeleteAccountViewModel(
                         apiClient: apiClient, authProvider: authProvider,
                         deviceIdProvider: deviceIdProvider, fixQueue: fixQueue,
-                        exportArtifactStore: exportArtifactStore
+                        exportArtifactStore: exportArtifactStore,
+                        // I11 additions — the same shared instances locationRuntimeContainer uses
+                        // (specs/009-device-runtime.md §6.1/§6.3), so this local wipe clears the
+                        // actual live geofence-event queue/config cache, not a second, separate one.
+                        geofenceEventQueue: locationRuntimeContainer.geofenceEventQueue,
+                        geofenceConfigStore: locationRuntimeContainer.geofenceConfigStore
                     ),
                     // specs/008-privacy-endpoints.md §3.1/§4.4 local wipe already clears fixQueue
                     // (the same shared instance locationRuntimeContainer uses, per this file's
