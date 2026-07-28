@@ -20,6 +20,17 @@ public final class SignInViewModel: ObservableObject {
     private let resendCooldownSeconds: Int
     /// Injectable so the 30 s resend cooldown (006 §4.1) advances deterministically in tests
     /// instead of racing a real timer — same pattern as `LocateViewModel`'s poll loop.
+    ///
+    /// Defaults through `Task.sleep(nanoseconds:)`, deliberately NOT `Task.sleep(for: Duration)`:
+    /// the latter is a known Swift concurrency runtime defect (swiftlang/swift#86204) where a
+    /// `Task.sleep(for:)` generic specialization compiled into more than one binary image —
+    /// `FindlyKit` and the separate `FindlyKitTests` module both call it — corrupts the task
+    /// allocator on deinit, crashing with SIGABRT "freed pointer was not the last allocation" in
+    /// `swift_task_dealloc`. That is I13's bug: symbolicated crash reports from every reproduction
+    /// pointed at this file's `beginCooldown(phone:)` closure's `await self.sleep(...)` call,
+    /// confirmed in isolation via `swift test --filter SignInViewModelTests`. `DateFormatter`/
+    /// `ISO8601DateFormatter` sharing, the original suspicion, was bisected out via `--skip` and
+    /// ruled out.
     private let sleep: (Duration) async -> Void
 
     private var cooldownTask: Task<Void, Never>?
@@ -28,7 +39,11 @@ public final class SignInViewModel: ObservableObject {
         authProvider: AuthProviding,
         onSignedIn: (() -> Void)? = nil,
         resendCooldownSeconds: Int = 30,
-        sleep: @escaping (Duration) async -> Void = { try? await Task.sleep(for: $0) }
+        sleep: @escaping (Duration) async -> Void = {
+            let (seconds, attoseconds) = $0.components
+            let nanoseconds = UInt64(max(0, seconds)) * 1_000_000_000 + UInt64(max(0, attoseconds) / 1_000_000_000)
+            try? await Task.sleep(nanoseconds: nanoseconds)
+        }
     ) {
         self.authProvider = authProvider
         self.onSignedIn = onSignedIn
