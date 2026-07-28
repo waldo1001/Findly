@@ -5,9 +5,11 @@
 // (src/adapters/**) and has no unit tests (thin integration surface, per backend/README.md) —
 // the credential is read from the environment at call time, never logged, never committed.
 //
-// B4 built §8.1 LOCATE_REQUEST. B5 adds §8.2 GEOFENCE_EVENT (notification + data) and §8.4
-// GEOFENCE_CONFIG_CHANGED (data-only); §8.3 SETTINGS_CHANGED remains out of scope — see
-// buildFcmBody below.
+// B4 built §8.1 LOCATE_REQUEST. B5 added §8.2 GEOFENCE_EVENT (notification + data) and §8.4
+// GEOFENCE_CONFIG_CHANGED (data-only). B24 closed the §8.3 SETTINGS_CHANGED gap left open by
+// B4/B5 — src/domain/device/patchDeviceSettings.ts already called pushSender.send() for it
+// (best-effort, failure swallowed there), but buildFcmBody's default case threw for any type
+// it didn't recognize, so every SETTINGS_CHANGED push silently failed until now.
 
 import { importPKCS8, SignJWT } from "jose";
 import type { PushMessage, PushSendOutcome, PushSender } from "../../ports/pushSender";
@@ -134,16 +136,35 @@ function buildGeofenceConfigChangedBody(message: PushMessage): Record<string, un
   };
 }
 
+function buildSettingsChangedBody(message: PushMessage): Record<string, unknown> {
+  // specs/001 §8.3 — data-only, normal priority; carries the complete current values of both
+  // fields (full state, never a delta), so the device can apply immediately regardless of
+  // reorder. Best-effort: the guaranteed pickup paths are the §5.1 piggyback/settings poll.
+  return {
+    message: {
+      token: message.token,
+      android: { priority: "normal" },
+      apns: {
+        headers: { "apns-priority": "5", "apns-push-type": "background" },
+        payload: { aps: { "content-available": 1 } },
+      },
+      data: message.data,
+    },
+  };
+}
+
 function buildFcmBody(message: PushMessage): Record<string, unknown> {
   switch (message.type) {
     case "LOCATE_REQUEST":
       return buildLocateRequestBody(message);
     case "GEOFENCE_EVENT":
       return buildGeofenceEventBody(message);
+    case "SETTINGS_CHANGED":
+      return buildSettingsChangedBody(message);
     case "GEOFENCE_CONFIG_CHANGED":
       return buildGeofenceConfigChangedBody(message);
     default:
-      throw new Error(`fcmV1Sender: push message type "${message.type}" is out of B4/B5 scope`);
+      throw new Error(`fcmV1Sender: unknown push message type "${message.type}"`);
   }
 }
 
