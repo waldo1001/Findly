@@ -49,6 +49,13 @@ public final class LocationRuntimeContainer {
 
     public let fixQueue: FixQueue
 
+    /// specs/009-device-runtime.md §5.2/§3.5 — the seam I12's `SETTINGS_CHANGED` push handler calls
+    /// into (`DeviceSettingsCoordinator`'s own doc names this exactly: "I12's scope to wire the
+    /// push arrival itself, but this is the seam it calls into"). Exposed read-only so the app
+    /// target's composition root (`FindlyApp.init()`) can hand the SAME coordinator instance this
+    /// container already built to `PushRuntimeContainer`, rather than constructing a second one.
+    public var settingsApplying: DeviceSettingsApplying { settingsCoordinator }
+
     public init(
         apiClient: FindlyAPIClient,
         deviceId: @escaping () -> String?,

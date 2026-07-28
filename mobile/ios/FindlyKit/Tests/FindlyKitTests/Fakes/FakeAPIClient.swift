@@ -114,7 +114,12 @@ final class FakeAPIClient: FindlyAPIClient {
         return try await pollLocateRequestHandler(requestId)
     }
 
-    func fulfillLocateRequest(deviceId: String, requestId: String, fix: LocationFix) async throws -> Envelope<FulfillLocateRequestResponse> { fatalError("not configured") }
+    private(set) var fulfillLocateRequestCalls: [(deviceId: String, requestId: String, fix: LocationFix)] = []
+    var fulfillLocateRequestHandler: (String, String, LocationFix) async throws -> Envelope<FulfillLocateRequestResponse> = { _, _, _ in fatalError("not configured") }
+    func fulfillLocateRequest(deviceId: String, requestId: String, fix: LocationFix) async throws -> Envelope<FulfillLocateRequestResponse> {
+        fulfillLocateRequestCalls.append((deviceId, requestId, fix))
+        return try await fulfillLocateRequestHandler(deviceId, requestId, fix)
+    }
 
     // MARK: - §7 Geofences
 

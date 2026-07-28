@@ -72,4 +72,28 @@ public final class DeviceRegistrationService {
             }
         }
     }
+
+    /// specs/004-ios-client.md §5's remaining two triggers this class didn't yet wire: **first
+    /// launch after sign-in** and **every app update** (compare stored vs running `appVersion`) —
+    /// push-token refresh was already covered by `observePushTokenRefreshes`. `previousVersion ==
+    /// nil` covers BOTH triggers at once: no stored version for this `userId` means either this
+    /// user has never registered on this device (first launch after THEIR sign-in — keyed per-user,
+    /// so a different user signing in on the same device is correctly its own "first launch") or
+    /// the tracker was never populated; either way 001 §4.1's upsert semantics make a redundant
+    /// `registerOrUpdate` call harmless.
+    ///
+    /// Call once per app launch (and safe to call again on every foreground/sign-in event — it's a
+    /// no-op once the current version is already recorded). Best-effort like
+    /// `observePushTokenRefreshes`: a failed call does NOT mark the version as registered, so the
+    /// next opportunity retries it — the existing `404 DEVICE_NOT_FOUND` self-heal path
+    /// (`LocationRuntimeContainer`'s `onReRegisterDevice`) remains the ultimate backstop regardless.
+    @discardableResult
+    public func registerOnLaunchIfNeeded(appVersionTracker: AppVersionRegistrationTracking) async -> Bool {
+        guard let userId = authProvider.currentUserId else { return false }
+        let currentVersion = deviceInfoProvider.appVersion
+        guard appVersionTracker.lastRegisteredAppVersion(forUserId: userId) != currentVersion else { return false }
+        guard (try? await registerOrUpdate()) != nil else { return false }
+        appVersionTracker.setLastRegisteredAppVersion(currentVersion, forUserId: userId)
+        return true
+    }
 }
