@@ -131,7 +131,14 @@ public final class SQLiteFixStore: FixStoring {
         var mintedId: String?
         let result: PendingBatch? = try? withTransaction {
             if let existing = try self.currentBatchLocked() { return existing }
-            let pending = try self.queryFixes(sql: "SELECT * FROM fixes WHERE batchId IS NULL ORDER BY seq ASC LIMIT \(max(maxSize, 0));")
+            // Post-review fix: LIMIT is now bound as a parameter, matching every other query in
+            // this file's "always bind, never splice" discipline — previously interpolated
+            // directly into the SQL text (not exploitable here, maxSize is an internal, never
+            // user/network-supplied Int, but inconsistent with the rest of the file).
+            let pending = try self.queryFixes(
+                sql: "SELECT * FROM fixes WHERE batchId IS NULL ORDER BY seq ASC LIMIT ?;",
+                bind: { try self.bindInt($0, index: 1, value: max(maxSize, 0)) }
+            )
             guard !pending.isEmpty else { return nil }
             let batchId = newBatchId()
             mintedId = batchId
@@ -296,8 +303,15 @@ public final class SQLiteFixStore: FixStoring {
     /// deferred `BEGIN`) acquires the write lock up front, which is what makes the "assign batchId
     /// to every row read in this same operation" sequence in `freezeNextBatch` genuinely atomic
     /// rather than merely appearing so under low contention. Rolls back on any thrown error.
+    ///
+    /// Internal (not `private`), matching `URLSessionAPIClient.makeRequest`/`send`'s established
+    /// precedent in this codebase — so `SQLiteFixStoreTests` can fault-inject a failure directly
+    /// (a real mid-transaction write followed by a thrown error) and assert the write was rolled
+    /// back, which no combination of the public `FixStoring` methods can trigger on their own
+    /// (the schema's only constraint, `fixId UNIQUE`, fails on the very first statement of any
+    /// transaction that hits it, before anything has been written that would need undoing).
     @discardableResult
-    private func withTransaction<T>(_ body: () throws -> T) throws -> T {
+    func withTransaction<T>(_ body: () throws -> T) throws -> T {
         try exec("BEGIN IMMEDIATE;")
         do {
             let value = try body()
@@ -309,7 +323,8 @@ public final class SQLiteFixStore: FixStoring {
         }
     }
 
-    private func exec(_ sql: String, bind: ((OpaquePointer?) throws -> Void)? = nil) throws {
+    /// Internal (not `private`) for the same reason as `withTransaction` above.
+    func exec(_ sql: String, bind: ((OpaquePointer?) throws -> Void)? = nil) throws {
         if bind == nil {
             var errorPointer: UnsafeMutablePointer<Int8>?
             let result = sqlite3_exec(db, sql, nil, nil, &errorPointer)

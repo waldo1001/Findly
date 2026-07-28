@@ -243,4 +243,43 @@ struct SQLiteFixStoreTests {
         #expect(storeAfterRestart.currentBatch() == nil)
         #expect(storeAfterRestart.loadAll().map(\.fixId) == ["f1", "f2"])
     }
+
+    // MARK: - Minor finding (post-review): the ROLLBACK path must actually be exercised
+
+    /// `withTransaction`'s `catch { ROLLBACK }` existed but nothing forced a mid-transaction
+    /// failure to prove pre-failure state survives untouched — a single-statement failure (e.g.
+    /// `append`'s `insert` hitting the `fixId UNIQUE` constraint) doesn't prove this on its own,
+    /// since nothing had been written yet for ROLLBACK to undo. This directly drives the internal
+    /// (not private, `@testable`-visible — see `withTransaction`'s doc) transaction helper with a
+    /// body that performs a REAL write via a second statement and then throws, proving SQLite's
+    /// ROLLBACK actually undoes it rather than merely relying on Swift-level early-exit control
+    /// flow having never written anything in the first place.
+    @Test func withTransaction_bodyWritesThenThrows_rollsBackTheWrite() throws {
+        struct InjectedFailure: Error {}
+        let store = try SQLiteFixStore(url: tempDatabaseURL())
+        store.append(makeFix("f1"))
+
+        #expect(throws: InjectedFailure.self) {
+            try store.withTransaction {
+                // A real write, executed and (absent a rollback) durably applied by this point.
+                try store.exec("DELETE FROM fixes WHERE fixId = 'f1';")
+                throw InjectedFailure()
+            }
+        }
+
+        #expect(store.loadAll().map(\.fixId) == ["f1"], "the DELETE must have been rolled back, not committed")
+    }
+
+    @Test func withTransaction_bodySucceeds_commitsNormally() throws {
+        // The commit-path counterpart, so the rollback test above isn't the only thing exercising
+        // this helper directly.
+        let store = try SQLiteFixStore(url: tempDatabaseURL())
+        store.append(makeFix("f1"))
+
+        try store.withTransaction {
+            try store.exec("DELETE FROM fixes WHERE fixId = 'f1';")
+        }
+
+        #expect(store.loadAll().isEmpty)
+    }
 }
