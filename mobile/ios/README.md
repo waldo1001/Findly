@@ -1,6 +1,6 @@
 # Findly — iOS app (Swift)
 
-**I1 (foundation) + I2 (feature screens) + I3 (phone sign-in) + I7 (Keychain hardening) + I8 (privacy: export/delete) + I9 (Xcode app-target project) + I10 (real device runtime) implemented.** Normative design: [`specs/004-ios-client.md`](../../specs/004-ios-client.md) — read that first; it owns the architecture, the design-system token contract, the full 001 endpoint mapping, auth/token-refresh, and the fix-queue model's *rules* (batch/idempotency — the *runtime* behind those rules, incl. persistence, capture, scheduling, and push/geofence handling, is normative in [`specs/009-device-runtime.md`](../../specs/009-device-runtime.md), which 004 §7 points to rather than duplicating). Phone sign-in is normative in [`specs/006-phone-auth.md`](../../specs/006-phone-auth.md) (004 §4 owns only the iOS shapes). Wire contract: [`specs/001-api-contract.md`](../../specs/001-api-contract.md). Product context: [`specs/000-overview.md`](../../specs/000-overview.md), esp. open items **O1–O4, O9**.
+**I1 (foundation) + I2 (feature screens) + I3 (phone sign-in) + I7 (Keychain hardening) + I8 (privacy: export/delete) + I9 (Xcode app-target project) + I10 (real device runtime) + I12 (push registration + handling) implemented.** Normative design: [`specs/004-ios-client.md`](../../specs/004-ios-client.md) — read that first; it owns the architecture, the design-system token contract, the full 001 endpoint mapping, auth/token-refresh, and the fix-queue model's *rules* (batch/idempotency — the *runtime* behind those rules, incl. persistence, capture, scheduling, and push/geofence handling, is normative in [`specs/009-device-runtime.md`](../../specs/009-device-runtime.md), which 004 §7 points to rather than duplicating). Phone sign-in is normative in [`specs/006-phone-auth.md`](../../specs/006-phone-auth.md) (004 §4 owns only the iOS shapes). Wire contract: [`specs/001-api-contract.md`](../../specs/001-api-contract.md). Product context: [`specs/000-overview.md`](../../specs/000-overview.md), esp. open items **O1–O4, O9**.
 
 ## What's here
 
@@ -14,8 +14,10 @@ mobile/ios/
 │   │                       fix-queue — `FixQueue`/`FixStoring`/`SQLiteFixStore` — plus the sync
 │   │                       runner: `LocationSyncCoordinator`/`LocationSyncRunner`, I10),
 │   │                       LocationSensing (real CoreLocation/BackgroundTasks wiring +
-│   │                       `LocationRuntimeContainer`, I10), Push, DesignSystem (tokens/theme/11
-│   │                       components), Navigation, Screens/ — two-step phone sign-in (I3) + Home, Map (live
+│   │                       `LocationRuntimeContainer`, I10), Push (I12 — `PushMessageType`/
+│   │                       `PushMessageDispatcher` + the four per-type handlers, `PushRuntimeContainer`
+│   │                       composition root, `LocationPushTokenHandling` scaffolding), DesignSystem
+│   │                       (tokens/theme/11 components), Navigation, Screens/ — two-step phone sign-in (I3) + Home, Map (live
 │   │                       map + swappable MapKit/list `MapRendering`), History (cursor
 │   │                       pagination), Geofences (list/editor, ETag-aware save + version-conflict
 │   │                       merge UX), Locate (create + poll-to-terminal), Settings (device +
@@ -37,8 +39,16 @@ mobile/ios/
                          real `KeychainStoring` implementation (`Security` framework
                          generic-password items), kept out of `FindlyKit` for the same reason:
                          Keychain access doesn't behave deterministically in a headless `swift test`
-                         sandbox. Also holds `Assets.xcassets/AppIcon.appiconset` (I9 — the
-                         light/dark/tinted app icon, `design/findly-icon/`).
+                         sandbox. `Push/FirebasePushTokenProvider.swift` (I12) — the real
+                         `PushTokenProviding`, bridging APNs↔`Messaging`↔the FCM token stream; kept
+                         out of `FindlyKit` for the same Firebase-SDK-free reason as
+                         `FirebaseAuthProvider`. `Push/AppDelegate.swift` (I12) — pure
+                         `UIApplicationDelegate` glue (Firebase configure, APNs token callbacks,
+                         `didReceiveRemoteNotification` → `FindlyKit`'s `PushMessageDispatcher` via
+                         `PushRuntimeContainerHolder`), wired in via
+                         `@UIApplicationDelegateAdaptor(AppDelegate.self)` in `FindlyApp.swift`. Also
+                         holds `Assets.xcassets/AppIcon.appiconset` (I9 — the light/dark/tinted app
+                         icon, `design/findly-icon/`).
 ```
 
 **I9** creates `Findly.xcodeproj` (specs/004 §1.1) — the piece 004 §1.1 explicitly deferred until a
@@ -105,14 +115,99 @@ hardcoded values — plist plumbing, not business logic.
   Apple's own requirement) reads lazily when the system actually fires the task.
 - **Deferred/not this task's scope:** geofence region-monitoring lifecycle and `source: "geofence"`
   captures (I11 — a `GeofenceRegistrarStub` no-op seam is left for it, mirroring Android's A9→A11
-  pattern); `SETTINGS_CHANGED`/`LOCATE_REQUEST`/`GEOFENCE_*` push routing (I12 — `DeviceSettingsApplying`
-  is the seam a push handler plugs into); a manual-refresh UI call site for `source: "manual"` (no
-  I2 screen currently calls it — the seam accepts a source/accuracy pair regardless, `requestSingleFix(source:)`,
-  ready for whenever one lands). Also noted: nothing in I1–I9 ever wired `DeviceRegistrationService`
-  to a "first launch after sign-in" trigger — a pre-existing gap, not an I10 regression — so this
-  task wired `onReRegisterDevice` (the `009 §9` `DEVICE_NOT_FOUND` reaction) to call it, which
-  self-heals a never-registered `deviceId` on the very first sync attempt; a proper eager trigger
-  right after sign-in is still a good follow-up.
+  pattern; I12 additionally leaves a second, `GEOFENCE_CONFIG_CHANGED`-specific seam,
+  `GeofenceConfigRegistering`, for the same I11 session to replace); a manual-refresh UI call site
+  for `source: "manual"` (no I2 screen currently calls it — the seam accepts a source/accuracy pair
+  regardless, `requestSingleFix(source:)`, ready for whenever one lands). The "first launch after
+  sign-in" gap noted here originally is now closed by I12 (see below) — `onReRegisterDevice` (the
+  `009 §9` `DEVICE_NOT_FOUND` reaction) remains as an additional backstop.
+
+**I12** wires up real push handling (specs/009-device-runtime.md §5, specs/001-api-contract.md §8).
+Summary — see the file-level doc comments (`FindlyKit/Sources/FindlyKit/Push/`) for the full
+rationale on each:
+
+- **Firebase SPM dependency, real and resolved.** `project.yml` adds `firebase-ios-sdk` (pinned
+  `from: 11.15.0`, resolved to `11.15.0` — see the committed `Package.resolved` under
+  `Findly.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/`) as a remote package, linking only
+  the two products this task needs — `FirebaseMessaging` + `FirebaseCore` — into the `Findly`
+  target (mirrors how `FindlyKit` itself is wired as a local package dependency). `FirebaseAuth` is
+  deliberately **not** added — that's I3's own already-written, `#if canImport(FirebaseAuth)`-gated
+  `FirebaseAuthProvider` code, left inert on purpose until a future session's task adds that
+  product. **Verified for real, not just assumed:** `xcodebuild build` resolves the package over the
+  network (a full clone of `firebase-ios-sdk` + its transitive Google dependencies) and links it
+  cleanly; a concrete-simulator build + `simctl install`/`launch` on a real iPhone 17 Simulator
+  (Xcode 26.6) shows `FirebaseMessaging` genuinely initializing at runtime (`[FirebaseMessaging]
+  ...FIRMessaging Remote Notifications proxy enabled...` in the device log, no crash) against the
+  real, gitignored `GoogleService-Info.plist` (Firebase project `findly-71f7b`) — that config file
+  is never committed and this session confirmed it stays gitignored (`git status` shows nothing).
+- **`PushMessageType`/`PushMessageDispatcher`** (`FindlyKit/Push/`) — the `data.type` discriminator
+  and routing table, mirroring Android's A9 `PushMessageType`/`PushMessageDispatcher` exactly.
+  Unknown types and the §8.7 reserved group types both parse to `.unrecognized` and dispatch to no
+  handler at all (001 §1.1 forward compatibility) — never a crash.
+- **`LocateRequestPushHandler`** — `now > expiresAt + 10 min` → silently ignored (no GPS burn);
+  otherwise calls `LocationProviding.requestSingleFix(source: .locate)` **directly**, bypassing
+  `FixCaptureCoordinator` entirely (its own doc explicitly names this pattern) so a paused device
+  still fulfills the request, then `POST /locate-requests/{id}/fulfill`. Every failure mode (no
+  `deviceId`, capture failure, fulfill-call failure) is a silent give-up, never a crash or retry —
+  "the requester's own poll surfaces the outcome" (009 §5.1).
+- **`SettingsChangedPushHandler`** — parses both fields defensively (strict `"true"`/`"false"` only,
+  matching Android's `toBooleanStrictOrNull`), forwards the full snapshot into
+  `DeviceSettingsApplying` (the seam `DeviceSettingsCoordinator`'s own doc names as I12's target) —
+  never a delta, exactly as 001 §8.3 requires.
+- **`GeofenceEventPushHandler`/`GeofenceEventNotificationTemplate`** — the exact 001 §8.2 title
+  template (`"<name> arrived at <geofence>"` / `"<name> left <geofence>"`, no body/time text),
+  matched to Android's `GeofenceEventNotificationTemplate` wording. The real notifier
+  (`SystemGeofenceEventNotifier`, `FindlyKit`, `#if os(iOS) && canImport(UserNotifications)`) posts
+  a genuine local `UNNotificationRequest` built from the push's own `data` — deliberately not
+  relying on the OS auto-bannering the FCM message's own `notification.title` (which the app cannot
+  fully control while foregrounded without a `UNUserNotificationCenterDelegate` opt-in, wired in
+  `AppDelegate`). No custom icon needed — iOS uses the app icon directly (009 §8).
+- **`GeofenceConfigChangedPushHandler`/`GeofenceConfigSyncCoordinator`** — the ETag-conditional
+  `GET /geofences` fetch-cache sequence (`GeofenceConfigCaching`, in-memory + `UserDefaults`
+  implementations); actual platform re-registration is I11's scope, stubbed behind a new
+  `GeofenceConfigRegistering` seam (`NoOpGeofenceConfigRegistering` default) with the exact same
+  "I12 builds the seam, I11 replaces the no-op" pattern Android's A9→A11 established for
+  `GeofenceRegistrar`.
+- **Token lifecycle.** `FirebasePushTokenProvider` (app target) bridges the raw APNs device token
+  (`AppDelegate.application(_:didRegisterForRemoteNotificationsWithDeviceToken:)` →
+  `Messaging.messaging().apnsToken`) into the **FCM token** surfaced via `MessagingDelegate` — the
+  FCM token, not the raw APNs token, is what `RegisterDeviceRequest.pushToken` expects (matches
+  Android's model). Wired into the already-existing, already-tested `DeviceRegistrationService.
+  observePushTokenRefreshes` with zero call-site change (same "swap the stub, keep the interface"
+  pattern Android's `RealPushTokenProvider` used). `DeviceRegistrationService` gains
+  `registerOnLaunchIfNeeded(appVersionTracker:)` — the two remaining specs/004 §5 triggers (first
+  launch after sign-in, every app update, keyed per-`userId` via the new
+  `AppVersionRegistrationTracking` protocol) — called once at cold launch (`FindlyApp.init()`, if
+  already signed in) and again from `RootView`'s `SignInViewModel.onSignedIn` completion (a session
+  that starts at the sign-in screen).
+- **`LOCATE_REQUEST`'s background-wake payload, checked against the real backend source** (not
+  assumed): `backend/src/adapters/push/fcmV1Sender.ts`'s `buildLocateRequestBody` already sends
+  `apns.payload.aps["content-available"]: 1` (+ `Info.plist`'s pre-existing `UIBackgroundModes:
+  remote-notification`, from I10) — the payload IS shaped to wake the app, matching 001 §8.1
+  exactly; on iOS this remains a budgeted/coalesced **best-effort** background push by Apple's own
+  design (000 §O1), which the spec already documents as the expected v1 posture pending the
+  Location Push entitlement. **A genuine backend gap found while checking this** (not this task's
+  scope to fix, flagged and spawned as a follow-up): `fcmV1Sender.ts`'s payload-builder `switch`
+  has no case for `"SETTINGS_CHANGED"` and throws `"...is out of B4/B5 scope"` for it — but
+  `backend/src/domain/device/patchDeviceSettings.ts` already calls `pushSender.send({ type:
+  "SETTINGS_CHANGED", ... })` on every parent-initiated settings change, wrapped in a swallowing
+  `catch` (by design, §10's `PUSH_DELIVERY_FAILED` note), so that push has silently never actually
+  been sent to a device in production. The iOS handler above is correct and ready for it regardless
+  — the two guaranteed pickup paths (§5.1's `deviceSettings` piggyback, the paused-device poll)
+  don't depend on this push at all.
+- **Logging discipline (009 §9):** no coordinates/`deviceId`/tokens/phone numbers are logged
+  anywhere in this task's new code — `FirebasePushTokenProvider.messaging(_:didReceiveRegistrationToken:)`
+  deliberately logs nothing at all rather than risk it, and `AppDelegate.application(_:
+  didFailToRegisterForRemoteNotificationsWithError:)` is an intentional no-op body for the same
+  reason.
+- **`onSignedIn` shared-file touches, for I11's awareness:** `FindlyApp.swift` gains
+  `@UIApplicationDelegateAdaptor(AppDelegate.self)`, the `PushRuntimeContainer` construction block,
+  and the `onSignedIn: () async -> Void` closure/property; `RootView.swift` gains one new init
+  parameter (`onSignedIn`) threaded into `SignInViewModel`'s existing `onSignedIn` callback.
+  `LocationRuntimeContainer.swift` gains one read-only computed property,
+  `settingsApplying: DeviceSettingsApplying { settingsCoordinator }` — no behavior change, just
+  exposure of an already-built instance. `project.yml` gains the `FirebaseSDK` package + two target
+  dependencies. None of these touch geofence-specific code paths I11 owns.
 
 **I2** adds the feature screens on top of I1's foundation: live map (§5.2), history (§5.3),
 geofences list/editor (§7.1–7.2), locate-to-request (§6), device/family settings
@@ -170,12 +265,20 @@ xcodegen` if needed). CI: `.github/workflows/ios.yml`'s `ios-build` job now runs
 `xcodebuild build` on `macos-14` (archive + real signing is still a TODO — requires the Apple
 Developer secrets H6 is provisioning).
 
+**I12 note:** the first `xcodebuild build` after this task's `project.yml` change resolves the new
+`firebase-ios-sdk` remote Swift Package dependency over the network (a full clone of the SDK repo
++ transitive Google dependencies — several minutes on a cold cache, seconds once
+`~/Library/Caches/org.swift.swiftpm/repositories/` and `~/Library/Developer/Xcode/DerivedData/*/SourcePackages/`
+are warm). CI will pay this cost on its first run too; no different from any other remote SPM
+dependency.
+
 ## Key decisions (see specs/004 for the full normative text)
 
 - **Location sync (I10, real):** `SystemLocationProvider` wraps `CLLocationManager` with staged onboarding (When-In-Use on first use, an explicit `requestAlwaysAuthorizationUpgrade()` for the app to call after showing an in-app explanation — no I2 screen calls it yet, so it stays dormant until one does); background fixes via significant-change monitoring, routed through `FixCaptureCoordinator`'s suppression rather than straight into the queue; `SystemBackgroundSyncScheduler` submits opportunistic `BGAppRefreshTaskRequest`s under identifier `be.dynex.findly.refresh`. Verified for real: a booted iOS Simulator install triggers the genuine system When-In-Use prompt with the exact `Info.plist` copy, and the app stays alive with no crash. iOS does not honor exact periodic intervals — the interval is a *target*; the UI (I2) must document the delivered cadence honestly.
 - **Push-to-locate (000 §O1 — the #1 platform risk):** correct mechanism is the **Location Push Service Extension** (`com.apple.developer.location.push`, `apns-push-type: location`) — **apply to Apple for this entitlement immediately** (human/Apple-account action, not blocking). Until granted, the backend's data-only `LOCATE_REQUEST` push is used exactly as normatively specified; UI (I2) falls back to "last known, updating…". `LocationPushTokenHandling` scaffolds the token capture/registration path so wiring the extension in later is additive only.
-- **Geofencing:** `CLCircularRegion` monitoring (max 20 regions — `features.limits.maxGeofences`, 000 §O9) is an I2 concern; `FindlyKit`'s geofences client methods exist now.
-- **Push tokens:** FCM/APNs token registered via `PushTokenProviding` → `DeviceRegistrationService`, re-`POST /devices` on every refresh (001 §4.1, 000 §O4).
+- **Geofencing:** `CLCircularRegion` monitoring (max 20 regions — `features.limits.maxGeofences`, 000 §O9) is an I2/I11 concern; `FindlyKit`'s geofences client methods exist now; I12 additionally lands the `GEOFENCE_CONFIG_CHANGED` push→`GET /geofences` fetch-cache half, with the platform-registration half stubbed behind `GeofenceConfigRegistering` for I11.
+- **Push tokens (I12, real):** the real FCM token — bridged from APNs via `FirebasePushTokenProvider` (app target, `Messaging.messaging().apnsToken` → `MessagingDelegate`) — is registered via `PushTokenProviding` → `DeviceRegistrationService.observePushTokenRefreshes`, re-`POST /devices` on every refresh (001 §4.1, 000 §O4), plus on first launch after sign-in and every app update (`registerOnLaunchIfNeeded`, specs/004 §5).
+- **Push routing (I12, real):** `PushMessageDispatcher` (`FindlyKit/Push/`) routes all four `data.type` values (001 §8) to their handlers — `LOCATE_REQUEST` (bypasses `FixCaptureCoordinator`, fulfills even while paused), `SETTINGS_CHANGED` (full-state, idempotent, into `DeviceSettingsApplying`), `GEOFENCE_EVENT` (local `UNNotificationRequest` from the push's own `data`, matching Android's title template), `GEOFENCE_CONFIG_CHANGED` (ETag-conditional re-fetch). `AppDelegate` (app target) is pure OS-lifecycle glue reaching this dispatcher via `PushRuntimeContainerHolder`.
 - **Auth (phone-only sign-in, specs/006):** `AuthProviding` gains `startPhoneVerification(phoneNumberE164:)`/`confirmCode(_:)` and the closed `PhoneAuthError` set (006 §4.2). `StubAuthProvider` implements the two-step dev shape (006 §5) and now emits a **real** unsigned JWT — base64url JSON header/payload with an empty signature, parseable by the backend's `AUTH_MODE=insecure-local` verifier; the previous `"stub-header.…"` shape was not valid base64url JSON and never actually worked against a local backend. `SignInViewModel`/`SignInScreen` implement the 006 §4.1 state machine (phone entry → code entry, 30 s resend cooldown via an injected virtual-time-testable sleep). `FirebaseAuthProvider` (app target) is the real implementation, wired in at the `RootView` seam via `AppConfig.authMode`/`firebaseProjectId` — it compiles to an inert fallback until the Firebase SDK dependency + `GoogleService-Info.plist` land (H1) and Firebase console phone-auth setup is done (H2).
 - **Offline (I10, durable):** `FixQueue` (actor, now stateless — every call delegates to `FixStoring`) — freeze-on-first-send `batchId` idempotency, batch upload per 001 §5.1. `SQLiteFixStore` (raw `SQLite3` C API, app-private `Library/Application Support/findly-fixqueue.sqlite`) persists both the fix rows *and* the frozen in-flight batch's identity, so a retry after a crash resends identical content (specs/009 §2) — proven by a test that reopens a fresh store instance against the same file and by a real on-simulator file inspection (see the I10 section above). 1 000-fix cap, oldest-pending-dropped-first, one debug-level count-only log line per drop.
 - **I7 hardening (Keychain, not UserDefaults):** `FirebaseAuthProvider`'s `verificationID` — previously plaintext in `UserDefaults` (flagged non-blocking in I3's security review) — now lives behind `KeychainStoring` (`FindlyKit`, protocol + `InMemoryKeychainStore` fake) with a real `Security`-framework `KeychainStore` (app target, generic-password item, `kSecAttrAccessibleWhenUnlockedThisDeviceOnly`). Storage-mechanism swap only; the verify/confirm lifecycle is unchanged.
