@@ -209,7 +209,7 @@ dependencies {
     // justification, reviewed per docs/security-review-checklist.md §4).
     implementation("com.google.zxing:core:3.5.3")
 
-    // A12 (specs/003-android-client.md §12): the real Google Maps tile renderer behind the
+    // A12/A16 (specs/003-android-client.md §12): the real Google Maps tile renderer behind the
     // MapRenderer seam (GoogleMapRenderer replaces PlaceholderMapRenderer at AppContainer's
     // composition root). Needs a Maps API key at runtime (the manifest's
     // com.google.android.geo.API_KEY meta-data, sourced from BuildConfig.MAPS_API_KEY above) —
@@ -218,21 +218,39 @@ dependencies {
     // without secrets" pattern every other H1-waived dependency in this codebase already uses.
     // maps-compose brings MarkerComposable, letting markers render the design-system
     // FindlyMapMarkerBubble instead of a default pin (design/findly-design-system/README.md).
-    // Pinned to 7.0.0, not the current 8.x line. This pin predates A14
-    // (docs/implementation-handoff.md), which bumped this project to compileSdk 37 — but A14's
-    // own review corrected an earlier version of this comment: maps-compose 8.0.0 does NOT need
-    // compileSdk 37. Verified from primary sources (the maps-compose-8.0.0 POM on Google Maven
-    // and core-ktx's own AAR `aar-metadata.properties`) that 8.0.0 resolves
-    // androidx.core:core-ktx:1.17.0, and 1.17.0 declares `minCompileSdk=36` — compileSdk 36
-    // already satisfies it. So the pin does not rest on a compileSdk requirement; it stays at
-    // 7.0.0 only because bumping the version itself is a separate, out-of-scope decision
-    // (tracked as its own follow-up task), not because 8.0.0 is technically blocked here. 7.0.0
-    // is the newest release confirmed compileSdk-36-compatible (6.4.4 also works but is a year
-    // older with no reason to prefer it over 7.0.0's upstream fixes). No explicit
-    // play-services-maps override here — 7.0.0 pulls it transitively (via maps-ktx:5.2.1) at
-    // 19.2.0, a pairing its own maintainers actually publish and test together; verified with
-    // `gradle :app:dependencies` rather than assumed from the POM alone.
-    implementation("com.google.maps.android:maps-compose:7.0.0")
+    //
+    // A16: unpinned from 7.0.0 to 8.4.0 (the current release as of this task; Maven Central's
+    // maven-metadata.xml lists 8.0.0 through 8.4.0 in the 8.x line, 2026-01-27 to 2026-07-16, no
+    // deprecations or removals of GoogleMap/MarkerComposable/rememberCameraPositionState/
+    // rememberUpdatedMarkerState across that range per the upstream CHANGELOG.md). A12 had pinned
+    // 7.0.0 on the belief that 8.0.0+ required compileSdk 37 via core-ktx 1.19.0; that was wrong
+    // for 8.0.0 specifically (its POM resolves core-ktx:1.17.0, whose own AAR
+    // aar-metadata.properties declares minCompileSdk=36) — but by 8.4.0 it has actually become
+    // true again: 8.4.0's POM resolves core-ktx:1.19.0 (core-ktx crossed to minCompileSdk=37
+    // starting at 1.19.0; 1.17.0/1.18.0, used by maps-compose up through 8.3.1, both stayed at
+    // minCompileSdk=36 — verified directly from each core-ktx AAR's aar-metadata.properties, not
+    // assumed from version numbers alone). That is moot here since A14 already raised this
+    // project to compileSdk 37, but it is the accurate reason 8.4.0 specifically needs it, not
+    // the disproved 8.0.0 claim the previous version of this comment carried. No explicit
+    // play-services-maps override: 8.4.0 pulls it transitively (via maps-ktx:6.2.0) at 20.0.0, a
+    // pairing its own maintainers publish and test together (maps-ktx:6.2.0's own POM depends on
+    // play-services-maps:20.0.0); verified against the real resolved graph with
+    // `gradle :app:dependencies --configuration debugRuntimeClasspath` rather than assumed from
+    // the POMs alone (A12's own standard).
+    //
+    // A16 review round 1 (Major, fixed): this bump is not maps-only — maps-compose declares its
+    // own compose-bom, and Gradle's highest-wins resolution elevates the *entire* app's Compose
+    // toolkit to it, overriding the explicit `platform("androidx.compose:compose-bom:2025.09.01")`
+    // pin below. That override predates A16: at 7.0.0 the pin was already being forced up to
+    // compose-bom 2025.12.00 (androidx.compose.ui/foundation/animation/runtime all resolving
+    // 1.10.0), verified directly by re-running `gradle :app:dependencies` against the pre-A16
+    // build file. At 8.4.0 it goes further — compose-bom 2026.06.01, with those same artifacts
+    // resolving 1.11.4 — verified the same way against this file as committed. Both numbers
+    // independently re-confirmed, not copied from the review. Accepted as a conscious
+    // consequence of this bump (every Compose screen in the app now compiles against 1.11.4, not
+    // just the map screens); the pin's own silent-override behavior is a separate, pre-existing
+    // issue tracked as its own follow-up task, not something A16 fixes.
+    implementation("com.google.maps.android:maps-compose:8.4.0")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
