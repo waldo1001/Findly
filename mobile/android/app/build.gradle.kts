@@ -61,12 +61,12 @@ val joinLinkHost: String = "kind-plant-0fb99b003.7.azurestaticapps.net"
 
 android {
     namespace = "com.findly.android"
-    compileSdk = 36
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "com.findly.android"
         minSdk = 26
-        targetSdk = 36
+        targetSdk = 37
         versionCode = 1
         versionName = "0.1.0"
     }
@@ -219,14 +219,15 @@ dependencies {
     // maps-compose brings MarkerComposable, letting markers render the design-system
     // FindlyMapMarkerBubble instead of a default pin (design/findly-design-system/README.md).
     // Pinned to 7.0.0, not the current 8.x line: 8.0.0+ transitively requires
-    // androidx.core:core-ktx 1.19.0, whose AAR metadata demands compileSdk 37 — this project is
-    // still on compileSdk 36 (only the android-36 platform is installed in this environment, and
-    // bumping compileSdk/targetSdk is a separate, tracked decision outside A12's scope). 7.0.0 is
-    // the newest release confirmed compileSdk-36-compatible (6.4.4 also works but is a year
-    // older with no reason to prefer it over 7.0.0's upstream fixes). No explicit
-    // play-services-maps override here — 7.0.0 pulls it transitively (via maps-ktx:5.2.1) at
-    // 19.2.0, a pairing its own maintainers actually publish and test together; verified with
-    // `gradle :app:dependencies` rather than assumed from the POM alone.
+    // androidx.core:core-ktx 1.19.0, whose AAR metadata demands compileSdk 37. A14
+    // (docs/implementation-handoff.md) bumped this project to compileSdk 37, which removes the
+    // original blocker recorded here — but the version bump itself stayed out of A14's scope by
+    // design (tracked as its own follow-up decision) and this pin was deliberately left
+    // unchanged. 7.0.0 is the newest release confirmed compileSdk-36-compatible (6.4.4 also
+    // works but is a year older with no reason to prefer it over 7.0.0's upstream fixes). No
+    // explicit play-services-maps override here — 7.0.0 pulls it transitively (via
+    // maps-ktx:5.2.1) at 19.2.0, a pairing its own maintainers actually publish and test
+    // together; verified with `gradle :app:dependencies` rather than assumed from the POM alone.
     implementation("com.google.maps.android:maps-compose:7.0.0")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
