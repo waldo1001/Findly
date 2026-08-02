@@ -237,6 +237,19 @@ dependencies {
     // play-services-maps:20.0.0); verified against the real resolved graph with
     // `gradle :app:dependencies --configuration debugRuntimeClasspath` rather than assumed from
     // the POMs alone (A12's own standard).
+    //
+    // A16 review round 1 (Major, fixed): this bump is not maps-only — maps-compose declares its
+    // own compose-bom, and Gradle's highest-wins resolution elevates the *entire* app's Compose
+    // toolkit to it, overriding the explicit `platform("androidx.compose:compose-bom:2025.09.01")`
+    // pin below. That override predates A16: at 7.0.0 the pin was already being forced up to
+    // compose-bom 2025.12.00 (androidx.compose.ui/foundation/animation/runtime all resolving
+    // 1.10.0), verified directly by re-running `gradle :app:dependencies` against the pre-A16
+    // build file. At 8.4.0 it goes further — compose-bom 2026.06.01, with those same artifacts
+    // resolving 1.11.4 — verified the same way against this file as committed. Both numbers
+    // independently re-confirmed, not copied from the review. Accepted as a conscious
+    // consequence of this bump (every Compose screen in the app now compiles against 1.11.4, not
+    // just the map screens); the pin's own silent-override behavior is a separate, pre-existing
+    // issue tracked as its own follow-up task, not something A16 fixes.
     implementation("com.google.maps.android:maps-compose:8.4.0")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
