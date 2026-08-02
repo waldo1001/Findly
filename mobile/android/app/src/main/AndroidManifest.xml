@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <!-- Networking -->
     <uses-permission android:name="android.permission.INTERNET" />
@@ -131,6 +132,36 @@
             <meta-data
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths" />
+        </provider>
+
+        <!-- A15 (docs/store-readiness.md §1; androidx.work's RemoveWorkManagerInitializer lint
+             check): FindlyApplication implements Configuration.Provider so WorkManager should use
+             AppContainer.workerFactory instead of its default no-arg-constructor factory — but
+             that alone is not sufficient while this entry stays merged in. Verified from the
+             actual androidx.work:2.10.0 bytecode: WorkManagerInitializer.create() (run by this
+             InitializationProvider's ContentProvider.onCreate(), which the platform invokes
+             *before* Application.onCreate()) unconditionally calls
+             WorkManager.initialize(context, Configuration.Builder().build()) — no check for
+             Configuration.Provider anywhere in that class. That first call wins the WorkManagerImpl
+             singleton with the *default* WorkerFactory; WorkManagerImpl.getInstance(Context) only
+             ever consults Configuration.Provider when no instance exists yet, so every later call
+             from AppContainer silently gets the already-default-configured instance back —
+             FindlyApplication's workManagerConfiguration is never read, and
+             LocationSyncWorker/SettingsPollWorker (whose constructors need the extra dependency
+             parameters only FindlyWorkerFactory supplies, specs/009-device-runtime.md §3, A10's
+             durable location-fix sync) fail to construct at runtime. Removing just this stock
+             manifest entry (on-demand init itself stays code-only, androidx.work's documented
+             pattern) is what actually makes Configuration.Provider take effect — not merely a
+             lint-satisfying change. -->
+        <provider
+            android:name="androidx.startup.InitializationProvider"
+            android:authorities="${applicationId}.androidx-startup"
+            android:exported="false"
+            tools:node="merge">
+            <meta-data
+                android:name="androidx.work.WorkManagerInitializer"
+                android:value="androidx.startup"
+                tools:node="remove" />
         </provider>
 
     </application>

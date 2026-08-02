@@ -155,6 +155,30 @@ kotlin {
 }
 
 dependencies {
+    // A15 (docs/store-readiness.md §1; androidx.activity's InvalidFragmentVersionForActivityResult
+    // lint check): this app has no Fragment usage of its own (Compose only, single ComponentActivity)
+    // and never declares androidx.fragment directly, but MainActivity's registerForActivityResult
+    // (specs/003-android-client.md §11 point 4) needs Fragment >= 1.3.0 in the *resolved* graph
+    // regardless. Verified via `gradle :app:dependencies --configuration releaseRuntimeClasspath`
+    // that com.google.android.gms:play-services-base (pulled in transitively by both
+    // play-services-location and firebase-auth's play-services-auth) declares a hard, non-range
+    // dependency on androidx.fragment:fragment:1.1.0 — no other node in the graph requests a newer
+    // version, so Gradle's default highest-wins resolution settles on that old 1.1.0 with nothing
+    // to override it. A dependency constraint (not a direct `implementation`) is the right fix:
+    // it bumps the resolved version without adding an unused API surface, since nothing in this
+    // codebase calls into androidx.fragment itself. 1.8.9 is the latest stable release (Google
+    // Maven maven-metadata.xml; 1.9.0 is still -alpha/-rc only as of this check).
+    constraints {
+        implementation("androidx.fragment:fragment:1.8.9") {
+            because(
+                "play-services-base:18.9.0 (transitive via play-services-location and " +
+                    "firebase-auth) pins androidx.fragment:fragment:1.1.0, which fails " +
+                    "androidx.activity's InvalidFragmentVersionForActivityResult lint check " +
+                    "(requires >= 1.3.0) against MainActivity's registerForActivityResult usage."
+            )
+        }
+    }
+
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.10.0")
     implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.10.0")
