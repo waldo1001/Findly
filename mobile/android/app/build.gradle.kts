@@ -218,16 +218,20 @@ dependencies {
     // without secrets" pattern every other H1-waived dependency in this codebase already uses.
     // maps-compose brings MarkerComposable, letting markers render the design-system
     // FindlyMapMarkerBubble instead of a default pin (design/findly-design-system/README.md).
-    // Pinned to 7.0.0, not the current 8.x line: 8.0.0+ transitively requires
-    // androidx.core:core-ktx 1.19.0, whose AAR metadata demands compileSdk 37. A14
-    // (docs/implementation-handoff.md) bumped this project to compileSdk 37, which removes the
-    // original blocker recorded here — but the version bump itself stayed out of A14's scope by
-    // design (tracked as its own follow-up decision) and this pin was deliberately left
-    // unchanged. 7.0.0 is the newest release confirmed compileSdk-36-compatible (6.4.4 also
-    // works but is a year older with no reason to prefer it over 7.0.0's upstream fixes). No
-    // explicit play-services-maps override here — 7.0.0 pulls it transitively (via
-    // maps-ktx:5.2.1) at 19.2.0, a pairing its own maintainers actually publish and test
-    // together; verified with `gradle :app:dependencies` rather than assumed from the POM alone.
+    // Pinned to 7.0.0, not the current 8.x line. This pin predates A14
+    // (docs/implementation-handoff.md), which bumped this project to compileSdk 37 — but A14's
+    // own review corrected an earlier version of this comment: maps-compose 8.0.0 does NOT need
+    // compileSdk 37. Verified from primary sources (the maps-compose-8.0.0 POM on Google Maven
+    // and core-ktx's own AAR `aar-metadata.properties`) that 8.0.0 resolves
+    // androidx.core:core-ktx:1.17.0, and 1.17.0 declares `minCompileSdk=36` — compileSdk 36
+    // already satisfies it. So the pin does not rest on a compileSdk requirement; it stays at
+    // 7.0.0 only because bumping the version itself is a separate, out-of-scope decision
+    // (tracked as its own follow-up task), not because 8.0.0 is technically blocked here. 7.0.0
+    // is the newest release confirmed compileSdk-36-compatible (6.4.4 also works but is a year
+    // older with no reason to prefer it over 7.0.0's upstream fixes). No explicit
+    // play-services-maps override here — 7.0.0 pulls it transitively (via maps-ktx:5.2.1) at
+    // 19.2.0, a pairing its own maintainers actually publish and test together; verified with
+    // `gradle :app:dependencies` rather than assumed from the POM alone.
     implementation("com.google.maps.android:maps-compose:7.0.0")
 
     debugImplementation("androidx.compose.ui:ui-tooling")

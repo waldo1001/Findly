@@ -67,7 +67,13 @@ jobs:
         run: |
           SDKMANAGER="$(command -v sdkmanager || find "${ANDROID_HOME:-$ANDROID_SDK_ROOT}" -type f -iname sdkmanager 2>/dev/null | sort -V | tail -1)"
           test -n "$SDKMANAGER" || { echo "sdkmanager not found under ANDROID_HOME/ANDROID_SDK_ROOT"; exit 1; }
-          yes | "$SDKMANAGER" --licenses >/dev/null
+          # Defensive, not a fix for a current break: this workflow has no `shell:` key and no
+          # `defaults.run`, so this step already runs as GitHub's default `bash -e {0}` (no
+          # `-o pipefail`) and `yes`'s SIGPIPE exit here is already discarded as-is. The `|| true`
+          # guards against that changing later (e.g. a future `shell: bash` addition, which does
+          # enable pipefail) — a genuine license-acceptance failure still surfaces loudly on the
+          # very next line, when the install itself can't proceed.
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
           "$SDKMANAGER" "platforms;android-37.0" "build-tools;37.0.0"
       # H1 (specs/003 §13): the google-services Gradle plugin (app/build.gradle.kts) requires
       # app/google-services.json to be present at build time. The REAL file (from the Firebase
