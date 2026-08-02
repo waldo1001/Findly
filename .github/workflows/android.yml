@@ -53,6 +53,28 @@ jobs:
       - name: generate Gradle wrapper
         working-directory: mobile/android
         run: gradle wrapper --gradle-version 9.4.1 --distribution-type bin
+      # A14 (docs/implementation-handoff.md, mobile/android/app/build.gradle.kts): compileSdk/
+      # targetSdk 37 needs the `platforms;android-37.0` SDK component. AGP *can* auto-download
+      # missing components on demand (verified locally — see A14's report), but that path is
+      # silently network- and license-acceptance-dependent and must not be the only thing
+      # standing between a green build and a red one on `ubuntu-latest`: the runner image's
+      # bundled Android SDK is refreshed on its own cadence and is not guaranteed to already
+      # carry a platform release this recent. Installing explicitly here makes the dependency
+      # visible and deterministic instead of hoping the implicit auto-download path fires.
+      # `sdkmanager`'s location is resolved dynamically rather than hardcoded to one path,
+      # since the exact cmdline-tools layout on the runner image isn't a stable contract.
+      - name: install Android SDK platform 37
+        run: |
+          SDKMANAGER="$(command -v sdkmanager || find "${ANDROID_HOME:-$ANDROID_SDK_ROOT}" -type f -iname sdkmanager 2>/dev/null | sort -V | tail -1)"
+          test -n "$SDKMANAGER" || { echo "sdkmanager not found under ANDROID_HOME/ANDROID_SDK_ROOT"; exit 1; }
+          # Defensive, not a fix for a current break: this workflow has no `shell:` key and no
+          # `defaults.run`, so this step already runs as GitHub's default `bash -e {0}` (no
+          # `-o pipefail`) and `yes`'s SIGPIPE exit here is already discarded as-is. The `|| true`
+          # guards against that changing later (e.g. a future `shell: bash` addition, which does
+          # enable pipefail) — a genuine license-acceptance failure still surfaces loudly on the
+          # very next line, when the install itself can't proceed.
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" "platforms;android-37.0" "build-tools;37.0.0"
       # H1 (specs/003 §13): the google-services Gradle plugin (app/build.gradle.kts) requires
       # app/google-services.json to be present at build time. The REAL file (from the Firebase
       # console) is gitignored and only ever exists on a developer's machine — CI needs a
