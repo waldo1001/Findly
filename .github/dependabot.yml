@@ -1,0 +1,27 @@
+# A18 (docs/security-review-checklist.md §4): keeps the Android Gradle dependency graph from
+# going stale between deliberate, human-initiated bumps. This config drives Dependabot *version*
+# updates — ordinary scheduled PRs bumping outdated versions — which work from this file alone,
+# independent of whether the repo's "Dependabot alerts" / "Dependabot security updates" settings
+# (Settings > Code security and analysis) are enabled. Vulnerability-specific alerts additionally
+# need the resolved dependency graph submitted, which .github/workflows/android-dependency-graph.yml
+# does; see that file's header for why it's a separate, minimally-scoped workflow.
+#
+# Every PR this opens runs through the existing android workflow (.github/workflows/android.yml)
+# unmodified — that workflow's `pull_request` trigger has no path filter specifically so PRs like
+# these always get a real build+test verification (`./gradlew test`, `assembleDebug`) before
+# anyone merges, not just a version bump nobody re-verified.
+version: 2
+updates:
+  - package-ecosystem: "gradle"
+    directory: "/mobile/android"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    # Single-developer, hobby-scale project (CLAUDE.md: "a few euros/month" cost target, one
+    # developer): a handful of open PRs at a time is reviewable, a flood is not.
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "android"
+    commit-message:
+      prefix: "android"

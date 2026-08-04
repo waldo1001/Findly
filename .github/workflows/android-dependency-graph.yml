@@ -1,0 +1,98 @@
+name: android-dependency-graph
+
+# A18 (docs/security-review-checklist.md §4): submits the resolved Gradle dependency graph to
+# GitHub's Dependency Submission API so Dependabot alerts can match every play-services-*,
+# androidx.*, and Firebase SDK artifact this app resolves against the GitHub Advisory Database.
+# Before this workflow, no Android dependency had ever been checked against a vulnerability
+# database (docs/implementation-handoff.md A18 row) — Gradle isn't one of the manifest formats
+# GitHub parses directly out of the repo the way it parses backend/package-lock.json for npm, so
+# without an explicit submission step the dependency graph for mobile/android simply doesn't
+# exist on GitHub's side and Dependabot has nothing to alert against.
+#
+# Deliberately its OWN workflow, not a job inside android.yml: the Dependency Submission API
+# requires `contents: write` (github.com/gradle/actions/blob/main/docs/dependency-submission.md),
+# and android.yml's job-wide `contents: read` is a deliberate, security-reviewed least-privilege
+# posture (docs/security-review-checklist.md §2) this task must not widen. Keeping the write
+# permission confined to this one narrowly-scoped, narrowly-triggered workflow is the "separate
+# job/workflow with its own minimal scope, explicitly justified" the checklist calls for.
+#
+# Runs only on push to main, never on pull_request:
+#   - Fork PRs never receive a write-scoped token regardless, so a pull_request trigger here
+#     would just fail silently for exactly the contributors it matters most to gate.
+#   - A dependency graph only needs to reflect what's actually shipped from main; resubmitting it
+#     on every PR (same-repo or not) would just re-upload a near-identical graph before the
+#     change even merges, for no extra signal.
+#   - This mirrors the existing "Deploy remains gated to pushes on main" posture the checklist
+#     already states for other write-scoped work (§2's last bullet).
+on:
+  push:
+    branches: [main]
+    paths: ["mobile/android/**", ".github/workflows/android-dependency-graph.yml"]
+
+permissions:
+  contents: write
+
+jobs:
+  submit:
+    # Unique job name for the same reason android.yml's build job is named "android-build":
+    # required-status-check matching is by job name, and "submit" alone would be ambiguous
+    # across workflows.
+    name: android-dependency-graph
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      # `dependency-graph: generate-and-submit` makes this action apply the GitHub Dependency
+      # Graph Gradle Plugin as an init script to every Gradle invocation in this job, then submit
+      # the resulting snapshot via the Dependency Submission API once the job succeeds. Verified
+      # locally (A18 task report) that this plugin, applied by hand via the same init-script
+      # mechanism against this exact project, produces a snapshot naming
+      # androidx.compose:compose-bom, com.google.android.gms:play-services-location,
+      # com.google.firebase:firebase-auth, com.google.maps.android:maps-compose, and
+      # androidx.fragment:fragment at their real resolved versions — this workflow could not be
+      # run end-to-end from a local checkout (it needs the real GitHub Dependency Submission API),
+      # so the submit half is unverified here; only the generate half was.
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "9.4.1"
+          dependency-graph: generate-and-submit
+      # H1 (specs/003 §13): the google-services plugin needs app/google-services.json present to
+      # configure; same obviously-fake placeholder as android.yml (docs/security-review-checklist.md
+      # §1 — no `AIza…` prefix, never a real credential) so plugin application and dependency
+      # resolution can proceed without a real Firebase project.
+      - name: generate placeholder google-services.json
+        working-directory: mobile/android
+        run: |
+          cat > app/google-services.json <<'JSON'
+          {
+            "project_info": {
+              "project_number": "000000000000",
+              "project_id": "findly-ci-placeholder",
+              "storage_bucket": "findly-ci-placeholder.appspot.com"
+            },
+            "client": [
+              {
+                "client_info": {
+                  "mobilesdk_app_id": "1:000000000000:android:0000000000000000000000",
+                  "android_client_info": { "package_name": "com.findly.android" }
+                },
+                "oauth_client": [],
+                "api_key": [{ "current_key": "CI-PLACEHOLDER-NOT-A-REAL-API-KEY" }],
+                "services": { "appinvite_service": { "other_platform_oauth_client": [] } }
+              }
+            ],
+            "configuration_version": "1"
+          }
+          JSON
+      # Deliberately the release runtime classpath, not debug: it's what actually ships to users
+      # (debug-only tooling like ui-tooling/ui-test-manifest never reaches Play Store), and it's
+      # the smallest task that fully resolves the graph without needing a signing config (unlike
+      # assembleRelease, this doesn't compile or package anything). No wrapper is generated here
+      # (unlike android.yml) — this job only needs the standalone `gradle` binary setup-gradle
+      # already installs, not a project-local ./gradlew.
+      - name: resolve dependencies (setup-gradle submits the graph after this succeeds)
+        working-directory: mobile/android
+        run: gradle :app:dependencies --configuration releaseRuntimeClasspath
