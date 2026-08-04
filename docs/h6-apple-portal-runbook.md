@@ -25,8 +25,21 @@ Step 1 has an **independent Apple review queue** that nothing else depends on. S
 
 **Why:** specs/000 §O1. Silent pushes (`content-available: 1`) are budgeted and coalesced by iOS — they are not a reliable wake, so push-to-locate is best-effort on iOS today. `com.apple.developer.location.push` is the mechanism built for exactly this, and it requires an application to Apple with an unknown lead time.
 
-1. Apple Developer account → the Location Push Service Extension request form.
-2. Describe the use case honestly: a family/group location-sharing app where a parent requests an on-demand location fix for a consented family member's device.
+**The form:** <https://developer.apple.com/contact/request/location-push-service-extension/>
+
+It sits behind Apple developer sign-in (the bare URL 302s to `idmsa.apple.com`), and **must be submitted by the Account Holder** — not an Admin or Developer role. For this project that is you.
+
+This is an **account-level enablement**, not a per-app one. Once Apple approves, `com.apple.developer.location.push` becomes available as a capability on your App IDs in Certificates, Identifiers & Profiles; you then enable it on `com.findly.ios`. Apple's own documentation is explicit that you request it **before** implementing the extension.
+
+**Draft justification** — adapt, don't paste blind; it should read as your words:
+
+> Findly is a private family location-sharing app. A parent can request an on-demand location update for a family member's device that has explicitly consented to sharing (each device opts in, and the owner can pause sharing at any time from the device itself).
+>
+> The app currently implements this with a silent background push (`content-available: 1`), which iOS budgets and coalesces — so a requested location update frequently does not arrive until the device happens to wake for another reason. This is the exact use case the Location Push Service Extension exists for: a power-efficient, on-demand location query when the app is not running.
+>
+> Location is only ever requested by a member of the same family group, is never shared outside it, and the app provides in-app export and deletion of all stored location history.
+
+**Set expectations honestly:** this is a request, not a switch. Response times vary from days to weeks, developers on Apple's forums report requests going unanswered, and Apple is selective — approval is not guaranteed. That is precisely why it goes first and why the app ships a working best-effort fallback (001 §8 payloads are designed for both paths, with "last known, updating…" UX). Nothing else in H6, or in shipping the app, depends on this being granted.
 
 **Do NOT add the entitlement to `Findly.entitlements` before Apple grants it** — the file already carries a commented-out block saying exactly this, because adding an ungranted entitlement **breaks code signing**.
 
