@@ -145,7 +145,9 @@ APNs auth keys are **team-wide** — this one key serves `com.findly.ios` and th
 2. `cd mobile/ios && xcodegen generate` — **never hand-edit `project.pbxproj`**.
 3. Leave `aps-environment` as `development`; Xcode switches it for distribution builds.
 
-✅ **Done when:** `xcodebuild build -scheme Findly -destination 'generic/platform=iOS Simulator'` still succeeds and `git diff` shows only `project.yml` + the regenerated project file.
+✅ **Done 2026-08-04** (commit `6cea39a`). `DEVELOPMENT_TEAM: 92A2K3Q7NH` is set on both targets, project regenerated via `xcodegen`.
+
+**One thing this step needed that the original plan missed:** with a real team set, automatic signing tries to resolve a provisioning profile — and the `ios-build` CI job runs on a GitHub runner with no Apple credentials, so it would have gone red on `main`. `.github/workflows/ios.yml`'s simulator build therefore now passes `CODE_SIGNING_ALLOWED=NO`. Simulator builds never need signing, so the job still checks exactly what it should (the code compiles, the extension embeds) without depending on secrets CI deliberately lacks. Verified for real: the exact CI command locally, then `ios` green on the runner (run `30944953241`).
 
 ---
 
