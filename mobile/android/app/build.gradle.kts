@@ -186,7 +186,42 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.10.0")
     implementation("androidx.activity:activity-compose:1.9.3")
 
-    implementation(platform("androidx.compose:compose-bom:2025.09.01"))
+    // A17: was pinned at 2025.09.01, but that pin was never honoured — maps-compose (below)
+    // declares its own compose-bom and Gradle's highest-wins BOM resolution let it silently
+    // override this one project-wide, since before A16 even bumped maps-compose. See the
+    // maps-compose block below (search "A16 review round 1") for the full mechanism and the
+    // measured before/after numbers. Re-pinning here at 2026.06.01 — the version already in
+    // force per `gradle :app:dependencies --configuration debugRuntimeClasspath` (maps-compose
+    // 8.4.0 itself declares `platform("androidx.compose:compose-bom:2026.06.01")`) — makes the
+    // declaration match reality today: the compose-bom-managed core artifacts (ui/foundation/
+    // animation/runtime) still land on 1.11.4, verified before/after on both debugRuntimeClasspath
+    // and releaseRuntimeClasspath.
+    //
+    // A17 code review round 1 (Major, fixed): a plain `implementation(platform(...))` BOM import
+    // is unenforced — it only contributes a candidate to Gradle's highest-wins resolution, it does
+    // not clamp. Verified directly against the pre-fix commit: the stale 2025.09.01 pin resolved
+    // silently to 2026.06.01 with `BUILD SUCCESSFUL` and no warning, which is the exact silent
+    // override this task exists to fix. Re-pinning at today's resolved value (above) alone would
+    // have repeated that same silent-override failure mode the next time any dependency asks for a
+    // newer compose-bom. The `strictly` constraint below makes that loud instead: any node in the
+    // graph demanding a compose-bom outside this exact version now fails resolution with an
+    // explicit conflict, rather than quietly winning. Verified this actually enforces (not just
+    // documents) by temporarily lowering the strictly value below what maps-compose demands and
+    // confirming the build failed with a version-conflict error before restoring the value below,
+    // which matches the platform() import above and therefore does not move any resolved version.
+    constraints {
+        implementation("androidx.compose:compose-bom") {
+            version { strictly("2026.06.01") }
+            because(
+                "maps-compose declares its own compose-bom, and Gradle's highest-wins BOM " +
+                    "resolution silently overrode the plain implementation(platform(...)) pin " +
+                    "above before this constraint existed (A17). `strictly` turns a future " +
+                    "conflicting compose-bom demand into a build failure instead of a silent " +
+                    "version bump."
+            )
+        }
+    }
+    implementation(platform("androidx.compose:compose-bom:2026.06.01"))
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-graphics")
     implementation("androidx.compose.ui:ui-tooling-preview")
@@ -274,6 +309,11 @@ dependencies {
     // consequence of this bump (every Compose screen in the app now compiles against 1.11.4, not
     // just the map screens); the pin's own silent-override behavior is a separate, pre-existing
     // issue tracked as its own follow-up task, not something A16 fixes.
+    //
+    // A17: the follow-up above landed. The compose-bom pin (above, search "implementation(platform")
+    // is now re-pinned at 2026.06.01 — the version this maps-compose release actually forces —
+    // and backed by a `strictly` constraint (same block) so a future conflicting demand fails the
+    // build loudly instead of silently winning highest-wins resolution the way this one did.
     implementation("com.google.maps.android:maps-compose:8.4.0")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
