@@ -1,6 +1,6 @@
 # Findly — iOS app (Swift)
 
-**I1 (foundation) + I2 (feature screens) + I3 (phone sign-in) + I7 (Keychain hardening) + I8 (privacy: export/delete) + I9 (Xcode app-target project) + I10 (real device runtime) + I11 (geofencing) + I12 (push registration + handling) implemented.** Normative design: [`specs/004-ios-client.md`](../../specs/004-ios-client.md) — read that first; it owns the architecture, the design-system token contract, the full 001 endpoint mapping, auth/token-refresh, and the fix-queue model's *rules* (batch/idempotency — the *runtime* behind those rules, incl. persistence, capture, scheduling, and push/geofence handling, is normative in [`specs/009-device-runtime.md`](../../specs/009-device-runtime.md), which 004 §7 points to rather than duplicating). Phone sign-in is normative in [`specs/006-phone-auth.md`](../../specs/006-phone-auth.md) (004 §4 owns only the iOS shapes). Wire contract: [`specs/001-api-contract.md`](../../specs/001-api-contract.md). Product context: [`specs/000-overview.md`](../../specs/000-overview.md), esp. open items **O1–O4, O9**.
+**I1 (foundation) + I2 (feature screens) + I3 (phone sign-in) + I7 (Keychain hardening) + I8 (privacy: export/delete) + I9 (Xcode app-target project) + I10 (real device runtime) + I11 (geofencing) + I12 (push registration + handling) + I15 (Notification Service Extension) implemented.** Normative design: [`specs/004-ios-client.md`](../../specs/004-ios-client.md) — read that first; it owns the architecture, the design-system token contract, the full 001 endpoint mapping, auth/token-refresh, and the fix-queue model's *rules* (batch/idempotency — the *runtime* behind those rules, incl. persistence, capture, scheduling, and push/geofence handling, is normative in [`specs/009-device-runtime.md`](../../specs/009-device-runtime.md), which 004 §7 points to rather than duplicating). Phone sign-in is normative in [`specs/006-phone-auth.md`](../../specs/006-phone-auth.md) (004 §4 owns only the iOS shapes). Wire contract: [`specs/001-api-contract.md`](../../specs/001-api-contract.md). Product context: [`specs/000-overview.md`](../../specs/000-overview.md), esp. open items **O1–O4, O9**.
 
 ## What's here
 
@@ -23,7 +23,13 @@ mobile/ios/
 │   │                       `PushMessageType`/`PushMessageDispatcher` + the four per-type handlers,
 │   │                       `PushRuntimeContainer` composition root, `LocationPushTokenHandling`
 │   │                       scaffolding — its `GEOFENCE_CONFIG_CHANGED` handler shares I11's real
-│   │                       `GeofenceConfigSyncCoordinator` instance, not a second one), DesignSystem
+│   │                       `GeofenceConfigSyncCoordinator` instance, not a second one;
+│   │                       `GeofenceEventServiceExtensionRendering`, I15 — the pure re-render
+│   │                       function the `FindlyNotificationService` extension target calls, reusing
+│   │                       `GeofenceEventNotificationTemplate` rather than duplicating it;
+│   │                       `PushPayloadParsing`, I15 round 2 — the shared `userInfo` ->
+│   │                       `[String: String]` bridging both `NotificationService` and `AppDelegate`
+│   │                       call, replacing what were two independent inline copies), DesignSystem
 │   │                       (tokens/theme/11 components), Navigation, Screens/ — two-step phone sign-in (I3) + Home, Map (live
 │   │                       map + swappable MapKit/list `MapRendering`), History (cursor
 │   │                       pagination), Geofences (list/editor, ETag-aware save + version-conflict
@@ -56,6 +62,17 @@ mobile/ios/
                          `@UIApplicationDelegateAdaptor(AppDelegate.self)` in `FindlyApp.swift`. Also
                          holds `Assets.xcassets/AppIcon.appiconset` (I9 — the light/dark/tinted app
                          icon, `design/findly-icon/`).
+└── FindlyNotificationService/   ← Notification Service Extension app-extension target (I15,
+                         specs/001 §8.2, specs/000 §O8). `NotificationService.swift` — the ONLY file
+                         here — is deliberately logic-free: it bridges `UNNotificationRequest.
+                         content.userInfo` into the `[String: String]` shape FindlyKit's push types
+                         already parse (same conversion `AppDelegate` does inline) and applies
+                         `GeofenceEventServiceExtensionRendering.title(for:)` (FindlyKit, unit-
+                         tested) to a mutable copy of the content, falling back to the untouched
+                         server content — both on a normal completion and on
+                         `serviceExtensionTimeWillExpire()` — if nothing renders. Depends on
+                         FindlyKit only, not the Firebase SDK (it never talks to FCM/APNs
+                         registration, only receives an already-delivered push from the OS).
 ```
 
 **I9** creates `Findly.xcodeproj` (specs/004 §1.1) — the piece 004 §1.1 explicitly deferred until a
@@ -279,13 +296,11 @@ rationale on each:
   from `SystemGeofenceEventNotifier`). Not user-visibly broken today — server and client build the
   identical title off the same template, so the content is correct regardless of which path
   renders it — but `GeofenceEventPushHandler`/`GeofenceEventNotificationTemplate`/
-  `SystemGeofenceEventNotifier` don't actually run for any real `GEOFENCE_EVENT` delivery yet. The
-  architecturally correct mechanism for what `mutable-content: 1` is meant to enable is a
-  `UNNotificationServiceExtension` app-extension target (which doesn't exist) — re-rendering the
-  alert from `data` *before* display, per 000 §O8's own wording. That target is a genuinely
-  separate, larger task, out of scope tonight; this code stays as the tested logic it would plug
-  into once that extension exists. No custom icon needed either way — iOS uses the app icon
-  directly (009 §8).
+  `SystemGeofenceEventNotifier` don't actually run for any real `GEOFENCE_EVENT` delivery yet
+  **(now addressed — see the I15 section below).** The architecturally correct mechanism for what
+  `mutable-content: 1` is meant to enable is a `UNNotificationServiceExtension` app-extension
+  target — re-rendering the alert from `data` *before* display, per 000 §O8's own wording. No
+  custom icon needed either way — iOS uses the app icon directly (009 §8).
 - **`GeofenceConfigChangedPushHandler`** — a thin delegate onto `GeofenceConfigSyncCoordinator.sync()`.
   **Reconciled post-I11-merge:** I12 originally shipped its own placeholder
   `GeofenceConfigCaching`/`GeofenceConfigRegistering`/`GeofenceConfigSyncCoordinator` trio ahead of
@@ -348,6 +363,85 @@ rationale on each:
   `public let`) — both exist so the app target can hand `PushRuntimeContainer` the SAME instances
   `LocationRuntimeContainer` already built, never a second independently-constructed one.
   `project.yml` gains the `FirebaseSDK` package + two target dependencies (no I11 overlap there).
+
+**I15** adds `FindlyNotificationService`, a `UNNotificationServiceExtension` app-extension target
+(specs/001-api-contract.md §8.2, specs/000-overview.md §O8), making I12's `GeofenceEventPushHandler`/
+`GeofenceEventNotificationTemplate`/`SystemGeofenceEventNotifier` path actually reachable for real
+`GEOFENCE_EVENT` deliveries instead of unreachable dead code (see the I12 correction above for the
+root cause this fixes).
+
+- **New target, added via `project.yml` + `xcodegen generate`, not hand-edited.** Mirrors I9's own
+  rule against hand-authoring `project.pbxproj`. `type: app-extension`, `PRODUCT_BUNDLE_IDENTIFIER:
+  com.findly.ios.NotificationService` (a sub-identifier under the app's own `com.findly.ios`, the
+  standard app-extension convention), `NSExtensionPointIdentifier: com.apple.usernotifications.
+  service` in its `Info.plist`. Depends on the `FindlyKit` package product ONLY — no Firebase SDK
+  linkage, since this target never talks to FCM/APNs registration, it only receives an
+  already-delivered push from the OS. Embedded into `Findly.app/PlugIns/` automatically by
+  xcodegen's default behavior for an app-extension target listed as a dependency of the app target
+  (no explicit `embed: true`/copy-files phase needed) — verified in the build log
+  (`Copy .../Findly.app/PlugIns/FindlyNotificationService.appex`).
+- **Shares the rendering logic, doesn't duplicate it.** `GeofenceEventServiceExtensionRendering.
+  title(for:)` (`FindlyKit/Push/`, unit-tested) checks `PushMessageType.from(data) ==
+  .geofenceEvent` (defensive — only `GEOFENCE_EVENT` ever carries `mutable-content: 1`, but a
+  future message type might) and, if so, delegates straight to the existing
+  `GeofenceEventNotificationTemplate.title(for:)` — the exact same template `GeofenceEventPushHandler`
+  already uses on the in-app dispatch path.
+- **`NotificationService.swift` (the extension target's ONLY file) is genuinely logic-free, not
+  just nominally so.** Round-2 code review found its `userInfo` -> `[String: String]` bridging had
+  zero coverage — `swift test` can't reach code outside the FindlyKit package, and (per the negative
+  result below) `simctl push` never reaches the extension on Simulator either, so nothing exercised
+  it. A direct-instantiation XCTest/Testing target for the `FindlyNotificationService` app-extension
+  target was attempted first (the stronger evidence — executing the real `didReceive` override
+  directly, no Simulator push pipeline needed) but hit a genuine structural wall: even with
+  `BUNDLE_LOADER` pointed at the extension's own Mach-O binary inside its built `.appex` (the
+  classic pre-testable-dylib pattern for linking a test bundle against another target's symbols),
+  the linker reported `NotificationService`'s own methods as undefined — an app-extension
+  executable doesn't retain its internal symbols for another test bundle to resolve against the way
+  an app target's Xcode-managed testable dylib does. Rather than force it, the bridging conversion
+  was extracted into `PushPayloadParsing.stringData(from:)` (`FindlyKit/Push/`, unit-tested, 5
+  cases) and both call sites — `NotificationService` here AND `AppDelegate.application(_:
+  didReceiveRemoteNotification:fetchCompletionHandler:)` (app target), which the reviewer found was
+  a byte-for-byte duplicate of the same conversion — now call the one shared implementation instead
+  of each keeping an inline copy. What's left in `NotificationService.didReceive` is: bridge via a
+  tested function, call another tested function, conditionally set one property, invoke a closure —
+  no independent logic of its own remains to test.
+- **Fallback contract.** `didReceive(_:withContentHandler:)` starts `bestAttemptContent` as an
+  unmodified mutable copy of the request's own content and only mutates `.title` if a title
+  actually renders; both the normal completion path and `serviceExtensionTimeWillExpire()` (the
+  hard OS time-budget callback) deliver whatever `bestAttemptContent` currently holds. A
+  malformed/non-`GEOFENCE_EVENT` payload, or the time budget expiring before rendering completes,
+  both degrade to the server's original `aps.alert.title` — never to no notification at all.
+- **Verified for real on the Simulator, with an important negative result.** `xcodebuild build
+  -scheme Findly -destination 'generic/platform=iOS Simulator'` succeeds and the build log shows
+  `FindlyNotificationService` actually compiling (`SwiftDriver`/`CompileSwift` steps, not just an
+  empty target) and its `.appex` being copied into `Findly.app/PlugIns/`; `xcrun simctl install` +
+  `launch` on a real booted iPhone 17 Simulator (iOS 26.5) run cleanly, and the extension's own
+  `Info.plist` (inspected inside the built `.appex`) carries the correct `CFBundleIdentifier`
+  (`com.findly.ios.NotificationService`), `NSExtensionPointIdentifier`
+  (`com.apple.usernotifications.service`), and `NSExtensionPrincipalClass`
+  (`FindlyNotificationService.NotificationService`). **However, `xcrun simctl push` injection
+  (both with the app foregrounded and with it terminated) does NOT invoke the extension on
+  Simulator** — confirmed via `log show`: the pushed notification is posted directly by
+  `CoreSimulatorBridge` into SpringBoard's notification datastore within milliseconds, with no
+  `runningboardd`/`pkd` "Executing launch request for xpcservice..." entry for
+  `com.findly.ios.NotificationService` at any point (contrasted directly against unrelated system
+  extensions launched in the same log window, which DO show that exact pattern). This is a known
+  iOS Simulator limitation in how `simctl push` injects notifications (it bypasses the `apsd`/
+  push-delivery pipeline a Notification Service Extension actually hooks into), not a defect in
+  this target — Apple's own supported way to exercise an NSE's `didReceive` locally is Xcode's GUI
+  scheme-editor "Notification Payload" debug-launch feature for the extension's own scheme, which
+  isn't drivable from a non-interactive CLI session. Full end-to-end confirmation (content
+  genuinely re-rendered on arrival) needs either that GUI flow or a real device receiving a real
+  APNs-routed push — flagged here rather than implied to have been done.
+- **No entitlements, no App Group.** The extension needs neither: all the data it re-renders from
+  (`displayName`, `geofenceName`, `transition`) already arrives in the push's own `data` payload —
+  nothing needs to be read from or shared into app-group-scoped storage, and no capability beyond
+  the extension point itself is required.
+- **H6 follow-up.** A real signed/on-device build needs `com.findly.ios.NotificationService`
+  registered as its own App ID in the Apple Developer portal (a sibling of the existing
+  `com.findly.ios` App ID), alongside H6's other still-open portal items (Associated Domains/Push/
+  App Attest activation on `com.findly.ios` itself). No new capability/entitlement needs enabling
+  on it — it's a plain app-extension App ID with no special capabilities checked.
 
 **I2** adds the feature screens on top of I1's foundation: live map (§5.2), history (§5.3),
 geofences list/editor (§7.1–7.2), locate-to-request (§6), device/family settings
@@ -418,7 +512,8 @@ dependency.
 - **Push-to-locate (000 §O1 — the #1 platform risk):** correct mechanism is the **Location Push Service Extension** (`com.apple.developer.location.push`, `apns-push-type: location`) — **apply to Apple for this entitlement immediately** (human/Apple-account action, not blocking). Until granted, the backend's data-only `LOCATE_REQUEST` push is used exactly as normatively specified; UI (I2) falls back to "last known, updating…". `LocationPushTokenHandling` scaffolds the token capture/registration path so wiring the extension in later is additive only.
 - **Geofencing (I11, real):** `SystemGeofenceRegistrar` wraps a dedicated `CLLocationManager` for `CLCircularRegion` monitoring, capped at `min(features.limits.maxGeofences, 20)` (000 §O9's platform ceiling). `GeofenceConfigSyncCoordinator` drives the fetch/cache/full-replace-register sequence across all five specs/009 §6.2 triggers (first sync after sign-in, two `geofenceEtag`-piggyback mismatch paths, resume from pause, cold start) — I12's `GEOFENCE_CONFIG_CHANGED` push handler shares this SAME instance rather than building its own (see the I12 section above). `GeofenceTransitionHandler` builds the durable per-transition event (`SQLiteGeofenceEventQueueStore`, same durability bar as the fix queue) and the accompanying `source: "geofence"` fix via I10's `FixCaptureCoordinator` hint seam. See the I11 section above for the full breakdown.
 - **Push tokens (I12, real):** the real FCM token — bridged from APNs via `FirebasePushTokenProvider` (app target, `Messaging.messaging().apnsToken` → `MessagingDelegate`) — is registered via `PushTokenProviding` → `DeviceRegistrationService.observePushTokenRefreshes`, re-`POST /devices` on every refresh (001 §4.1, 000 §O4), plus on first launch after sign-in and every app update (`registerOnLaunchIfNeeded`, specs/004 §5).
-- **Push routing (I12, real):** `PushMessageDispatcher` (`FindlyKit/Push/`) routes all four `data.type` values (001 §8) to their handlers — `LOCATE_REQUEST` (bypasses `FixCaptureCoordinator`, fulfills even while paused), `SETTINGS_CHANGED` (full-state, idempotent, into `DeviceSettingsApplying`), `GEOFENCE_EVENT` (local `UNNotificationRequest` from the push's own `data`, matching Android's title template — **but currently unreached for real deliveries**, see the I12 section above: 001 §8.2's actual payload shape lets iOS auto-display its own embedded title before `PushMessageDispatcher` ever sees the push; the handler is correct/tested and would need a `UNNotificationServiceExtension` target to actually run), `GEOFENCE_CONFIG_CHANGED` (ETag-conditional re-fetch, delegating to I11's `GeofenceConfigSyncCoordinator`). `AppDelegate` (app target) is pure OS-lifecycle glue reaching this dispatcher via `PushRuntimeContainerHolder`.
+- **Push routing (I12, real):** `PushMessageDispatcher` (`FindlyKit/Push/`) routes all four `data.type` values (001 §8) to their handlers — `LOCATE_REQUEST` (bypasses `FixCaptureCoordinator`, fulfills even while paused), `SETTINGS_CHANGED` (full-state, idempotent, into `DeviceSettingsApplying`), `GEOFENCE_EVENT` (local `UNNotificationRequest` from the push's own `data`, matching Android's title template — this path itself is still only reached when the OS invokes the app delegate directly, e.g. a data-only-shaped delivery; the *alert-carrying* `GEOFENCE_EVENT` shape's actual re-rendering now happens earlier, in the extension — see the I15 bullet below), `GEOFENCE_CONFIG_CHANGED` (ETag-conditional re-fetch, delegating to I11's `GeofenceConfigSyncCoordinator`). `AppDelegate` (app target) is pure OS-lifecycle glue reaching this dispatcher via `PushRuntimeContainerHolder`.
+- **`GEOFENCE_EVENT` re-rendering, made reachable (I15, real):** the `FindlyNotificationService` `UNNotificationServiceExtension` target (specs/001 §8.2, specs/000 §O8) intercepts the push before the OS displays it and replaces `aps.alert.title` with `GeofenceEventServiceExtensionRendering.title(for:)`'s output (`FindlyKit/Push/`, unit-tested, delegates to the same `GeofenceEventNotificationTemplate` `GeofenceEventPushHandler` already used) — this is what fixes the I12-discovered dead-code path. Falls back to the server's own unmodified content on a malformed payload or on `serviceExtensionTimeWillExpire()`. See the I15 section above for the full build/verification breakdown, including the honest negative result on `simctl push` injection (Simulator's push-injection path bypasses NSEs entirely — a documented Simulator limitation, not unverified-by-omission).
 - **Auth (phone-only sign-in, specs/006):** `AuthProviding` gains `startPhoneVerification(phoneNumberE164:)`/`confirmCode(_:)` and the closed `PhoneAuthError` set (006 §4.2). `StubAuthProvider` implements the two-step dev shape (006 §5) and now emits a **real** unsigned JWT — base64url JSON header/payload with an empty signature, parseable by the backend's `AUTH_MODE=insecure-local` verifier; the previous `"stub-header.…"` shape was not valid base64url JSON and never actually worked against a local backend. `SignInViewModel`/`SignInScreen` implement the 006 §4.1 state machine (phone entry → code entry, 30 s resend cooldown via an injected virtual-time-testable sleep). `FirebaseAuthProvider` (app target) is the real implementation, wired in at the `RootView` seam via `AppConfig.authMode`/`firebaseProjectId` — it compiles to an inert fallback until the Firebase SDK dependency + `GoogleService-Info.plist` land (H1) and Firebase console phone-auth setup is done (H2).
 - **Offline (I10, durable):** `FixQueue` (actor, now stateless — every call delegates to `FixStoring`) — freeze-on-first-send `batchId` idempotency, batch upload per 001 §5.1. `SQLiteFixStore` (raw `SQLite3` C API, app-private `Library/Application Support/findly-fixqueue.sqlite`) persists both the fix rows *and* the frozen in-flight batch's identity, so a retry after a crash resends identical content (specs/009 §2) — proven by a test that reopens a fresh store instance against the same file and by a real on-simulator file inspection (see the I10 section above). 1 000-fix cap, oldest-pending-dropped-first, one debug-level count-only log line per drop.
 - **I7 hardening (Keychain, not UserDefaults):** `FirebaseAuthProvider`'s `verificationID` — previously plaintext in `UserDefaults` (flagged non-blocking in I3's security review) — now lives behind `KeychainStoring` (`FindlyKit`, protocol + `InMemoryKeychainStore` fake) with a real `Security`-framework `KeychainStore` (app target, generic-password item, `kSecAttrAccessibleWhenUnlockedThisDeviceOnly`). Storage-mechanism swap only; the verify/confirm lifecycle is unchanged.

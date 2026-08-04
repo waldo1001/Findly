@@ -55,11 +55,10 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
             completionHandler(.noData)
             return
         }
-        var data: [String: String] = [:]
-        for (key, value) in userInfo {
-            guard let key = key as? String else { continue }
-            data[key] = "\(value)"
-        }
+        // I15 round-2 code review: shared with FindlyNotificationService's NotificationService,
+        // which needs the identical [AnyHashable: Any] -> [String: String] conversion — one
+        // FindlyKit implementation instead of two independent copies of the same few lines.
+        let data = PushPayloadParsing.stringData(from: userInfo)
         Task {
             await dispatcher.dispatch(data)
             completionHandler(.newData)
