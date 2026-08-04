@@ -26,7 +26,9 @@ Team ID **`92A2K3Q7NH`** · enrollment COMPLETE · I9 and I15 merged, so a build
 
 ## Step 2 — Register the extension's App ID
 
-Same screen, **+** again.
+<https://developer.apple.com/account> → Certificates, Identifiers & Profiles → **Identifiers** → **+** → App IDs → App
+
+(Registering in step 1 returns you to the Identifiers list — click the **+** next to the "Identifiers" heading again.)
 
 - **Description:** `Findly Notification Service`
 - **Bundle ID:** Explicit, `com.findly.ios.NotificationService`
