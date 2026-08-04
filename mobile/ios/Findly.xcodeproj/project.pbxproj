@@ -206,9 +206,11 @@
 				LastUpgradeCheck = 1430;
 				TargetAttributes = {
 					8A36219C4895092FB13DC80D = {
+						DevelopmentTeam = 92A2K3Q7NH;
 						ProvisioningStyle = Automatic;
 					};
 					F457FA93E8F16685158BE240 = {
+						DevelopmentTeam = 92A2K3Q7NH;
 						ProvisioningStyle = Automatic;
 					};
 				};
@@ -343,6 +345,7 @@
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 92A2K3Q7NH;
 				INFOPLIST_FILE = FindlyNotificationService/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -367,6 +370,7 @@
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 92A2K3Q7NH;
 				INFOPLIST_FILE = Findly/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -390,6 +394,7 @@
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 92A2K3Q7NH;
 				INFOPLIST_FILE = Findly/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -473,6 +478,7 @@
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 92A2K3Q7NH;
 				INFOPLIST_FILE = FindlyNotificationService/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
 				LD_RUNPATH_SEARCH_PATHS = (

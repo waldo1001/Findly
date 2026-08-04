@@ -64,8 +64,12 @@ targets:
         SWIFT_VERSION: "5.0"
         TARGETED_DEVICE_FAMILY: "1"
         CODE_SIGN_STYLE: Automatic
-        # DEVELOPMENT_TEAM: 92A2K3Q7NH  # TODO(H6): uncomment once real device signing is wired up,
-        # matching the app target's own TODO below.
+        # H6 (2026-08-04): real device signing wired up. The extension's App ID
+        # (com.findly.ios.NotificationService) is registered in the Apple portal; an app extension
+        # needs its own App ID or a signed build fails. CI is unaffected — .github/workflows/ios.yml
+        # builds for a simulator destination with CODE_SIGNING_ALLOWED=NO, so it never resolves a
+        # provisioning profile (the runner has no Apple credentials).
+        DEVELOPMENT_TEAM: 92A2K3Q7NH
     dependencies:
       - package: FindlyKit
         product: FindlyKit
@@ -98,11 +102,14 @@ targets:
         CURRENT_PROJECT_VERSION: "1"
         SWIFT_VERSION: "5.0"
         TARGETED_DEVICE_FAMILY: "1"
-        # No Apple Developer Team wired in yet (H5/H6 own real signing — docs/implementation-handoff.md
-        # H6). Automatic signing with no team is sufficient for a debug/simulator build; set
-        # DEVELOPMENT_TEAM to a real Team ID (92A2K3Q7NH per H6) once signing is actually needed.
+        # H6 (2026-08-04): real device signing wired up — Apple enrollment complete, App IDs
+        # registered for both this target and the notification extension, APNs key uploaded to
+        # Firebase. Needed for TestFlight/device builds (docs/h6-apple-portal-runbook.md step 6).
+        # CI keeps working because .github/workflows/ios.yml builds for a simulator destination
+        # with CODE_SIGNING_ALLOWED=NO — a GitHub runner has no Apple credentials, and with a team
+        # set, automatic signing would otherwise try to resolve a provisioning profile and fail.
         CODE_SIGN_STYLE: Automatic
-        # DEVELOPMENT_TEAM: 92A2K3Q7NH  # TODO(H6): uncomment once real device signing is wired up.
+        DEVELOPMENT_TEAM: 92A2K3Q7NH
     dependencies:
       - package: FindlyKit
         product: FindlyKit

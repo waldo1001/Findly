@@ -119,8 +119,14 @@ jobs:
       # find a device matching the provided destination specifier`. This job only builds (never
       # runs on the simulator), so `generic/platform=iOS Simulator` sidesteps the whole
       # device/OS-availability pairing and can't go stale the same way again.
+      # CODE_SIGNING_ALLOWED=NO (H6, 2026-08-04): project.yml now sets a real DEVELOPMENT_TEAM
+      # (92A2K3Q7NH) so device/TestFlight builds can sign. This runner has no Apple credentials,
+      # and with a team set, automatic signing would try to resolve a provisioning profile for
+      # com.findly.ios (and the extension) and fail. Simulator builds never need signing, so
+      # disabling it here keeps this job checking exactly what it's meant to check — that the code
+      # compiles and the extension embeds — without depending on secrets CI deliberately lacks.
       - name: build
-        run: xcodebuild build -scheme Findly -destination 'generic/platform=iOS Simulator'
+        run: xcodebuild build -scheme Findly -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO
       # TODO(H6): archive + sign (main only) — real signing secrets don't exist yet (store-readiness
       # §2 / docs/implementation-handoff.md H6). Expected shape:
       #
