@@ -39,6 +39,39 @@ This is an **account-level enablement**, not a per-app one. Once Apple approves,
 >
 > Location is only ever requested by a member of the same family group, is never shared outside it, and the app provides in-app export and deletion of all stored location history.
 
+### 1a. Ordering correction — you need the App Store Connect record first
+
+The form asks for **App Apple ID** and **App Store URL**. The Apple ID is the numeric identifier App Store Connect assigns when you *create the app record* — it does not exist until you do. So "step 1 first" is only true for the *queue*; you must do the first half of step 5 (create the ASC app record — no build upload needed, it's a two-minute form) before you can submit this one.
+
+Revised order: **create the ASC record → submit this form → carry on with steps 2–4.**
+
+### 1b. Field-by-field answers
+
+| Field | Answer |
+|---|---|
+| **App name** | `Findly` |
+| **Bundle ID** | `com.findly.ios` |
+| **App Apple ID** | the numeric ID from the App Store Connect record (App Store Connect → your app → App Information → General Information) |
+| **App Store URL** | The app is not released yet, so no public URL exists. State that plainly — e.g. *"Not yet released; app record created in App Store Connect, first build going to TestFlight."* Do not invent a URL. |
+
+**Describe your app:**
+
+> Findly is a private family location-sharing app. Members of a family (or a temporary, time-limited group) can see each other's locations on a shared map. Every device opts in explicitly, sharing intervals are chosen per device by the person who owns it, and any member can pause sharing from their own device at any time. Location data is only ever visible to members of the same family or group — it is never sold, shared with third parties, or used for advertising. The app provides full in-app export and deletion of stored location history.
+
+**Describe how your app will make use of the Location Push Service Extension:**
+
+> Only for the app's on-demand "locate" feature. When one family member requests a current location for another member's device, the app needs a single, high-accuracy fix from that device at that moment. Today this is implemented with a silent background push (`content-available: 1`), which iOS budgets and coalesces — the requested update often does not arrive until the device wakes for an unrelated reason, so the requester is left looking at a stale last-known position. The Location Push Service Extension is the mechanism designed for this: a power-efficient, on-demand location query when the app is not running. It returns one fix per request and is not used for continuous or background tracking — periodic location sharing uses ordinary background scheduling and significant-location-change monitoring, entirely separately from this extension.
+
+**What will trigger a location push:**
+
+> An explicit, user-initiated request. A family member taps "locate" on another member's device in the app; the backend sends exactly one location push to that specific target device. Nothing automated, scheduled, or geofence-driven ever triggers one. Requests expire after 60 seconds, and a concurrent request for a device that already has one pending is coalesced into the existing request rather than sending a second push.
+
+**On average, how many location pushes will your app send a user per day:**
+
+> Typically fewer than 5 per device per day, since each one requires a person to deliberately tap "locate". The backend enforces a hard ceiling of 100 locate requests per family per UTC day, shared across all members, and coalesces concurrent requests for the same device so repeat taps do not multiply pushes.
+
+*(All four answers are grounded in the shipped implementation: `locateRequestsPerDay: 100` in `backend/src/domain/plan.ts`, coalescing and the 60-second expiry in specs/001 §6.1. Adapt the wording, but keep the numbers — they are enforced in code and should stay true.)*
+
 **Set expectations honestly:** this is a request, not a switch. Response times vary from days to weeks, developers on Apple's forums report requests going unanswered, and Apple is selective — approval is not guaranteed. That is precisely why it goes first and why the app ships a working best-effort fallback (001 §8 payloads are designed for both paths, with "last known, updating…" UX). Nothing else in H6, or in shipping the app, depends on this being granted.
 
 **Do NOT add the entitlement to `Findly.entitlements` before Apple grants it** — the file already carries a commented-out block saying exactly this, because adding an ungranted entitlement **breaks code signing**.
