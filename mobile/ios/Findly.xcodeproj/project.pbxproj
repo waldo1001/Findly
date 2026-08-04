@@ -8,17 +8,44 @@
 
 /* Begin PBXBuildFile section */
 		1212706638CC72A1A448E57C /* KeychainStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 933698B18341B5B93F960141 /* KeychainStore.swift */; };
+		14722EEF59605AB4225CB60E /* FindlyNotificationService.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = B0836124C0B16912A162DA50 /* FindlyNotificationService.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		220125CCC68EB48569672CA1 /* FirebaseCore in Frameworks */ = {isa = PBXBuildFile; productRef = E5F9E685A2737D7E01168F16 /* FirebaseCore */; };
 		2927A0E0F956AE3E0708D444 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 1DA559770EEB71FE9D4E4731 /* Assets.xcassets */; };
 		2E1B11D96FD0432BBF16C66C /* FindlyApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A469252C0F62EA27A5A96C8 /* FindlyApp.swift */; };
 		680F3A8A8F5B9384D3E27E33 /* FirebasePushTokenProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0CFCAEA06AA257D2BD8FD4EC /* FirebasePushTokenProvider.swift */; };
+		92E3CA8155EC53B254E0AD47 /* NotificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = FAAC38E9856598F8ADAC5B1E /* NotificationService.swift */; };
 		B02F8EA427CC832CDAD5222E /* FirebaseAuthProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB7E3B29A1DEB20EAF23B1F7 /* FirebaseAuthProvider.swift */; };
+		B61559C4D032C36B09A6C14E /* FindlyKit in Frameworks */ = {isa = PBXBuildFile; productRef = 8AF6A59F5CFA6CC825063744 /* FindlyKit */; };
 		C260FCFC518F028EBF7BBA4A /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 116AE311B80835894993CDAC /* RootView.swift */; };
 		C9507C73AF152EF9C3355B39 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = E76AF327094EE2AF4787E446 /* AppDelegate.swift */; };
 		CB8C07C58DEB2D7E127CAF82 /* FindlyKit in Frameworks */ = {isa = PBXBuildFile; productRef = 9442267E30BDEB32B226E1B5 /* FindlyKit */; };
 		E0BB8FB47DD4963B529B77B3 /* FirebaseMessaging in Frameworks */ = {isa = PBXBuildFile; productRef = FB971569453E73404BF940F5 /* FirebaseMessaging */; };
 		F508E58763FB60F25015ADCD /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = 222ABA473205FAA462451553 /* GoogleService-Info.plist */; };
 /* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		AC50BEB298FA7EF00AB71988 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 61959B8F29EC12796CDFAE8F /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = F457FA93E8F16685158BE240;
+			remoteInfo = FindlyNotificationService;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		639BED47CB8EBE230CEE087A /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				14722EEF59605AB4225CB60E /* FindlyNotificationService.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		0CFCAEA06AA257D2BD8FD4EC /* FirebasePushTokenProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FirebasePushTokenProvider.swift; sourceTree = "<group>"; };
@@ -29,11 +56,21 @@
 		7A469252C0F62EA27A5A96C8 /* FindlyApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FindlyApp.swift; sourceTree = "<group>"; };
 		933698B18341B5B93F960141 /* KeychainStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainStore.swift; sourceTree = "<group>"; };
 		9515587061357626BB7B1D90 /* FindlyKit */ = {isa = PBXFileReference; lastKnownFileType = folder; name = FindlyKit; path = FindlyKit; sourceTree = SOURCE_ROOT; };
+		B0836124C0B16912A162DA50 /* FindlyNotificationService.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = FindlyNotificationService.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		E76AF327094EE2AF4787E446 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		EB7E3B29A1DEB20EAF23B1F7 /* FirebaseAuthProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FirebaseAuthProvider.swift; sourceTree = "<group>"; };
+		FAAC38E9856598F8ADAC5B1E /* NotificationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationService.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		DB10FCE03C5DE3C1BD25F4C5 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B61559C4D032C36B09A6C14E /* FindlyKit in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		F2652F432D8956BF37BEDF20 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -47,11 +84,20 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		168C0D0D8B2B62D5790032C3 /* FindlyNotificationService */ = {
+			isa = PBXGroup;
+			children = (
+				FAAC38E9856598F8ADAC5B1E /* NotificationService.swift */,
+			);
+			path = FindlyNotificationService;
+			sourceTree = "<group>";
+		};
 		3CC0EAE8E0A4D97999B38108 = {
 			isa = PBXGroup;
 			children = (
 				222ABA473205FAA462451553 /* GoogleService-Info.plist */,
 				6A42350ACED47A91740C2749 /* Findly */,
+				168C0D0D8B2B62D5790032C3 /* FindlyNotificationService */,
 				6171207FFC9987B47E3C6F6E /* Packages */,
 				DF8D92856590906E565827DE /* Products */,
 			);
@@ -99,6 +145,7 @@
 			isa = PBXGroup;
 			children = (
 				360976CF9D45F33462D845E1 /* Findly.app */,
+				B0836124C0B16912A162DA50 /* FindlyNotificationService.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -113,10 +160,12 @@
 				0DF31DA3D7152AEC43F51E8E /* Sources */,
 				286688678627E22BFCE334D0 /* Resources */,
 				F2652F432D8956BF37BEDF20 /* Frameworks */,
+				639BED47CB8EBE230CEE087A /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				B582DD76F57C343D56DA1843 /* PBXTargetDependency */,
 			);
 			name = Findly;
 			packageProductDependencies = (
@@ -128,6 +177,25 @@
 			productReference = 360976CF9D45F33462D845E1 /* Findly.app */;
 			productType = "com.apple.product-type.application";
 		};
+		F457FA93E8F16685158BE240 /* FindlyNotificationService */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 59C59B517B40C7916C3A0215 /* Build configuration list for PBXNativeTarget "FindlyNotificationService" */;
+			buildPhases = (
+				FCB02E631AED9AFAC9CE83C0 /* Sources */,
+				DB10FCE03C5DE3C1BD25F4C5 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = FindlyNotificationService;
+			packageProductDependencies = (
+				8AF6A59F5CFA6CC825063744 /* FindlyKit */,
+			);
+			productName = FindlyNotificationService;
+			productReference = B0836124C0B16912A162DA50 /* FindlyNotificationService.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -138,6 +206,9 @@
 				LastUpgradeCheck = 1430;
 				TargetAttributes = {
 					8A36219C4895092FB13DC80D = {
+						ProvisioningStyle = Automatic;
+					};
+					F457FA93E8F16685158BE240 = {
 						ProvisioningStyle = Automatic;
 					};
 				};
@@ -160,6 +231,7 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
+				F457FA93E8F16685158BE240 /* FindlyNotificationService */,
 				8A36219C4895092FB13DC80D /* Findly */,
 			);
 		};
@@ -191,7 +263,23 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		FCB02E631AED9AFAC9CE83C0 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				92E3CA8155EC53B254E0AD47 /* NotificationService.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		B582DD76F57C343D56DA1843 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = F457FA93E8F16685158BE240 /* FindlyNotificationService */;
+			targetProxy = AC50BEB298FA7EF00AB71988 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		081435676526553FE636AF3B /* Release */ = {
@@ -249,6 +337,27 @@
 				SWIFT_VERSION = 5.0;
 			};
 			name = Release;
+		};
+		3DF2D9BA78E28AD8365E29CB /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				INFOPLIST_FILE = FindlyNotificationService/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.findly.ios.NotificationService;
+				PRODUCT_NAME = FindlyNotificationService;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
 		};
 		45B6C5D5E6687195C1651B92 /* Debug */ = {
 			isa = XCBuildConfiguration;
@@ -359,6 +468,27 @@
 			};
 			name = Debug;
 		};
+		D2DD997A5E1203A937A8F9AA /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				INFOPLIST_FILE = FindlyNotificationService/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.findly.ios.NotificationService;
+				PRODUCT_NAME = FindlyNotificationService;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -367,6 +497,15 @@
 			buildConfigurations = (
 				45B6C5D5E6687195C1651B92 /* Debug */,
 				9F27BC0339185034E9A61280 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		59C59B517B40C7916C3A0215 /* Build configuration list for PBXNativeTarget "FindlyNotificationService" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				3DF2D9BA78E28AD8365E29CB /* Debug */,
+				D2DD997A5E1203A937A8F9AA /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;
@@ -401,6 +540,10 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		8AF6A59F5CFA6CC825063744 /* FindlyKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = FindlyKit;
+		};
 		9442267E30BDEB32B226E1B5 /* FindlyKit */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = FindlyKit;

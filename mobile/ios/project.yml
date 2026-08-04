@@ -33,6 +33,43 @@ packages:
     from: 11.15.0
 
 targets:
+  # I15 (specs/001 §8.2, specs/000 §O8) — Notification Service Extension. `mutable-content: 1` on
+  # the GEOFENCE_EVENT push exists specifically to let an extension like this re-render the alert
+  # from `data` before the OS displays it; without one, iOS auto-displays the server's own
+  # `aps.alert.title` and the app-level PushMessageDispatcher/GeofenceEventPushHandler path never
+  # runs (found by I12, tracked as this task). Depends on FindlyKit ONLY — no Firebase SDK linkage
+  # needed here, this target never talks to FCM/APNs registration, it only receives an
+  # already-delivered push from the OS. Embedded into the Findly app target below via the
+  # `dependencies: [{target: FindlyNotificationService}]` entry, which xcodegen auto-embeds (an
+  # app-extension target dependency is embedded + code-signed automatically, no separate copy-files
+  # phase needed).
+  FindlyNotificationService:
+    type: app-extension
+    platform: iOS
+    deploymentTarget: "16.0"
+    sources:
+      - path: FindlyNotificationService
+        excludes:
+          - Info.plist
+    settings:
+      base:
+        PRODUCT_NAME: FindlyNotificationService
+        # Sub-identifier under the app's own com.findly.ios bundle id (standard app-extension
+        # convention) — H6 must register this as its own App ID in the Apple Developer portal
+        # before a real-device/signed build (see mobile/ios/README.md's H6 note).
+        PRODUCT_BUNDLE_IDENTIFIER: com.findly.ios.NotificationService
+        INFOPLIST_FILE: FindlyNotificationService/Info.plist
+        MARKETING_VERSION: "1.0.0"
+        CURRENT_PROJECT_VERSION: "1"
+        SWIFT_VERSION: "5.0"
+        TARGETED_DEVICE_FAMILY: "1"
+        CODE_SIGN_STYLE: Automatic
+        # DEVELOPMENT_TEAM: 92A2K3Q7NH  # TODO(H6): uncomment once real device signing is wired up,
+        # matching the app target's own TODO below.
+    dependencies:
+      - package: FindlyKit
+        product: FindlyKit
+
   Findly:
     type: application
     platform: iOS
@@ -73,6 +110,9 @@ targets:
         product: FirebaseMessaging
       - package: FirebaseSDK
         product: FirebaseCore
+      # I15 — embeds + code-signs the extension bundle into Findly.app automatically (xcodegen's
+      # default for an app-extension-typed target dependency; no explicit `embed: true` needed).
+      - target: FindlyNotificationService
     scheme:
       testTargets: []
       gatherCoverageData: false
