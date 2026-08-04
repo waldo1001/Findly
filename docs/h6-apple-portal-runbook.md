@@ -59,7 +59,16 @@ This is new from I15. A signed build fails without it.
 
 Then read the **Apple ID** off it: Apps → Findly → **App Information** → General Information → **Apple ID** (~10 digits). It's also in the URL: `appstoreconnect.apple.com/apps/`**`1234567890`**`/…`
 
-✅ **Done when:** you have written the number down here → `App Apple ID: ____________`
+✅ **Done 2026-08-04.** App Store Connect record created:
+
+| | |
+|---|---|
+| **App Apple ID** | `6797994768` |
+| **SKU** | `findly-ios-001` |
+| **Store listing name** | `Findly - Friends Locator` |
+| **Bundle ID** | `com.findly.ios` |
+
+(The Apple ID is public information — it's the `id…` in every App Store URL — so it's fine to record here. The eventual public URL will be `https://apps.apple.com/app/id6797994768`, which 404s until the app is actually released.)
 
 ---
 
@@ -75,7 +84,7 @@ Must be submitted by the **Account Holder** role. Approval is account-level: onc
 |---|---|
 | App name | `Findly` |
 | Bundle ID | `com.findly.ios` |
-| App Apple ID | the number from step 3 |
+| App Apple ID | `6797994768` |
 | App Store URL | *"Not yet released; app record created in App Store Connect, first build going to TestFlight."* |
 
 **Describe your app:**
