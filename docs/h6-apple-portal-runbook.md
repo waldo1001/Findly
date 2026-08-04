@@ -109,7 +109,7 @@ The numbers are enforced in code — `locateRequestsPerDay: 100` in `backend/src
 
 **Expect:** days to weeks, sometimes no reply, approval not guaranteed. Nothing else in H6 or in shipping depends on it — the app ships a working best-effort fallback (001 §8 payloads are designed for both paths).
 
-✅ **Done when:** submitted. Then carry straight on — do not wait.
+✅ **Submitted 2026-08-04.** Awaiting Apple. Nothing downstream waits on the outcome — if it's granted, it becomes its own spec'd task (see "After H6").
 
 ---
 
