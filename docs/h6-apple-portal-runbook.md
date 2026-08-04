@@ -122,7 +122,18 @@ The numbers are enforced in code — `locateRequestsPerDay: 100` in `backend/src
 3. Note the **Key ID** (shown on the key page) and Team ID `92A2K3Q7NH`.
 4. <https://console.firebase.google.com> → project **`findly-71f7b`** → ⚙️ Project settings → **Cloud Messaging** → iOS app configuration → **APNs Authentication Key** → Upload → the `.p8` + Key ID + Team ID.
 
-⚠️ Never commit the `.p8`. `.gitignore` already covers `*.p8`.
+**Part A done 2026-08-04:**
+
+| | |
+|---|---|
+| Key name | `Findly APNs` |
+| **Key ID** | `MS22L459T9` |
+| Service | Apple Push Notifications service (APNs) |
+| Team ID | `92A2K3Q7NH` |
+
+⚠️ **The `.p8` file is the secret — never commit it** (`.gitignore` covers `*.p8`). The Key ID and Team ID above are *not* secrets: they're non-sensitive identifiers that pair with the key, they appear in Firebase config and in backend app settings, and they are useless without the private key itself. Recording them here is deliberate so a future session doesn't have to go hunting in the Apple portal.
+
+APNs auth keys are **team-wide** — this one key serves `com.findly.ios` and the notification extension. Do not create a second.
 
 ✅ **Done when:** Firebase's Cloud Messaging tab shows the APNs key against the iOS app.
 
