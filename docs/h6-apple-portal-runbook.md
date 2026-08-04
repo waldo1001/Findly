@@ -41,9 +41,41 @@ This is an **account-level enablement**, not a per-app one. Once Apple approves,
 
 ### 1a. Ordering correction — you need the App Store Connect record first
 
-The form asks for **App Apple ID** and **App Store URL**. The Apple ID is the numeric identifier App Store Connect assigns when you *create the app record* — it does not exist until you do. So "step 1 first" is only true for the *queue*; you must do the first half of step 5 (create the ASC app record — no build upload needed, it's a two-minute form) before you can submit this one.
+The form asks for **App Apple ID** and **App Store URL**. The Apple ID is the numeric identifier App Store Connect assigns when you *create the app record* — it does not exist until you do. And you cannot create that record until the App ID is registered, because App Store Connect's Bundle ID dropdown only lists App IDs that already exist in Certificates, Identifiers & Profiles.
 
-Revised order: **create the ASC record → submit this form → carry on with steps 2–4.**
+**So the real chain is: register the App ID (step 2a) → create the ASC record → the Apple ID now exists → submit this form.** "Step 1 first" holds only for the *queue* — the paperwork has prerequisites.
+
+#### Register the App ID (if `com.findly.ios` isn't there yet)
+
+<https://developer.apple.com/account> → Certificates, Identifiers & Profiles → **Identifiers** → **+** → App IDs → App →
+
+- **Description:** `Findly`
+- **Bundle ID:** choose **Explicit**, enter `com.findly.ios`
+- Tick **Push Notifications**, **Associated Domains**, **App Attest** (this is step 2a — do it now, it's the same screen)
+- Continue → Register
+
+Repeat for `com.findly.ios.NotificationService` (description e.g. `Findly Notification Service`, no capabilities).
+
+#### Create the App Store Connect record
+
+<https://appstoreconnect.apple.com> → **Apps** → **+** → **New App**
+
+- **Platforms:** iOS
+- **Name:** `Findly` — ⚠️ must be **unique across the entire App Store**, max 30 characters. If it's taken you'll be told here, and you'll need a store-facing variant (the bundle id and internal naming stay `findly` regardless; only the display name would change).
+- **Primary Language:** English (or your preference)
+- **Bundle ID:** pick `com.findly.ios` from the dropdown — if it's absent, the App ID above isn't registered yet
+- **SKU:** your own internal identifier, never shown publicly — e.g. `findly-ios-001`
+- **User Access:** Full Access
+
+→ **Create**
+
+#### Then find the Apple ID
+
+App Store Connect → **Apps** → Findly → **App Information** (left sidebar, under General) → **General Information** → **Apple ID**. It's a ~10-digit number.
+
+Quickest alternative: it's in the browser URL while you're in the app — `appstoreconnect.apple.com/apps/`**`1234567890`**`/appstore/…`
+
+**Record it here once you have it:** `App Apple ID: ________`
 
 ### 1b. Field-by-field answers
 
