@@ -81,7 +81,14 @@ IPA="$OUT/Findly.ipa"
 echo "==> Built $IPA ($(du -h "$IPA" | cut -f1))"
 
 # Sanity check the extension really shipped inside the app (I15).
-if ! unzip -l "$IPA" | grep -q "PlugIns/FindlyNotificationService.appex/FindlyNotificationService"; then
+#
+# NB: the listing is captured into a variable first, rather than piped straight into `grep -q`.
+# Under `set -o pipefail` (on, above), `grep -q` exits at the first match, `unzip` then dies of
+# SIGPIPE (141), and pipefail reports the *pipeline* as failed — so a perfectly good .ipa gets
+# rejected. This bit us for real on 2026-08-05, and is the same SIGPIPE-under-pipefail trap that
+# A17's review chased in the Android CI workflow.
+LISTING="$(unzip -l "$IPA")"
+if ! grep -q "PlugIns/FindlyNotificationService.appex/FindlyNotificationService" <<<"$LISTING"; then
   echo "!! FindlyNotificationService.appex missing from the .ipa — refusing to upload"
   exit 1
 fi

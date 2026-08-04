@@ -344,7 +344,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_TEAM = 92A2K3Q7NH;
 				INFOPLIST_FILE = FindlyNotificationService/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
@@ -369,7 +369,7 @@
 				CODE_SIGN_ENTITLEMENTS = Findly/Findly.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_TEAM = 92A2K3Q7NH;
 				INFOPLIST_FILE = Findly/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
@@ -393,7 +393,7 @@
 				CODE_SIGN_ENTITLEMENTS = Findly/Findly.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_TEAM = 92A2K3Q7NH;
 				INFOPLIST_FILE = Findly/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
@@ -477,7 +477,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_TEAM = 92A2K3Q7NH;
 				INFOPLIST_FILE = FindlyNotificationService/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;

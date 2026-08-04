@@ -31,6 +31,41 @@ public struct AppConfig: Equatable {
         self.joinLinkHost = joinLinkHost
     }
 
+    /// specs/004-ios-client.md §8 — reads the real deployment values the app target injects via
+    /// its `Info.plist`, which is iOS's counterpart to Android's `BuildConfig` fields in
+    /// `app/build.gradle.kts` (specs/003 §13).
+    ///
+    /// This exists because it was missing: `FindlyApp.init()` called `AppConfig()` with no
+    /// arguments, so every build — including the first TestFlight upload — shipped the
+    /// `.invalid` placeholder base URL and `authMode == .stubLocal`. The app could not reach
+    /// `func-findly` at all, and phone sign-in was faked locally by `StubAuthProvider` rather
+    /// than going through Firebase.
+    ///
+    /// Every value falls back to its safe default when the key is absent, empty, or unparseable,
+    /// so a mis-set build setting degrades to the obviously-non-resolving placeholder instead of
+    /// silently pointing at something wrong.
+    public init(infoDictionary: [String: Any]?) {
+        let dict = infoDictionary ?? [:]
+
+        func string(_ key: String) -> String? {
+            guard let value = dict[key] as? String else { return nil }
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        }
+
+        let baseURL = string("FindlyBaseURL")
+            .flatMap { URL(string: $0) }
+            .flatMap { $0.scheme == nil ? nil : $0 }   // "not a url at all" parses but has no scheme
+            ?? AppConfig.placeholderBaseURL
+
+        self.init(
+            baseURL: baseURL,
+            authMode: string("FindlyAuthMode")?.lowercased() == "firebase" ? .firebase : .stubLocal,
+            firebaseProjectId: string("FindlyFirebaseProjectId") ?? "findly-dev",
+            joinLinkHost: string("FindlyJoinLinkHost") ?? AppConfig.defaultJoinLinkHost
+        )
+    }
+
     /// Obviously non-resolving placeholder — H1 supplies the real Azure Functions base URL via
     /// the app target's build configuration, never by editing this default.
     public static let placeholderBaseURL = URL(string: "https://api.findly.invalid/api/v1")!

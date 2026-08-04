@@ -15,7 +15,7 @@
 	<key>CFBundlePackageType</key>
 	<string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.0.0</string>
+	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
@@ -26,7 +26,15 @@
 		</dict>
 	</array>
 	<key>CFBundleVersion</key>
-	<string>1</string>
+	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>FindlyAuthMode</key>
+	<string>firebase</string>
+	<key>FindlyBaseURL</key>
+	<string>https://func-findly.azurewebsites.net/api/v1</string>
+	<key>FindlyFirebaseProjectId</key>
+	<string>findly-71f7b</string>
+	<key>FindlyJoinLinkHost</key>
+	<string>kind-plant-0fb99b003.7.azurestaticapps.net</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>

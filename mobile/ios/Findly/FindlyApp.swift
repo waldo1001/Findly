@@ -53,7 +53,12 @@ struct FindlyApp: App {
     private let onSignedIn: () async -> Void
 
     init() {
-        let config = AppConfig()
+        // specs/004 §8 — real deployment values come from this target's Info.plist (iOS's
+        // counterpart to Android's BuildConfig fields). Previously this was a bare `AppConfig()`,
+        // which shipped the `.invalid` placeholder base URL and `authMode == .stubLocal`: the app
+        // could not reach func-findly, and phone sign-in was faked by StubAuthProvider instead of
+        // going through Firebase. Found on the first real TestFlight install, 2026-08-05.
+        let config = AppConfig(infoDictionary: Bundle.main.infoDictionary)
         self.config = config
         let coordinator = AppCoordinator(joinLinkHost: config.joinLinkHost)
         _coordinator = StateObject(wrappedValue: coordinator)

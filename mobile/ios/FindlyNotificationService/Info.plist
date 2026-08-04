@@ -2,10 +2,6 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<!-- I15 (specs/001-api-contract.md §8.2, specs/000-overview.md §O8) — standard Xcode-template
-	     app-extension keys; the values are the standard build-setting substitutions, not
-	     hardcoded, matching the pattern the app target's own Info.plist (Findly/Info.plist)
-	     already established (see its own comment for why these are needed at all). -->
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleDisplayName</key>
@@ -21,12 +17,9 @@
 	<key>CFBundlePackageType</key>
 	<string>XPC!</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.0.0</string>
+	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
-	<string>1</string>
-	<!-- The extension point that makes this a Notification Service Extension (specs/000 §O8's
-	     "UNNotificationServiceExtension" wording) — re-renders GEOFENCE_EVENT's mutable-content:1
-	     alert from data before the OS displays it, per specs/001 §8.2. -->
+	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>NSExtension</key>
 	<dict>
 		<key>NSExtensionPointIdentifier</key>
