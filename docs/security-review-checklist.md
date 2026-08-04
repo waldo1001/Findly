@@ -48,6 +48,29 @@ Scope of review: the task's full diff (`git diff <merge-base>..<branch>`), all *
 
 - `npm audit --omit=dev` → zero high/critical in production dependencies (dev-chain advisories: note, don't block).
 - New dependencies: well-known packages only, exact-name check against typosquats, justified in the task report.
+- **Android (A18).** `.github/workflows/android-dependency-graph.yml` submits the resolved Gradle
+  graph (`androidx.*`, `play-services-*`, `com.google.firebase:*`, `maps-compose`, everything on
+  `releaseRuntimeClasspath`) to GitHub on every push to `main`; `.github/dependabot.yml` opens
+  weekly version-update PRs for `mobile/android`, each gated through the existing `android`
+  workflow's `./gradlew test` + `assembleDebug` like any other PR — a version bump is never merged
+  un-built. For any diff touching `mobile/android/app/build.gradle.kts` or
+  `mobile/android/build.gradle.kts`: open the repo's **Security → Dependabot alerts** tab and check
+  for an open HIGH/CRITICAL alert on a dependency the diff touches (added, bumped, or left
+  unchanged); do not merge without an explicit, reported reason if one exists. A blank alert list
+  is only meaningful if Dependabot alerts are actually turned on for the repo (**Settings → Code
+  security and analysis → Dependabot alerts**) — as of A18 they were **off** repo-wide (confirmed
+  via `gh api repos/waldo1001/Findly --jq .security_and_analysis`), which is a one-time, human,
+  account-settings action no task in this repo has performed yet; until it happens, an empty alert
+  list means "nobody has looked," not "nothing is wrong," and this bullet cannot be executed as
+  written.
+- **Not adopted for A18, don't conflate with the above:** Gradle dependency
+  **locking/verification** (`gradle --write-verification-metadata`) proves an artifact is
+  byte-identical to what was fetched before — supply-chain *integrity* — it does not check
+  anything against a vulnerability database and is not a substitute for the two bullets above. An
+  OWASP `dependency-check`-style Gradle plugin was also evaluated and rejected: it needs a
+  periodically-updated local CVE database (slow/flaky in CI without a paid NVD API key) — not
+  worth the upkeep for a single-developer, few-euros/month project when GitHub already provides
+  the same signal for free via the graph submission above.
 
 ## 5. Mobile (once A1/I1 exist)
 
