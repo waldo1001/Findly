@@ -9,11 +9,13 @@ import UserNotifications
 /// Kept logic-free by design, mirroring how `backend/src/functions` and the app target's
 /// `AppDelegate` are kept thin elsewhere in this codebase (see its own doc comment): the ONLY
 /// thing this class does is (1) bridge `UNNotificationRequest.content.userInfo` into the
-/// `[String: String]` shape `FindlyKit`'s push types already parse — the exact same conversion
-/// `AppDelegate.application(_:didReceiveRemoteNotification:...)` does inline — and (2) apply the
-/// result of `GeofenceEventServiceExtensionRendering.title(for:)` (FindlyKit, unit-tested) to a
-/// mutable copy of the content. All the actual template/parsing logic lives in FindlyKit and is
-/// shared with the in-app `GeofenceEventPushHandler` dispatch path — not duplicated here.
+/// `[String: String]` shape `FindlyKit`'s push types already parse, via `FindlyKit`'s
+/// `PushPayloadParsing.stringData(from:)` — the SAME shared helper
+/// `AppDelegate.application(_:didReceiveRemoteNotification:...)` calls, not a second inline copy
+/// of the same conversion — and (2) apply the result of
+/// `GeofenceEventServiceExtensionRendering.title(for:)` (FindlyKit, unit-tested) to a mutable copy
+/// of the content. All the actual bridging/template/parsing logic lives in FindlyKit and is
+/// unit-tested there (`swift test`); this class itself has no logic of its own left to test.
 ///
 /// Fallback contract: `bestAttemptContent` starts as an unmodified mutable copy of the server's
 /// own content, and is only mutated if a title can actually be rendered. Both the normal
@@ -33,11 +35,7 @@ final class NotificationService: UNNotificationServiceExtension {
         let bestAttemptContent = (request.content.mutableCopy() as? UNMutableNotificationContent) ?? UNMutableNotificationContent()
         self.bestAttemptContent = bestAttemptContent
 
-        var data: [String: String] = [:]
-        for (key, value) in request.content.userInfo {
-            guard let key = key as? String else { continue }
-            data[key] = "\(value)"
-        }
+        let data = PushPayloadParsing.stringData(from: request.content.userInfo)
 
         if let title = GeofenceEventServiceExtensionRendering.title(for: data) {
             bestAttemptContent.title = title

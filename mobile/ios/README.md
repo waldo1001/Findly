@@ -26,7 +26,10 @@ mobile/ios/
 │   │                       `GeofenceConfigSyncCoordinator` instance, not a second one;
 │   │                       `GeofenceEventServiceExtensionRendering`, I15 — the pure re-render
 │   │                       function the `FindlyNotificationService` extension target calls, reusing
-│   │                       `GeofenceEventNotificationTemplate` rather than duplicating it), DesignSystem
+│   │                       `GeofenceEventNotificationTemplate` rather than duplicating it;
+│   │                       `PushPayloadParsing`, I15 round 2 — the shared `userInfo` ->
+│   │                       `[String: String]` bridging both `NotificationService` and `AppDelegate`
+│   │                       call, replacing what were two independent inline copies), DesignSystem
 │   │                       (tokens/theme/11 components), Navigation, Screens/ — two-step phone sign-in (I3) + Home, Map (live
 │   │                       map + swappable MapKit/list `MapRendering`), History (cursor
 │   │                       pagination), Geofences (list/editor, ETag-aware save + version-conflict
@@ -378,16 +381,30 @@ root cause this fixes).
   (no explicit `embed: true`/copy-files phase needed) — verified in the build log
   (`Copy .../Findly.app/PlugIns/FindlyNotificationService.appex`).
 - **Shares the rendering logic, doesn't duplicate it.** `GeofenceEventServiceExtensionRendering.
-  title(for:)` (`FindlyKit/Push/`, new, unit-tested) is the only new logic: it checks
-  `PushMessageType.from(data) == .geofenceEvent` (defensive — only `GEOFENCE_EVENT` ever carries
-  `mutable-content: 1`, but a future message type might) and, if so, delegates straight to the
-  existing `GeofenceEventNotificationTemplate.title(for:)` — the exact same template
-  `GeofenceEventPushHandler` already uses on the in-app dispatch path. `NotificationService.swift`
-  (the extension target's ONLY file) is kept logic-free by design, mirroring how
-  `backend/src/functions` and the app target's `AppDelegate` are kept thin elsewhere in this
-  codebase: it bridges `UNNotificationRequest.content.userInfo` into the `[String: String]` shape
-  (same conversion `AppDelegate` already does inline) and applies the FindlyKit function's result to
-  a mutable copy of the content.
+  title(for:)` (`FindlyKit/Push/`, unit-tested) checks `PushMessageType.from(data) ==
+  .geofenceEvent` (defensive — only `GEOFENCE_EVENT` ever carries `mutable-content: 1`, but a
+  future message type might) and, if so, delegates straight to the existing
+  `GeofenceEventNotificationTemplate.title(for:)` — the exact same template `GeofenceEventPushHandler`
+  already uses on the in-app dispatch path.
+- **`NotificationService.swift` (the extension target's ONLY file) is genuinely logic-free, not
+  just nominally so.** Round-2 code review found its `userInfo` -> `[String: String]` bridging had
+  zero coverage — `swift test` can't reach code outside the FindlyKit package, and (per the negative
+  result below) `simctl push` never reaches the extension on Simulator either, so nothing exercised
+  it. A direct-instantiation XCTest/Testing target for the `FindlyNotificationService` app-extension
+  target was attempted first (the stronger evidence — executing the real `didReceive` override
+  directly, no Simulator push pipeline needed) but hit a genuine structural wall: even with
+  `BUNDLE_LOADER` pointed at the extension's own Mach-O binary inside its built `.appex` (the
+  classic pre-testable-dylib pattern for linking a test bundle against another target's symbols),
+  the linker reported `NotificationService`'s own methods as undefined — an app-extension
+  executable doesn't retain its internal symbols for another test bundle to resolve against the way
+  an app target's Xcode-managed testable dylib does. Rather than force it, the bridging conversion
+  was extracted into `PushPayloadParsing.stringData(from:)` (`FindlyKit/Push/`, unit-tested, 5
+  cases) and both call sites — `NotificationService` here AND `AppDelegate.application(_:
+  didReceiveRemoteNotification:fetchCompletionHandler:)` (app target), which the reviewer found was
+  a byte-for-byte duplicate of the same conversion — now call the one shared implementation instead
+  of each keeping an inline copy. What's left in `NotificationService.didReceive` is: bridge via a
+  tested function, call another tested function, conditionally set one property, invoke a closure —
+  no independent logic of its own remains to test.
 - **Fallback contract.** `didReceive(_:withContentHandler:)` starts `bestAttemptContent` as an
   unmodified mutable copy of the request's own content and only mutates `.title` if a title
   actually renders; both the normal completion path and `serviceExtensionTimeWillExpire()` (the
