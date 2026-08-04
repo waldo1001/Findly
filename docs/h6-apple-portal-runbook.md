@@ -45,7 +45,11 @@ This is new from I15. A signed build fails without it.
 <https://appstoreconnect.apple.com> → **Apps** → **+** → **New App**
 
 - **Platforms:** iOS
-- **Name:** `Findly` — ⚠️ must be unique across the entire App Store, max 30 chars. If taken, only the store display name changes; bundle id and all internal naming stay as they are.
+- **Name:** `Findly - Friends Locator` — **registered 2026-08-04** (plain hyphen, not an em dash — this is the exact string in App Store Connect)
+  - The bare name `Findly` is **already taken** on the App Store (tried 2026-08-04: *"The app name you entered is already being used"*) — there are at least four Findly apps, including a Bluetooth device-finder. The descriptor form was checked and no app holds this string.
+  - **This is the store listing name only.** The home-screen name stays `Findly` (`CFBundleDisplayName` in `Findly/Info.plist`), and every internal identifier is unchanged: `com.findly.ios`, `com.findly.ios.NotificationService`, Firebase `findly-71f7b`, the join-link host. Nothing in the repo changes because of this.
+  - If Apple still rejects it, vary the descriptor (`Findly: Shared Location`, `Findly — Whereabouts`) — do **not** touch bundle ids, which would mean redoing steps 1–2 and recreating the Firebase project.
+  - Use this exact string anywhere the store listing name is needed (App Review notes, marketing, the Play listing if you want them consistent).
 - **Primary Language:** English
 - **Bundle ID:** `com.findly.ios` from the dropdown (absent = step 1 didn't take)
 - **SKU:** your own internal string, never public — `findly-ios-001`
