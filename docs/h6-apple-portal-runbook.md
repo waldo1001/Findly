@@ -174,7 +174,34 @@ Archive fails without a working signing identity, and this machine had none. Wha
 
 Also confirmed here: the **Dynex** team really is `92A2K3Q7NH` (the distribution certificate's own subject says so), matching what `project.yml` hardcodes.
 
-### 7b. Archive and upload
+### 7b. Archive and upload — ✅ done 2026-08-05, build `1.0.0 (1)` uploaded
+
+**Use the script, not Xcode:** `mobile/ios/scripts/release-testflight.sh` does archive → sign → verify → upload in one command.
+
+```bash
+ASC_KEY_ID=WV483G2U79 ASC_ISSUER_ID=c21438a3-3f0b-490f-8e50-bde1e155f03f mobile/ios/scripts/release-testflight.sh
+```
+
+App Store Connect API key (Users and Access → Integrations → App Store Connect API):
+
+| | |
+|---|---|
+| Key ID | `WV483G2U79` |
+| Issuer ID | `c21438a3-3f0b-490f-8e50-bde1e155f03f` |
+| Access | App Manager |
+| Private key | `~/.appstoreconnect/private_keys/AuthKey_WV483G2U79.p8`, mode `600` — **the secret**, never in the repo |
+
+The Key ID and Issuer ID are non-secret identifiers (Apple treats them as such) and are useless without the `.p8`; recorded here so the script is runnable without hunting the portal.
+
+**The signing story, so nobody re-fights it** — three attempts, and only the third works:
+
+1. `xcodebuild archive` with automatic signing → *"Your team has no devices from which to generate a provisioning profile"*. Automatic signing wants a **development** profile at archive time, and Apple won't issue one to a team with zero registered devices.
+2. Forcing `CODE_SIGN_IDENTITY: "Apple Distribution"` on Release → *"automatically signed for development, but a conflicting code signing identity has been manually specified"*. You cannot hand-pick an identity under automatic signing.
+3. ✅ **Archive with `CODE_SIGNING_ALLOWED=NO`, then let `-exportArchive` sign** with `method: app-store-connect`. Export-time signing creates *"iOS Team Store Provisioning Profile"* entries, which need **no registered device at all**. Verified: both the app and the embedded `FindlyNotificationService.appex` signed correctly.
+
+`project.yml` needs no signing config beyond `DEVELOPMENT_TEAM` + `CODE_SIGN_STYLE: Automatic` — the fix belongs in *how the archive is built*, not in the project.
+
+### 7c. Still to do in App Store Connect
 
 1. Xcode → Product → **Archive**
 2. Distribute App → **App Store Connect** → Upload
