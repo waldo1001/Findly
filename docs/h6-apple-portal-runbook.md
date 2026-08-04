@@ -1,90 +1,76 @@
-# H6 — Apple portal runbook (step-by-step)
+# H6 — Apple portal runbook
 
-> Companion to [`docs/store-readiness.md`](store-readiness.md) §2. That section is the *checklist*; this is the *procedure*, with the concrete values from this repo filled in and a verification step for every item.
->
-> **Status when written (2026-08-04):** enrollment is COMPLETE — Team ID **`92A2K3Q7NH`**, verified live in the served AASA. Nothing here is enrollment-gated. I9 (the `.xcodeproj`) and I15 (the Notification Service Extension) are both merged, so a build can actually be produced and uploaded.
+**Do these in order. Each step is one action. Nothing here depends on anything below it.**
 
-## Values you will need
+Companion to [`docs/store-readiness.md`](store-readiness.md) §2 (that's the checklist; this is the procedure).
 
-| Thing | Value | Source |
-|---|---|---|
-| Team ID | `92A2K3Q7NH` | verified in the live AASA |
-| App bundle id | `com.findly.ios` | `mobile/ios/project.yml` |
-| **Extension bundle id** | `com.findly.ios.NotificationService` | `mobile/ios/project.yml` (**new — added by I15**) |
-| Associated domain | `applinks:kind-plant-0fb99b003.7.azurestaticapps.net` | `mobile/ios/Findly/Findly.entitlements` |
-| Firebase project | `findly-71f7b` | rename runbook |
-| BGTask identifier | `be.dynex.findly.refresh` | specs/009 §3.4 — normative, do not "fix" the old reverse-domain casually |
-
-## Order matters — do step 1 first
-
-Step 1 has an **independent Apple review queue** that nothing else depends on. Start it before the mechanical portal work so the wait overlaps with everything else.
+Team ID **`92A2K3Q7NH`** · enrollment COMPLETE · I9 and I15 merged, so a build can be produced and uploaded.
 
 ---
 
-## 1. Apply for the Location Push Service Extension entitlement
+## Step 1 — Register the app's App ID
 
-**Why:** specs/000 §O1. Silent pushes (`content-available: 1`) are budgeted and coalesced by iOS — they are not a reliable wake, so push-to-locate is best-effort on iOS today. `com.apple.developer.location.push` is the mechanism built for exactly this, and it requires an application to Apple with an unknown lead time.
-
-**The form:** <https://developer.apple.com/contact/request/location-push-service-extension/>
-
-It sits behind Apple developer sign-in (the bare URL 302s to `idmsa.apple.com`), and **must be submitted by the Account Holder** — not an Admin or Developer role. For this project that is you.
-
-This is an **account-level enablement**, not a per-app one. Once Apple approves, `com.apple.developer.location.push` becomes available as a capability on your App IDs in Certificates, Identifiers & Profiles; you then enable it on `com.findly.ios`. Apple's own documentation is explicit that you request it **before** implementing the extension.
-
-**Draft justification** — adapt, don't paste blind; it should read as your words:
-
-> Findly is a private family location-sharing app. A parent can request an on-demand location update for a family member's device that has explicitly consented to sharing (each device opts in, and the owner can pause sharing at any time from the device itself).
->
-> The app currently implements this with a silent background push (`content-available: 1`), which iOS budgets and coalesces — so a requested location update frequently does not arrive until the device happens to wake for another reason. This is the exact use case the Location Push Service Extension exists for: a power-efficient, on-demand location query when the app is not running.
->
-> Location is only ever requested by a member of the same family group, is never shared outside it, and the app provides in-app export and deletion of all stored location history.
-
-### 1a. Ordering correction — you need the App Store Connect record first
-
-The form asks for **App Apple ID** and **App Store URL**. The Apple ID is the numeric identifier App Store Connect assigns when you *create the app record* — it does not exist until you do. And you cannot create that record until the App ID is registered, because App Store Connect's Bundle ID dropdown only lists App IDs that already exist in Certificates, Identifiers & Profiles.
-
-**So the real chain is: register the App ID (step 2a) → create the ASC record → the Apple ID now exists → submit this form.** "Step 1 first" holds only for the *queue* — the paperwork has prerequisites.
-
-#### Register the App ID (if `com.findly.ios` isn't there yet)
-
-<https://developer.apple.com/account> → Certificates, Identifiers & Profiles → **Identifiers** → **+** → App IDs → App →
+<https://developer.apple.com/account> → Certificates, Identifiers & Profiles → **Identifiers** → **+** → App IDs → App
 
 - **Description:** `Findly`
-- **Bundle ID:** choose **Explicit**, enter `com.findly.ios`
-- Tick **Push Notifications**, **Associated Domains**, **App Attest** (this is step 2a — do it now, it's the same screen)
+- **Bundle ID:** select **Explicit**, enter `com.findly.ios`
+- Tick these three capabilities:
+  - **Push Notifications** — all FCM-routed push (001 §8)
+  - **Associated Domains** — public join links (007 §3)
+  - **App Attest** — App Check on iOS, blocks H8 (006 §6.3)
 - Continue → Register
 
-Repeat for `com.findly.ios.NotificationService` (description e.g. `Findly Notification Service`, no capabilities).
+✅ **Done when:** `com.findly.ios` is listed under Identifiers with those three capabilities.
 
-#### Create the App Store Connect record
+---
+
+## Step 2 — Register the extension's App ID
+
+Same screen, **+** again.
+
+- **Description:** `Findly Notification Service`
+- **Bundle ID:** Explicit, `com.findly.ios.NotificationService`
+- **No capabilities** — the extension declares no entitlements, no App Group, no Keychain, no network.
+
+This is new from I15. A signed build fails without it.
+
+✅ **Done when:** both identifiers appear under Identifiers.
+
+---
+
+## Step 3 — Create the App Store Connect record
 
 <https://appstoreconnect.apple.com> → **Apps** → **+** → **New App**
 
 - **Platforms:** iOS
-- **Name:** `Findly` — ⚠️ must be **unique across the entire App Store**, max 30 characters. If it's taken you'll be told here, and you'll need a store-facing variant (the bundle id and internal naming stay `findly` regardless; only the display name would change).
-- **Primary Language:** English (or your preference)
-- **Bundle ID:** pick `com.findly.ios` from the dropdown — if it's absent, the App ID above isn't registered yet
-- **SKU:** your own internal identifier, never shown publicly — e.g. `findly-ios-001`
+- **Name:** `Findly` — ⚠️ must be unique across the entire App Store, max 30 chars. If taken, only the store display name changes; bundle id and all internal naming stay as they are.
+- **Primary Language:** English
+- **Bundle ID:** `com.findly.ios` from the dropdown (absent = step 1 didn't take)
+- **SKU:** your own internal string, never public — `findly-ios-001`
 - **User Access:** Full Access
 
 → **Create**
 
-#### Then find the Apple ID
+Then read the **Apple ID** off it: Apps → Findly → **App Information** → General Information → **Apple ID** (~10 digits). It's also in the URL: `appstoreconnect.apple.com/apps/`**`1234567890`**`/…`
 
-App Store Connect → **Apps** → Findly → **App Information** (left sidebar, under General) → **General Information** → **Apple ID**. It's a ~10-digit number.
+✅ **Done when:** you have written the number down here → `App Apple ID: ____________`
 
-Quickest alternative: it's in the browser URL while you're in the app — `appstoreconnect.apple.com/apps/`**`1234567890`**`/appstore/…`
+---
 
-**Record it here once you have it:** `App Apple ID: ________`
+## Step 4 — Submit the Location Push entitlement request
 
-### 1b. Field-by-field answers
+<https://developer.apple.com/contact/request/location-push-service-extension/>
+
+Must be submitted by the **Account Holder** role. Approval is account-level: once granted, `com.apple.developer.location.push` becomes available as a capability on your App IDs.
+
+**Form answers:**
 
 | Field | Answer |
 |---|---|
-| **App name** | `Findly` |
-| **Bundle ID** | `com.findly.ios` |
-| **App Apple ID** | the numeric ID from the App Store Connect record (App Store Connect → your app → App Information → General Information) |
-| **App Store URL** | The app is not released yet, so no public URL exists. State that plainly — e.g. *"Not yet released; app record created in App Store Connect, first build going to TestFlight."* Do not invent a URL. |
+| App name | `Findly` |
+| Bundle ID | `com.findly.ios` |
+| App Apple ID | the number from step 3 |
+| App Store URL | *"Not yet released; app record created in App Store Connect, first build going to TestFlight."* |
 
 **Describe your app:**
 
@@ -102,105 +88,75 @@ Quickest alternative: it's in the browser URL while you're in the app — `appst
 
 > Typically fewer than 5 per device per day, since each one requires a person to deliberately tap "locate". The backend enforces a hard ceiling of 100 locate requests per family per UTC day, shared across all members, and coalesces concurrent requests for the same device so repeat taps do not multiply pushes.
 
-*(All four answers are grounded in the shipped implementation: `locateRequestsPerDay: 100` in `backend/src/domain/plan.ts`, coalescing and the 60-second expiry in specs/001 §6.1. Adapt the wording, but keep the numbers — they are enforced in code and should stay true.)*
+The numbers are enforced in code — `locateRequestsPerDay: 100` in `backend/src/domain/plan.ts`, the 60s expiry and coalescing in specs/001 §6.1. Adapt the prose, keep the numbers.
 
-**Set expectations honestly:** this is a request, not a switch. Response times vary from days to weeks, developers on Apple's forums report requests going unanswered, and Apple is selective — approval is not guaranteed. That is precisely why it goes first and why the app ships a working best-effort fallback (001 §8 payloads are designed for both paths, with "last known, updating…" UX). Nothing else in H6, or in shipping the app, depends on this being granted.
+⚠️ **Do NOT add `com.apple.developer.location.push` to `Findly.entitlements` until Apple grants it** — an ungranted entitlement breaks code signing. The file already carries a commented-out block saying so.
 
-**Do NOT add the entitlement to `Findly.entitlements` before Apple grants it** — the file already carries a commented-out block saying exactly this, because adding an ungranted entitlement **breaks code signing**.
+**Expect:** days to weeks, sometimes no reply, approval not guaranteed. Nothing else in H6 or in shipping depends on it — the app ships a working best-effort fallback (001 §8 payloads are designed for both paths).
 
-**When granted**, it is a follow-up task, not part of H6: locate pushes move to direct APNs (`apns-push-type: location`, topic `<bundleId>.location-query`), which adds an APNs `.p8` credential to the *backend* and a `locationPushToken` on device registration (001 §4.1, §8.1). FCM cannot address location push tokens. File it as its own spec'd task when the grant lands.
-
-**Verify:** you have a confirmation/reference for the submitted request.
+✅ **Done when:** submitted. Then carry straight on — do not wait.
 
 ---
 
-## 2. Register the two App IDs and their capabilities
+## Step 5 — Create the APNs key and upload it to Firebase
 
-Certificates, Identifiers & Profiles → Identifiers.
+**The highest-value step.** It unblocks iOS on-device phone sign-in *and* App Check, and App Check blocks H8.
 
-### 2a. `com.findly.ios` (should already exist)
+1. <https://developer.apple.com/account> → **Keys** → **+** → tick **Apple Push Notifications service (APNs)** → Continue → Register
+2. **Download the `.p8`. Apple allows this exactly once.** Put it in your password manager.
+3. Note the **Key ID** (shown on the key page) and Team ID `92A2K3Q7NH`.
+4. <https://console.firebase.google.com> → project **`findly-71f7b`** → ⚙️ Project settings → **Cloud Messaging** → iOS app configuration → **APNs Authentication Key** → Upload → the `.p8` + Key ID + Team ID.
 
-Enable these capabilities:
+⚠️ Never commit the `.p8`. `.gitignore` already covers `*.p8`.
 
-| Capability | Why | Reference |
-|---|---|---|
-| **Push Notifications** | all FCM-routed push (001 §8) | specs/001 §8 |
-| **Associated Domains** | public join links `https://…/g#CODE` | I6, specs/007 §3 |
-| **App Attest** | App Check on iOS — blocks H8 | specs/006 §6.3 |
-
-### 2b. `com.findly.ios.NotificationService` (**new — must be created**)
-
-This did not exist before I15. An app extension needs its **own** App ID; a signed build fails without it.
-
-- Create it as a plain App ID under the same team.
-- **No capabilities needed.** I15's security review confirmed the extension declares no entitlements, no App Group, no Keychain, no network — it reads its own notification request and calls a pure function.
-
-**Verify:** both identifiers appear in the portal; `com.findly.ios` shows all three capabilities enabled.
+✅ **Done when:** Firebase's Cloud Messaging tab shows the APNs key against the iOS app.
 
 ---
 
-## 3. Create and upload the APNs auth key
+## Step 6 — Turn on real signing in the project
 
-**This is the highest-value step** — it unblocks two things that are otherwise stuck: iOS on-device phone sign-in (Firebase app verification needs it) and iOS App Check, which in turn blocks **H8**.
+1. Edit `mobile/ios/project.yml` — uncomment `DEVELOPMENT_TEAM: 92A2K3Q7NH` in **both** targets (`Findly` and `FindlyNotificationService`; each has a `TODO(H6)` marker).
+2. `cd mobile/ios && xcodegen generate` — **never hand-edit `project.pbxproj`**.
+3. Leave `aps-environment` as `development`; Xcode switches it for distribution builds.
 
-1. Keys → create a new key → enable **Apple Push Notifications service (APNs)**.
-2. Download the `.p8`. **Apple lets you download it exactly once.** Store it in your password manager, not the repo.
-3. Note the **Key ID** and your Team ID (`92A2K3Q7NH`).
-4. Firebase console → project **`findly-71f7b`** → Project settings → Cloud Messaging → iOS app configuration → upload the `.p8` with its Key ID and Team ID.
-
-**Never commit the `.p8`.** `docs/security-review-checklist.md` §1 forbids it and `.gitignore` already covers `*.p8`.
-
-**Verify:** the Firebase Cloud Messaging tab shows the APNs key against the iOS app. Real verification is step 6.
+✅ **Done when:** `xcodebuild build -scheme Findly -destination 'generic/platform=iOS Simulator'` still succeeds and `git diff` shows only `project.yml` + the regenerated project file.
 
 ---
 
-## 4. Wire signing in the project
+## Step 7 — Upload a build to TestFlight
 
-Both targets currently ship with `DEVELOPMENT_TEAM` commented out — deliberate, so simulator builds work without a team.
+1. Xcode → Product → **Archive**
+2. Distribute App → **App Store Connect** → Upload
+3. App Store Connect → your app → **TestFlight** → enable internal testing → install on your iPhone
 
-1. In `mobile/ios/project.yml`, uncomment `DEVELOPMENT_TEAM: 92A2K3Q7NH` for **both** the `Findly` and `FindlyNotificationService` targets (each has its own `TODO(H6)` marker).
-2. Regenerate: `cd mobile/ios && xcodegen generate` — **never hand-edit `project.pbxproj`** (I9's rule; a reviewer verified the committed file is byte-identical to xcodegen output).
-3. `aps-environment` is `development` in `Findly.entitlements`; Xcode switches it to `production` for distribution builds automatically. Leave it.
+Fill in while you're there:
 
-**Verify:** `xcodebuild build -scheme Findly -destination 'generic/platform=iOS Simulator'` still succeeds, and `git diff` shows only the intended `project.yml` + regenerated `project.pbxproj` changes.
+- **Privacy nutrition labels** (must match the Play data-safety answers): precise **location**, linked to identity, **shared with other users**; **phone number** for authentication.
+- **Age rating**.
+- **App Review notes**: the test-phone-number sign-in approach — reviewers cannot receive a real SMS.
 
----
-
-## 5. App Store Connect app + TestFlight
-
-1. App Store Connect → new app → platform iOS, bundle id `com.findly.ios`, name **Findly**.
-2. Archive and upload a build from Xcode (Product → Archive → Distribute → App Store Connect).
-3. Enable **TestFlight** internal testing and install on a real device.
-
-**Privacy nutrition labels** — must match the Play data-safety answers already worked out for H5:
-- Precise **location**, linked to identity, **shared with other users** (family/group members)
-- **Phone number**, used for authentication
-- Age rating appropriate for a family app
-
-**App Review notes:** provide the test phone number sign-in approach, same as Play. Reviewers cannot receive a real SMS.
-
-**Verify:** the build appears in TestFlight and installs on a device.
+✅ **Done when:** the build installs on a real device from TestFlight.
 
 ---
 
-## 6. What to actually test on the device (this is the point)
+## Step 8 — Test on the device
 
-A large amount of iOS work is written, unit-tested, and **never yet observed on real hardware**. TestFlight is what converts it. Test in this order:
+This is the point of all of it. A lot of iOS work is written, unit-tested, and has never run on real hardware.
 
-1. **Phone sign-in** — needs step 3's APNs key. Fails without it.
+1. **Phone sign-in** — needs step 5. Fails without it.
 2. **Push arrival** — `LOCATE_REQUEST`, `SETTINGS_CHANGED`, `GEOFENCE_CONFIG_CHANGED` (001 §8).
-3. **`GEOFENCE_EVENT` re-rendering via the new extension (I15)** — this is the *only* way to verify it. `xcrun simctl push` provably never invokes a Notification Service Extension on Simulator (established empirically in I15 by both the implementing agent and its reviewer), and app-extension targets cannot be unit-tested directly. Trigger a real geofence transition and confirm the displayed notification is the client-rendered title, not the server's pre-baked one.
-4. **Universal Links** — tap a `https://kind-plant-0fb99b003.7.azurestaticapps.net/g#CODE` link and confirm it opens the app rather than Safari.
-5. **Background location** — the "Always" permission dance, and that fixes keep flowing with the app closed.
+3. **`GEOFENCE_EVENT` re-rendering via the I15 extension** — trigger a real geofence transition, confirm the notification shows the client-rendered title. **This is the only way to verify it**: `simctl push` provably never invokes a Notification Service Extension on Simulator, and app-extension targets can't be unit-tested directly.
+4. **Universal Links** — tap `https://kind-plant-0fb99b003.7.azurestaticapps.net/g#CODE`, confirm it opens the app not Safari.
+5. **Background location** — the "Always" permission dance; fixes keep flowing with the app closed.
 
 ---
 
-## 7. Then, and only then
+## After H6
 
-- **H8** (go-open switch) needs App Check *enforced* on both platforms, which needs step 2a's App Attest plus step 3's key. H8 also waits on **H9** (the web App Check provider) — enforce before opening SMS regions, never the other way round.
-- If Apple grants the Location Push entitlement (step 1), that becomes its own task.
+- **H8** (go-open switch) needs App Check *enforced* on both platforms — step 1's App Attest + step 5's key — and also waits on **H9**. Enforce before opening SMS regions, never the reverse.
+- If Apple grants the Location Push entitlement, that's its own spec'd task: locate pushes move to direct APNs (`apns-push-type: location`, topic `<bundleId>.location-query`), adding an APNs credential to the backend and a `locationPushToken` to device registration (001 §4.1, §8.1). FCM cannot address location push tokens.
 
 ## Notes
 
-- **Nothing in this runbook belongs in the repo.** The `.p8`, provisioning profiles, and certificates are all password-manager material. The only repo change H6 produces is step 4's two-line `DEVELOPMENT_TEAM` uncomment plus the regenerated project file.
-- The BGTask identifier `be.dynex.findly.refresh` keeps the pre-rename reverse-domain. It is consistent across `Info.plist`, `BackgroundSyncScheduling.swift`, and specs/009 §3.4, and BGTask identifiers need not match the bundle id — so it is cosmetic, not a defect. Changing it means a spec change first, and it must stay in lockstep with `Info.plist` or `BGTaskScheduler.submit()` throws `notPermitted`.
+- **Almost nothing here touches the repo.** The `.p8`, profiles and certificates are password-manager material. The only code change H6 produces is step 6's two-line uncomment plus the regenerated project file.
+- The BGTask identifier `be.dynex.findly.refresh` keeps the pre-rename reverse-domain. It's consistent across `Info.plist`, `BackgroundSyncScheduling.swift` and specs/009 §3.4, and BGTask identifiers need not match the bundle id — cosmetic, not a defect. Changing it needs a spec change and must stay in lockstep with `Info.plist`, or `BGTaskScheduler.submit()` throws `notPermitted`.
