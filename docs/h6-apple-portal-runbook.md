@@ -153,6 +153,29 @@ APNs auth keys are **team-wide** — this one key serves `com.findly.ios` and th
 
 ## Step 7 — Upload a build to TestFlight
 
+### 7a. Machine prerequisites (done 2026-08-04 — read this if signing ever breaks)
+
+Archive fails without a working signing identity, and this machine had none. What was needed:
+
+1. **Xcode → Settings → Apple Accounts → +** — sign in with the Apple ID on the enrolled team (`apple@waldo.be`, team **Dynex**, role Admin).
+2. Select the team → **Manage Certificates… → +** → create **Apple Development** *and* **Apple Distribution**.
+3. **The trap:** certificates existed and Xcode showed them, but `security find-identity -v -p codesigning` reported **0 valid identities** and `codesign` failed with:
+   ```
+   unable to build chain to self-signed root for signer "Apple Distribution: Dynex (92A2K3Q7NH)"
+   errSecInternalComponent
+   ```
+   Cause: the certificate is issued by **WWDR G3** (`OU=G3`), but the only WWDR intermediate in the keychain was the original **G1, expired 2023-02-07**. Apple Root CA was fine (present in system roots). The chain simply couldn't reach it. Fix:
+   ```bash
+   curl -fsSL https://www.apple.com/certificateauthority/AppleWWDRCAG3.cer -o /tmp/AppleWWDRCAG3.cer && security import /tmp/AppleWWDRCAG3.cer -k ~/Library/Keychains/login.keychain-db
+   ```
+   Verified after: 2 valid identities, and `codesign -dvv` shows the full chain `Apple Distribution → WWDR → Apple Root CA`, `TeamIdentifier=92A2K3Q7NH`.
+
+**Diagnostic worth reusing:** `security find-identity -v -p codesigning` lists only *valid* identities, so an incomplete chain shows as zero and looks identical to "no certificates at all". `security find-certificate -a` proves whether the certs exist; a real `codesign` attempt reveals *why* they're unusable. Also note `security find-certificate` does not search `/System/Library/Keychains/SystemRootCertificates.keychain` unless you name it — an apparently-missing Apple Root CA is usually a search-path artifact, not a real absence.
+
+Also confirmed here: the **Dynex** team really is `92A2K3Q7NH` (the distribution certificate's own subject says so), matching what `project.yml` hardcodes.
+
+### 7b. Archive and upload
+
 1. Xcode → Product → **Archive**
 2. Distribute App → **App Store Connect** → Upload
 3. App Store Connect → your app → **TestFlight** → enable internal testing → install on your iPhone
