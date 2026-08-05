@@ -53,7 +53,27 @@ It also fixes a live production bug: `assetlinks.json` currently serves **`CHANG
 fingerprints**, so Android App Links do not verify and a shared `https://…/g#CODE` join link opens the
 browser instead of the app.
 
-### B1 👤 Create the release keystore (local, never committed)
+### B0 👤 ⏳ **Play account verification — BLOCKER, start it first, it has lead time**
+
+Hit 2026-08-05: Play Console refuses app creation with *"Complete account verifications to create new apps."*
+Nothing in Track B past B4 can proceed until Google clears it.
+
+**Play Console → Settings → Developer account → Account details**, and complete every item flagged there.
+For an Organisation account (`waldo1001`, Dynex bv, account ID `6979198494407001879`) that typically means:
+legal entity name and address, the **D-U-N-S number** (already exists per the 2026-07-25 finding — reusable,
+no need to re-apply), a verified contact email and phone, and sometimes a document upload proving the
+address.
+
+**Lead time is days, not minutes** — Google reviews it. Start it before anything else in this track, then go
+do Track C and TestFlight while it runs. This is now the **single largest fixed delay to M1-Android**, taking
+over the role the 14-day closed-test rule would have played had the account not been exempt.
+
+Steps B1–B4 (keystore, secrets, local signed AAB) are **already done as of 2026-08-05** — the AAB is built and
+verified signed with `CN=Eric Wauters, O=Dynex`, upload-key SHA-256
+`3B:5C:9A:72:D0:15:8B:C1:CF:CD:0C:6C:6F:49:13:6B:25:1A:B3:F0:2C:83:8E:71:A9:4A:E9:FB:32:14:C3:18`.
+So the moment verification clears, B5 (upload) is immediate.
+
+### B1 👤 Create the release keystore (local, never committed) ✅ done 2026-08-05
 
 ```bash
 keytool -genkeypair -v -keystore release.jks -alias findly -keyalg RSA -keysize 2048 -validity 10000
@@ -123,8 +143,10 @@ Play's data-safety form requires a working account-deletion URL.
 1. 👤 Firebase console → register a **web app** in `findly-71f7b`.
 2. 👤 **Authentication → Settings → Authorized domains** → add the SWA host
    (`kind-plant-0fb99b003.7.azurestaticapps.net`).
-3. 🤖 CORS on `func-findly` for that origin, allowing `DELETE` + `Authorization` (agent can run the `az` CLI
-   if you are logged in; otherwise Azure Portal → Function App → CORS).
+3. ✅ **Already done** (verified 2026-08-05): `az functionapp cors show -n func-findly -g Findly` returns
+   `allowedOrigins: ["https://kind-plant-0fb99b003.7.azurestaticapps.net"]` with `supportCredentials: false`
+   — correct, since the deletion page authenticates with an `Authorization` bearer header rather than
+   cookies. `/delete-account` also returns `200`. So this track is two Firebase-console items, not four.
 4. 👤 Register the **web** App Check provider (reCAPTCHA). Must exist **before** H8 flips enforcement, or the
    deletion page's sign-in breaks the moment enforcement turns on.
 
