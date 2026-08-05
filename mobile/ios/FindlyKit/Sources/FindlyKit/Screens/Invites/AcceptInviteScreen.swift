@@ -10,11 +10,19 @@ public struct AcceptInviteScreen: View {
     // on.
     @StateObject private var viewModel: AcceptInviteViewModel
     @State private var inviteCode: String
-    @State private var displayName: String = ""
+    @State private var displayName: String
 
-    public init(viewModel: @autoclosure @escaping () -> AcceptInviteViewModel, prefillInviteCode: String = "") {
+    /// [prefillDisplayName] seeds the display-name field when this screen is reached from the
+    /// profile-less first-run flow (`HomeScreen`'s `.profileless` branch, I17) — same "enter it
+    /// once" intent as [prefillInviteCode]'s existing deep-link prefill.
+    public init(
+        viewModel: @autoclosure @escaping () -> AcceptInviteViewModel,
+        prefillInviteCode: String = "",
+        prefillDisplayName: String = ""
+    ) {
         _viewModel = StateObject(wrappedValue: viewModel())
         self._inviteCode = State(initialValue: prefillInviteCode)
+        self._displayName = State(initialValue: prefillDisplayName)
     }
 
     public var body: some View {

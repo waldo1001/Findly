@@ -14,11 +14,19 @@ public struct CreateGroupScreen: View {
     @State private var name: String = ""
     @State private var endsAt: Date = Date().addingTimeInterval(24 * 3600)
     @State private var expiryPolicy: GroupExpiryPolicy = .delete
-    @State private var displayName: String = ""
+    @State private var displayName: String
     private let onCreated: (GroupSummary) -> Void
 
-    public init(viewModel: @autoclosure @escaping () -> CreateGroupViewModel, onCreated: @escaping (GroupSummary) -> Void) {
+    /// [prefillDisplayName] seeds the display-name field when this screen is reached from the
+    /// profile-less first-run flow (`HomeScreen`'s `.profileless` branch, I17) — same "enter it
+    /// once" intent as `GroupJoinScreen`/`AcceptInviteScreen`'s own `prefillDisplayName`.
+    public init(
+        viewModel: @autoclosure @escaping () -> CreateGroupViewModel,
+        prefillDisplayName: String = "",
+        onCreated: @escaping (GroupSummary) -> Void
+    ) {
         _viewModel = StateObject(wrappedValue: viewModel())
+        self._displayName = State(initialValue: prefillDisplayName)
         self.onCreated = onCreated
     }
 

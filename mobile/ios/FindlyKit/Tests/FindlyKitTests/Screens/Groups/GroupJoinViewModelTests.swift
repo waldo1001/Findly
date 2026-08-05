@@ -66,6 +66,43 @@ struct GroupJoinViewModelTests {
         }
     }
 
+    // MARK: - I17 bootstrap guard (001 §12.6: "displayName REQUIRED then, optional otherwise") —
+    // `needsDisplayName` is threaded in from the profile-less first-run flow
+    // (`HomeViewModel.State.profileless`); a blank display name must never reach the network in
+    // that case.
+
+    @Test func join_needsDisplayNameAndBlank_isRejectedWithoutCallingTheApi() async {
+        let api = FakeAPIClient()
+        let viewModel = GroupJoinViewModel(apiClient: api, needsDisplayName: true)
+
+        await viewModel.join(rawCode: "7F3K9QRZ", displayName: "   ")
+
+        #expect(api.joinGroupCalls.isEmpty)
+        guard case .error = viewModel.state else {
+            Issue.record("expected .error state, got \(viewModel.state)")
+            return
+        }
+    }
+
+    @Test func join_needsDisplayNameAndProvided_callsTheApi() async {
+        let api = FakeAPIClient()
+        api.joinGroupHandler = { code, displayName in
+            #expect(displayName == "Noor")
+            return TestFeatures.envelope(GroupSummary(
+                groupId: "grp_x", name: "Crew", endsAt: "2026-08-02T22:00:00Z", expiryPolicy: "delete",
+                state: "active", role: "member", memberCount: 2, code: code, createdAt: nil
+            ))
+        }
+        let viewModel = GroupJoinViewModel(apiClient: api, needsDisplayName: true)
+
+        await viewModel.join(rawCode: "7F3K9QRZ", displayName: "Noor")
+
+        guard case .joined = viewModel.state else {
+            Issue.record("expected .joined state, got \(viewModel.state)")
+            return
+        }
+    }
+
     @Test func join_rotatedOrUnknownCode_setsErrorState() async {
         let api = FakeAPIClient()
         api.joinGroupHandler = { _, _ in

@@ -71,6 +71,44 @@ struct CreateGroupViewModelTests {
         }
     }
 
+    // MARK: - I17 bootstrap guard (001 §12.1: "displayName REQUIRED then, optional otherwise") —
+    // `needsDisplayName` is threaded in from the profile-less first-run flow
+    // (`HomeViewModel.State.profileless`); a blank display name must never reach the network in
+    // that case, same "gate before any network call" convention as `CreateFamilyViewModel`/
+    // `AcceptInviteViewModel`.
+
+    @Test func createGroup_needsDisplayNameAndBlank_isRejectedWithoutCallingTheApi() async {
+        let api = FakeAPIClient()
+        let viewModel = CreateGroupViewModel(apiClient: api, needsDisplayName: true)
+
+        await viewModel.createGroup(name: "Crew", endsAt: Date().addingTimeInterval(86400), expiryPolicy: .delete, displayName: "   ")
+
+        #expect(api.createGroupCalls.isEmpty)
+        guard case .error = viewModel.state else {
+            Issue.record("expected .error state, got \(viewModel.state)")
+            return
+        }
+    }
+
+    @Test func createGroup_needsDisplayNameAndProvided_callsTheApi() async {
+        let api = FakeAPIClient()
+        api.createGroupHandler = { name, endsAtString, expiryPolicy, displayName in
+            #expect(displayName == "Eric")
+            return TestFeatures.envelope(GroupSummary(
+                groupId: "grp_1", name: name, endsAt: endsAtString, expiryPolicy: expiryPolicy,
+                state: "active", role: "owner", memberCount: 1, code: "7F3K9QRZ", createdAt: "2026-07-21T10:00:00Z"
+            ))
+        }
+        let viewModel = CreateGroupViewModel(apiClient: api, needsDisplayName: true)
+
+        await viewModel.createGroup(name: "Crew", endsAt: Date().addingTimeInterval(86400), expiryPolicy: .delete, displayName: "Eric")
+
+        guard case .created = viewModel.state else {
+            Issue.record("expected .created state, got \(viewModel.state)")
+            return
+        }
+    }
+
     @Test func createGroup_serverError_setsErrorState() async {
         let api = FakeAPIClient()
         api.createGroupHandler = { _, _, _, _ in
