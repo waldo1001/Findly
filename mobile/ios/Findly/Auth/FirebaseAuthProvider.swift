@@ -83,6 +83,49 @@ final class FirebaseAuthProvider: AuthProviding {
         try await user.delete()
     }
 
+    /// Firebase phone auth needs to prove the request came from *this* app before it will send an
+    /// SMS. On iOS it does that with a silent APNs push, falling back to a reCAPTCHA web view.
+    /// Neither was wired up, which is why sign-in crashed on device the moment `FirebaseAuth` was
+    /// actually linked (2026-08-05): `Auth` never received an APNs token — the token was being
+    /// handed to `Messaging` only, which is a *different* Firebase component — and the reCAPTCHA
+    /// fallback is impossible here because `GoogleService-Info.plist` carries no
+    /// `REVERSED_CLIENT_ID` (that key only exists when Google Sign-In is enabled, and this project
+    /// is phone-auth-only, specs/006 §1). With no verification path available and
+    /// `uiDelegate: nil`, `verifyPhoneNumber` had nowhere to go.
+    ///
+    /// Call from `AppDelegate.application(_:didRegisterForRemoteNotificationsWithDeviceToken:)`,
+    /// alongside the Messaging equivalent. `.unknown` lets Firebase detect sandbox vs production
+    /// itself, which matters because debug builds use the APNs sandbox and TestFlight/App Store
+    /// builds use production, against the same uploaded `.p8` key.
+    static func setAPNSToken(_ deviceToken: Data) {
+        Auth.auth().setAPNSToken(deviceToken, type: .unknown)
+    }
+
+    /// Call FIRST from `AppDelegate.application(_:didReceiveRemoteNotification:...)`. Firebase's
+    /// app-verification push is addressed to the app like any other silent push; if it isn't
+    /// handed to `Auth`, verification never completes and the app would also try to dispatch it as
+    /// if it were one of specs/001 §8's own push types.
+    static func canHandleNotification(_ userInfo: [AnyHashable: Any]) -> Bool {
+        Auth.auth().canHandleNotification(userInfo)
+    }
+
+    /// Call once, from `didFinishLaunchingWithOptions`, strictly AFTER `FirebaseApp.configure()`.
+    ///
+    /// In DEBUG only, disables Firebase's app verification. The Simulator has no APNs at all, so
+    /// without this the phone-auth flow cannot be exercised locally and every change has to be
+    /// round-tripped through a TestFlight build — which is exactly how this bug survived three
+    /// uploads. With verification disabled, the console-configured test numbers
+    /// (`+32 470 00 00 01` / `123456`, specs/006 §5) sign in on the Simulator.
+    ///
+    /// Guarded by `#if DEBUG` so it can never reach a Release build: switching it on in
+    /// production would disable the anti-abuse check that stops anyone burning SMS quota, which
+    /// is precisely what specs/006 §6.3's App Check ordering exists to protect.
+    static func configureForCurrentBuild() {
+        #if DEBUG
+        Auth.auth().settings?.isAppVerificationDisabledForTesting = true
+        #endif
+    }
+
     func startPhoneVerification(phoneNumberE164: String) async throws {
         do {
             verificationID = try await PhoneAuthProvider.provider().verifyPhoneNumber(phoneNumberE164, uiDelegate: nil)
@@ -142,5 +185,8 @@ final class FirebaseAuthProvider: AuthProviding {
     func deleteCurrentUser() async throws { throw AuthError.notSignedIn }
     func startPhoneVerification(phoneNumberE164: String) async throws { throw PhoneAuthError.unknown }
     func confirmCode(_ code: String) async throws { throw PhoneAuthError.unknown }
+    static func setAPNSToken(_ deviceToken: Data) {}
+    static func canHandleNotification(_ userInfo: [AnyHashable: Any]) -> Bool { false }
+    static func configureForCurrentBuild() {}
 #endif
 }

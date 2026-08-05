@@ -26,6 +26,10 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         // access could trigger too early.
         FirebaseApp.configure()
 #endif
+        // Must follow FirebaseApp.configure(). DEBUG-only: disables app verification so the
+        // phone-auth flow is exercisable on the Simulator, which has no APNs — see the method's
+        // doc comment for why that matters.
+        FirebaseAuthProvider.configureForCurrentBuild()
         FirebasePushTokenProvider.shared.startObservingMessaging()
         UNUserNotificationCenter.current().delegate = self
         return true
@@ -33,6 +37,10 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
 
     func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
         FirebasePushTokenProvider.shared.setAPNSToken(deviceToken)
+        // Auth is a SEPARATE Firebase component from Messaging and needs its own copy of the
+        // token — handing it only to Messaging (as this did until 2026-08-05) leaves phone-auth
+        // app verification with no silent-push path, and no reCAPTCHA fallback exists here.
+        FirebaseAuthProvider.setAPNSToken(deviceToken)
     }
 
     func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {
@@ -51,6 +59,13 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         didReceiveRemoteNotification userInfo: [AnyHashable: Any],
         fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void
     ) {
+        // Firebase's phone-auth verification push must be offered to Auth first: it looks like any
+        // other silent push, and if Auth never sees it, verification stalls and we would also try
+        // to dispatch it as though it were one of specs/001 §8's own types.
+        if FirebaseAuthProvider.canHandleNotification(userInfo) {
+            completionHandler(.noData)
+            return
+        }
         guard let dispatcher = PushRuntimeContainerHolder.shared.container?.dispatcher else {
             completionHandler(.noData)
             return
