@@ -3,6 +3,11 @@ import FindlyKit
 #if canImport(FirebaseAuth)
 import FirebaseAuth
 #endif
+#if canImport(FirebaseCore)
+// `FirebaseApp` (configuration + the already-configured check) lives in FirebaseCore, not
+// FirebaseAuth — see `configureFirebaseIfNeeded()`.
+import FirebaseCore
+#endif
 
 /// specs/004-ios-client.md §4.1 — the first real `AuthProviding` implementation. Lives in the app
 /// target (not `FindlyKit`) so `FindlyKit` stays Firebase-SDK-free and `swift test` keeps running
@@ -109,6 +114,27 @@ final class FirebaseAuthProvider: AuthProviding {
         Auth.auth().canHandleNotification(userInfo)
     }
 
+    /// Configures the default `FirebaseApp` if it isn't configured yet, and is safe to call more
+    /// than once (a second bare `FirebaseApp.configure()` logs a duplicate-app error).
+    ///
+    /// Why this exists rather than a single `configure()` in the app delegate: SwiftUI runs
+    /// `App.init()` **before** `application(_:didFinishLaunchingWithOptions:)`, and specs/004 §2.6
+    /// requires `FindlyApp.init()` to read the restored `Auth.auth().currentUser` to pick the
+    /// launch route. Touching `Auth` before configuration is a hard crash, so the earliest caller
+    /// configures and the delegate's later call becomes a no-op. Ordering between the two is
+    /// therefore no longer load-bearing.
+    static func configureFirebaseIfNeeded() {
+        if FirebaseApp.app() == nil {
+            FirebaseApp.configure()
+        }
+    }
+
+    /// True when a previous session's user was restored from the keychain — specs/004 §2.6's
+    /// launch-route input. MUST be called after `configureFirebaseIfNeeded()`.
+    static var hasRestoredSession: Bool {
+        Auth.auth().currentUser != nil
+    }
+
     /// Call once, from `didFinishLaunchingWithOptions`, strictly AFTER `FirebaseApp.configure()`.
     ///
     /// In DEBUG only, disables Firebase's app verification. The Simulator has no APNs at all, so
@@ -188,5 +214,9 @@ final class FirebaseAuthProvider: AuthProviding {
     static func setAPNSToken(_ deviceToken: Data) {}
     static func canHandleNotification(_ userInfo: [AnyHashable: Any]) -> Bool { false }
     static func configureForCurrentBuild() {}
+    static func configureFirebaseIfNeeded() {}
+    /// No SDK linked means no persisted session to restore — the app starts at sign-in, which is
+    /// the correct answer for this build shape (specs/004 §2.6).
+    static var hasRestoredSession: Bool { false }
 #endif
 }

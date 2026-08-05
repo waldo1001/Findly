@@ -1,6 +1,7 @@
 package com.findly.android.ui.designsystem.components
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
@@ -8,12 +9,31 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import com.findly.android.ui.designsystem.FindlyTheme
 
 /**
+ * The one central "can this screen go back?" answer, provided once by
+ * [com.findly.android.ui.nav.FindlyNavHost] and consumed by every [FindlyTopBar] (specs/003 §12.5,
+ * mirroring specs/004 §2.5's iOS `navBarBackAction` environment value).
+ *
+ * Threading an `onBack` parameter through all 14 screens would put the "should there be a back
+ * button here?" decision back in each screen — which is how every screen ended up with **no**
+ * visible back affordance at all, leaving the system back gesture as the only way out.
+ *
+ * `null` means "this is a start destination, there is nothing to pop".
+ */
+val LocalNavBackAction = compositionLocalOf<(() -> Unit)?> { null }
+
+/**
  * A stateless top app bar. Reads only [FindlyTheme] tokens (specs/003-android-client.md §4.3).
+ *
+ * When [navigationIcon] is not supplied, the bar renders a back control iff [LocalNavBackAction] is
+ * non-null — so screens get the correct affordance without opting in.
  */
 @Composable
 fun FindlyTopBar(
@@ -22,6 +42,27 @@ fun FindlyTopBar(
     navigationIcon: (@Composable () -> Unit)? = null,
     actions: @Composable RowScope.() -> Unit = {},
 ) {
+    val backAction = LocalNavBackAction.current
+    val resolvedNavigationIcon: (@Composable () -> Unit)? = navigationIcon
+        ?: backAction?.let {
+            {
+                // A themed text glyph rather than a Material icon: this module deliberately has no
+                // material-icons dependency, and the design system's rule is that components read
+                // only FindlyTheme tokens (specs/003 §4.3). "‹" mirrors correctly under RTL
+                // layout direction.
+                Text(
+                    text = "‹",
+                    color = FindlyTheme.colors.primary,
+                    style = FindlyTheme.typography.titleLarge,
+                    // clickable() BEFORE padding() so the padded area is part of the ripple/hit
+                    // target — a bare glyph is otherwise a very small thing to hit.
+                    modifier = Modifier
+                        .clickable(onClick = it)
+                        .padding(horizontal = FindlyTheme.spacing.sm)
+                        .semantics { contentDescription = "Back" },
+                )
+            }
+        }
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -30,7 +71,7 @@ fun FindlyTopBar(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(FindlyTheme.spacing.sm),
     ) {
-        navigationIcon?.invoke()
+        resolvedNavigationIcon?.invoke()
 
         Text(
             text = title,

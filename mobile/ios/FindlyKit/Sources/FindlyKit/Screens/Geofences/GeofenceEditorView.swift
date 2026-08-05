@@ -34,6 +34,16 @@ public struct GeofenceEditorView: View {
     }
 
     public var body: some View {
+        content
+            // specs/004 §2.5 — this view is presented MODALLY (a sheet), so it is not part of the
+            // coordinator's navigation stack. SwiftUI propagates custom environment values into
+            // sheet content, so without this clear its `FindlyNavBar` would render the app-level
+            // back chevron and popping it would navigate the app *behind* a sheet that stays up.
+            // Dismissal here is the explicit Cancel/Save buttons below, nothing else.
+            .environment(\.navBarBackAction, nil)
+    }
+
+    private var content: some View {
         VStack(spacing: 0) {
             FindlyNavBar(originalId == nil ? "Add geofence" : "Edit geofence")
             ScrollView {

@@ -80,4 +80,133 @@ struct AppCoordinatorTests {
 
         #expect(coordinator.route == .groupJoin(prefillCode: ""))
     }
+
+    // MARK: - Back stack (specs/004 §2.5)
+    //
+    // The regression these cover: `route` used to be a single value with no history, so on a
+    // platform with no hardware back button every `showX()` was a one-way door.
+
+    @Test func atRoot_cannotGoBack() {
+        let coordinator = AppCoordinator(route: .home)
+
+        #expect(coordinator.canGoBack == false)
+    }
+
+    @Test func push_thenPop_returnsToPreviousRoute() {
+        let coordinator = AppCoordinator(route: .home)
+
+        coordinator.showGeofences()
+        #expect(coordinator.route == .geofences)
+        #expect(coordinator.canGoBack)
+
+        coordinator.pop()
+
+        #expect(coordinator.route == .home)
+        #expect(coordinator.canGoBack == false)
+    }
+
+    @Test func pop_atRoot_isNoOp() {
+        // The stack must never empty — there is always a screen to render.
+        let coordinator = AppCoordinator(route: .home)
+
+        coordinator.pop()
+
+        #expect(coordinator.route == .home)
+        #expect(coordinator.canGoBack == false)
+    }
+
+    @Test func multiLevelPush_popsBackOneLevelAtATime() {
+        let coordinator = AppCoordinator(route: .home)
+
+        coordinator.showGroupsList()
+        coordinator.showGroupDetail(groupId: "grp_1")
+        coordinator.showGroupMap(groupId: "grp_1")
+
+        coordinator.pop()
+        #expect(coordinator.route == .groupDetail(groupId: "grp_1"))
+
+        coordinator.pop()
+        #expect(coordinator.route == .groupsList)
+
+        coordinator.pop()
+        #expect(coordinator.route == .home)
+        #expect(coordinator.canGoBack == false)
+    }
+
+    @Test func pushingTheRouteAlreadyOnTop_isIdempotent() {
+        // A double tap must not stack a duplicate that needs two backs to escape.
+        let coordinator = AppCoordinator(route: .home)
+
+        coordinator.showGeofences()
+        coordinator.showGeofences()
+
+        coordinator.pop()
+
+        #expect(coordinator.route == .home)
+    }
+
+    @Test func showHome_resetsTheStackToRoot() {
+        // Home is the top of the app: you can never go "back" past it into a deeper screen.
+        let coordinator = AppCoordinator(route: .home)
+
+        coordinator.showGroupsList()
+        coordinator.showGroupDetail(groupId: "grp_1")
+        coordinator.showHome()
+
+        #expect(coordinator.route == .home)
+        #expect(coordinator.canGoBack == false)
+    }
+
+    @Test func showSignIn_resetsTheStackToRoot() {
+        // specs/008 §4.4: after sign-out / account deletion no authenticated screen may remain
+        // reachable behind the sign-in screen.
+        let coordinator = AppCoordinator(route: .home)
+
+        coordinator.showPrivacySettings()
+        coordinator.showDeleteAccount()
+        coordinator.showSignIn()
+
+        #expect(coordinator.route == .signIn)
+        #expect(coordinator.canGoBack == false)
+    }
+
+    @Test func handleDeepLink_whileRunning_pushesSoBackReturnsWhereTheUserWas() {
+        let coordinator = AppCoordinator(route: .home, joinLinkHost: "join.example.test")
+
+        coordinator.showLiveMap()
+        coordinator.handleDeepLink(URL(string: "https://join.example.test/g#7f3k-9qrz")!)
+        #expect(coordinator.route == .groupJoin(prefillCode: "7F3K9QRZ"))
+
+        coordinator.pop()
+
+        #expect(coordinator.route == .liveMap)
+    }
+
+    @Test func handleDeepLink_ignoredLink_doesNotGrowTheStack() {
+        let coordinator = AppCoordinator(route: .home)
+
+        coordinator.showLiveMap()
+        coordinator.handleDeepLink(URL(string: "https://evil.example/not-a-group")!)
+
+        coordinator.pop()
+
+        #expect(coordinator.route == .home)
+    }
+
+    // MARK: - Launch route / session restore (specs/004 §2.6)
+
+    @Test func launchRoute_withRestoredSession_startsAtHomeNotSignIn() {
+        // The regression: launch was hardcoded to .signIn, forcing SMS re-verification on every
+        // cold start even though Firebase had persisted the session all along.
+        let coordinator = AppCoordinator(route: AppCoordinator.launchRoute(isSignedIn: true))
+
+        #expect(coordinator.route == .home)
+        #expect(coordinator.canGoBack == false)
+    }
+
+    @Test func launchRoute_withNoSession_startsAtSignIn() {
+        let coordinator = AppCoordinator(route: AppCoordinator.launchRoute(isSignedIn: false))
+
+        #expect(coordinator.route == .signIn)
+    }
 }

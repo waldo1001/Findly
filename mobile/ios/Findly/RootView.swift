@@ -199,27 +199,45 @@ struct RootView: View {
                 CreateGroupScreen(
                     viewModel: CreateGroupViewModel(apiClient: apiClient),
                     prefillDisplayName: pendingGroupBootstrapDisplayName,
-                    onCreated: { group in coordinator.showGroupDetail(groupId: group.groupId) }
+                    // specs/004 §2.5: unwind the finished form OUT of the stack before pushing the
+                    // new group's detail — otherwise back lands on a create-group form for a group
+                    // that already exists, and submitting it again would create a duplicate.
+                    onCreated: { group in
+                        coordinator.popTo(.groupsList)
+                        coordinator.showGroupDetail(groupId: group.groupId)
+                    }
                 )
             case .groupDetail(let groupId):
                 GroupDetailScreen(
                     viewModel: GroupDetailViewModel(apiClient: apiClient, groupId: groupId),
                     joinLinkHost: joinLinkHost,
                     onSelectMap: { coordinator.showGroupMap(groupId: groupId) },
-                    onExit: { coordinator.showGroupsList() }
+                    // specs/004 §2.5: unwind to the groups list rather than pushing a second copy
+                    // of it — pushing would leave this just-left group sitting behind it, so back
+                    // would walk straight back into a group the user is no longer a member of.
+                    onExit: { coordinator.popTo(.groupsList) }
                 )
             case .groupJoin(let prefillCode):
                 GroupJoinScreen(
                     viewModel: GroupJoinViewModel(apiClient: apiClient),
                     prefillCode: prefillCode,
                     prefillDisplayName: pendingGroupBootstrapDisplayName,
-                    onJoined: { group in coordinator.showGroupDetail(groupId: group.groupId) }
+                    // Same unwind rationale as `CreateGroupScreen`'s `onCreated` above. This also
+                    // covers the cold-start deep-link arrival, where `.groupsList` was never
+                    // visited: `popTo` rebuilds a minimal stack under it rather than leaving the
+                    // user on a spent join form with nowhere to go.
+                    onJoined: { group in
+                        coordinator.popTo(.groupsList)
+                        coordinator.showGroupDetail(groupId: group.groupId)
+                    }
                 )
             case .groupMap(let groupId):
                 GroupMapScreen(
                     viewModel: GroupMapViewModel(apiClient: apiClient, groupId: groupId),
                     renderer: defaultMapRenderer,
-                    onExit: { coordinator.showGroupsList() }
+                    // Same unwind rationale as `GroupDetailScreen`'s `onExit` above — this fires
+                    // when the group has expired, so it must not stay reachable behind the list.
+                    onExit: { coordinator.popTo(.groupsList) }
                 )
 
             // MARK: - I8 privacy routes (specs/004 §3.6; specs/008-privacy-endpoints.md)
@@ -263,6 +281,12 @@ struct RootView: View {
             }
         }
         .environment(\.theme, colorScheme == .dark ? .dark : .light)
+        // specs/004-ios-client.md §2.5 — the ONE back affordance decision for the whole app.
+        // Non-nil exactly when the coordinator's stack has something to pop; every screen's own
+        // `FindlyNavBar` picks this up from the environment and renders the button, so no screen
+        // decides (or forgets) this for itself. iOS has no hardware back button — before this,
+        // every screen reached via `showX()` was a dead end.
+        .environment(\.navBarBackAction, coordinator.canGoBack ? { coordinator.pop() } : nil)
         // specs/009-device-runtime.md §3.4/§4 — the foreground opportunistic trigger + the
         // paused-device poll's "on every app foreground" requirement. `.active` fires on cold
         // launch too (harmless — `LocationSyncRunner.runOnce()` is idempotent-safe when there's

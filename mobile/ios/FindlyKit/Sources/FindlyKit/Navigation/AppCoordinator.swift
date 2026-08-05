@@ -5,102 +5,169 @@ import Foundation
 /// components) to show.
 @MainActor
 public final class AppCoordinator: ObservableObject {
-    @Published public private(set) var route: AppRoute
+    /// specs/004-ios-client.md §2.5 — the back stack. **Invariant: never empty.** Every mutating
+    /// method below preserves that, so `route`'s `last!` is total, not a latent crash.
+    ///
+    /// This used to be a single `@Published var route`, i.e. a router with no history. On a
+    /// platform with no hardware back button that made every `showX()` a one-way door — the user
+    /// could reach Geofences/LiveMap/History/PrivacySettings/… and had no way out short of killing
+    /// the app. Publishing the stack (rather than the derived `route`) is what drives SwiftUI
+    /// updates; `route` is computed from it so every existing call site and test reads unchanged.
+    @Published public private(set) var stack: [AppRoute]
+
+    /// The screen currently on top of the stack.
+    public var route: AppRoute { stack[stack.count - 1] }
+
+    /// specs/004 §2.5 — the single source of truth for whether a back affordance is shown.
+    /// `RootView` reads this once, centrally; no screen decides it for itself.
+    public var canGoBack: Bool { stack.count > 1 }
+
     /// specs/004-ios-client.md §3.5, specs/007-public-join-links.md §1 — the deployment constant
     /// `handleDeepLink` matches https universal links against (`AppConfig.joinLinkHost`).
     private let joinLinkHost: String
 
     public init(route: AppRoute = .signIn, joinLinkHost: String = AppConfig.defaultJoinLinkHost) {
-        self.route = route
+        self.stack = [route]
         self.joinLinkHost = joinLinkHost
     }
 
+    /// specs/004 §2.6 — the launch route derives from the persisted auth session, never a
+    /// hardcoded `.signIn`. Firebase restores `currentUser` from its keychain across process
+    /// death; the app used to simply never ask, forcing a full SMS re-verification every cold
+    /// start. A pure function (rather than reading `AuthProviding` in here) keeps `FindlyKit`'s
+    /// navigation layer free of an auth dependency and makes both branches trivially testable —
+    /// the app target supplies `isSignedIn` from `authProvider.currentUserId != nil`.
+    public static func launchRoute(isSignedIn: Bool) -> AppRoute {
+        isSignedIn ? .home : .signIn
+    }
+
+    // MARK: - Stack primitives (specs/004 §2.5)
+
+    /// Pushes unless `route` is already on top — a double tap must not stack a duplicate that
+    /// then needs two backs to escape.
+    private func push(_ route: AppRoute) {
+        guard route != self.route else { return }
+        stack.append(route)
+    }
+
+    /// Undo the last push. A no-op at the root: the stack never empties, so there is always a
+    /// screen to render.
+    public func pop() {
+        guard canGoBack else { return }
+        stack.removeLast()
+    }
+
+    /// Unwind to an *existing* entry — the counterpart to Android's
+    /// `popBackStack(route, inclusive = false)`, used by terminal callbacks that mean "this flow
+    /// is over, return to the screen that started it" (e.g. leaving a group returns to the groups
+    /// list). Distinct from `push`: re-pushing the destination would leave the just-finished
+    /// screen sitting *behind* it, so back would walk into a group the user has already left.
+    ///
+    /// If `route` isn't on the stack at all — reachable when a cold-start deep link opened this
+    /// flow directly, so the caller's "return to" screen was never visited — rebuild a minimal
+    /// sane stack under it rather than stranding the user on a finished screen.
+    public func popTo(_ route: AppRoute) {
+        if let index = stack.lastIndex(of: route) {
+            stack.removeSubrange((index + 1)...)
+        } else if route == .home {
+            stack = [.home]
+        } else {
+            stack = [.home, route]
+        }
+    }
+
+    // MARK: - Navigation roots (specs/004 §2.5)
+    //
+    // These two RESET the stack rather than pushing. You can never go "back" into a sign-in
+    // screen, and Home is the top of the app. The reset is also what guarantees no authenticated
+    // screen stays reachable behind sign-in after a sign-out / account deletion (specs/008 §4.4).
+
     public func showSignIn() {
-        route = .signIn
+        stack = [.signIn]
     }
 
     public func showHome() {
-        route = .home
+        stack = [.home]
     }
 
     // MARK: - I2 feature-screen routes
 
     public func showLiveMap() {
-        route = .liveMap
+        push(.liveMap)
     }
 
     public func showHistory(userId: String, deviceId: String? = nil) {
-        route = .history(userId: userId, deviceId: deviceId)
+        push(.history(userId: userId, deviceId: deviceId))
     }
 
     public func showGeofences() {
-        route = .geofences
+        push(.geofences)
     }
 
     public func showLocate(target: LocateTarget, targetDisplayName: String) {
-        route = .locate(target: target, targetDisplayName: targetDisplayName)
+        push(.locate(target: target, targetDisplayName: targetDisplayName))
     }
 
     public func showDeviceSettings(isParent: Bool) {
-        route = .deviceSettings(isParent: isParent)
+        push(.deviceSettings(isParent: isParent))
     }
 
     public func showFamilyMembers() {
-        route = .familyMembers
+        push(.familyMembers)
     }
 
     public func showCreateInvite() {
-        route = .createInvite
+        push(.createInvite)
     }
 
     public func showAcceptInvite(prefillCode: String = "") {
-        route = .acceptInvite(prefillCode: prefillCode)
+        push(.acceptInvite(prefillCode: prefillCode))
     }
 
     // MARK: - I17 profile-bootstrap route (001 §1.5.3, §3.1)
 
     public func showCreateFamily() {
-        route = .createFamily
+        push(.createFamily)
     }
 
     // MARK: - I5 groups routes (specs/004 §3.4)
 
     public func showGroupsList() {
-        route = .groupsList
+        push(.groupsList)
     }
 
     public func showCreateGroup() {
-        route = .createGroup
+        push(.createGroup)
     }
 
     public func showGroupDetail(groupId: String) {
-        route = .groupDetail(groupId: groupId)
+        push(.groupDetail(groupId: groupId))
     }
 
     public func showGroupJoin(prefillCode: String = "") {
-        route = .groupJoin(prefillCode: prefillCode)
+        push(.groupJoin(prefillCode: prefillCode))
     }
 
     public func showGroupMap(groupId: String) {
-        route = .groupMap(groupId: groupId)
+        push(.groupMap(groupId: groupId))
     }
 
     // MARK: - I8 privacy routes (specs/004 §3.6; specs/008)
 
     public func showPrivacySettings() {
-        route = .privacySettings
+        push(.privacySettings)
     }
 
     public func showExportData() {
-        route = .exportData
+        push(.exportData)
     }
 
     public func showDeleteAccount() {
-        route = .deleteAccount
+        push(.deleteAccount)
     }
 
     public func showDeleteFamily() {
-        route = .deleteFamily
+        push(.deleteFamily)
     }
 
     /// The app target's `onOpenURL` forwards here (specs/004 §3.4/§3.5) — `GroupCodeParsing` (pure,
@@ -112,13 +179,16 @@ public final class AppCoordinator: ObservableObject {
     /// a deliberate difference from the `findly://` case, since only the https form's contract
     /// specifies that behavior. A URL matching neither form is silently ignored either way, rather
     /// than surfacing a raw error for what may be an unrelated/malformed external URL.
+    /// specs/004 §2.5: a link arriving while the app is already running **pushes**, so dismissing
+    /// the join screen returns the user wherever they were rather than dropping them at a root.
+    /// An unrecognized link still changes nothing at all — it must not grow the stack either.
     public func handleDeepLink(_ url: URL) {
         if let code = GroupCodeParsing.normalize(url.absoluteString) {
-            route = .groupJoin(prefillCode: code)
+            push(.groupJoin(prefillCode: code))
             return
         }
         if case .recognized(let code) = GroupCodeParsing.matchHttpsJoinLink(url, joinLinkHost: joinLinkHost) {
-            route = .groupJoin(prefillCode: code ?? "")
+            push(.groupJoin(prefillCode: code ?? ""))
         }
     }
 }

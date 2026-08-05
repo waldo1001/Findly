@@ -1,9 +1,9 @@
 import FindlyKit
 import UIKit
 import UserNotifications
-#if canImport(FirebaseCore)
-import FirebaseCore
-#endif
+// FirebaseCore is no longer imported here: configuration moved behind
+// `FirebaseAuthProvider.configureFirebaseIfNeeded()` (specs/004 §2.6), so this file references no
+// FirebaseCore type of its own.
 
 /// specs/004-ios-client.md §1.1's explicit allowance ("passing the OS lifecycle... push-
 /// registration callbacks... into FindlyKit types through their public protocols") — this class
@@ -19,13 +19,16 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
     ) -> Bool {
-#if canImport(FirebaseCore)
         // MUST run before anything touches `Messaging.messaging()` (a hard precondition failure
         // otherwise) - see `FirebasePushTokenProvider`'s doc for why `startObservingMessaging()` is
         // a separate, explicitly-ordered call rather than something `init()`/`shared`'s lazy first
         // access could trigger too early.
-        FirebaseApp.configure()
-#endif
+        //
+        // Idempotent as of specs/004 §2.6: `FindlyApp.init()` runs BEFORE this delegate callback
+        // and needs Firebase configured to read the restored session for its launch route, so it
+        // configures first and this call is normally a no-op. Kept here regardless so this
+        // delegate never depends on who ran first.
+        FirebaseAuthProvider.configureFirebaseIfNeeded()
         // Must follow FirebaseApp.configure(). DEBUG-only: disables app verification so the
         // phone-auth flow is exercisable on the Simulator, which has no APNs — see the method's
         // doc comment for why that matters.

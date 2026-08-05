@@ -60,7 +60,38 @@ struct FindlyApp: App {
         // going through Firebase. Found on the first real TestFlight install, 2026-08-05.
         let config = AppConfig(infoDictionary: Bundle.main.infoDictionary)
         self.config = config
-        let coordinator = AppCoordinator(joinLinkHost: config.joinLinkHost)
+
+        // specs/004-ios-client.md §4.1, §8 — AuthMode.stubLocal (default) matches the backend's
+        // AUTH_MODE=insecure-local (specs/001 §2.3); AuthMode.firebase swaps in FirebaseAuthProvider,
+        // the H1/H2 follow-up — a config change only, no further code change at this seam.
+        //
+        // Built BEFORE the coordinator as of specs/004 §2.6: the launch route is derived from this
+        // provider's restored session, so it has to exist first.
+        let authProvider: AuthProviding
+        switch config.authMode {
+        case .stubLocal:
+            authProvider = StubAuthProvider(firebaseProjectId: config.firebaseProjectId)
+        case .firebase:
+            // SwiftUI runs `App.init()` before `didFinishLaunchingWithOptions`, so nothing has
+            // configured Firebase yet — and touching `Auth` unconfigured is a hard crash. Configure
+            // here; `AppDelegate`'s own (now idempotent) call becomes a no-op.
+            FirebaseAuthProvider.configureFirebaseIfNeeded()
+            authProvider = FirebaseAuthProvider()
+        }
+        self.authProvider = authProvider
+
+        // specs/004-ios-client.md §2.6 — the launch route comes from the persisted auth session,
+        // never a hardcoded `.signIn`. Firebase restores `currentUser` from its keychain across
+        // process death; this used to never be asked, so every cold start dumped the user back on
+        // the sign-in screen and demanded a fresh SMS verification even though the session was
+        // right there. Found on the first real TestFlight install, 2026-08-05.
+        //
+        // Read through `AuthProviding.currentUserId` (not `FirebaseAuthProvider.hasRestoredSession`
+        // directly) so the stub-local dev build restores its own session by exactly the same rule.
+        let coordinator = AppCoordinator(
+            route: AppCoordinator.launchRoute(isSignedIn: authProvider.currentUserId != nil),
+            joinLinkHost: config.joinLinkHost
+        )
         _coordinator = StateObject(wrappedValue: coordinator)
 
         // specs/008-privacy-endpoints.md §3.1 rule 2(b) — the one-shot cold-start cleanup: removes
@@ -70,17 +101,6 @@ struct FindlyApp: App {
         // in the app target where "cold start" is unambiguous.
         FileManagerExportArtifactStore().removeCurrentArtifact()
 
-        // specs/004-ios-client.md §4.1, §8 — AuthMode.stubLocal (default) matches the backend's
-        // AUTH_MODE=insecure-local (specs/001 §2.3); AuthMode.firebase swaps in FirebaseAuthProvider,
-        // the H1/H2 follow-up — a config change only, no further code change at this seam.
-        let authProvider: AuthProviding
-        switch config.authMode {
-        case .stubLocal:
-            authProvider = StubAuthProvider(firebaseProjectId: config.firebaseProjectId)
-        case .firebase:
-            authProvider = FirebaseAuthProvider()
-        }
-        self.authProvider = authProvider
         let apiClient = URLSessionAPIClient(baseURL: config.baseURL, authProvider: authProvider)
         self.apiClient = apiClient
         let deviceIdProvider = UserDefaultsDeviceIdProvider()

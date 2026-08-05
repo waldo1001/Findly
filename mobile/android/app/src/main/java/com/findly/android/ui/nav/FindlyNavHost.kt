@@ -1,6 +1,7 @@
 package com.findly.android.ui.nav
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -12,7 +13,9 @@ import androidx.navigation.NavHostController
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import com.findly.android.ui.designsystem.components.LocalNavBackAction
 import androidx.navigation.navArgument
 import androidx.navigation.navDeepLink
 import com.findly.android.AppContainer
@@ -185,6 +188,23 @@ fun FindlyNavHost(
         }
     }
 
+    // specs/003 §12.5 (mirroring specs/004 §2.5 on iOS): the ONE back-affordance decision for the
+    // whole graph. Every screen's FindlyTopBar reads this, so none of them decides — or forgets —
+    // for itself. The system back gesture already worked; what was missing was any *visible* way
+    // out, which is what users actually look for.
+    //
+    // `currentBackStackEntryAsState()` (not a bare `previousBackStackEntry` read) is what makes
+    // this recompose as the stack changes — read outside the state stream it would be evaluated
+    // once and then go stale.
+    val currentBackStackEntry by navController.currentBackStackEntryAsState()
+    val canGoBack = currentBackStackEntry != null && navController.previousBackStackEntry != null
+    val backAction: (() -> Unit)? = if (canGoBack) {
+        { navController.popBackStack() }
+    } else {
+        null
+    }
+
+    CompositionLocalProvider(LocalNavBackAction provides backAction) {
     NavHost(navController = navController, startDestination = Destinations.Home.route) {
         composable(Destinations.Home.route) {
             HomeRoute(
@@ -383,5 +403,6 @@ fun FindlyNavHost(
                 onExpired = { navController.popBackStack(Destinations.Groups.route, false) },
             )
         }
+    }
     }
 }
