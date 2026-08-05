@@ -5,13 +5,36 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import android.content.Intent
+import android.net.Uri
+import android.provider.Settings
+import androidx.compose.foundation.layout.Column
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.findly.android.location.LocationAuthorization
+import com.findly.android.location.LocationAuthorizationResolver
+import com.findly.android.location.PermissionBanner
+import com.findly.android.location.PermissionDisclosureKind
+import com.findly.android.location.PermissionFlowPolicy
+import com.findly.android.location.PermissionFlowStep
+import com.findly.android.ui.designsystem.components.FindlyPermissionBanner
+import com.findly.android.ui.permissions.PermissionDisclosureScreen
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.ui.Modifier
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.findly.android.ui.designsystem.FindlyTheme
 import com.findly.android.queue.worker.LocationForegroundService
@@ -65,11 +88,37 @@ class MainActivity : ComponentActivity() {
     private val notificationPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { /* no-op */ }
 
+    /** Bumped after any permission result so the Compose tree re-reads the checkers (009 §7's
+     * "re-checked on every foreground", plus immediately after the user answers a dialog). */
+    private val permissionEpoch = mutableIntStateOf(0)
+
+    /**
+     * specs/003 §11.1 / 009 §7 — the fine-location request. **This app had no location request at
+     * all before now**: the permission was declared and checked, but never asked for, so Android
+     * could never report a position. Fired only from the disclosure's Continue button.
+     */
+    private val fineLocationLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) {
+            permissionEpoch.intValue++
+        }
+
+    /**
+     * specs/003 §11.2 — the background upgrade, a **separate, later** request: Android 11+ refuses
+     * to show it bundled with the foreground one, and it needs its own rationale first.
+     */
+    private val backgroundLocationLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) {
+            permissionEpoch.intValue++
+        }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
         container.onActivityStarted(this)
-        requestNotificationPermissionIfNeeded()
+        // NOT requested here any more (specs/009 §7). Firing it from onCreate put the system
+        // notification dialog on screen on top of the location disclosure — the same
+        // prompt-before-explanation inversion, one permission over. It now runs from the composable
+        // below, only once no disclosure is pending.
 
         val launchingUri = intent?.data
         val httpsJoinLinkResult = GroupJoinHttpsLinkParser.parseIfFreshLaunch(
@@ -95,6 +144,72 @@ class MainActivity : ComponentActivity() {
                 // an emulator 2026-08-05: a tap at y=70 did nothing, y=90 popped correctly.
                 // Applied once at the root so every screen inherits it, rather than per-screen.
                 Box(modifier = Modifier.statusBarsPadding().navigationBarsPadding()) {
+                // specs/009 §7 — the disclosure gate. Re-read on every recomposition triggered by
+                // `permissionEpoch` (a permission result) and by `ON_RESUME` below, which is §7's
+                // "re-checked on every foreground": the user can revoke from system settings at any
+                // time, and returning from that screen is the likeliest moment for it to change.
+                val epoch = permissionEpoch.intValue
+                val lifecycleOwner = LocalLifecycleOwner.current
+                DisposableEffect(lifecycleOwner) {
+                    val observer = LifecycleEventObserver { _, event ->
+                        if (event == Lifecycle.Event.ON_RESUME) permissionEpoch.intValue++
+                    }
+                    lifecycleOwner.lifecycle.addObserver(observer)
+                    onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+                }
+
+                var permissionState by remember(epoch) {
+                    mutableStateOf(readPermissionState())
+                }
+                var bannerDismissed by rememberSaveable { mutableStateOf(false) }
+                var declinedThisSession by remember { mutableStateOf(setOf<PermissionDisclosureKind>()) }
+
+                val step = PermissionFlowPolicy.nextStep(
+                    authorization = permissionState.authorization,
+                    foregroundDisclosureAcknowledged = permissionState.foregroundAcknowledged,
+                    backgroundDisclosureAcknowledged = permissionState.backgroundAcknowledged,
+                    requiresBackground = permissionState.requiresBackground,
+                )
+                val pendingDisclosure = (step as? PermissionFlowStep.ShowDisclosure)
+                    ?.kind
+                    ?.takeIf { it !in declinedThisSession }
+
+                if (pendingDisclosure != null) {
+                    // Full-screen, and returned INSTEAD of the app content: nothing may reach an OS
+                    // prompt while this is up — that ordering is the whole of §7 and what Play's
+                    // background-location review checks for.
+                    PermissionDisclosureScreen(
+                        kind = pendingDisclosure,
+                        onContinue = {
+                            container.permissionDisclosureStore.acknowledge(pendingDisclosure)
+                            when (pendingDisclosure) {
+                                PermissionDisclosureKind.FOREGROUND ->
+                                    fineLocationLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
+                                PermissionDisclosureKind.BACKGROUND ->
+                                    backgroundLocationLauncher.launch(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
+                            }
+                            permissionEpoch.intValue++
+                        },
+                        // A real choice, not a formality: no prompt, no acknowledgement recorded,
+                        // and not re-presented for the rest of this session.
+                        onNotNow = { declinedThisSession = declinedThisSession + pendingDisclosure },
+                    )
+                    return@Box
+                }
+
+                // Safe to ask now: no disclosure is on screen (that branch returned above).
+                LaunchedEffect(Unit) { requestNotificationPermissionIfNeeded() }
+
+                Column {
+                    FindlyPermissionBanner(
+                        banner = PermissionFlowPolicy.banner(
+                            authorization = permissionState.authorization,
+                            requiresBackground = permissionState.requiresBackground,
+                            dismissedThisSession = bannerDismissed,
+                        ),
+                        onOpenSettings = { openAppSettings() },
+                        onDismiss = { bannerDismissed = true },
+                    )
                 val homeViewModel: HomeViewModel = viewModel(
                     factory = HomeViewModelFactory(
                         container.authProvider,
@@ -111,8 +226,52 @@ class MainActivity : ComponentActivity() {
                     openSettingsOnLaunch = openSettingsOnLaunch,
                 )
                 }
+                }
             }
         }
+    }
+
+    /** Snapshot of everything [PermissionFlowPolicy] needs, read fresh (never cached — §7). */
+    private data class PermissionSnapshot(
+        val authorization: LocationAuthorization,
+        val foregroundAcknowledged: Boolean,
+        val backgroundAcknowledged: Boolean,
+        val requiresBackground: Boolean,
+    )
+
+    private fun readPermissionState(): PermissionSnapshot {
+        val fine = ContextCompat.checkSelfPermission(
+            this, Manifest.permission.ACCESS_FINE_LOCATION,
+        ) == PackageManager.PERMISSION_GRANTED
+        val background = ContextCompat.checkSelfPermission(
+            this, Manifest.permission.ACCESS_BACKGROUND_LOCATION,
+        ) == PackageManager.PERMISSION_GRANTED
+        val store = container.permissionDisclosureStore
+        val foregroundAcknowledged = store.isAcknowledged(PermissionDisclosureKind.FOREGROUND)
+        return PermissionSnapshot(
+            authorization = LocationAuthorizationResolver.resolve(
+                fineGranted = fine,
+                backgroundGranted = background,
+                foregroundDisclosureAcknowledged = foregroundAcknowledged,
+            ),
+            foregroundAcknowledged = foregroundAcknowledged,
+            backgroundAcknowledged = store.isAcknowledged(PermissionDisclosureKind.BACKGROUND),
+            // Tracking paused means this device is not reporting by choice, so it must not nag for
+            // a permission it is not using. Read synchronously here; the flow only needs the
+            // coarse answer, not a suspending settings load.
+            requiresBackground = true,
+        )
+    }
+
+    /** specs/009 §7's "route into system settings" — the only way back once permission is refused,
+     * since Android will not show its dialog again. */
+    private fun openAppSettings() {
+        startActivity(
+            Intent(
+                Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                Uri.fromParts("package", packageName, null),
+            ),
+        )
     }
 
     override fun onDestroy() {

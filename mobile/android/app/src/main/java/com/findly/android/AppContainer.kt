@@ -21,6 +21,8 @@ import com.findly.android.device.SharedPreferencesDeviceIdStore
 import com.findly.android.location.AndroidBackgroundLocationPermissionChecker
 import com.findly.android.location.AndroidBatteryLevelProvider
 import com.findly.android.location.AndroidLocationPermissionChecker
+import com.findly.android.location.PermissionDisclosureStore
+import com.findly.android.location.SharedPreferencesPermissionDisclosureStore
 import com.findly.android.location.FixCaptureCoordinator
 import com.findly.android.location.FusedLocationCapturer
 import com.findly.android.location.LocationCapturer
@@ -226,6 +228,22 @@ class AppContainer(context: Context) {
 
     private val batteryLevelProvider = AndroidBatteryLevelProvider(context)
     private val locationPermissionState = AndroidLocationPermissionChecker(context)
+
+    /**
+     * specs/009 §7 — the permission flow's inputs, exposed for [com.findly.android.MainActivity].
+     *
+     * Location permission was **never requested anywhere in this app**: `ACCESS_FINE_LOCATION` is
+     * declared in the manifest and read by the checkers, but nothing ever called
+     * `requestPermissions` for it, so points 1-3 of 003 §11 were unimplemented and Android could
+     * never actually report a location. `MainActivity` now owns that request, gated behind the
+     * disclosure.
+     */
+    val permissionDisclosureStore: PermissionDisclosureStore =
+        SharedPreferencesPermissionDisclosureStore(context)
+
+    /** True when this device's configured interval needs background reporting (003 §11.3). */
+    suspend fun requiresBackgroundLocation(): Boolean =
+        deviceSettingsStateStore.current()?.trackingEnabled != false
 
     /** Real [TrackingPauseState] — reads the same cache [deviceSettingsCoordinator] writes to, so
      * a pause takes effect for the very next capture attempt with no extra signal needed (specs/009

@@ -108,7 +108,7 @@ public struct PermissionDisclosureScreen: View {
         case .background:
             return [
                 "To keep the map up to date, Findly needs to collect your location even when the app is closed or not in use.",
-                "This is what lets your family see where you are without you opening the app, and what makes arrival and departure alerts for places like home or school work.",
+                "This is what lets your family see where you are without you opening the app, and what makes arrival and departure alerts work for places like home or school.",
                 "Background updates follow the interval you choose in Settings, and stop entirely when you pause sharing.",
             ]
         }
