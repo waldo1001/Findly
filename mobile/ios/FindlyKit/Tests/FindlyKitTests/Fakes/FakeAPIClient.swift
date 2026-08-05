@@ -22,7 +22,12 @@ final class FakeAPIClient: FindlyAPIClient {
 
     // MARK: - §3 Family
 
-    func createFamily(familyName: String, displayName: String) async throws -> Envelope<CreateFamilyResponse> { fatalError("not configured") }
+    private(set) var createFamilyCalls: [(familyName: String, displayName: String)] = []
+    var createFamilyHandler: (String, String) async throws -> Envelope<CreateFamilyResponse> = { _, _ in fatalError("not configured") }
+    func createFamily(familyName: String, displayName: String) async throws -> Envelope<CreateFamilyResponse> {
+        createFamilyCalls.append((familyName, displayName))
+        return try await createFamilyHandler(familyName, displayName)
+    }
 
     private(set) var getMyFamilyCallCount = 0
     var getMyFamilyHandler: () async throws -> Envelope<GetMyFamilyResponse> = { fatalError("not configured") }
