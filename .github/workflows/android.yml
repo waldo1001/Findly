@@ -47,9 +47,20 @@ jobs:
       # gradle-wrapper.jar — no JDK/Gradle toolchain existed in that sandbox to produce a
       # verified one. `gradle-version` installs Gradle directly instead of relying on a
       # committed wrapper; the step below then generates the wrapper for any later local use.
-      - uses: gradle/actions/setup-gradle@v4
+      # A20: v6 (unlike v4) defaults `cache-provider` to "enhanced" — a proprietary caching
+      # backend (gradle-actions-caching) that routes build/cache data through Gradle's own
+      # service rather than GitHub's, a third-party data-egress path this workflow didn't
+      # previously have, and requires accepting Gradle's Terms of Use merely by upgrading.
+      # This holds regardless of repo visibility. `cache-provider: basic` opts back into the
+      # MIT-licensed, open-source actions/cache-based provider that v4 always used — same
+      # caching behavior, no new third-party data path, no license terms silently accepted.
+      # Verified against gradle/actions' setup-gradle/action.yml at v6.3.0 (default 'enhanced',
+      # "uses the full-featured commercial caching service") and v4.4.3 (no `cache-provider`
+      # input exists at all — caching was unconditionally open-source).
+      - uses: gradle/actions/setup-gradle@v6
         with:
           gradle-version: "9.4.1"
+          cache-provider: basic
       - name: generate Gradle wrapper
         working-directory: mobile/android
         run: gradle wrapper --gradle-version 9.4.1 --distribution-type bin
