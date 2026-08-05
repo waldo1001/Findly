@@ -55,9 +55,17 @@ jobs:
       # androidx.fragment:fragment at their real resolved versions — this workflow could not be
       # run end-to-end from a local checkout (it needs the real GitHub Dependency Submission API),
       # so the submit half is unverified here; only the generate half was.
-      - uses: gradle/actions/setup-gradle@v4
+      # A20: pinned to v6 (see android.yml for the full v4->v6 rationale). `dependency-graph:
+      # generate-and-submit` is unchanged in v6.3.0's action.yml (still a valid enum value,
+      # `contents: write` still the documented required permission per gradle/actions'
+      # docs/dependency-submission.md at v6.3.0). `cache-provider: basic` for the same reason as
+      # android.yml: v6 defaults to the proprietary "Enhanced Caching" backend, which requires
+      # accepting Gradle's commercial Terms of Use and is only a Free Preview for private repos;
+      # `basic` keeps this workflow on the same MIT-licensed, open-source caching v4 always used.
+      - uses: gradle/actions/setup-gradle@v6
         with:
           gradle-version: "9.4.1"
+          cache-provider: basic
           dependency-graph: generate-and-submit
       # H1 (specs/003 §13): the google-services plugin needs app/google-services.json present to
       # configure; same obviously-fake placeholder as android.yml (docs/security-review-checklist.md
