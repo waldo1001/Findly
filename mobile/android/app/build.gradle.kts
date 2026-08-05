@@ -112,7 +112,12 @@ android {
             } else {
                 signingConfigs.getByName("debug")
             }
-            isMinifyEnabled = false // TODO(H1): enable + tune proguard-rules.pro before shipping
+            // Enabled 2026-08-05 (was false with a TODO to enable "before shipping"). Turned on
+            // while an emulator exists to verify against — enabling R8 late is precisely when
+            // reflection-dependent libraries (kotlinx.serialization, Firebase) break, and doing
+            // that under submission pressure is how a release slips. See proguard-rules.pro.
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             // Obviously-fake placeholder host (never resolves) — TODO(H1) replaces with the real
             // Function App URL once docs/azure-setup.md has been run (specs/003 §13).
