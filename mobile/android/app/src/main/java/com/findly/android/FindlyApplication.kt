@@ -32,6 +32,11 @@ class FindlyApplication : Application(), Configuration.Provider {
     override fun onCreate() {
         super.onCreate()
         container = AppContainer(this)
+        // MUST come after the assignment above, never from inside AppContainer's constructor:
+        // start() touches WorkManager, whose on-demand initialization calls straight back into
+        // `workManagerConfiguration` below and reads `container`. See AppContainer.start()'s doc —
+        // running it a line earlier was a 100% launch crash.
+        container.start()
     }
 
     override val workManagerConfiguration: Configuration

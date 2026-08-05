@@ -409,6 +409,33 @@ class AppContainer(context: Context) {
         // (never per-Activity/per-screen), so this is the one true "next app cold start" hook.
         coldStartExportCleanup.run()
 
+    }
+
+    /**
+     * Cold-start work that must NOT run inside the constructor. Called by
+     * [FindlyApplication.onCreate] immediately after `container` is assigned.
+     *
+     * **Why this is separate — it was a 100% launch crash.** `settingsPollScheduler.ensureScheduled()`
+     * calls `WorkManager.getInstance()`. Since A15 removed `WorkManagerInitializer` (so the custom
+     * `WorkerFactory` is actually used), that first call performs *on-demand* initialization, which
+     * calls back into `FindlyApplication.workManagerConfiguration` → `container.workerFactory`. Run
+     * from the constructor, `container` is still unassigned at that moment, so the `lateinit` read
+     * threw:
+     *
+     *     kotlin.UninitializedPropertyAccessException: lateinit property container has not been
+     *     initialized
+     *       FindlyApplication.getWorkManagerConfiguration → WorkManagerImpl.getInstance
+     *       → SettingsPollScheduler.ensureScheduled → AppContainer.<init>
+     *
+     * A15 fixed a real bug (the default initializer winning the singleton and ignoring the custom
+     * factory) and introduced this one, because the two halves are the same mechanism seen from
+     * opposite ends: making initialization on-demand is exactly what makes it re-enter the app
+     * during construction. Reproduced deterministically on an emulator 2026-08-05 — every launch,
+     * debug and release alike. It survived because the Android app had never actually been
+     * *launched* since A15; unit tests and `assembleDebug` both pass against a process that dies
+     * before `onCreate` returns.
+     */
+    fun start() {
         // specs/009-device-runtime.md §4: the low-frequency (>=6h) half of the pull-based resume
         // poll must keep running independent of pause/sign-in state (it's the one thing that
         // detects resume) - ExistingPeriodicWorkPolicy.KEEP inside makes this call idempotent, and
