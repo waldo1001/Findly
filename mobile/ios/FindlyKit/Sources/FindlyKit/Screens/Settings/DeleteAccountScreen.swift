@@ -9,12 +9,17 @@ import SwiftUI
 /// exact "only parent" copy is unit-tested, not just eyeballed here.
 public struct DeleteAccountScreen: View {
     @Environment(\.theme) private var theme
-    @ObservedObject private var viewModel: DeleteAccountViewModel
+    // `@StateObject`, NOT `@ObservedObject` — see `HomeScreen`'s doc for the full failure mode
+    // (I16). `RootView` constructs this screen's view model inline and re-evaluates on every
+    // in-app navigation; `@StateObject` + `@autoclosure` keeps the first instance for this view's
+    // lifetime instead of silently discarding the one `.task` observes (and whose `.phase` this
+    // screen's own `onChange` above navigates off of).
+    @StateObject private var viewModel: DeleteAccountViewModel
     @State private var showConfirmation = false
     private let onCompleted: () -> Void
 
-    public init(viewModel: DeleteAccountViewModel, onCompleted: @escaping () -> Void) {
-        self.viewModel = viewModel
+    public init(viewModel: @autoclosure @escaping () -> DeleteAccountViewModel, onCompleted: @escaping () -> Void) {
+        _viewModel = StateObject(wrappedValue: viewModel())
         self.onCompleted = onCompleted
     }
 

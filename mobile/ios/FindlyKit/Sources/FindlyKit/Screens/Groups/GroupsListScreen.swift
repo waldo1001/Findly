@@ -5,18 +5,22 @@ import SwiftUI
 /// whether the list is empty or not.
 public struct GroupsListScreen: View {
     @Environment(\.theme) private var theme
-    @ObservedObject private var viewModel: GroupsListViewModel
+    // `@StateObject`, NOT `@ObservedObject` — see `HomeScreen`'s doc for the full failure mode
+    // (I16). `RootView` constructs this screen's view model inline and re-evaluates on every
+    // in-app navigation; `@StateObject` + `@autoclosure` keeps the first instance for this view's
+    // lifetime instead of silently discarding the one `.task` observes.
+    @StateObject private var viewModel: GroupsListViewModel
     private let onSelectGroup: (String) -> Void
     private let onCreateGroup: () -> Void
     private let onJoinGroup: () -> Void
 
     public init(
-        viewModel: GroupsListViewModel,
+        viewModel: @autoclosure @escaping () -> GroupsListViewModel,
         onSelectGroup: @escaping (String) -> Void,
         onCreateGroup: @escaping () -> Void,
         onJoinGroup: @escaping () -> Void
     ) {
-        self.viewModel = viewModel
+        _viewModel = StateObject(wrappedValue: viewModel())
         self.onSelectGroup = onSelectGroup
         self.onCreateGroup = onCreateGroup
         self.onJoinGroup = onJoinGroup

@@ -12,13 +12,17 @@ extension Geofence: Identifiable {
 /// them via the ETag-aware `GeofencesViewModel.save(_:)`.
 public struct GeofencesScreen: View {
     @Environment(\.theme) private var theme
-    @ObservedObject private var viewModel: GeofencesViewModel
+    // `@StateObject`, NOT `@ObservedObject` — see `HomeScreen`'s doc for the full failure mode
+    // (I16). `RootView` constructs this screen's view model inline and re-evaluates on every
+    // in-app navigation; `@StateObject` + `@autoclosure` keeps the first instance for this view's
+    // lifetime instead of silently discarding the one `.task` observes.
+    @StateObject private var viewModel: GeofencesViewModel
     @State private var drafts: [Geofence] = []
     @State private var editing: Geofence?
     @State private var isAddingNew = false
 
-    public init(viewModel: GeofencesViewModel) {
-        self.viewModel = viewModel
+    public init(viewModel: @autoclosure @escaping () -> GeofencesViewModel) {
+        _viewModel = StateObject(wrappedValue: viewModel())
     }
 
     public var body: some View {

@@ -7,13 +7,18 @@ import SwiftUI
 /// fragment, 007 §4).
 public struct GroupJoinScreen: View {
     @Environment(\.theme) private var theme
-    @ObservedObject private var viewModel: GroupJoinViewModel
+    // `@StateObject`, NOT `@ObservedObject` — see `HomeScreen`'s doc for the full failure mode
+    // (I16). `RootView` constructs this screen's view model inline and re-evaluates on every
+    // in-app navigation; `@StateObject` + `@autoclosure` keeps the first instance for this view's
+    // lifetime instead of silently discarding the one this screen's state (e.g. `.joined`) lives
+    // on.
+    @StateObject private var viewModel: GroupJoinViewModel
     @State private var code: String
     @State private var displayName: String = ""
     private let onJoined: (GroupSummary) -> Void
 
-    public init(viewModel: GroupJoinViewModel, prefillCode: String = "", onJoined: @escaping (GroupSummary) -> Void) {
-        self.viewModel = viewModel
+    public init(viewModel: @autoclosure @escaping () -> GroupJoinViewModel, prefillCode: String = "", onJoined: @escaping (GroupSummary) -> Void) {
+        _viewModel = StateObject(wrappedValue: viewModel())
         self._code = State(initialValue: prefillCode)
         self.onJoined = onJoined
     }

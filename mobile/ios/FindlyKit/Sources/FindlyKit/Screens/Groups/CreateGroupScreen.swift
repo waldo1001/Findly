@@ -5,15 +5,20 @@ import SwiftUI
 /// date-range pickers and the live map's first-party MapKit).
 public struct CreateGroupScreen: View {
     @Environment(\.theme) private var theme
-    @ObservedObject private var viewModel: CreateGroupViewModel
+    // `@StateObject`, NOT `@ObservedObject` — see `HomeScreen`'s doc for the full failure mode
+    // (I16). `RootView` constructs this screen's view model inline and re-evaluates on every
+    // in-app navigation; `@StateObject` + `@autoclosure` keeps the first instance for this view's
+    // lifetime instead of silently discarding the one this screen's state (e.g. `.created`, which
+    // `onChange(of: created)` below fires `onCreated` from) lives on.
+    @StateObject private var viewModel: CreateGroupViewModel
     @State private var name: String = ""
     @State private var endsAt: Date = Date().addingTimeInterval(24 * 3600)
     @State private var expiryPolicy: GroupExpiryPolicy = .delete
     @State private var displayName: String = ""
     private let onCreated: (GroupSummary) -> Void
 
-    public init(viewModel: CreateGroupViewModel, onCreated: @escaping (GroupSummary) -> Void) {
-        self.viewModel = viewModel
+    public init(viewModel: @autoclosure @escaping () -> CreateGroupViewModel, onCreated: @escaping (GroupSummary) -> Void) {
+        _viewModel = StateObject(wrappedValue: viewModel())
         self.onCreated = onCreated
     }
 

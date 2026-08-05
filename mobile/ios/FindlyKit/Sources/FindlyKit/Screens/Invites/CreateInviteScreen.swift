@@ -5,12 +5,17 @@ import SwiftUI
 /// invite code out-of-band, exactly as specs/001 §3.3 requires.
 public struct CreateInviteScreen: View {
     @Environment(\.theme) private var theme
-    @ObservedObject private var viewModel: CreateInviteViewModel
+    // `@StateObject`, NOT `@ObservedObject` — see `HomeScreen`'s doc for the full failure mode
+    // (I16). `RootView` constructs this screen's view model inline and re-evaluates on every
+    // in-app navigation; `@StateObject` + `@autoclosure` keeps the first instance for this view's
+    // lifetime instead of silently discarding the one this screen's state (e.g. `.created`) lives
+    // on.
+    @StateObject private var viewModel: CreateInviteViewModel
     @State private var role: String = "member"
     @State private var emailHint: String = ""
 
-    public init(viewModel: CreateInviteViewModel) {
-        self.viewModel = viewModel
+    public init(viewModel: @autoclosure @escaping () -> CreateInviteViewModel) {
+        _viewModel = StateObject(wrappedValue: viewModel())
     }
 
     public var body: some View {
