@@ -57,6 +57,12 @@ public final class AppCoordinator: ObservableObject {
         route = .acceptInvite(prefillCode: prefillCode)
     }
 
+    // MARK: - I17 profile-bootstrap route (001 §1.5.3, §3.1)
+
+    public func showCreateFamily() {
+        route = .createFamily
+    }
+
     // MARK: - I5 groups routes (specs/004 §3.4)
 
     public func showGroupsList() {

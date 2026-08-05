@@ -44,10 +44,15 @@ struct HomeViewModelTests {
         }
     }
 
-    // MARK: - Family-less (review-gate finding #3, specs/005 §1, 001 §1.5) — a signed-in user
-    // without a family is first-class, not a dead end: `FAMILY_NOT_FOUND`/`PROFILE_NOT_FOUND` on
-    // the family fetch must land in a distinct, renderable state (not the generic `.error`), so
-    // `HomeScreen` can still offer Groups — the one destination that works without a family.
+    // MARK: - Family-less vs profile-less (review-gate finding #3, specs/005 §1, 001 §1.5; I17) —
+    // a signed-in user without a family is first-class, not a dead end: `FAMILY_NOT_FOUND` and
+    // `PROFILE_NOT_FOUND` on the family fetch must each land in a distinct, renderable state (not
+    // the generic `.error`) — but they are materially different (001 §1.5.3/§1.5.4): a
+    // `FAMILY_NOT_FOUND` caller already has a `Users` profile row and can list groups (§12.2)
+    // straight away, while a `PROFILE_NOT_FOUND` caller has no profile at all and cannot call
+    // `GET /groups` either — only the four bootstrap endpoints work for them. I17 fixes the prior
+    // conflation (both collapsed into `.familyless`), which is what made `HomeScreen.familylessContent`
+    // route a profile-less caller into a `GroupsListScreen` that would itself 404.
 
     @Test func load_familyNotFound_setsFamilylessState() async {
         let api = FakeAPIClient()
@@ -61,9 +66,9 @@ struct HomeViewModelTests {
         #expect(viewModel.state == .familyless)
     }
 
-    @Test func load_profileNotFound_setsFamilylessState() async {
-        // A brand-new signed-in user with no profile at all yet (001 §1.5.3) is likewise
-        // family-less, not a dead end — same rendering as FAMILY_NOT_FOUND.
+    @Test func load_profileNotFound_setsProfilelessState() async {
+        // A brand-new signed-in user with no profile at all yet (001 §1.5.3) is a DISTINCT state
+        // from family-less — see this section's doc for why.
         let api = FakeAPIClient()
         api.getMyFamilyHandler = {
             throw APIError.server(APIErrorBody(code: .profileNotFound, message: "no profile", details: nil, requestId: "r1"), httpStatus: 404)
@@ -72,7 +77,7 @@ struct HomeViewModelTests {
 
         await viewModel.load()
 
-        #expect(viewModel.state == .familyless)
+        #expect(viewModel.state == .profileless)
     }
 
     @Test func load_otherServerError_staysGenericError() async {

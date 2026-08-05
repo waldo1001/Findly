@@ -74,4 +74,31 @@ struct APIErrorUserMessageTests {
         let error = APIError.server(APIErrorBody(code: .limitExceeded, message: "x", details: nil, requestId: "r1"), httpStatus: 402)
         #expect(error.userFacingMessage == "You've reached a plan limit.")
     }
+
+    /// I17 review (belt-and-braces) — 001 §12.1/§12.6's create-group/join-group bootstrap path
+    /// (`backend/src/domain/group/createGroup.ts`/`joinGroup.ts`) reports a missing `displayName`
+    /// as `400 VALIDATION_FAILED`, `details.fields: ["displayName"]`. This does NOT substitute for
+    /// `CreateGroupViewModel`/`GroupJoinViewModel`'s own client-side profile probe (which should
+    /// catch this before the network call in practice) — it's a fallback for the case that probe
+    /// was inconclusive and the blank name reached the server anyway.
+    @Test func validationFailed_displayNameField_getsASpecificMessage() {
+        let error = APIError.server(
+            APIErrorBody(code: .validationFailed, message: "x", details: ["fields": .array([.string("displayName")])], requestId: "r1"),
+            httpStatus: 400
+        )
+        #expect(error.userFacingMessage == "Enter a display name.")
+    }
+
+    @Test func validationFailed_otherFields_keepTheGenericMessage() {
+        let error = APIError.server(
+            APIErrorBody(code: .validationFailed, message: "x", details: ["fields": .array([.string("fixes[3].recordedAt")])], requestId: "r1"),
+            httpStatus: 400
+        )
+        #expect(error.userFacingMessage == "Please check your input and try again.")
+    }
+
+    @Test func validationFailed_noDetails_keepsTheGenericMessage() {
+        let error = APIError.server(APIErrorBody(code: .validationFailed, message: "x", details: nil, requestId: "r1"), httpStatus: 400)
+        #expect(error.userFacingMessage == "Please check your input and try again.")
+    }
 }

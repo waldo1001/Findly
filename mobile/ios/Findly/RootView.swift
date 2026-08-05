@@ -58,6 +58,20 @@ struct RootView: View {
     // again here once `SignInViewModel` reports a fresh interactive sign-in (a session that starts
     // at the sign-in screen never got the cold-launch call, since nobody was signed in yet then).
     private let onSignedIn: () async -> Void
+    // I17 (001 §1.5.3) — the display name typed once on `HomeScreen`'s `.profileless` branch,
+    // carried (still editable at the destination) to whichever of the four bootstrap paths the
+    // user picks — same "remembered local state instead of a nav-graph argument" pattern Android's
+    // `FindlyNavHost` uses for its `pendingOnboardingDisplayName`/`pendingCreateContext`/
+    // `pendingJoinContext` (specs/003 §12.2/A21), chosen here too so `AppRoute`'s existing,
+    // already-tested cases (`.groupJoin(prefillCode:)` etc., `AppCoordinatorTests`) stay untouched
+    // rather than growing a second associated value. This is prefill-only, purely a UX convenience
+    // (skip re-typing a name already typed once) — it is NOT how `CreateGroupViewModel`/
+    // `GroupJoinViewModel` decide whether a blank name is actually required; those establish that
+    // themselves from the server's own profile state (I17 review, Major finding: a caller-supplied
+    // "which button was tapped" flag is wrong for arrivals that don't go through these closures at
+    // all, e.g. a `findly://group-join` deep link).
+    @State private var pendingOnboardingDisplayName = ""
+    @State private var pendingGroupBootstrapDisplayName = ""
 
     init(
         coordinator: AppCoordinator,
@@ -107,7 +121,26 @@ struct RootView: View {
                     onSelectFamily: { coordinator.showFamilyMembers() },
                     onSelectInvite: { coordinator.showCreateInvite() },
                     onSelectGroups: { coordinator.showGroupsList() },
-                    onSelectPrivacySettings: { coordinator.showPrivacySettings() }
+                    onSelectPrivacySettings: { coordinator.showPrivacySettings() },
+                    // I17 (001 §1.5.3): the four profile-bootstrap paths off `.profileless` — stash
+                    // the once-entered display name the same way `onCreateGroup`/`onJoinGroup`
+                    // below stash `pendingGroupBootstrapDisplayName`.
+                    onSelectCreateFamily: { name in
+                        pendingOnboardingDisplayName = name
+                        coordinator.showCreateFamily()
+                    },
+                    onSelectAcceptInvite: { name in
+                        pendingOnboardingDisplayName = name
+                        coordinator.showAcceptInvite()
+                    },
+                    onSelectCreateGroup: { name in
+                        pendingGroupBootstrapDisplayName = name
+                        coordinator.showCreateGroup()
+                    },
+                    onSelectJoinGroup: { name in
+                        pendingGroupBootstrapDisplayName = name
+                        coordinator.showGroupJoin()
+                    }
                 )
             case .liveMap:
                 LiveMapScreen(viewModel: LiveMapViewModel(apiClient: apiClient), renderer: defaultMapRenderer)
@@ -127,7 +160,21 @@ struct RootView: View {
             case .createInvite:
                 CreateInviteScreen(viewModel: CreateInviteViewModel(apiClient: apiClient))
             case .acceptInvite(let prefillCode):
-                AcceptInviteScreen(viewModel: AcceptInviteViewModel(apiClient: apiClient), prefillInviteCode: prefillCode)
+                AcceptInviteScreen(
+                    viewModel: AcceptInviteViewModel(apiClient: apiClient),
+                    prefillInviteCode: prefillCode,
+                    prefillDisplayName: pendingOnboardingDisplayName
+                )
+
+            // MARK: - I17 profile-bootstrap route (001 §1.5.3, §3.1) — see `CreateFamilyViewModel`'s
+            // doc for why this is the client's only `POST /families` entry point.
+
+            case .createFamily:
+                CreateFamilyScreen(
+                    viewModel: CreateFamilyViewModel(apiClient: apiClient),
+                    prefillDisplayName: pendingOnboardingDisplayName,
+                    onCreated: { _ in coordinator.showHome() }
+                )
 
             // MARK: - I5 groups routes (specs/004 §3.4)
 
@@ -135,12 +182,23 @@ struct RootView: View {
                 GroupsListScreen(
                     viewModel: GroupsListViewModel(apiClient: apiClient),
                     onSelectGroup: { groupId in coordinator.showGroupDetail(groupId: groupId) },
-                    onCreateGroup: { coordinator.showCreateGroup() },
-                    onJoinGroup: { coordinator.showGroupJoin() }
+                    onCreateGroup: {
+                        // The ordinary (already-has-a-profile) entry point — never leak a stale
+                        // prefill name from an earlier profile-less visit. (Whether `displayName`
+                        // is actually required is no longer decided here at all — see
+                        // `CreateGroupViewModel.createGroup`'s doc, I17 review.)
+                        pendingGroupBootstrapDisplayName = ""
+                        coordinator.showCreateGroup()
+                    },
+                    onJoinGroup: {
+                        pendingGroupBootstrapDisplayName = ""
+                        coordinator.showGroupJoin()
+                    }
                 )
             case .createGroup:
                 CreateGroupScreen(
                     viewModel: CreateGroupViewModel(apiClient: apiClient),
+                    prefillDisplayName: pendingGroupBootstrapDisplayName,
                     onCreated: { group in coordinator.showGroupDetail(groupId: group.groupId) }
                 )
             case .groupDetail(let groupId):
@@ -154,6 +212,7 @@ struct RootView: View {
                 GroupJoinScreen(
                     viewModel: GroupJoinViewModel(apiClient: apiClient),
                     prefillCode: prefillCode,
+                    prefillDisplayName: pendingGroupBootstrapDisplayName,
                     onJoined: { group in coordinator.showGroupDetail(groupId: group.groupId) }
                 )
             case .groupMap(let groupId):

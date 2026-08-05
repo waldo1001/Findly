@@ -13,6 +13,16 @@ public enum AppRoute: Equatable {
     case createInvite
     case acceptInvite(prefillCode: String)
 
+    // MARK: - I17 profile-bootstrap route (001 §1.5.3, §3.1) — the client's only `POST /families`
+    // destination, reachable both ordinarily and from the profile-less first-run flow
+    // (`HomeScreen`'s `.profileless` branch). No associated `prefillDisplayName` value — unlike
+    // `.acceptInvite`/`.groupJoin`'s `prefillCode` (untrusted deep-link input that must travel with
+    // the route itself), the onboarding display name is trusted in-app text the user just typed;
+    // `RootView` threads it the same "remembered local state" way Android's `FindlyNavHost` threads
+    // its `pendingOnboardingDisplayName` (specs/003 §12.2/A21), keeping this enum's existing,
+    // already-tested cases (`.groupJoin(prefillCode:)` etc., `AppCoordinatorTests`) untouched.
+    case createFamily
+
     // MARK: - I5 groups routes (specs/004 §3.4; specs/005)
 
     case groupsList

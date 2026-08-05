@@ -14,12 +14,21 @@ public struct GroupJoinScreen: View {
     // on.
     @StateObject private var viewModel: GroupJoinViewModel
     @State private var code: String
-    @State private var displayName: String = ""
+    @State private var displayName: String
     private let onJoined: (GroupSummary) -> Void
 
-    public init(viewModel: @autoclosure @escaping () -> GroupJoinViewModel, prefillCode: String = "", onJoined: @escaping (GroupSummary) -> Void) {
+    /// [prefillDisplayName] seeds the display-name field when this screen is reached from the
+    /// profile-less first-run flow (`HomeScreen`'s `.profileless` branch, I17) — same "enter it
+    /// once" intent as [prefillCode].
+    public init(
+        viewModel: @autoclosure @escaping () -> GroupJoinViewModel,
+        prefillCode: String = "",
+        prefillDisplayName: String = "",
+        onJoined: @escaping (GroupSummary) -> Void
+    ) {
         _viewModel = StateObject(wrappedValue: viewModel())
         self._code = State(initialValue: prefillCode)
+        self._displayName = State(initialValue: prefillDisplayName)
         self.onJoined = onJoined
     }
 

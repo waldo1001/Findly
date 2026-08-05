@@ -15,6 +15,13 @@ public struct HomeScreen: View {
     /// `@StateObject` keeps the first instance for the view's lifetime and discards the
     /// re-constructed ones, which is what makes the `.task`/observation pair coherent.
     @StateObject private var viewModel: HomeViewModel
+    // I17 (001 §1.5.3) — the display name typed once on `profilelessContent`, carried (still
+    // editable) into whichever of the four bootstrap paths the user picks. Local `@State`, not
+    // view-model state: this screen's own body already holds `displayName`-style form fields as
+    // plain `@State` nowhere else, but the four bootstrap actions below are simple one-shot
+    // navigations (mirroring `CreateGroupScreen`/`GroupJoinScreen`'s own local-field pattern), not
+    // something `HomeViewModel` needs to own.
+    @State private var profileDisplayName: String = ""
     private let onSelectMap: () -> Void
     private let onSelectHistory: (String) -> Void
     private let onSelectGeofences: () -> Void
@@ -24,6 +31,11 @@ public struct HomeScreen: View {
     private let onSelectInvite: () -> Void
     private let onSelectGroups: () -> Void
     private let onSelectPrivacySettings: () -> Void
+    // MARK: - I17 profile-bootstrap paths (001 §1.5.3) — reachable only from `.profileless`.
+    private let onSelectCreateFamily: (String) -> Void
+    private let onSelectAcceptInvite: (String) -> Void
+    private let onSelectCreateGroup: (String) -> Void
+    private let onSelectJoinGroup: (String) -> Void
 
     public init(
         viewModel: @autoclosure @escaping () -> HomeViewModel,
@@ -35,7 +47,11 @@ public struct HomeScreen: View {
         onSelectFamily: @escaping () -> Void,
         onSelectInvite: @escaping () -> Void,
         onSelectGroups: @escaping () -> Void,
-        onSelectPrivacySettings: @escaping () -> Void
+        onSelectPrivacySettings: @escaping () -> Void,
+        onSelectCreateFamily: @escaping (String) -> Void,
+        onSelectAcceptInvite: @escaping (String) -> Void,
+        onSelectCreateGroup: @escaping (String) -> Void,
+        onSelectJoinGroup: @escaping (String) -> Void
     ) {
         _viewModel = StateObject(wrappedValue: viewModel())
         self.onSelectMap = onSelectMap
@@ -47,6 +63,10 @@ public struct HomeScreen: View {
         self.onSelectInvite = onSelectInvite
         self.onSelectGroups = onSelectGroups
         self.onSelectPrivacySettings = onSelectPrivacySettings
+        self.onSelectCreateFamily = onSelectCreateFamily
+        self.onSelectAcceptInvite = onSelectAcceptInvite
+        self.onSelectCreateGroup = onSelectCreateGroup
+        self.onSelectJoinGroup = onSelectJoinGroup
     }
 
     public var body: some View {
@@ -69,6 +89,8 @@ public struct HomeScreen: View {
             }
         case .familyless:
             familylessContent
+        case .profileless:
+            profilelessContent
         case .loaded(let myUserId, let isParent, let familyName, let otherMembers):
             ScrollView {
                 VStack(spacing: theme.spacing.md) {
@@ -115,6 +137,31 @@ public struct HomeScreen: View {
             FindlyButton("Groups") { onSelectGroups() }
             // specs/008-privacy-endpoints.md §4.4 — a family-less user is still a full account
             // holder and must still be able to export/delete without contacting support.
+            FindlyButton("Privacy & data", style: .secondary) { onSelectPrivacySettings() }
+        }
+        .padding(theme.spacing.xl)
+    }
+
+    /// I17 (001 §1.5.3) — a brand-new signed-in user with no `Users` profile row at all. DISTINCT
+    /// from [familylessContent]: `GET /groups` would 404 for this caller too (§12.2 requires a
+    /// profile), so Groups is deliberately NOT offered here — only the four profile-bootstrapping
+    /// paths are (§3.1/§3.4/§12.1/§12.6), each carrying the one display name typed below.
+    private var profilelessContent: some View {
+        VStack(spacing: theme.spacing.md) {
+            EmptyStateView(
+                title: "Welcome to Findly",
+                message: "Create or join a family, or start a temporary group — pick how you'd like to get started."
+            )
+            FindlyTextField("Your display name", text: $profileDisplayName, placeholder: "Eric")
+            FindlyButton("Create a family") { onSelectCreateFamily(profileDisplayName) }
+            FindlyButton("I have an invite code", style: .secondary) { onSelectAcceptInvite(profileDisplayName) }
+            FindlyButton("Create a group", style: .secondary) { onSelectCreateGroup(profileDisplayName) }
+            FindlyButton("Join a group", style: .secondary) { onSelectJoinGroup(profileDisplayName) }
+            // I17 review (Minor): 001 §1.5.3 explicitly permits `DELETE /users/me` without a
+            // profile, and specs/008-privacy-endpoints.md §4.4 requires export/delete to be
+            // reachable without contacting support (a store requirement) — a brand-new user who
+            // decides not to proceed with onboarding still needs a way to delete the account they
+            // just created. Same escape hatch [familylessContent] already has.
             FindlyButton("Privacy & data", style: .secondary) { onSelectPrivacySettings() }
         }
         .padding(theme.spacing.xl)
