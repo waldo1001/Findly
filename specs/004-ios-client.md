@@ -136,10 +136,21 @@ Screens (`Screens/*/*.swift`) compose `DesignSystem.Components` and read state f
 
 **The problem this section exists to prevent.** `AppCoordinator`'s launch route was hardcoded to `.signIn`, and nothing at launch ever consulted `AuthProviding`. Firebase Auth **does** persist its session across launches (its keychain-backed `currentUser` survives process death), so the session was in fact restored — the app simply never asked, and forced a full SMS re-verification on every cold start. The same file's cold-launch device-registration closure already guarded on `authProvider.currentUserId != nil`, proving the restored session was observable at that exact point. Found on the first real TestFlight install, 2026-08-05.
 
-**Rule (MUST):** the app target selects the launch route from the auth provider, once, in `FindlyApp.init()`:
+**Rule (MUST): nothing may touch `FirebaseAuth` during `FindlyApp.init()`.** The first version of this section had the app read `authProvider.currentUserId` there, which constructs `Auth.auth()` before `UIApplicationMain` has finished bringing up `UIApplication.shared`. That is not a style preference — it corrupts Firebase's own initialization, permanently, for the life of the process:
 
-- `authProvider.currentUserId != nil` → stack root `.home`.
-- otherwise → stack root `.signIn`.
+- `Auth.protectedDataInitialization()` is where `tokenManager`, `appCredentialManager` and `notificationManager` are assigned.
+- Its iOS branch obtains `UIApplication.shared` **by reflection** and, if that fails, `return`s early **without assigning any of them** and without re-arming its observer.
+- `tokenManager` is declared `AuthAPNSTokenManager!` — implicitly unwrapped. So a failed early init leaves it `nil` forever.
+- `Auth.setAPNSToken(_:type:)` then does `self.tokenManager.token = …`, which traps (`EXC_BREAKPOINT`, `_assertionFailure`) the first time APNs registration completes.
+
+Observed on the simulator 2026-08-05 in build 5, crashing ~0.5 s after launch via `AppDelegate.didRegisterForRemoteNotificationsWithDeviceToken` → `FirebaseAuthProvider.setAPNSToken`. On a real device that callback is far more reliable than on a simulator, so this is a launch crash, not an edge case.
+
+**Rule (MUST):** the launch route is resolved **after** the UI exists, not during `App.init()`:
+
+- The coordinator's stack starts at **`.launching`**, a neutral route rendering a themed splash — never `.signIn`, so a returning user never sees a sign-in screen flash before being restored.
+- `RootView` resolves it on first appear (`.task`), by which point `UIApplication.shared` genuinely exists: `authProvider.currentUserId != nil` → `.home`, otherwise → `.signIn`. Resolution replaces the stack root; `.launching` is never returned to and never appears behind a back button.
+- The cold-launch device/push registration (`onSignedIn`) moves to the same place, for the same reason — it reads `currentUserId` too.
+- `FindlyApp.init()` MAY still call `FirebaseAuthProvider.configureFirebaseIfNeeded()`, which touches `FirebaseApp` only and constructs no `Auth` instance.
 
 A restored session MUST NOT re-prompt for SMS verification. Sign-in is reached on a cold start only when there is genuinely no persisted user. Token *expiry* is a separate, already-specified concern: the client refreshes via `refreshIDToken()`, and only a second `AUTH_TOKEN_EXPIRED` forces sign-out (specs/009 §9) — an expired token at launch is a refresh, never an immediate bounce to sign-in.
 
