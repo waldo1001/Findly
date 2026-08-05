@@ -63,6 +63,8 @@ Firebase console → the `findly-71f7b` project:
 (`+32 470 00 00 01` / `123456`) works regardless, which is exactly why this gap can hide until a family
 member tries to sign in.
 
+**Verified behaviourally 2026-08-05**: a real Belgian (+32) number signed in successfully on a real device — so Blaze is active, real SMS delivery works, and Firebase phone auth is correctly wired end to end. This is the first *behavioural* confirmation of A2; it had until then been user-reported only, since Firebase is invisible to the agent. Note what it does **not** prove: the number tested is inside the allow-list, so non-BE/NL numbers remain silent by design.
+
 **Do not** open SMS to all regions here — that's H8, and it belongs after App Check is *enforced*.
 
 ---
