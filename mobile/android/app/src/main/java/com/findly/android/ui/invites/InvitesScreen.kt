@@ -29,10 +29,15 @@ import com.findly.android.ui.designsystem.components.FindlyTopBar
  * two independent forms on one screen, driven by [InvitesViewModel]/[InvitesStateHolder].
  */
 @Composable
-fun InvitesRoute(viewModel: InvitesViewModel, modifier: Modifier = Modifier) {
+fun InvitesRoute(
+    viewModel: InvitesViewModel,
+    modifier: Modifier = Modifier,
+    prefillDisplayName: String = "",
+) {
     val state by viewModel.state.collectAsState()
     InvitesScreen(
         state = state,
+        prefillDisplayName = prefillDisplayName,
         onCreateInvite = viewModel::createInvite,
         onAcceptInvite = viewModel::acceptInvite,
         modifier = modifier,
@@ -43,13 +48,16 @@ fun InvitesRoute(viewModel: InvitesViewModel, modifier: Modifier = Modifier) {
 fun InvitesScreen(
     state: InvitesUiState,
     modifier: Modifier = Modifier,
+    prefillDisplayName: String = "",
     onCreateInvite: (role: String, emailHint: String?) -> Unit = { _, _ -> },
     onAcceptInvite: (inviteCode: String, displayName: String) -> Unit = { _, _ -> },
 ) {
     var selectedRole by remember { mutableStateOf("member") }
     var emailHint by remember { mutableStateOf("") }
     var inviteCode by remember { mutableStateOf("") }
-    var displayName by remember { mutableStateOf("") }
+    // A21: seeded from the profile-less first-run screen's shared display-name entry
+    // (GroupsListScreen's ProfileNeeded branch) when reached from "I have an invite code".
+    var displayName by remember { mutableStateOf(prefillDisplayName) }
 
     Column(modifier = modifier.fillMaxSize()) {
         FindlyTopBar(title = "Invites")

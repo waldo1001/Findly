@@ -26,6 +26,13 @@ sealed class Destinations(val route: String) {
     data object Invites : Destinations("invites")
     data object SignIn : Destinations("sign-in")
 
+    /** A21 (001 §3.1, specs/003 §12.2's `ProfileNeeded` first-run flow): the client's only
+     * `POST /families` entry point — see [com.findly.android.ui.family.CreateFamilyStateHolder]'s
+     * doc for why this destination didn't exist before. Reached from
+     * [com.findly.android.ui.groups.GroupsListScreen]'s profile-less branch, same
+     * remembered-prefill pattern as [GroupCreate]/[GroupJoin] below (this class's own doc). */
+    data object CreateFamily : Destinations("family-create")
+
     // --- A5 additions (specs/005-temporary-groups.md; specs/003-android-client.md §12.2) ---
 
     /** The groups list — also the family-less home (§1.5.4); reachable from [Home] like every
