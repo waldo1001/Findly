@@ -1,5 +1,6 @@
 import Foundation
 import Security
+import os
 import FindlyKit
 
 /// I7 hardening (docs/implementation-handoff.md "Known follow-ups": iOS `verificationID` stored in
@@ -44,7 +45,25 @@ final class KeychainStore: KeychainStoring {
         var query = baseQuery(forKey: key)
         query[kSecValueData as String] = Data(value.utf8)
         query[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
-        SecItemAdd(query as CFDictionary, nil)
+        let status = SecItemAdd(query as CFDictionary, nil)
+        if status != errSecSuccess {
+            // The status used to be discarded entirely, which made a failed write invisible: the
+            // value simply wasn't there on the next read. For the phone-auth verification ID that
+            // surfaces to the user as "That code expired. Request a new one." — pointing at the
+            // SMS code, which is fine, rather than at storage, which isn't. Cost a debugging round
+            // on 2026-08-05 to work out.
+            //
+            // Logs the OSStatus only — never the key or value (docs/security-review-checklist.md:
+            // category/code only, never the secret). errSecMissingEntitlement (-34018) is the one
+            // to recognise: it means the app was built without entitlements, which happens on a
+            // simulator build made with CODE_SIGNING_ALLOWED=NO.
+            os_log(
+                "keychain write failed (OSStatus %{public}d) — dependent flow will behave as if the value was never stored",
+                log: OSLog(subsystem: "com.findly.ios", category: "keychain"),
+                type: .error,
+                status
+            )
+        }
     }
 
     func removeString(forKey key: String) {

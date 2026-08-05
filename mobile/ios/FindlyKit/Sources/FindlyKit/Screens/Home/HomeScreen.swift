@@ -5,7 +5,16 @@ import SwiftUI
 /// `AppCoordinator` seam already established by I1's `SignInScreen`.
 public struct HomeScreen: View {
     @Environment(\.theme) private var theme
-    @ObservedObject private var viewModel: HomeViewModel
+    /// `@StateObject`, NOT `@ObservedObject` (2026-08-05). `RootView` constructs this screen's
+    /// view model inline in its own `body`, and `RootView` re-evaluates on every
+    /// `coordinator.route` publish — i.e. on every in-app navigation. With `@ObservedObject` that
+    /// produced a fresh, still-`.loading` view model on each re-evaluation while `.task` (bound to
+    /// the unchanged view identity) never re-ran, so the instance that actually completed `load()`
+    /// was no longer the one the view observed. Symptom: the screen sat on "Loading your family…"
+    /// forever even though `load()` had finished in ~46 ms and correctly resolved to `.familyless`.
+    /// `@StateObject` keeps the first instance for the view's lifetime and discards the
+    /// re-constructed ones, which is what makes the `.task`/observation pair coherent.
+    @StateObject private var viewModel: HomeViewModel
     private let onSelectMap: () -> Void
     private let onSelectHistory: (String) -> Void
     private let onSelectGeofences: () -> Void
@@ -17,7 +26,7 @@ public struct HomeScreen: View {
     private let onSelectPrivacySettings: () -> Void
 
     public init(
-        viewModel: HomeViewModel,
+        viewModel: @autoclosure @escaping () -> HomeViewModel,
         onSelectMap: @escaping () -> Void,
         onSelectHistory: @escaping (String) -> Void,
         onSelectGeofences: @escaping () -> Void,
@@ -28,7 +37,7 @@ public struct HomeScreen: View {
         onSelectGroups: @escaping () -> Void,
         onSelectPrivacySettings: @escaping () -> Void
     ) {
-        self.viewModel = viewModel
+        _viewModel = StateObject(wrappedValue: viewModel())
         self.onSelectMap = onSelectMap
         self.onSelectHistory = onSelectHistory
         self.onSelectGeofences = onSelectGeofences

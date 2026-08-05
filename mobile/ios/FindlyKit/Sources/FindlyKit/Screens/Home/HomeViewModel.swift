@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// specs/004-ios-client.md I2/§3.4 — the post-sign-in hub. Loads just enough family context
 /// (`GET /families/me`) to know the caller's role (parent vs member) and offer sensible defaults
@@ -29,8 +30,10 @@ public final class HomeViewModel: ObservableObject {
 
     public func load() async {
         state = .loading
+        Self.log("load: started")
         do {
             let envelope = try await apiClient.getMyFamily()
+            Self.log("load: getMyFamily returned")
             let others = envelope.data.members.filter { $0.userId != envelope.data.me.userId }
             state = .loaded(
                 myUserId: envelope.data.me.userId,
@@ -41,10 +44,23 @@ public final class HomeViewModel: ObservableObject {
         } catch {
             switch (error as? APIError)?.serverCode {
             case .familyNotFound, .profileNotFound:
+                Self.log("load: no family/profile -> familyless")
                 state = .familyless
             default:
+                Self.log("load: failed -> error state")
                 state = .error(userFacingMessage(for: error))
             }
         }
+    }
+
+    /// Home is the first screen every signed-in launch lands on, and it was possible for it to sit
+    /// on "Loading your family…" forever with nothing whatsoever in the logs to say why (2026-08-05).
+    /// These three breadcrumbs distinguish the cases that look identical from the outside: the call
+    /// never started, it started and never returned, or it returned and the state machine moved on.
+    ///
+    /// Logs control flow only — never the family, member names, or the error's text
+    /// (docs/security-review-checklist.md: category only, never payload).
+    private static func log(_ message: StaticString) {
+        os_log(message, log: OSLog(subsystem: "com.findly.ios", category: "home"), type: .info)
     }
 }
