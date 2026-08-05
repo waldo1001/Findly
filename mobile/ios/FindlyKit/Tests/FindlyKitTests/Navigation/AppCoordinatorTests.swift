@@ -209,4 +209,63 @@ struct AppCoordinatorTests {
 
         #expect(coordinator.route == .signIn)
     }
+
+    // MARK: - Deferred launch resolution (specs/004 §2.6)
+    //
+    // Why this exists: reading `currentUserId` in `FindlyApp.init()` constructs `Auth.auth()`
+    // before `UIApplication.shared` is up. Firebase's `protectedDataInitialization` fetches
+    // UIApplication by reflection and, failing that, returns early leaving `tokenManager` — an
+    // implicitly-unwrapped optional — nil forever, so the first APNs callback traps. Resolution
+    // therefore happens after the UI exists, and the app starts on a neutral route.
+
+    @Test func defaultStart_isLaunching_notSignIn() {
+        // Must NOT be .signIn: a returning user would see a sign-in screen flash before restore.
+        let coordinator = AppCoordinator()
+
+        #expect(coordinator.route == .launching)
+        #expect(coordinator.canGoBack == false)
+    }
+
+    @Test func resolveLaunch_signedIn_replacesLaunchingWithHome() {
+        let coordinator = AppCoordinator()
+
+        coordinator.resolveLaunch(isSignedIn: true)
+
+        #expect(coordinator.route == .home)
+        // .launching must not remain underneath — there is nothing to go back to.
+        #expect(coordinator.canGoBack == false)
+    }
+
+    @Test func resolveLaunch_signedOut_replacesLaunchingWithSignIn() {
+        let coordinator = AppCoordinator()
+
+        coordinator.resolveLaunch(isSignedIn: false)
+
+        #expect(coordinator.route == .signIn)
+        #expect(coordinator.canGoBack == false)
+    }
+
+    @Test func resolveLaunch_isIgnoredOnceTheUserHasNavigatedAway() {
+        // `.task` can re-fire (view identity changes, scene reattachment). Re-resolving would
+        // yank a user who has already navigated back to a root.
+        let coordinator = AppCoordinator()
+        coordinator.resolveLaunch(isSignedIn: true)
+        coordinator.showGeofences()
+
+        coordinator.resolveLaunch(isSignedIn: true)
+
+        #expect(coordinator.route == .geofences)
+    }
+
+    @Test func deepLink_arrivingBeforeLaunchResolves_isNotLostBehindLaunching() {
+        // A cold start via a join link can deliver `onOpenURL` before `.task` runs.
+        let coordinator = AppCoordinator(joinLinkHost: "join.example.test")
+
+        coordinator.handleDeepLink(URL(string: "https://join.example.test/g#7f3k-9qrz")!)
+
+        #expect(coordinator.route == .groupJoin(prefillCode: "7F3K9QRZ"))
+        // Backing out of the deep-linked screen must never reveal the splash.
+        coordinator.pop()
+        #expect(coordinator.route != .launching)
+    }
 }

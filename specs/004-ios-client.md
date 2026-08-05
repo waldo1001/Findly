@@ -136,14 +136,9 @@ Screens (`Screens/*/*.swift`) compose `DesignSystem.Components` and read state f
 
 **The problem this section exists to prevent.** `AppCoordinator`'s launch route was hardcoded to `.signIn`, and nothing at launch ever consulted `AuthProviding`. Firebase Auth **does** persist its session across launches (its keychain-backed `currentUser` survives process death), so the session was in fact restored — the app simply never asked, and forced a full SMS re-verification on every cold start. The same file's cold-launch device-registration closure already guarded on `authProvider.currentUserId != nil`, proving the restored session was observable at that exact point. Found on the first real TestFlight install, 2026-08-05.
 
-**Rule (MUST): nothing may touch `FirebaseAuth` during `FindlyApp.init()`.** The first version of this section had the app read `authProvider.currentUserId` there, which constructs `Auth.auth()` before `UIApplicationMain` has finished bringing up `UIApplication.shared`. That is not a style preference — it corrupts Firebase's own initialization, permanently, for the life of the process:
+**Rule (SHOULD): avoid touching `FirebaseAuth` during `FindlyApp.init()`.** Deferring the session read costs nothing and keeps `App.init()` free of SDK initialization order hazards.
 
-- `Auth.protectedDataInitialization()` is where `tokenManager`, `appCredentialManager` and `notificationManager` are assigned.
-- Its iOS branch obtains `UIApplication.shared` **by reflection** and, if that fails, `return`s early **without assigning any of them** and without re-arming its observer.
-- `tokenManager` is declared `AuthAPNSTokenManager!` — implicitly unwrapped. So a failed early init leaves it `nil` forever.
-- `Auth.setAPNSToken(_:type:)` then does `self.tokenManager.token = …`, which traps (`EXC_BREAKPOINT`, `_assertionFailure`) the first time APNs registration completes.
-
-Observed on the simulator 2026-08-05 in build 5, crashing ~0.5 s after launch via `AppDelegate.didRegisterForRemoteNotificationsWithDeviceToken` → `FirebaseAuthProvider.setAPNSToken`. On a real device that callback is far more reliable than on a simulator, so this is a launch crash, not an edge case.
+> **Correction (2026-08-05).** An earlier revision of this section asserted that reading `currentUserId` in `App.init()` *caused* the launch crash in build 5, by making Firebase's `protectedDataInitialization()` fail its reflective `UIApplication.shared` lookup and leave `tokenManager` nil. **That attribution was wrong and is retracted.** The crash was reproduced identically with the early read removed. The real cause was an unguarded manual APNs-token forward in `AppDelegate` — see specs/004 §5 and the `AppDelegate` comment. The deferral is retained on its own merits (no sign-in flash, no early SDK construction), not as a crash fix.
 
 **Rule (MUST):** the launch route is resolved **after** the UI exists, not during `App.init()`:
 

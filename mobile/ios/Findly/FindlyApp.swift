@@ -80,18 +80,20 @@ struct FindlyApp: App {
         }
         self.authProvider = authProvider
 
-        // specs/004-ios-client.md §2.6 — the launch route comes from the persisted auth session,
-        // never a hardcoded `.signIn`. Firebase restores `currentUser` from its keychain across
-        // process death; this used to never be asked, so every cold start dumped the user back on
-        // the sign-in screen and demanded a fresh SMS verification even though the session was
-        // right there. Found on the first real TestFlight install, 2026-08-05.
+        // specs/004-ios-client.md §2.6 — starts at `.launching` and is resolved by `RootView`'s
+        // `.task`, NOT here.
         //
-        // Read through `AuthProviding.currentUserId` (not `FirebaseAuthProvider.hasRestoredSession`
-        // directly) so the stub-local dev build restores its own session by exactly the same rule.
-        let coordinator = AppCoordinator(
-            route: AppCoordinator.launchRoute(isSignedIn: authProvider.currentUserId != nil),
-            joinLinkHost: config.joinLinkHost
-        )
+        // The first version of this read `authProvider.currentUserId` right here to pick the
+        // route. That constructs `Auth.auth()` before `UIApplicationMain` has `UIApplication.shared`
+        // up, and Firebase's `protectedDataInitialization` obtains UIApplication *by reflection* —
+        // when that lookup fails it returns early without assigning `tokenManager`, which is an
+        // implicitly-unwrapped optional and therefore stays nil for the entire process. The first
+        // APNs callback then trapped in `Auth.setAPNSToken`. Build 5 crashed ~0.5s after launch
+        // this way, via `AppDelegate.didRegisterForRemoteNotificationsWithDeviceToken`.
+        //
+        // So: nothing in this initializer may touch `FirebaseAuth`. `configureFirebaseIfNeeded()`
+        // above is fine — it touches `FirebaseApp` only and constructs no `Auth`.
+        let coordinator = AppCoordinator(joinLinkHost: config.joinLinkHost)
         _coordinator = StateObject(wrappedValue: coordinator)
 
         // specs/008-privacy-endpoints.md §3.1 rule 2(b) — the one-shot cold-start cleanup: removes
@@ -280,7 +282,11 @@ struct FindlyApp: App {
             await deviceRegistrationService.registerOnLaunchIfNeeded(appVersionTracker: appVersionTracker)
         }
         self.onSignedIn = onSignedInClosure
-        Task { await onSignedInClosure() }
+        // specs/004 §2.6: NOT fired from here any more. This closure reads `currentUserId`, i.e.
+        // constructs `Auth.auth()` — and a `Task` spawned in `App.init()` can run before
+        // `UIApplication.shared` exists, which is exactly the sequence that left Firebase's
+        // `tokenManager` nil and crashed build 5 on the first APNs callback. `RootView`'s `.task`
+        // now runs it, right after resolving the launch route, where the UI is guaranteed up.
     }
 
     var body: some Scene {

@@ -102,6 +102,14 @@ final class FirebaseAuthProvider: AuthProviding {
     /// alongside the Messaging equivalent. `.unknown` lets Firebase detect sandbox vs production
     /// itself, which matters because debug builds use the APNs sandbox and TestFlight/App Store
     /// builds use production, against the same uploaded `.p8` key.
+    /// **Do not call while Firebase method swizzling is enabled** — see `AppDelegate`'s
+    /// `didRegisterForRemoteNotificationsWithDeviceToken` for the full account. `Auth.setAPNSToken`
+    /// force-unwraps `tokenManager`, which only exists after `protectedDataInitialization()` has
+    /// run, so calling it from an APNs callback traps on launch. Auth receives the token via its
+    /// own swizzled interceptor, which is registered only after that initialization completes.
+    ///
+    /// Kept (unused) so the fix is discoverable rather than looking like an oversight: anyone who
+    /// disables swizzling will need this, guarded by a readiness check.
     static func setAPNSToken(_ deviceToken: Data) {
         Auth.auth().setAPNSToken(deviceToken, type: .unknown)
     }

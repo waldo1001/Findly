@@ -2,6 +2,17 @@
 /// (map, history, geofences, locate, settings, invites) on top of I1's `signIn`/`home` seam. I5
 /// (§3.4) adds the groups screens on top of that — same inventory as 003 §12.2's Android screens.
 public enum AppRoute: Equatable {
+    /// specs/004 §2.6 — the neutral start route: a themed splash shown only until `RootView`'s
+    /// first appear resolves the real one.
+    ///
+    /// It exists so the app can start **without touching `FirebaseAuth`**. Reading
+    /// `currentUserId` in `FindlyApp.init()` constructs `Auth.auth()` before
+    /// `UIApplication.shared` is up; Firebase's `protectedDataInitialization` fetches
+    /// UIApplication by reflection and, failing, returns early leaving `tokenManager` (an
+    /// implicitly-unwrapped optional) nil for the life of the process — so the first APNs
+    /// callback traps in `Auth.setAPNSToken`. Starting at `.signIn` instead would also flash a
+    /// sign-in screen at every launch for an already-signed-in user, which §2.6 exists to prevent.
+    case launching
     case signIn
     case home
     case liveMap

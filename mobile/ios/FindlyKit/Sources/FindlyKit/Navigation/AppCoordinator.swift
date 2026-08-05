@@ -26,9 +26,24 @@ public final class AppCoordinator: ObservableObject {
     /// `handleDeepLink` matches https universal links against (`AppConfig.joinLinkHost`).
     private let joinLinkHost: String
 
-    public init(route: AppRoute = .signIn, joinLinkHost: String = AppConfig.defaultJoinLinkHost) {
+    /// Defaults to `.launching` (specs/004 §2.6) — deliberately NOT `.signIn`, which would both
+    /// flash a sign-in screen at every launch for a restored session and require reading
+    /// `currentUserId` this early. See `AppRoute.launching` for what that early read does to
+    /// Firebase's own initialization.
+    public init(route: AppRoute = .launching, joinLinkHost: String = AppConfig.defaultJoinLinkHost) {
         self.stack = [route]
         self.joinLinkHost = joinLinkHost
+    }
+
+    /// specs/004 §2.6 — called once by `RootView` on first appear, when `UIApplication.shared`
+    /// genuinely exists and reading the auth session is therefore safe.
+    ///
+    /// **Idempotent by design.** SwiftUI's `.task` can re-run (view identity changes, scene
+    /// reattachment), and re-resolving would yank a user who has since navigated elsewhere back to
+    /// a root. It therefore only acts while the stack is still exactly `[.launching]`.
+    public func resolveLaunch(isSignedIn: Bool) {
+        guard stack == [.launching] else { return }
+        stack = [Self.launchRoute(isSignedIn: isSignedIn)]
     }
 
     /// specs/004 §2.6 — the launch route derives from the persisted auth session, never a
@@ -47,6 +62,14 @@ public final class AppCoordinator: ObservableObject {
     /// then needs two backs to escape.
     private func push(_ route: AppRoute) {
         guard route != self.route else { return }
+        // `.launching` is a splash, not a navigation entry — anything that navigates REPLACES it
+        // rather than stacking on top. Otherwise a cold start via a join link (`onOpenURL` can
+        // arrive before `RootView`'s `.task` resolves the launch) would leave the splash sitting
+        // behind the join screen, and backing out would reveal it.
+        if stack == [.launching] {
+            stack = [route]
+            return
+        }
         stack.append(route)
     }
 

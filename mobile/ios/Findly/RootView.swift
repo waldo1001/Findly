@@ -96,6 +96,11 @@ struct RootView: View {
     var body: some View {
         Group {
             switch coordinator.route {
+            case .launching:
+                // specs/004 §2.6 — the neutral splash shown until `.task` below resolves the real
+                // route. Themed rather than blank so a restored session never flashes a sign-in
+                // screen, and never flashes white either.
+                LoadingStateView(message: "Findly")
             case .signIn:
                 SignInScreen(
                     viewModel: SignInViewModel(authProvider: authProvider, onSignedIn: {
@@ -279,6 +284,20 @@ struct RootView: View {
                     onCompleted: { coordinator.showHome() }
                 )
             }
+        }
+        // specs/004-ios-client.md §2.6 — resolve the launch route HERE, not in `FindlyApp.init()`.
+        // This is the earliest point at which `UIApplication.shared` is guaranteed up, which is
+        // what makes reading `currentUserId` (and therefore constructing `Auth.auth()`) safe: doing
+        // it in `App.init()` made Firebase's own `protectedDataInitialization` fail its reflective
+        // UIApplication lookup and return early, leaving `tokenManager` nil for the whole process
+        // so the first APNs callback trapped. `resolveLaunch` is itself idempotent, since `.task`
+        // can re-run on view-identity changes.
+        //
+        // The device/push registration below reads `currentUserId` too, so it moved here for the
+        // same reason — it used to be a `Task` fired from `App.init()`.
+        .task {
+            coordinator.resolveLaunch(isSignedIn: authProvider.currentUserId != nil)
+            await onSignedIn()
         }
         .environment(\.theme, colorScheme == .dark ? .dark : .light)
         // specs/004-ios-client.md §2.5 — the ONE back affordance decision for the whole app.
