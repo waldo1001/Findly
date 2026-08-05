@@ -16,3 +16,14 @@ Thumbs.db
 
 # Raw design uploads (keep the extracted design/findly-design-system/ instead)
 design/*.zip
+
+# Signing material — repo-wide, never committed (docs/security-review-checklist.md §1).
+# mobile/android/.gitignore already covers these, but ONLY under that directory: a keystore
+# generated at the repo root (which is where the keytool command in docs/finish-line-runbook.md
+# lands by default) was not ignored, so a `git add -A` could have committed it.
+*.jks
+*.keystore
+keystore.properties
+*.p8
+*.p12
+*.mobileprovision
