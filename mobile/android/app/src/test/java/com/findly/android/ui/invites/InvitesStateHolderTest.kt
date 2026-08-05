@@ -9,6 +9,7 @@ import com.findly.android.network.dto.CreateInviteResponseDto
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /** [InvitesStateHolder] is pure Kotlin — tested with [FakeFamilyApi]
@@ -66,6 +67,20 @@ class InvitesStateHolderTest {
         assertEquals(false, state.isAcceptingInvite)
         assertNull(state.acceptInviteError)
         assertEquals(listOf("7F3K9QRZ" to "Noor"), api.acceptInviteCalls)
+    }
+
+    @Test
+    fun `acceptInvite with a blank display name surfaces a validation message and never reaches the network`() = runTest {
+        val api = FakeFamilyApi()
+        val holder = InvitesStateHolder(api)
+
+        holder.acceptInvite(inviteCode = "7F3K9QRZ", displayName = "  ")
+
+        val state = holder.state.value
+        assertEquals("Enter a display name", state.acceptInviteError)
+        assertEquals(false, state.isAcceptingInvite)
+        assertNull(state.acceptedFamily)
+        assertTrue(api.acceptInviteCalls.isEmpty())
     }
 
     @Test

@@ -36,8 +36,18 @@ class InvitesStateHolder(private val familyApi: FamilyApi) {
 
     /** §3.4 — caller MUST NOT already belong to a family; `INVITE_INVALID`/`INVITE_ALREADY_USED`/
      * `INVITE_EXPIRED`/`FAMILY_ALREADY_MEMBER` all surface as an ordinary
-     * [InvitesUiState.acceptInviteError]. */
+     * [InvitesUiState.acceptInviteError]. `displayName` is required unconditionally server-side
+     * (`backend/src/http/validate.ts`, unlike §12.1/§12.6's create/join-group where it's only
+     * required when the caller has no profile yet) — a blank value never reaches the network,
+     * mirroring [com.findly.android.ui.family.CreateFamilyStateHolder.validate]'s same
+     * unconditional "gate before any network call" convention (A21 review — this is one of the
+     * four equally-weighted first-run bootstrap paths off `GroupsListUiState.ProfileNeeded`). */
     suspend fun acceptInvite(inviteCode: String, displayName: String) {
+        if (displayName.isBlank()) {
+            _state.value = _state.value.copy(acceptInviteError = "Enter a display name")
+            return
+        }
+
         _state.value = _state.value.copy(isAcceptingInvite = true, acceptInviteError = null)
         when (val result = familyApi.acceptInvite(inviteCode, displayName)) {
             is ApiResult.Success -> _state.value = _state.value.copy(
