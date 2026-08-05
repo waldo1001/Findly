@@ -10,6 +10,30 @@ This doc sequences that work. It does not replace the detailed references — [`
 
 **Legend:** 👤 = only you can do it · 🤖 = agent can do it · ⏳ = waiting on a third party.
 
+## What the agent can and cannot verify — read this before following any step
+
+Written after the agent instructed the user to do two H9 steps that were **already done**, because it
+treated an un-flipped ledger row as evidence of work outstanding. A `human` row means *nobody recorded
+finishing it*, which is not the same as *it isn't finished*.
+
+| System | Agent access | So it can verify… |
+|---|---|---|
+| GitHub | `gh` authenticated | secrets (names), variables, branch protection, Dependabot alerts, CI runs |
+| Azure | `az` authenticated as `eric.wauters@dynex.be` | resources, Function App config, CORS, storage |
+| Live web | plain `curl` | `/privacy`, `/terms`, `/delete-account`, `assetlinks.json`, AASA |
+| Local repo | full | code, specs, builds, tests, signing of built artifacts |
+| **Firebase** | **none** — no `firebase` CLI, no `gcloud`, no credentials | **nothing.** Auth providers, SMS region policy, authorized domains, registered apps, App Check, budget — all invisible |
+| **Play Console** | **none** | nothing |
+| **App Store Connect** | API key exists (upload only) | uploads; not listing/label state |
+
+**Rule for the agent:** before presenting a `human` row as a task, verify it if the table above says you can.
+If you cannot, say *"I can't check this — confirm whether it's already done"* rather than issuing it as work.
+
+**To close the Firebase blind spot** (optional, ~2 min): `npm i -g firebase-tools && firebase login`. After
+that the agent can run `firebase projects:list` / `firebase apps:list --project findly-71f7b`. Note that even
+then, SMS region policy and authorized domains sit in Identity Platform and are not exposed by that CLI —
+those stay user-confirmed.
+
 ---
 
 ## Track A — quick wins (~15 min, do first)
