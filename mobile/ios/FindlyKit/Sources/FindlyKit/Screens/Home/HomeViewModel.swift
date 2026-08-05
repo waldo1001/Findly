@@ -6,18 +6,26 @@ import os
 /// (own history, first other member to locate), so individual feature screens don't each need to
 /// re-derive this.
 ///
-/// **Family-less is first-class (review-gate finding #3, specs/005 §1, 001 §1.5).** A signed-in
-/// user without a family answers `FAMILY_NOT_FOUND` (has a profile, no family) or
-/// `PROFILE_NOT_FOUND` (brand-new, no profile at all yet — 001 §1.5.3) to this fetch — both land in
-/// `.familyless`, a distinct renderable state, NOT the generic `.error`, so `HomeScreen` can still
-/// offer Groups (family-independent, 001 §1.5.4) instead of a dead end with a bare error banner.
-/// Every other failure (transport, decoding, any other server code) still lands in `.error`.
+/// **Family-less and profile-less are first-class (review-gate finding #3, specs/005 §1, 001 §1.5;
+/// I17).** A signed-in user without a family answers `FAMILY_NOT_FOUND` or `PROFILE_NOT_FOUND` to
+/// this fetch — neither is the generic `.error`, so `HomeScreen` can still offer a way forward
+/// instead of a dead end with a bare error banner. **They are DISTINCT states, not one conflated
+/// `.familyless` (I17 fix — the prior conflation was itself a bug):** `FAMILY_NOT_FOUND` (`.familyless`)
+/// means the caller already has a `Users` profile row and can use every profile-scoped endpoint,
+/// incl. `GET /groups` (001 §12.2) — Groups is a safe, working destination for them.
+/// `PROFILE_NOT_FOUND` (`.profileless`) means no profile exists at all (001 §1.5.3): `GET /groups`
+/// would 404 too, so the only ways forward are the four profile-bootstrapping endpoints
+/// (`POST /families` §3.1, `POST /invites/accept` §3.4, `POST /groups` §12.1, `POST /groups/join`
+/// §12.6) — routing this caller to the ordinary Groups list (as the pre-I17 code did) was itself
+/// the doomed dead end the review found. Every other failure (transport, decoding, any other server
+/// code) still lands in `.error`.
 @MainActor
 public final class HomeViewModel: ObservableObject {
     public enum State: Equatable {
         case loading
         case loaded(myUserId: String, isParent: Bool, familyName: String, otherMembers: [FamilyMember])
         case familyless
+        case profileless
         case error(String)
     }
 
@@ -43,9 +51,12 @@ public final class HomeViewModel: ObservableObject {
             )
         } catch {
             switch (error as? APIError)?.serverCode {
-            case .familyNotFound, .profileNotFound:
-                Self.log("load: no family/profile -> familyless")
+            case .familyNotFound:
+                Self.log("load: no family -> familyless")
                 state = .familyless
+            case .profileNotFound:
+                Self.log("load: no profile -> profileless")
+                state = .profileless
             default:
                 Self.log("load: failed -> error state")
                 state = .error(userFacingMessage(for: error))
