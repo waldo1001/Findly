@@ -157,6 +157,12 @@ public struct HomeScreen: View {
             FindlyButton("I have an invite code", style: .secondary) { onSelectAcceptInvite(profileDisplayName) }
             FindlyButton("Create a group", style: .secondary) { onSelectCreateGroup(profileDisplayName) }
             FindlyButton("Join a group", style: .secondary) { onSelectJoinGroup(profileDisplayName) }
+            // I17 review (Minor): 001 §1.5.3 explicitly permits `DELETE /users/me` without a
+            // profile, and specs/008-privacy-endpoints.md §4.4 requires export/delete to be
+            // reachable without contacting support (a store requirement) — a brand-new user who
+            // decides not to proceed with onboarding still needs a way to delete the account they
+            // just created. Same escape hatch [familylessContent] already has.
+            FindlyButton("Privacy & data", style: .secondary) { onSelectPrivacySettings() }
         }
         .padding(theme.spacing.xl)
     }
