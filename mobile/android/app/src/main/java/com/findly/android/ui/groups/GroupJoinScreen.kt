@@ -37,6 +37,7 @@ fun GroupJoinRoute(
     viewModel: GroupJoinViewModel,
     modifier: Modifier = Modifier,
     prefillCode: String = "",
+    prefillDisplayName: String = "",
     onJoined: () -> Unit = {},
 ) {
     val state by viewModel.state.collectAsState()
@@ -44,6 +45,7 @@ fun GroupJoinRoute(
         state = state,
         needsDisplayName = viewModel.needsDisplayName,
         prefillCode = prefillCode,
+        prefillDisplayName = prefillDisplayName,
         onJoin = viewModel::join,
         onJoined = onJoined,
         modifier = modifier,
@@ -56,11 +58,14 @@ fun GroupJoinScreen(
     modifier: Modifier = Modifier,
     needsDisplayName: Boolean = false,
     prefillCode: String = "",
+    prefillDisplayName: String = "",
     onJoin: (code: String, displayName: String?) -> Unit = { _, _ -> },
     onJoined: () -> Unit = {},
 ) {
     var code by remember { mutableStateOf(prefillCode) }
-    var displayName by remember { mutableStateOf("") }
+    // A21: seeded from the profile-less first-run screen's shared display-name entry
+    // (GroupsListUiState.CreateJoinContext.prefillDisplayName) when reached from there.
+    var displayName by remember { mutableStateOf(prefillDisplayName) }
 
     LaunchedEffect(state.joined) {
         if (state.joined != null) onJoined()

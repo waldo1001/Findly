@@ -13,12 +13,24 @@ import com.findly.android.network.ports.FamilyApi
 /** Test fake — mirrors the backend's `test/fakes/` convention (backend/README.md). Used by the
  * A2 settings/invites ViewModel tests. */
 class FakeFamilyApi : FamilyApi {
+    val createFamilyCalls = mutableListOf<Pair<String, String>>()
     val createInviteCalls = mutableListOf<Pair<String, String?>>()
     val acceptInviteCalls = mutableListOf<Pair<String, String>>()
     val updateMemberCalls = mutableListOf<Pair<String, UpdateMemberRequestDto>>()
     val removeMemberCalls = mutableListOf<String>()
     var getMyFamilyCallCount = 0
         private set
+
+    /** A21: `POST /families` (001 §3.1) — previously unexercised ("not exercised by A2 tests"),
+     * since no screen/ViewModel called [FamilyApi.createFamily] until [CreateFamilyStateHolder]. */
+    var createFamilyResult: ApiResult<CreateFamilyResponseDto> = ApiResult.Success(
+        CreateFamilyResponseDto(
+            familyId = "fam_test",
+            familyName = "Wauters",
+            member = MemberDto("uid-parent", "parent", "Eric"),
+        ),
+        features = defaultFeatures(),
+    )
 
     var getMyFamilyResult: ApiResult<FamilyMeResponseDto> = ApiResult.Success(
         FamilyMeResponseDto(
@@ -51,8 +63,10 @@ class FakeFamilyApi : FamilyApi {
 
     var removeMemberResult: ApiResult<Unit> = ApiResult.Success(Unit, features = null)
 
-    override suspend fun createFamily(familyName: String, displayName: String): ApiResult<CreateFamilyResponseDto> =
-        throw UnsupportedOperationException("not exercised by A2 tests")
+    override suspend fun createFamily(familyName: String, displayName: String): ApiResult<CreateFamilyResponseDto> {
+        createFamilyCalls.add(familyName to displayName)
+        return createFamilyResult
+    }
 
     override suspend fun getMyFamily(): ApiResult<FamilyMeResponseDto> {
         getMyFamilyCallCount++

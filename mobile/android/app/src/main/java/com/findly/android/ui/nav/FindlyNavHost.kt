@@ -18,6 +18,9 @@ import androidx.navigation.navDeepLink
 import com.findly.android.AppContainer
 import com.findly.android.auth.AuthState
 import com.findly.android.network.PlanLimits
+import com.findly.android.ui.family.CreateFamilyRoute
+import com.findly.android.ui.family.CreateFamilyViewModel
+import com.findly.android.ui.family.CreateFamilyViewModelFactory
 import com.findly.android.ui.geofences.GeofencesRoute
 import com.findly.android.ui.geofences.GeofencesViewModel
 import com.findly.android.ui.geofences.GeofencesViewModelFactory
@@ -125,8 +128,15 @@ fun FindlyNavHost(
     openSettingsOnLaunch: Boolean = false,
 ) {
     var pendingLocateTarget by remember { mutableStateOf<Pair<String, String>?>(null) }
-    var pendingCreateContext by remember { mutableStateOf<GroupsListUiState.Content?>(null) }
-    var pendingJoinContext by remember { mutableStateOf<GroupsListUiState.Content?>(null) }
+    var pendingCreateContext by remember { mutableStateOf<GroupsListUiState.CreateJoinContext?>(null) }
+    var pendingJoinContext by remember { mutableStateOf<GroupsListUiState.CreateJoinContext?>(null) }
+
+    // A21 (specs/003 §12.2's ProfileNeeded first-run flow): the display name the user typed once
+    // on GroupsListScreen's profile-less branch, carried to whichever of CreateFamily/Invites they
+    // tap next — same "remembered local state instead of a nav-graph argument" pattern as
+    // pendingLocateTarget/pendingCreateContext above (only one of these two destinations is ever
+    // pending navigation at a time, so one holder suffices).
+    var pendingOnboardingDisplayName by remember { mutableStateOf("") }
 
     val authState by container.authProvider.authState.collectAsState()
     LaunchedEffect(authState) {
@@ -243,7 +253,19 @@ fun FindlyNavHost(
 
         composable(Destinations.Invites.route) {
             val invitesViewModel: InvitesViewModel = viewModel(factory = InvitesViewModelFactory(container.findlyApiClient))
-            InvitesRoute(viewModel = invitesViewModel)
+            InvitesRoute(viewModel = invitesViewModel, prefillDisplayName = pendingOnboardingDisplayName)
+        }
+
+        // A21 (001 §3.1, specs/003 §12.2's ProfileNeeded flow): the client's only POST /families
+        // entry point.
+        composable(Destinations.CreateFamily.route) {
+            val createFamilyViewModel: CreateFamilyViewModel =
+                viewModel(factory = CreateFamilyViewModelFactory(container.findlyApiClient))
+            CreateFamilyRoute(
+                viewModel = createFamilyViewModel,
+                prefillDisplayName = pendingOnboardingDisplayName,
+                onCreated = { navController.popBackStack() },
+            )
         }
 
         // --- A5: groups (specs/005-temporary-groups.md; specs/003 §12.2) ---
@@ -253,16 +275,27 @@ fun FindlyNavHost(
                 viewModel(factory = GroupsListViewModelFactory(container.findlyApiClient, container.findlyApiClient))
             GroupsListRoute(
                 viewModel = groupsListViewModel,
-                onCreateGroup = { content ->
-                    pendingCreateContext = content
+                onCreateGroup = { context ->
+                    pendingCreateContext = context
                     navController.navigate(Destinations.GroupCreate.route)
                 },
-                onJoinGroup = { content ->
-                    pendingJoinContext = content
+                onJoinGroup = { context ->
+                    pendingJoinContext = context
                     navController.navigate(Destinations.GroupJoin.route)
                 },
                 onOpenGroup = { groupId -> navController.navigate(Destinations.GroupDetail.createRoute(groupId)) },
                 onManageFamily = { navController.navigate(Destinations.Invites.route) },
+                // A21: the two non-group bootstrap paths off GroupsListScreen's ProfileNeeded
+                // branch (001 §1.5.3) — stash the once-entered display name the same way
+                // onCreateGroup/onJoinGroup stash their CreateJoinContext above.
+                onCreateFamily = { displayName ->
+                    pendingOnboardingDisplayName = displayName
+                    navController.navigate(Destinations.CreateFamily.route)
+                },
+                onAcceptInvite = { displayName ->
+                    pendingOnboardingDisplayName = displayName
+                    navController.navigate(Destinations.Invites.route)
+                },
             )
         }
 
@@ -277,6 +310,7 @@ fun FindlyNavHost(
             )
             CreateGroupRoute(
                 viewModel = createGroupViewModel,
+                prefillDisplayName = context?.prefillDisplayName.orEmpty(),
                 onCreated = { navController.popBackStack() },
             )
         }
@@ -304,6 +338,7 @@ fun FindlyNavHost(
             GroupJoinRoute(
                 viewModel = groupJoinViewModel,
                 prefillCode = sanitizedCode,
+                prefillDisplayName = context?.prefillDisplayName.orEmpty(),
                 // Not a plain popBackStack: GroupJoin is this app's only deep-link destination, so
                 // a cold app start via findly://group-join can leave a back stack that never
                 // contains Destinations.Groups at all — popBackStack(Groups, ...) would silently

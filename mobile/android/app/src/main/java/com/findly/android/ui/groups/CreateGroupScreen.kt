@@ -48,12 +48,14 @@ import java.time.ZoneOffset
 fun CreateGroupRoute(
     viewModel: CreateGroupViewModel,
     modifier: Modifier = Modifier,
+    prefillDisplayName: String = "",
     onCreated: () -> Unit = {},
 ) {
     val state by viewModel.state.collectAsState()
     CreateGroupScreen(
         state = state,
         needsDisplayName = viewModel.needsDisplayName,
+        prefillDisplayName = prefillDisplayName,
         onCreate = viewModel::createGroup,
         onCreated = onCreated,
         modifier = modifier,
@@ -66,12 +68,16 @@ fun CreateGroupScreen(
     state: CreateGroupUiState,
     modifier: Modifier = Modifier,
     needsDisplayName: Boolean = false,
+    prefillDisplayName: String = "",
     onCreate: (name: String, endsAtMillis: Long?, expiryPolicy: String, displayName: String?) -> Unit =
         { _, _, _, _ -> },
     onCreated: () -> Unit = {},
 ) {
     var name by remember { mutableStateOf("") }
-    var displayName by remember { mutableStateOf("") }
+    // A21: seeded from the profile-less first-run screen's shared display-name entry
+    // (GroupsListUiState.CreateJoinContext.prefillDisplayName) when reached from there — still
+    // editable, same "enter it once" intent as GroupJoinScreen's prefillCode.
+    var displayName by remember { mutableStateOf(prefillDisplayName) }
     var expiryPolicy by remember { mutableStateOf("delete") }
     var dateMillis by remember { mutableStateOf<Long?>(null) }
     var hour by remember { mutableStateOf("22") }
