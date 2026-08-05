@@ -37,12 +37,11 @@ class GroupsListStateHolderTest {
         assertEquals(1, state.groups.size)
         assertEquals("Festival crew", state.groups.single().name)
         assertTrue(state.hasFamily)
-        assertFalse(state.needsDisplayName)
         assertEquals(5, state.limits?.maxActiveGroups)
     }
 
     @Test
-    fun `FAMILY_NOT_FOUND on the family probe marks hasFamily false, needsDisplayName false`() = runTest {
+    fun `FAMILY_NOT_FOUND on the family probe marks hasFamily false but still loads the group list`() = runTest {
         val groupsApi = FakeGroupsApi()
         val familyApi = FakeFamilyApi().apply {
             getMyFamilyResult = ApiResult.Failure(ApiError.FamilyNotFound("no family", "r_1"))
@@ -53,11 +52,11 @@ class GroupsListStateHolderTest {
 
         val state = holder.state.value as GroupsListUiState.Content
         assertFalse(state.hasFamily)
-        assertFalse(state.needsDisplayName)
+        assertEquals(1, groupsApi.listGroupsCallCount)
     }
 
     @Test
-    fun `PROFILE_NOT_FOUND on the family probe marks hasFamily false, needsDisplayName true`() = runTest {
+    fun `PROFILE_NOT_FOUND on the family probe yields ProfileNeeded and never calls the doomed GET groups`() = runTest {
         val groupsApi = FakeGroupsApi()
         val familyApi = FakeFamilyApi().apply {
             getMyFamilyResult = ApiResult.Failure(ApiError.ProfileNotFound("no profile", "r_1"))
@@ -66,9 +65,12 @@ class GroupsListStateHolderTest {
         val holder = GroupsListStateHolder(groupsApi, familyApi, backgroundScope)
         runCurrent()
 
-        val state = holder.state.value as GroupsListUiState.Content
-        assertFalse(state.hasFamily)
-        assertTrue(state.needsDisplayName)
+        // 001 §12.2: "GET /groups: caller needs a profile" — a profile-less caller's GET /groups
+        // is doomed to 404 PROFILE_NOT_FOUND, so it must never even be attempted (the A21 bug:
+        // the old code called listGroups() first and only then classified the caller, stranding
+        // a profile-less user on GroupsListUiState.Error instead of the four bootstrap paths).
+        assertEquals(GroupsListUiState.ProfileNeeded, holder.state.value)
+        assertEquals(0, groupsApi.listGroupsCallCount)
     }
 
     @Test
@@ -83,7 +85,6 @@ class GroupsListStateHolderTest {
 
         val state = holder.state.value as GroupsListUiState.Content
         assertTrue(state.hasFamily)
-        assertFalse(state.needsDisplayName)
     }
 
     @Test

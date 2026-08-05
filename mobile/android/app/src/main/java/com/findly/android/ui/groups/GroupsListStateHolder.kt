@@ -14,10 +14,12 @@ import kotlinx.coroutines.launch
 
 /**
  * The groups list screen's pure state machine (001-api-contract.md §12.2). Constructor-injected
- * [CoroutineScope] — same pattern as [com.findly.android.ui.map.MapStateHolder]. Loads
- * `GET /groups` and, alongside it, probes `GET /families/me` (001 §1.5.4) purely to classify the
- * caller for the family-less-home behavior (specs/003-android-client.md §12.2) — this screen is
- * the one place in the app that must work identically whether the caller has a family or not.
+ * [CoroutineScope] — same pattern as [com.findly.android.ui.map.MapStateHolder]. Probes
+ * `GET /families/me` (001 §1.5.4) **first**, purely to classify the caller — only once that
+ * probe rules out "no profile at all" does it call `GET /groups`, since that call needs a profile
+ * (§12.2) and would otherwise 404 for a profile-less caller (specs/003-android-client.md §12.2;
+ * A21). This screen is the one place in the app that must work identically whether the caller has
+ * a family, has a profile but no family, or has no profile at all.
  */
 class GroupsListStateHolder(
     private val groupsApi: GroupsApi,
@@ -31,38 +33,38 @@ class GroupsListStateHolder(
         scope.launch { refresh() }
     }
 
-    /** Re-fetches both the group list and the family-probe. Public so pull-to-refresh / retry can
-     * call it directly, mirroring [com.findly.android.ui.map.MapStateHolder.refresh]. */
+    /** Re-fetches the family-probe and, unless the caller is profile-less, the group list.
+     * Public so pull-to-refresh / retry can call it directly, mirroring
+     * [com.findly.android.ui.map.MapStateHolder.refresh]. */
     suspend fun refresh() {
         val current = _state.value
         if (current is GroupsListUiState.Content) {
             _state.value = current.copy(isRefreshing = true)
         }
 
+        val profileResult = familyApi.getMyFamily()
+        if (profileResult is ApiResult.Failure && profileResult.error is ApiError.ProfileNotFound) {
+            // 001 §1.5.3/§12.2: no profile at all — GET /groups would 404 too, so never attempt
+            // it. This is the fix for the A21 bug: the old code called listGroups() unconditionally
+            // and only classified the caller afterwards, stranding a profile-less user on
+            // GroupsListUiState.Error instead of the four bootstrap paths.
+            _state.value = GroupsListUiState.ProfileNeeded
+            return
+        }
+
         when (val result = groupsApi.listGroups()) {
             is ApiResult.Failure -> _state.value = GroupsListUiState.Error(result.error.userMessage())
             is ApiResult.Success -> {
-                val (hasFamily, needsDisplayName) = resolveProfileStatus()
                 _state.value = GroupsListUiState.Content(
                     groups = result.data.groups.map { it.toUi() },
                     limits = result.features?.limits,
-                    hasFamily = hasFamily,
-                    needsDisplayName = needsDisplayName,
+                    // FAMILY_NOT_FOUND (profile exists, no family) -> false; any other outcome —
+                    // a genuine Success, or an unrelated failure (network, etc.) — defaults to
+                    // true, since only a confirmed FAMILY_NOT_FOUND is evidence the caller is
+                    // actually family-less (never mislabel on an inconclusive probe).
+                    hasFamily = !(profileResult is ApiResult.Failure && profileResult.error is ApiError.FamilyNotFound),
                 )
             }
-        }
-    }
-
-    /** Returns `(hasFamily, needsDisplayName)`. `PROFILE_NOT_FOUND` means the caller has no
-     * profile at all (`needsDisplayName = true`, 001 §12.1/§12.6's bootstrap rule);
-     * `FAMILY_NOT_FOUND` means a profile exists but no family; any other failure (network, etc.)
-     * is unrelated to family status and must not mislabel the caller as family-less. */
-    private suspend fun resolveProfileStatus(): Pair<Boolean, Boolean> = when (val result = familyApi.getMyFamily()) {
-        is ApiResult.Success -> true to false
-        is ApiResult.Failure -> when (result.error) {
-            is ApiError.ProfileNotFound -> false to true
-            is ApiError.FamilyNotFound -> false to false
-            else -> true to false
         }
     }
 }
