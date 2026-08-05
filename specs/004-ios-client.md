@@ -113,6 +113,34 @@ Injected via a custom `EnvironmentKey` (`\.theme`), defaulting to `.light`; the 
 
 Screens (`Screens/*/*.swift`) compose `DesignSystem.Components` and read state from an `ObservableObject` view model. View models contain **zero** styling — no `Color`, `Font`, or SwiftUI layout modifiers beyond what a generic container view needs; they expose plain state (strings, enums, booleans) that components render. This seam is what lets a future design pass replace every file under `DesignSystem/` without touching `Screens/`, `Navigation/`, `Networking/`, `Auth/`, `Device/`, or `Locations/`.
 
+### 2.5 Navigation model — the back stack (normative)
+
+**The problem this section exists to prevent.** `AppCoordinator` originally held a *single* `@Published var route: AppRoute`, and `RootView` `switch`ed on it to swap the whole view. That is not a navigation model — it is a router with no history. iOS has no hardware back button, so every screen reached that way was a **dead end**: the user could enter `.geofences`/`.liveMap`/`.history`/`.privacySettings`/`.deviceSettings`/`.familyMembers`/`.createInvite`/`.exportData` and had no way back short of killing the app. Only the handful of screens with a terminal callback (`onExit`/`onCreated`/`onCompleted`) could return, and they did so by *replacing* the route, not popping. Found on the first real TestFlight install, 2026-08-05.
+
+**Rule (MUST): `AppCoordinator` owns a stack, not a route.**
+
+- Internally the coordinator holds a non-empty `[AppRoute]`. `route` remains the public read-only accessor for the **top** of the stack, so existing call sites and tests keep working unchanged.
+- Every `showX()` method **pushes**. Pushing the route already on top is a no-op (idempotent — a double tap must not stack duplicates).
+- `pop()` removes the top entry and MUST be a **no-op at the root** (the stack never empties).
+- `canGoBack` is `true` iff the stack holds more than one entry. This is the single source of truth the UI reads to decide whether to show a back affordance — no screen decides this for itself.
+- **Root replacements, not pushes:** `showSignIn()` and `showHome()` **reset** the stack to exactly `[.signIn]` / `[.home]`. These are the two navigation roots; you can never go "back" *into* a sign-in screen, and Home is the top of the app. This is also what makes the post-sign-out and post-account-deletion paths land on a stack with no stale authenticated screens behind them (a real data-leak concern, not just cosmetics — specs/008 §4.4).
+- `handleDeepLink` **pushes** `.groupJoin` onto the existing stack when the app is already running, so dismissing a deep-linked join screen returns the user where they were. On a cold start the stack root is whatever §2.6 selected, so back from a deep link always has somewhere to land.
+
+**Rule (MUST): the back affordance is rendered once, centrally.** `RootView` renders it above the switched-on screen content, driven solely by `coordinator.canGoBack`. Individual screens MUST NOT each grow their own back button — that is what produced 20 screens with 20 different (or absent) answers. `FindlyNavBar` therefore takes an optional `onBack` closure and renders a themed, `.accessibilityLabel("Back")` control when one is supplied.
+
+**Terminal callbacks vs. back.** A screen's own completion callback (`onCreated`, `onCompleted`, `onExit`) expresses *where the flow ends*, which is not always "one screen back". Back is strictly "undo the last push"; a completion callback that means "this flow is over, return to the screen that started it" MUST use `popTo(_:)` — the counterpart to Android's `popBackStack(route, inclusive = false)` — which unwinds to the **existing** stack entry. Pushing the destination instead would leave the just-finished screen sitting *behind* it, so back would walk into a group the user has already left or a family they just deleted. When the target isn't on the stack at all (reachable when a cold-start deep link opened the flow directly), `popTo` rebuilds a minimal sane stack under it rather than stranding the user on a finished screen.
+
+### 2.6 Launch route — session restore (normative)
+
+**The problem this section exists to prevent.** `AppCoordinator`'s launch route was hardcoded to `.signIn`, and nothing at launch ever consulted `AuthProviding`. Firebase Auth **does** persist its session across launches (its keychain-backed `currentUser` survives process death), so the session was in fact restored — the app simply never asked, and forced a full SMS re-verification on every cold start. The same file's cold-launch device-registration closure already guarded on `authProvider.currentUserId != nil`, proving the restored session was observable at that exact point. Found on the first real TestFlight install, 2026-08-05.
+
+**Rule (MUST):** the app target selects the launch route from the auth provider, once, in `FindlyApp.init()`:
+
+- `authProvider.currentUserId != nil` → stack root `.home`.
+- otherwise → stack root `.signIn`.
+
+A restored session MUST NOT re-prompt for SMS verification. Sign-in is reached on a cold start only when there is genuinely no persisted user. Token *expiry* is a separate, already-specified concern: the client refreshes via `refreshIDToken()`, and only a second `AUTH_TOKEN_EXPIRED` forces sign-out (specs/009 §9) — an expired token at launch is a refresh, never an immediate bounce to sign-in.
+
 ---
 
 ## 3. Networking — full 001 client
