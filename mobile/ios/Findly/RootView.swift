@@ -73,6 +73,13 @@ struct RootView: View {
     @State private var pendingOnboardingDisplayName = ""
     @State private var pendingGroupBootstrapDisplayName = ""
 
+    /// specs/009-device-runtime.md §7 — owns the disclosure/prompt/banner ordering. `@StateObject`,
+    /// not `@ObservedObject`: this view is reconstructed on every navigation (see this type's top
+    /// doc, and I16), and an `@ObservedObject` here would hand the screen a fresh view model each
+    /// time — losing the "declined this session" and "banner dismissed" flags, so a user who
+    /// dismissed the banner would see it again on their next tap.
+    @StateObject private var permissionFlow: PermissionFlowViewModel
+
     init(
         coordinator: AppCoordinator,
         config: AppConfig,
@@ -91,9 +98,68 @@ struct RootView: View {
         self.exportArtifactStore = exportArtifactStore
         self.locationRuntimeContainer = locationRuntimeContainer
         self.onSignedIn = onSignedIn
+        // specs/009 §7. Built from the container's read-only seams rather than a second
+        // CLLocationManager, so the authorization this reports is the one the capture stack uses.
+        _permissionFlow = StateObject(wrappedValue: PermissionFlowViewModel(
+            authorization: { [weak locationRuntimeContainer] in
+                locationRuntimeContainer?.locationAuthorization ?? .notDetermined
+            },
+            requiresBackground: { [weak locationRuntimeContainer] in
+                locationRuntimeContainer?.requiresBackgroundLocation ?? false
+            },
+            disclosureStore: UserDefaultsPermissionDisclosureStore(),
+            requestForeground: { [weak locationRuntimeContainer] in
+                locationRuntimeContainer?.requestForegroundAuthorization()
+            },
+            requestBackgroundUpgrade: { [weak locationRuntimeContainer] in
+                locationRuntimeContainer?.requestBackgroundAuthorizationUpgrade()
+            }
+        ))
     }
 
     var body: some View {
+        // specs/009 §7 — the banner sits ABOVE the screen content, so a device that is not
+        // reporting says so on whatever screen the user is looking at, not only on one of them.
+        VStack(spacing: 0) {
+            PermissionBannerView(
+                banner: permissionFlow.banner,
+                onOpenSettings: { openSystemSettings() },
+                onDismiss: { permissionFlow.dismissBanner() }
+            )
+            content
+        }
+        // The disclosure is a full-screen cover, not a sheet: it must be answered before the OS
+        // prompt fires, and a swipe-to-dismiss sheet would let the user skip past the explanation
+        // into a prompt they were never given context for.
+        .fullScreenCover(
+            item: Binding(
+                get: { permissionFlow.disclosure },
+                // Only reachable if SwiftUI dismisses the cover itself; treat that as "Not now"
+                // rather than as consent, since the user has not read and accepted anything.
+                set: { if $0 == nil { permissionFlow.declineDisclosure() } }
+            )
+        ) { kind in
+            PermissionDisclosureScreen(
+                kind: kind,
+                onContinue: { permissionFlow.acknowledgeDisclosure() },
+                onNotNow: { permissionFlow.declineDisclosure() }
+            )
+            .environment(\.theme, colorScheme == .dark ? .dark : .light)
+            // The cover is presented outside the main hierarchy, so it does not inherit the back
+            // action — but clear it explicitly for the same reason `GeofenceEditorView` does
+            // (specs/004 §2.5): a back chevron here would navigate the app behind the cover.
+            .environment(\.navBarBackAction, nil)
+        }
+    }
+
+    /// specs/009 §7's "route into system settings" — the only way back once permission is denied,
+    /// since iOS will not show its dialog a second time.
+    private func openSystemSettings() {
+        guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+        UIApplication.shared.open(url)
+    }
+
+    private var content: some View {
         Group {
             switch coordinator.route {
             case .launching:
@@ -297,6 +363,11 @@ struct RootView: View {
         // same reason — it used to be a `Task` fired from `App.init()`.
         .task {
             coordinator.resolveLaunch(isSignedIn: authProvider.currentUserId != nil)
+            // specs/009 §7 — first evaluation of the disclosure/prompt/banner state. Deliberately
+            // after the launch route resolves, so a signed-out user is asked to sign in before
+            // being asked for their location: explaining family location-sharing to someone who has
+            // no family yet is the wrong order.
+            permissionFlow.refresh()
             await onSignedIn()
         }
         .environment(\.theme, colorScheme == .dark ? .dark : .light)
@@ -315,6 +386,17 @@ struct RootView: View {
         .onChange(of: scenePhase) { newPhase in
             guard newPhase == .active else { return }
             Task { await locationRuntimeContainer.onAppForeground() }
+            // specs/009 §7 — permission MUST be re-checked on every foreground: the user can revoke
+            // it from system settings at any time, and returning from that very screen is the most
+            // likely moment for it to have changed.
+            permissionFlow.refresh()
+        }
+        // specs/009 §7 — answering the OS dialog does not change scene phase, so without this the
+        // banner and the deferred monitoring would both stay stale until the user next left the app
+        // and came back.
+        .onReceive(NotificationCenter.default.publisher(for: .findlyLocationAuthorizationChanged)) { _ in
+            permissionFlow.refresh()
+            locationRuntimeContainer.onAuthorizationChanged()
         }
     }
 

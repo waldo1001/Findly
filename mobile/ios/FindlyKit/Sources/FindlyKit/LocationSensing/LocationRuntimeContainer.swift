@@ -82,6 +82,32 @@ public final class LocationRuntimeContainer {
     /// container already built to `PushRuntimeContainer`, rather than constructing a second one.
     public var settingsApplying: DeviceSettingsApplying { settingsCoordinator }
 
+    /// specs/009 §7 — the two inputs the permission flow needs from the runtime, exposed read-only
+    /// so the app target can build a `PermissionFlowViewModel` without reaching into the container's
+    /// internals or constructing a second `CLLocationManager`.
+    public var locationAuthorization: LocationAuthorization { locationProvider.authorization }
+
+    /// Whether this device's configured interval needs background reporting at all (003 §11.3).
+    /// A device on a ≥15-minute interval reports through `BGAppRefreshTask` and significant-change
+    /// monitoring, which still want Always; the 5/10-minute intervals additionally run the
+    /// foreground service. Either way anything below "always" degrades to foreground-only, so this
+    /// is `true` whenever tracking is on — and deliberately `false` when the user has paused
+    /// tracking, so a paused device never nags for a permission it is not using.
+    public var requiresBackgroundLocation: Bool {
+        stateStore.current()?.trackingEnabled != false
+    }
+
+    /// Fires the OS prompts. Kept behind the container because `SystemLocationProvider` owns the
+    /// `CLLocationManager`; the flow's ordering guarantee lives in `PermissionFlowViewModel`, which
+    /// only ever calls these AFTER its disclosure has been acknowledged.
+    public func requestForegroundAuthorization() {
+        (locationProvider as? SystemLocationProviderRequesting)?.requestWhenInUseAuthorizationIfNeeded()
+    }
+
+    public func requestBackgroundAuthorizationUpgrade() {
+        (locationProvider as? SystemLocationProviderRequesting)?.requestAlwaysAuthorizationUpgrade()
+    }
+
     public init(
         apiClient: FindlyAPIClient,
         deviceId: @escaping () -> String?,
@@ -146,7 +172,13 @@ public final class LocationRuntimeContainer {
                 // geofence re-registration triggers (I11) — the OS may have already lost the
                 // platform registrations while paused (a paused device unregisters all geofences,
                 // §4), so resume must re-sync/re-register, not just restart location monitoring.
-                locationProvider.startBackgroundMonitoring(coordinator: captureCoordinator)
+                // Same authorization gate as `startMonitoringIfAuthorized()`, inlined: this
+                // closure is built inside `init` before all members exist, so it cannot call
+                // a method on `self`. Uses the same local captures the original call did.
+                let auth = locationProvider.authorization
+                if auth == .whenInUse || auth == .always {
+                    locationProvider.startBackgroundMonitoring(coordinator: captureCoordinator)
+                }
                 backgroundScheduler.scheduleNextSync()
                 await geofenceConfigSyncCoordinator.sync()
             }
@@ -189,11 +221,43 @@ public final class LocationRuntimeContainer {
     /// significant-location-change monitoring is conditional on not being paused.
     public func start() {
         if stateStore.current()?.trackingEnabled != false {
-            locationProvider.startBackgroundMonitoring(coordinator: captureCoordinator)
+            // specs/009 §7 — monitoring is gated on authorization, NOT just on `trackingEnabled`.
+            // `startMonitoringSignificantLocationChanges()` implicitly triggers the OS
+            // authorization dialog when the status is `.notDetermined`, so calling it here fired
+            // the prompt during launch — straight over the disclosure screen that had just been
+            // presented, which is the exact inversion §7 forbids. Observed on the simulator
+            // 2026-08-05 with the disclosure visible and the system alert stacked on top of it.
+            //
+            // Deferring costs nothing: `onAuthorizationChanged()` starts monitoring the moment
+            // permission is actually granted, and `onAppForeground()` re-checks besides.
+            startMonitoringIfAuthorized()
             backgroundScheduler.scheduleNextSync()
         } else {
             backgroundScheduler.scheduleNextSync(afterDelay: Self.pausedPollIntervalSeconds)
         }
+    }
+
+    /// Call once the user has answered the OS prompt (specs/009 §7). Starts the monitoring that
+    /// every call site deliberately defers while authorization is still undetermined; a no-op if
+    /// permission was refused, or if tracking is paused.
+    public func onAuthorizationChanged() {
+        guard stateStore.current()?.trackingEnabled != false else { return }
+        startMonitoringIfAuthorized()
+    }
+
+    /// specs/009 §7 — **the only way this container starts location monitoring.**
+    ///
+    /// `startMonitoringSignificantLocationChanges()` implicitly triggers the OS authorization
+    /// dialog when the status is `.notDetermined`, so any ungated call fires the prompt — including
+    /// over the disclosure screen that was just presented, which is the precise inversion §7
+    /// forbids. There were three ungated call sites (cold start, resume-from-pause, and the
+    /// foreground re-check); each launch path raced the disclosure. Routing all of them through one
+    /// gate is what makes "no prompt before the explanation" a property of this type rather than
+    /// something each caller has to remember.
+    private func startMonitoringIfAuthorized() {
+        let auth = locationProvider.authorization
+        guard auth == .whenInUse || auth == .always else { return }
+        locationProvider.startBackgroundMonitoring(coordinator: captureCoordinator)
     }
 
     /// specs/009 §6.2's "device reboot / app reinstall" registration trigger — both lose OS-level

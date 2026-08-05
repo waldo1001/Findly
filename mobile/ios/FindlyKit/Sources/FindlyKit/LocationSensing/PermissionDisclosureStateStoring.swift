@@ -66,3 +66,9 @@ public final class UserDefaultsPermissionDisclosureStore: PermissionDisclosureSt
 }
 
 extension PermissionDisclosureKind: Hashable {}
+
+/// Lets SwiftUI drive a `fullScreenCover(item:)` straight from the view model's `disclosure`,
+/// without a wrapper type whose only job would be to carry an id.
+extension PermissionDisclosureKind: Identifiable {
+    public var id: Self { self }
+}

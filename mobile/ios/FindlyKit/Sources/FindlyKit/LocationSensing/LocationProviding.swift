@@ -30,6 +30,36 @@ public protocol LocationProviding: AnyObject {
     func requestSingleFix(source: FixSource) async throws -> LocationFix
     func startBackgroundMonitoring(coordinator: FixCaptureCoordinator)
     func stopBackgroundMonitoring()
+
+    /// Current authorization, collapsed to the four states `PermissionFlowPolicy` reasons about
+    /// (specs/009 §7). Distinct from the pre-existing `isAuthorized`, which answers "can I capture
+    /// a fix right now?" and cannot distinguish *not yet asked* from *refused* — a distinction the
+    /// disclosure flow depends on, since only one of those two can still be prompted.
+    var authorization: LocationAuthorization { get }
+}
+
+public extension LocationProviding {
+    /// Defaults to `.notDetermined` so the many test fakes and the macOS/no-op provider need no
+    /// change; only the real CoreLocation-backed provider reports a meaningful value.
+    var authorization: LocationAuthorization { .notDetermined }
+}
+
+/// The two OS prompts, behind a protocol so `LocationRuntimeContainer` can trigger them without
+/// importing CoreLocation or knowing which concrete provider it holds — and so a test double can
+/// stand in on macOS, where `SystemLocationProvider` does not exist at all.
+public extension Notification.Name {
+    /// Posted when CoreLocation reports an authorization change (specs/009 §7). Answering the OS
+    /// dialog does **not** move the app through a scene-phase change, so the foreground re-check
+    /// alone would leave the banner and the deferred monitoring stale until the user next left and
+    /// returned. This is the signal that closes that gap.
+    static let findlyLocationAuthorizationChanged = Notification.Name("com.findly.locationAuthorizationChanged")
+}
+
+public protocol SystemLocationProviderRequesting: AnyObject {
+    /// MUST be called only after the foreground disclosure is acknowledged (specs/009 §7).
+    func requestWhenInUseAuthorizationIfNeeded()
+    /// MUST be called only after the background disclosure is acknowledged (003 §11.2).
+    func requestAlwaysAuthorizationUpgrade()
 }
 
 public enum LocationProvidingError: Error, Equatable {
@@ -57,7 +87,7 @@ public final class NoOpLocationProvider: LocationProviding {
 /// lives elsewhere (`FixCaptureCoordinator`, `FixAccuracyPolicy`) so this class stays a pure
 /// CLLocationManager adapter, unit-untestable by nature (same bucket as Android's
 /// `FusedLocationCapturer`) but kept as small as possible so there's little here to get wrong.
-public final class SystemLocationProvider: NSObject, LocationProviding {
+public final class SystemLocationProvider: NSObject, LocationProviding, SystemLocationProviderRequesting {
     private let manager: CLLocationManager
     private let batteryLevelProvider: () -> Int
 
@@ -82,16 +112,25 @@ public final class SystemLocationProvider: NSObject, LocationProviding {
         super.init()
         manager.delegate = self
         manager.desiredAccuracy = kCLLocationAccuracyHundredMeters
-        // specs/009 §7 / specs/004 §7: When-In-Use first; the deliberate Always upgrade prompt is
-        // a separate, explicit call (`requestAlwaysAuthorizationUpgrade()` below) — shown only
-        // after an in-app explanation, never auto-fired from init. No onboarding screen exists yet
-        // in I2's shipped screen inventory to host that explanation (checked: none of
-        // `Screens/*/*.swift` references CLLocationManager/authorization), so triggering the
-        // upgrade prompt itself is left as a public method for a future UI session to call, per
-        // this task's explicit "UI as a later concern" allowance.
-        if manager.authorizationStatus == .notDetermined {
-            manager.requestWhenInUseAuthorization()
-        }
+        // specs/009 §7 / specs/004 §7: When-In-Use first, then a deliberate Always upgrade — each
+        // shown only AFTER its in-app explanation.
+        //
+        // **This initializer used to call `requestWhenInUseAuthorization()` directly**, which meant
+        // the OS dialog appeared the instant the location stack was constructed, before the user
+        // had been told anything. That is the precise inversion §7 forbids ("a prominent disclosure
+        // precedes the OS prompt") and the thing Play's background-location review checks. It was
+        // written when no screen existed to host the explanation; `PermissionDisclosureScreen` now
+        // does, and `PermissionFlowViewModel` owns the ordering. Prompting is therefore an explicit
+        // call — never a side effect of construction.
+    }
+
+    /// Fires the When-In-Use prompt. **Call only after the foreground disclosure is acknowledged**
+    /// — `PermissionFlowViewModel` is what guarantees that, and its tests are what prove it.
+    /// A no-op unless the status is still `.notDetermined`: once the user has answered, iOS will
+    /// not show the dialog again, and asking is a wasted delegate round-trip.
+    public func requestWhenInUseAuthorizationIfNeeded() {
+        guard manager.authorizationStatus == .notDetermined else { return }
+        manager.requestWhenInUseAuthorization()
     }
 
     /// specs/009 §7's deliberate Always-upgrade prompt — call only after showing the in-app
@@ -101,6 +140,19 @@ public final class SystemLocationProvider: NSObject, LocationProviding {
     public func requestAlwaysAuthorizationUpgrade() {
         guard manager.authorizationStatus == .authorizedWhenInUse else { return }
         manager.requestAlwaysAuthorization()
+    }
+
+    /// specs/009 §7 — the four states the disclosure flow reasons about. `.restricted` maps to
+    /// `.denied`: the effect is identical (no location, and no dialog that could change it), and
+    /// the banner's "open settings" route is the right advice for both.
+    public var authorization: LocationAuthorization {
+        switch manager.authorizationStatus {
+        case .authorizedAlways: return .always
+        case .authorizedWhenInUse: return .whenInUse
+        case .notDetermined: return .notDetermined
+        case .denied, .restricted: return .denied
+        @unknown default: return .denied
+        }
     }
 
     public var isAuthorized: Bool {
@@ -185,6 +237,14 @@ public final class SystemLocationProvider: NSObject, LocationProviding {
 }
 
 extension SystemLocationProvider: CLLocationManagerDelegate {
+    /// specs/009 §7 — the app must notice authorization changes without waiting for a foreground
+    /// cycle. Fires when the user answers the dialog, and again if they change the setting in
+    /// system Settings and return. Carries no location data, so the notification is safe to
+    /// broadcast (docs/security-review-checklist.md).
+    public func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+        NotificationCenter.default.post(name: .findlyLocationAuthorizationChanged, object: nil)
+    }
+
     public func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         guard let location = locations.last else { return }
         if let continuation = pendingFixContinuation, let source = pendingFixSource {
