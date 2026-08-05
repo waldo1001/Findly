@@ -22,8 +22,30 @@ public struct SignInScreen: View {
             Spacer()
             content
             Spacer()
+            buildLabel
         }
         .background(theme.colors.surfaceVariant)
+    }
+
+    /// Version + build shown on the sign-in screen so a TestFlight tester can tell at a glance
+    /// *which* build they are looking at. Added 2026-08-05 after a session where two builds were
+    /// uploaded minutes apart and there was no way to confirm which one had installed — the
+    /// difference between them was whether the app could reach the backend at all.
+    ///
+    /// Also surfaces the API host, because the bug that prompted this was the app silently
+    /// shipping the `.invalid` placeholder base URL: "which backend am I actually talking to"
+    /// turned out to be the single most useful thing to be able to see on-device.
+    @ViewBuilder
+    private var buildLabel: some View {
+        let info = Bundle.main.infoDictionary
+        let version = info?["CFBundleShortVersionString"] as? String ?? "?"
+        let build = info?["CFBundleVersion"] as? String ?? "?"
+        let host = (info?["FindlyBaseURL"] as? String).flatMap { URL(string: $0)?.host } ?? "unconfigured"
+        Text("v\(version) (\(build)) · \(host)")
+            .font(theme.typography.labelSmall)
+            .foregroundColor(theme.colors.outline)
+            .padding(.bottom, theme.spacing.sm)
+            .accessibilityIdentifier("signIn.buildLabel")
     }
 
     @ViewBuilder

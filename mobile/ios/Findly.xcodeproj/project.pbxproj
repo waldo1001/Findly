@@ -16,6 +16,7 @@
 		92E3CA8155EC53B254E0AD47 /* NotificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = FAAC38E9856598F8ADAC5B1E /* NotificationService.swift */; };
 		B02F8EA427CC832CDAD5222E /* FirebaseAuthProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB7E3B29A1DEB20EAF23B1F7 /* FirebaseAuthProvider.swift */; };
 		B61559C4D032C36B09A6C14E /* FindlyKit in Frameworks */ = {isa = PBXBuildFile; productRef = 8AF6A59F5CFA6CC825063744 /* FindlyKit */; };
+		BCE4FC4E4D216471C06EF8F0 /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = EECA9DB87E5D3A19B5B8D891 /* FirebaseAuth */; };
 		C260FCFC518F028EBF7BBA4A /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 116AE311B80835894993CDAC /* RootView.swift */; };
 		C9507C73AF152EF9C3355B39 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = E76AF327094EE2AF4787E446 /* AppDelegate.swift */; };
 		CB8C07C58DEB2D7E127CAF82 /* FindlyKit in Frameworks */ = {isa = PBXBuildFile; productRef = 9442267E30BDEB32B226E1B5 /* FindlyKit */; };
@@ -78,6 +79,7 @@
 				CB8C07C58DEB2D7E127CAF82 /* FindlyKit in Frameworks */,
 				E0BB8FB47DD4963B529B77B3 /* FirebaseMessaging in Frameworks */,
 				220125CCC68EB48569672CA1 /* FirebaseCore in Frameworks */,
+				BCE4FC4E4D216471C06EF8F0 /* FirebaseAuth in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -172,6 +174,7 @@
 				9442267E30BDEB32B226E1B5 /* FindlyKit */,
 				FB971569453E73404BF940F5 /* FirebaseMessaging */,
 				E5F9E685A2737D7E01168F16 /* FirebaseCore */,
+				EECA9DB87E5D3A19B5B8D891 /* FirebaseAuth */,
 			);
 			productName = Findly;
 			productReference = 360976CF9D45F33462D845E1 /* Findly.app */;
@@ -344,7 +347,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 3;
 				DEVELOPMENT_TEAM = 92A2K3Q7NH;
 				INFOPLIST_FILE = FindlyNotificationService/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
@@ -369,7 +372,7 @@
 				CODE_SIGN_ENTITLEMENTS = Findly/Findly.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 3;
 				DEVELOPMENT_TEAM = 92A2K3Q7NH;
 				INFOPLIST_FILE = Findly/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
@@ -393,7 +396,7 @@
 				CODE_SIGN_ENTITLEMENTS = Findly/Findly.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 3;
 				DEVELOPMENT_TEAM = 92A2K3Q7NH;
 				INFOPLIST_FILE = Findly/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
@@ -477,7 +480,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 3;
 				DEVELOPMENT_TEAM = 92A2K3Q7NH;
 				INFOPLIST_FILE = FindlyNotificationService/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
@@ -558,6 +561,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 55ACDD30D11FF8B12DF6B695 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
 			productName = FirebaseCore;
+		};
+		EECA9DB87E5D3A19B5B8D891 /* FirebaseAuth */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 55ACDD30D11FF8B12DF6B695 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseAuth;
 		};
 		FB971569453E73404BF940F5 /* FirebaseMessaging */ = {
 			isa = XCSwiftPackageProductDependency;
