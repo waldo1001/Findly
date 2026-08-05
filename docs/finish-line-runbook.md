@@ -210,6 +210,27 @@ Remaining:
    the repo.
 5. Submit → ⏳ App Review → **M2-iOS**.
 
+### E0 👤 **Delete the sideload release the moment Play goes live** (user directive, 2026-08-05)
+
+While Play verification was in review, the Android family build shipped as a **public GitHub release** —
+`android-v1.0.0-build6`, carrying a signed APK and the install guide as its notes
+([`install-android.md`](install-android.md) is the same content, kept in-repo).
+
+```bash
+gh release delete android-v1.0.0-build6 --yes
+```
+
+**Why it must go, not just fade:** it is a public download on a public repo, so it stays installable by
+anyone who ever had the link — indefinitely, and with no update path. Once Play is serving the app, that
+release is a stale fork of it: signed with the **upload** key rather than Google's app-signing key, so it
+can never be upgraded in place and will silently diverge from whatever the Store is shipping. Leaving it up
+means some family member reinstalls the frozen build a year from now and quietly runs old code against the
+live backend.
+
+Do this **after** confirming Play install works for at least one family member, not before — it is the only
+Android distribution channel until then. Tell testers to uninstall the sideloaded copy first; the signature
+mismatch blocks an in-place upgrade either way.
+
 ### E2 — Play (H5 tail) 👤 → ⏳
 
 1. **Background-location declaration** + a demo video of the in-app prominent disclosure that precedes the
