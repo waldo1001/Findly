@@ -88,6 +88,8 @@ legal entity name and address, the **D-U-N-S number** (already exists per the 20
 no need to re-apply), a verified contact email and phone, and sometimes a document upload proving the
 address.
 
+**Status 2026-08-05 (checked):** documents uploaded, **identity verification in review** — Console reads *"Google is verifying your identity... This may take a few days"*. Note it is **sequential, not one gate**: phone-number verification is itself blocked until the documents are approved (*"To verify your phone numbers, complete other verification tasks"*), so the sequence is identity review (days) → phone verification (minutes) → app creation unblocks. The completion notice goes to the **account owner's email**, not the Console — an unwatched inbox turns Google's delay into ours.
+
 **Lead time is days, not minutes** — Google reviews it. Start it before anything else in this track, then go
 do Track C and TestFlight while it runs. This is now the **single largest fixed delay to M1-Android**, taking
 over the role the 14-day closed-test rule would have played had the account not been exempt.
