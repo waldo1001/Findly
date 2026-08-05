@@ -60,17 +60,18 @@ struct RootView: View {
     private let onSignedIn: () async -> Void
     // I17 (001 §1.5.3) — the display name typed once on `HomeScreen`'s `.profileless` branch,
     // carried (still editable at the destination) to whichever of the four bootstrap paths the
-    // user picks: `.createFamily`/`.acceptInvite` read `pendingOnboardingDisplayName` directly;
-    // `.createGroup`/`.groupJoin` also need `pendingGroupBootstrapNeedsDisplayName` since those two
-    // endpoints treat `displayName` as required-only-if-bootstrapping (001 §12.1/§12.6) rather than
-    // unconditionally required (§3.1/§3.4) — same "remembered local state instead of a nav-graph
-    // argument" pattern Android's `FindlyNavHost` uses for its `pendingOnboardingDisplayName`/
-    // `pendingCreateContext`/`pendingJoinContext` (specs/003 §12.2/A21), chosen here too so
-    // `AppRoute`'s existing, already-tested cases (`.groupJoin(prefillCode:)` etc.,
-    // `AppCoordinatorTests`) stay untouched rather than growing a second associated value.
+    // user picks — same "remembered local state instead of a nav-graph argument" pattern Android's
+    // `FindlyNavHost` uses for its `pendingOnboardingDisplayName`/`pendingCreateContext`/
+    // `pendingJoinContext` (specs/003 §12.2/A21), chosen here too so `AppRoute`'s existing,
+    // already-tested cases (`.groupJoin(prefillCode:)` etc., `AppCoordinatorTests`) stay untouched
+    // rather than growing a second associated value. This is prefill-only, purely a UX convenience
+    // (skip re-typing a name already typed once) — it is NOT how `CreateGroupViewModel`/
+    // `GroupJoinViewModel` decide whether a blank name is actually required; those establish that
+    // themselves from the server's own profile state (I17 review, Major finding: a caller-supplied
+    // "which button was tapped" flag is wrong for arrivals that don't go through these closures at
+    // all, e.g. a `findly://group-join` deep link).
     @State private var pendingOnboardingDisplayName = ""
     @State private var pendingGroupBootstrapDisplayName = ""
-    @State private var pendingGroupBootstrapNeedsDisplayName = false
 
     init(
         coordinator: AppCoordinator,
@@ -134,12 +135,10 @@ struct RootView: View {
                     },
                     onSelectCreateGroup: { name in
                         pendingGroupBootstrapDisplayName = name
-                        pendingGroupBootstrapNeedsDisplayName = true
                         coordinator.showCreateGroup()
                     },
                     onSelectJoinGroup: { name in
                         pendingGroupBootstrapDisplayName = name
-                        pendingGroupBootstrapNeedsDisplayName = true
                         coordinator.showGroupJoin()
                     }
                 )
@@ -184,21 +183,21 @@ struct RootView: View {
                     viewModel: GroupsListViewModel(apiClient: apiClient),
                     onSelectGroup: { groupId in coordinator.showGroupDetail(groupId: groupId) },
                     onCreateGroup: {
-                        // The ordinary (already-has-a-profile) entry point — never bootstrap here,
-                        // and never leak a stale bootstrap name from an earlier profile-less visit.
-                        pendingGroupBootstrapNeedsDisplayName = false
+                        // The ordinary (already-has-a-profile) entry point — never leak a stale
+                        // prefill name from an earlier profile-less visit. (Whether `displayName`
+                        // is actually required is no longer decided here at all — see
+                        // `CreateGroupViewModel.createGroup`'s doc, I17 review.)
                         pendingGroupBootstrapDisplayName = ""
                         coordinator.showCreateGroup()
                     },
                     onJoinGroup: {
-                        pendingGroupBootstrapNeedsDisplayName = false
                         pendingGroupBootstrapDisplayName = ""
                         coordinator.showGroupJoin()
                     }
                 )
             case .createGroup:
                 CreateGroupScreen(
-                    viewModel: CreateGroupViewModel(apiClient: apiClient, needsDisplayName: pendingGroupBootstrapNeedsDisplayName),
+                    viewModel: CreateGroupViewModel(apiClient: apiClient),
                     prefillDisplayName: pendingGroupBootstrapDisplayName,
                     onCreated: { group in coordinator.showGroupDetail(groupId: group.groupId) }
                 )
@@ -211,7 +210,7 @@ struct RootView: View {
                 )
             case .groupJoin(let prefillCode):
                 GroupJoinScreen(
-                    viewModel: GroupJoinViewModel(apiClient: apiClient, needsDisplayName: pendingGroupBootstrapNeedsDisplayName),
+                    viewModel: GroupJoinViewModel(apiClient: apiClient),
                     prefillCode: prefillCode,
                     prefillDisplayName: pendingGroupBootstrapDisplayName,
                     onJoined: { group in coordinator.showGroupDetail(groupId: group.groupId) }

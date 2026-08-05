@@ -47,6 +47,15 @@ extension APIError {
             case .groupCodeInvalid:
                 return "That group code isn't valid."
             case .validationFailed:
+                // I17 review (belt-and-braces, doesn't substitute for the client-side guard):
+                // the create-group/join-group bootstrap path (001 §12.1/§12.6,
+                // backend/src/domain/group/createGroup.ts, joinGroup.ts) reports a missing
+                // `displayName` as `details.fields: ["displayName"]` — surface that specifically
+                // rather than the generic fallback, in case a blank name ever does reach the
+                // network (e.g. the client-side profile probe was inconclusive).
+                if case .array(let fields)? = body.details?["fields"], fields.contains(.string("displayName")) {
+                    return "Enter a display name."
+                }
                 return "Please check your input and try again."
             case .locationBatchTooLarge:
                 return "Too many locations at once."

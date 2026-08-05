@@ -15,23 +15,20 @@ public final class CreateGroupViewModel: ObservableObject {
 
     @Published public private(set) var state: State = .idle
     private let apiClient: FindlyAPIClient
-    /// I17: `true` when this creation is one of the four 001 §1.5.3 profile-bootstrap paths (the
-    /// caller reached here from `HomeViewModel.State.profileless`, not the ordinary
-    /// `GroupsListScreen`) — 001 §12.1's `displayName` is REQUIRED then, optional otherwise.
-    /// Defaults `false` so every pre-I17 call site (the ordinary, already-has-a-profile path)
-    /// keeps its existing "blank means absent" behavior unchanged.
-    private let needsDisplayName: Bool
 
-    public init(apiClient: FindlyAPIClient, needsDisplayName: Bool = false) {
+    public init(apiClient: FindlyAPIClient) {
         self.apiClient = apiClient
-        self.needsDisplayName = needsDisplayName
     }
 
     /// `displayName` becomes the caller's per-group nickname (005 §1); required-if-no-profile,
-    /// optional otherwise (001 §12.1) — blank is gated client-side BEFORE any network call only
-    /// when [needsDisplayName] (same "gate before any network call" convention as
-    /// `CreateFamilyViewModel`/`AcceptInviteViewModel`); otherwise a blank value is sent as `nil`,
-    /// never an empty string standing in for "absent".
+    /// optional otherwise (001 §12.1). **I17 review (Major fix):** whether this call is
+    /// bootstrapping a profile is established here from the server's own truth, NOT from a
+    /// caller-supplied flag — a `RootView`-level "which button was tapped" hint (the pre-fix shape)
+    /// is wrong for any arrival route that doesn't run through those specific closures, most
+    /// notably a `findly://group-join`-style deep link (007), which `AppCoordinator.handleDeepLink`
+    /// routes directly, bypassing `RootView`'s bootstrap-tracking state entirely. Only probed when
+    /// `displayName` is actually blank — a non-blank value is valid either way, so the extra
+    /// `GET /families/me` round trip is skipped in the common (name provided) case.
     public func createGroup(name: String, endsAt: Date, expiryPolicy: GroupExpiryPolicy, displayName: String) async {
         let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedName.isEmpty else {
@@ -39,7 +36,7 @@ public final class CreateGroupViewModel: ObservableObject {
             return
         }
         let trimmedDisplayName = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
-        if needsDisplayName && trimmedDisplayName.isEmpty {
+        if trimmedDisplayName.isEmpty, await isBootstrappingProfile() {
             state = .error("Enter a display name.")
             return
         }
@@ -54,6 +51,22 @@ public final class CreateGroupViewModel: ObservableObject {
             state = .created(envelope.data)
         } catch {
             state = .error(userFacingMessage(for: error))
+        }
+    }
+
+    /// `true` only on a confirmed `PROFILE_NOT_FOUND` (001 §1.5.3) — any other outcome (a genuine
+    /// profile, or an inconclusive probe: transport error, `FAMILY_NOT_FOUND`, anything else)
+    /// defaults `false`, so a blip never blocks an ordinary already-profiled caller whose
+    /// `displayName` genuinely is optional. If this default is ever wrong (a real bootstrap call
+    /// slips through blank), the server still enforces it (`400 VALIDATION_FAILED`,
+    /// `details.fields: ["displayName"]`) — `APIError+UserMessage` maps that to a specific message,
+    /// same "server remains authoritative" fallback as every other client-side guard in this app.
+    private func isBootstrappingProfile() async -> Bool {
+        do {
+            _ = try await apiClient.getMyFamily()
+            return false
+        } catch {
+            return (error as? APIError)?.serverCode == .profileNotFound
         }
     }
 
