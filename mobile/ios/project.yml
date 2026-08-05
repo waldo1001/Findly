@@ -60,7 +60,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.findly.ios.NotificationService
         INFOPLIST_FILE: FindlyNotificationService/Info.plist
         MARKETING_VERSION: "1.0.0"
-        CURRENT_PROJECT_VERSION: "3"
+        CURRENT_PROJECT_VERSION: "4"
         SWIFT_VERSION: "5.0"
         TARGETED_DEVICE_FAMILY: "1"
         CODE_SIGN_STYLE: Automatic
@@ -99,7 +99,7 @@ targets:
         CODE_SIGN_ENTITLEMENTS: Findly/Findly.entitlements
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         MARKETING_VERSION: "1.0.0"
-        CURRENT_PROJECT_VERSION: "3"
+        CURRENT_PROJECT_VERSION: "4"
         SWIFT_VERSION: "5.0"
         TARGETED_DEVICE_FAMILY: "1"
         # H6 (2026-08-04): real device signing wired up — Apple enrollment complete, App IDs
