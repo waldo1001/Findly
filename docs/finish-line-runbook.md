@@ -29,6 +29,8 @@ finishing it*, which is not the same as *it isn't finished*.
 **Rule for the agent:** before presenting a `human` row as a task, verify it if the table above says you can.
 If you cannot, say *"I can't check this — confirm whether it's already done"* rather than issuing it as work.
 
+**Simulator permission alerts are sticky.** An iOS permission dialog that survives an app uninstall is a **stale SpringBoard alert**, not a live request — SpringBoard owns it, uninstalling does not dismiss it, and it ignores injected taps. Cost an hour on 2026-08-05 debugging a disclosure-ordering bug that did not exist. Run `xcrun simctl erase <udid>` before drawing any conclusion about permission ordering.
+
 **To close the Firebase blind spot** (optional, ~2 min): `npm i -g firebase-tools && firebase login`. After
 that the agent can run `firebase projects:list` / `firebase apps:list --project findly-71f7b`. Note that even
 then, SMS region policy and authorized domains sit in Identity Platform and are not exposed by that CLI —
