@@ -6,6 +6,10 @@ import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.ui.Modifier
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -84,6 +88,13 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             FindlyTheme {
+                // The app draws edge-to-edge, so without this the top bar renders UNDER the system
+                // status bar: the screen title collides with the clock, and the top ~90px of the
+                // back chevron sits in the status bar's own tap region — taps there go to the
+                // system, not the app, making the upper half of the back button dead. Verified on
+                // an emulator 2026-08-05: a tap at y=70 did nothing, y=90 popped correctly.
+                // Applied once at the root so every screen inherits it, rather than per-screen.
+                Box(modifier = Modifier.statusBarsPadding().navigationBarsPadding()) {
                 val homeViewModel: HomeViewModel = viewModel(
                     factory = HomeViewModelFactory(
                         container.authProvider,
@@ -99,6 +110,7 @@ class MainActivity : ComponentActivity() {
                     httpsJoinLinkResult = httpsJoinLinkResult,
                     openSettingsOnLaunch = openSettingsOnLaunch,
                 )
+                }
             }
         }
     }
