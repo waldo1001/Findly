@@ -13,7 +13,11 @@ import SwiftUI
 /// `https://{joinLinkHost}/g#CODE` link rather than plain text.
 public struct GroupDetailScreen: View {
     @Environment(\.theme) private var theme
-    @ObservedObject private var viewModel: GroupDetailViewModel
+    // `@StateObject`, NOT `@ObservedObject` — see `HomeScreen`'s doc for the full failure mode
+    // (I16). `RootView` constructs this screen's view model inline and re-evaluates on every
+    // in-app navigation; `@StateObject` + `@autoclosure` keeps the first instance for this view's
+    // lifetime instead of silently discarding the one `.task` observes.
+    @StateObject private var viewModel: GroupDetailViewModel
     @State private var editedName: String = ""
     @State private var extendedEndsAt: Date = Date().addingTimeInterval(24 * 3600)
     /// Every owner mutation the spec (003 §12.2/004 §3.4) requires a confirm step for
@@ -27,12 +31,12 @@ public struct GroupDetailScreen: View {
     private let onExit: () -> Void
 
     public init(
-        viewModel: GroupDetailViewModel,
+        viewModel: @autoclosure @escaping () -> GroupDetailViewModel,
         joinLinkHost: String = AppConfig.defaultJoinLinkHost,
         onSelectMap: @escaping () -> Void,
         onExit: @escaping () -> Void
     ) {
-        self.viewModel = viewModel
+        _viewModel = StateObject(wrappedValue: viewModel())
         self.joinLinkHost = joinLinkHost
         self.onSelectMap = onSelectMap
         self.onExit = onExit

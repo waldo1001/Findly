@@ -6,10 +6,14 @@ import SwiftUI
 /// (read-only) for a non-parent viewer, matching §4.3's parent-vs-owner permission split.
 public struct DeviceSettingsScreen: View {
     @Environment(\.theme) private var theme
-    @ObservedObject private var viewModel: DeviceSettingsViewModel
+    // `@StateObject`, NOT `@ObservedObject` — see `HomeScreen`'s doc for the full failure mode
+    // (I16). `RootView` constructs this screen's view model inline and re-evaluates on every
+    // in-app navigation; `@StateObject` + `@autoclosure` keeps the first instance for this view's
+    // lifetime instead of silently discarding the one `.task` observes.
+    @StateObject private var viewModel: DeviceSettingsViewModel
 
-    public init(viewModel: DeviceSettingsViewModel) {
-        self.viewModel = viewModel
+    public init(viewModel: @autoclosure @escaping () -> DeviceSettingsViewModel) {
+        _viewModel = StateObject(wrappedValue: viewModel())
     }
 
     public var body: some View {

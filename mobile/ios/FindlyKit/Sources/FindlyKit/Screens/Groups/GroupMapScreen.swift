@@ -6,12 +6,16 @@ import SwiftUI
 /// `GroupMemberLocation` simply doesn't carry those fields.
 public struct GroupMapScreen: View {
     @Environment(\.theme) private var theme
-    @ObservedObject private var viewModel: GroupMapViewModel
+    // `@StateObject`, NOT `@ObservedObject` — see `HomeScreen`'s doc for the full failure mode
+    // (I16). `RootView` constructs this screen's view model inline and re-evaluates on every
+    // in-app navigation; `@StateObject` + `@autoclosure` keeps the first instance for this view's
+    // lifetime instead of silently discarding the one `.task` observes.
+    @StateObject private var viewModel: GroupMapViewModel
     private let renderer: any MapRendering
     private let onExit: () -> Void
 
-    public init(viewModel: GroupMapViewModel, renderer: any MapRendering, onExit: @escaping () -> Void) {
-        self.viewModel = viewModel
+    public init(viewModel: @autoclosure @escaping () -> GroupMapViewModel, renderer: any MapRendering, onExit: @escaping () -> Void) {
+        _viewModel = StateObject(wrappedValue: viewModel())
         self.renderer = renderer
         self.onExit = onExit
     }

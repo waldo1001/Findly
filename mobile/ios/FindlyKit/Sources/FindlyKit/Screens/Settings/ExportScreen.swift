@@ -18,10 +18,15 @@ import SwiftUI
 /// in-progress share.
 public struct ExportScreen: View {
     @Environment(\.theme) private var theme
-    @ObservedObject private var viewModel: ExportViewModel
+    // `@StateObject`, NOT `@ObservedObject` — see `HomeScreen`'s doc for the full failure mode
+    // (I16). `RootView` constructs this screen's view model inline and re-evaluates on every
+    // in-app navigation; `@StateObject` + `@autoclosure` keeps the first instance for this view's
+    // lifetime instead of silently discarding the one `.task` observes (and, per this screen's own
+    // doc above, the one holding `shareURL`/the in-flight `ShareLink`).
+    @StateObject private var viewModel: ExportViewModel
 
-    public init(viewModel: ExportViewModel) {
-        self.viewModel = viewModel
+    public init(viewModel: @autoclosure @escaping () -> ExportViewModel) {
+        _viewModel = StateObject(wrappedValue: viewModel())
     }
 
     public var body: some View {

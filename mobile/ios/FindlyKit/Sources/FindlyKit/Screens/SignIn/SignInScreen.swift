@@ -8,12 +8,28 @@ import SwiftUI
 /// bound string.
 public struct SignInScreen: View {
     @Environment(\.theme) private var theme
-    @ObservedObject private var viewModel: SignInViewModel
+    // `@StateObject`, NOT `@ObservedObject` — see `HomeScreen`'s doc for the full failure mode
+    // (I16). `RootView` constructs this screen's view model inline (`RootView.swift:87`),
+    // including an `onSignedIn` closure baked into `SignInViewModel.init`, so this is the one
+    // screen in the sweep worth double-checking for a stale-closure trap: `@StateObject` only ever
+    // evaluates the FIRST `viewModel()` autoclosure for a given view identity, so every capture
+    // inside that first closure is frozen for this view's lifetime, including nested closures like
+    // `onSignedIn`. That is only safe if everything `onSignedIn` captures (`coordinator`, the
+    // app-level `onSignedIn`, `locationRuntimeContainer`) is itself referentially stable across
+    // every `RootView.body` re-evaluation — checked against `RootView.swift`/`FindlyApp.swift`:
+    // all three are built exactly once in `FindlyApp.init()` (`@StateObject`/`let`, per
+    // `RootView`'s own "composition root" doc) and handed into every `RootView(...)` construction
+    // unchanged, so the frozen closure calls the same live instances every time it fires,
+    // regardless of which `RootView.body` re-evaluation happened to be the one whose autoclosure
+    // actually ran. `@StateObject` is therefore correct here too — the trap this comment checks
+    // for would only be real if `onSignedIn` closed over something route- or render-specific
+    // (e.g. a value threaded in fresh per navigation), which it does not.
+    @StateObject private var viewModel: SignInViewModel
     @State private var phoneInput: String = "+32"
     @State private var codeInput: String = ""
 
-    public init(viewModel: SignInViewModel) {
-        self.viewModel = viewModel
+    public init(viewModel: @autoclosure @escaping () -> SignInViewModel) {
+        _viewModel = StateObject(wrappedValue: viewModel())
     }
 
     public var body: some View {

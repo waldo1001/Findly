@@ -7,18 +7,22 @@ import SwiftUI
 /// shown only for a parent (008 §5.1) — the server still enforces the role check either way.
 public struct PrivacySettingsScreen: View {
     @Environment(\.theme) private var theme
-    @ObservedObject private var viewModel: PrivacySettingsViewModel
+    // `@StateObject`, NOT `@ObservedObject` — see `HomeScreen`'s doc for the full failure mode
+    // (I16). `RootView` constructs this screen's view model inline and re-evaluates on every
+    // in-app navigation; `@StateObject` + `@autoclosure` keeps the first instance for this view's
+    // lifetime instead of silently discarding the one `.task` observes.
+    @StateObject private var viewModel: PrivacySettingsViewModel
     private let onSelectExport: () -> Void
     private let onSelectDeleteAccount: () -> Void
     private let onSelectDeleteFamily: () -> Void
 
     public init(
-        viewModel: PrivacySettingsViewModel,
+        viewModel: @autoclosure @escaping () -> PrivacySettingsViewModel,
         onSelectExport: @escaping () -> Void,
         onSelectDeleteAccount: @escaping () -> Void,
         onSelectDeleteFamily: @escaping () -> Void
     ) {
-        self.viewModel = viewModel
+        _viewModel = StateObject(wrappedValue: viewModel())
         self.onSelectExport = onSelectExport
         self.onSelectDeleteAccount = onSelectDeleteAccount
         self.onSelectDeleteFamily = onSelectDeleteFamily

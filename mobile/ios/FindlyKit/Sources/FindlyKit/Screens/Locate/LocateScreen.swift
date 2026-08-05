@@ -4,12 +4,16 @@ import SwiftUI
 /// locate request on appear and cancels the poll loop on disappear (`onDisappear`).
 public struct LocateScreen: View {
     @Environment(\.theme) private var theme
-    @ObservedObject private var viewModel: LocateViewModel
+    // `@StateObject`, NOT `@ObservedObject` — see `HomeScreen`'s doc for the full failure mode
+    // (I16). `RootView` constructs this screen's view model inline and re-evaluates on every
+    // in-app navigation; `@StateObject` + `@autoclosure` keeps the first instance for this view's
+    // lifetime instead of silently discarding the one `.task` observes.
+    @StateObject private var viewModel: LocateViewModel
     private let target: LocateTarget
     private let targetDisplayName: String
 
-    public init(viewModel: LocateViewModel, target: LocateTarget, targetDisplayName: String) {
-        self.viewModel = viewModel
+    public init(viewModel: @autoclosure @escaping () -> LocateViewModel, target: LocateTarget, targetDisplayName: String) {
+        _viewModel = StateObject(wrappedValue: viewModel())
         self.target = target
         self.targetDisplayName = targetDisplayName
     }

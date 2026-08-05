@@ -10,13 +10,18 @@ import SwiftUI
 /// family-less state via `FAMILY_NOT_FOUND`.
 public struct DeleteFamilyScreen: View {
     @Environment(\.theme) private var theme
-    @ObservedObject private var viewModel: DeleteFamilyViewModel
+    // `@StateObject`, NOT `@ObservedObject` — see `HomeScreen`'s doc for the full failure mode
+    // (I16). `RootView` constructs this screen's view model inline and re-evaluates on every
+    // in-app navigation; `@StateObject` + `@autoclosure` keeps the first instance for this view's
+    // lifetime instead of silently discarding the one `.task` observes (and whose `.phase` this
+    // screen's own `onChange` above navigates off of).
+    @StateObject private var viewModel: DeleteFamilyViewModel
     @State private var typedFamilyName: String = ""
     @State private var showConfirmation = false
     private let onCompleted: () -> Void
 
-    public init(viewModel: DeleteFamilyViewModel, onCompleted: @escaping () -> Void) {
-        self.viewModel = viewModel
+    public init(viewModel: @autoclosure @escaping () -> DeleteFamilyViewModel, onCompleted: @escaping () -> Void) {
+        _viewModel = StateObject(wrappedValue: viewModel())
         self.onCompleted = onCompleted
     }
 

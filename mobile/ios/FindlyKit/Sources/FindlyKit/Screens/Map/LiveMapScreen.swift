@@ -5,11 +5,15 @@ import SwiftUI
 /// so callers can swap map providers without specializing this type.
 public struct LiveMapScreen: View {
     @Environment(\.theme) private var theme
-    @ObservedObject private var viewModel: LiveMapViewModel
+    // `@StateObject`, NOT `@ObservedObject` — see `HomeScreen`'s doc for the full failure mode
+    // (I16). `RootView` constructs this screen's view model inline and re-evaluates on every
+    // in-app navigation; `@StateObject` + `@autoclosure` keeps the first instance for this view's
+    // lifetime instead of silently discarding the one `.task` observes.
+    @StateObject private var viewModel: LiveMapViewModel
     private let renderer: any MapRendering
 
-    public init(viewModel: LiveMapViewModel, renderer: any MapRendering) {
-        self.viewModel = viewModel
+    public init(viewModel: @autoclosure @escaping () -> LiveMapViewModel, renderer: any MapRendering) {
+        _viewModel = StateObject(wrappedValue: viewModel())
         self.renderer = renderer
     }
 
