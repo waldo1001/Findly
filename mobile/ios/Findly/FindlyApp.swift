@@ -182,10 +182,25 @@ struct FindlyApp: App {
             // re-run registration. `onSignedIn` below (I12) now also explicitly registers on first
             // launch after sign-in and on every app update, per specs/004 §5's trigger list — this
             // remains the backstop for any registration `onSignedIn` missed or that failed silently.
+            //
+            // I24 fix: this call goes to `registerOrUpdate()` DIRECTLY rather than through one of
+            // `DeviceRegistrationService`'s own best-effort wrappers (`registerOnLaunchIfNeeded`,
+            // `observePushTokenRefreshes`) — its doc comment's own convention is that such direct
+            // callers "need failure visibility", so a bare `try?` here was defeating that by
+            // discarding the very error it was written to expose. `.profileNotYetBootstrapped` is
+            // expected (RootView's bootstrap-completion callbacks are the actual retry path once a
+            // profile exists) and stays silent; anything else is a genuine failure, now logged
+            // instead of vanishing.
             onReRegisterDevice: { [weak authProvider] in
                 guard let uid = authProvider?.currentUserId else { return }
                 deviceIdProvider.clearDeviceId(forUserId: uid)
-                _ = try? await deviceRegistrationService.registerOrUpdate()
+                do {
+                    _ = try await deviceRegistrationService.registerOrUpdate()
+                } catch DeviceRegistrationError.profileNotYetBootstrapped {
+                    // Expected for a profile-less caller (specs/001 §1.5.3) — not an error.
+                } catch {
+                    Self.deviceRegistrationLog.error("device re-registration after DEVICE_NOT_FOUND failed: \(String(describing: error), privacy: .public)")
+                }
             },
             // specs/009 §9: a second AUTH_TOKEN_EXPIRED means signed-out - wipe local state and
             // return to sign-in. Reads the container back through the holder (populated a few
@@ -309,6 +324,12 @@ struct FindlyApp: App {
                 .onOpenURL { url in coordinator.handleDeepLink(url) }
         }
     }
+
+    /// I24 — makes a genuine device re-registration failure observable (see `onReRegisterDevice`
+    /// above) instead of the bare `try?` that used to discard it silently. `docs/security-review-
+    /// checklist.md`: the logged value is `error`'s own description only — never device/user IDs,
+    /// tokens, or coordinates.
+    private static let deviceRegistrationLog = Logger(subsystem: "com.findly.ios", category: "DeviceRegistration")
 
     /// specs/009-device-runtime.md §2 / docs/security-review-checklist.md — the fix-queue's
     /// 1 000-cap overflow log line: a **count only**, never coordinates/fixId/deviceId. `.debug`
