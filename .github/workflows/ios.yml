@@ -16,6 +16,10 @@ jobs:
     # check): a genuine `swift build` + `swift test` gate for every PR touching mobile/ios/.
     name: ios-package
     runs-on: macos-14
+    # H10 (docs/security-review-checklist.md §2): explicit, minimal, job-level permissions —
+    # this job only checks out and builds/tests a local SPM package, no deploy.
+    permissions:
+      contents: read
     defaults:
       run:
         working-directory: mobile/ios/FindlyKit
@@ -49,6 +53,19 @@ jobs:
     # I9: the Findly.xcodeproj app target now exists (generated via xcodegen, specs/004 §1.1) —
     # real xcodebuild CI, not a structure check. Needs a real macOS/Xcode runner.
     runs-on: macos-14
+    # H10 (docs/security-review-checklist.md §2): explicit, minimal, job-level permissions.
+    # TestFlight publishing (below) authenticates with its own App Store Connect API key secret,
+    # not a GITHUB_TOKEN scope, so `contents: read` stays correct even with publishing added.
+    permissions:
+      contents: read
+    # H10: the three App Store Connect secrets, mapped to job-level env so a step's `if:` can
+    # read them (same reasoning as android.yml's ANDROID_KEYSTORE_BASE64 — see that file's A7
+    # comment). Empty on forks/PRs and before a human provisions the real secrets
+    # (docs/store-readiness.md §2) — every `if:` below checks `!= ''`.
+    env:
+      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+      ASC_API_KEY_P8: ${{ secrets.ASC_API_KEY_P8 }}
     defaults:
       run:
         working-directory: mobile/ios
@@ -127,12 +144,64 @@ jobs:
       # compiles and the extension embeds — without depending on secrets CI deliberately lacks.
       - name: build
         run: xcodebuild build -scheme Findly -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO
-      # TODO(H6): archive + sign (main only) — real signing secrets don't exist yet (store-readiness
-      # §2 / docs/implementation-handoff.md H6). Expected shape:
+      # H10 (docs/implementation-handoff.md): same build-number reasoning as android.yml's
+      # "compute release version code" step — Apple rejects a reused CURRENT_PROJECT_VERSION the
+      # same way Play rejects a reused versionCode, and this workflow's own `github.run_number`
+      # only ever increases. Always computed (cheap, no secret needed); only consumed by the
+      # gated release step below, via `release-testflight.sh`'s optional BUILD_NUMBER env var
+      # (see that script's header) — project.yml/project.pbxproj are never edited.
+      - name: compute release build number
+        id: version
+        run: echo "number=$((100 + ${{ github.run_number }}))" >> "$GITHUB_OUTPUT"
+      # H10 (docs/store-readiness.md §2 — human prerequisites): TestFlight from CI, gated the
+      # same way as android.yml's Play publish step — `ASC_API_KEY_P8` empty (no secret
+      # provisioned yet, or a fork/PR run) is a silent no-op, never a failure. Gated to `main`
+      # too: a signed, uploadable archive is only ever built from `main`, same as Android's
+      # release signing.
       #
-      # - name: archive + sign (main only)
-      #   run: xcodebuild archive -scheme Findly ...
-      #   env:
-      #     CERT_P12_BASE64: ${{ secrets.IOS_CERT_P12_BASE64 }}
-      #     CERT_PASSWORD: ${{ secrets.IOS_CERT_PASSWORD }}
-      #     PROVISIONING_PROFILE_BASE64: ${{ secrets.IOS_PROVISIONING_PROFILE_BASE64 }}
+      # `ASC_API_KEY_P8` is the .p8 file's contents, base64-encoded (same convention as
+      # android.yml's ANDROID_KEYSTORE_BASE64) — decoded here to the exact path
+      # `release-testflight.sh` documents that `xcrun altool` reads by default. Never echoed,
+      # never logged, written with 600 perms, and shredded in the always-run cleanup step below
+      # regardless of outcome — it must not persist anywhere past this job (checklist "Security"
+      # requirement: the Play service account JSON and the .p8 must never persist in the
+      # workspace or an artifact). $HOME is outside the checked-out repo, and nothing in this job
+      # uploads an artifact, so it's never captured either way.
+      - name: write App Store Connect API key
+        if: env.ASC_API_KEY_P8 != '' && github.ref == 'refs/heads/main'
+        run: |
+          mkdir -p "$HOME/.appstoreconnect/private_keys"
+          echo "$ASC_API_KEY_P8" | base64 -d > "$HOME/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8"
+          chmod 600 "$HOME/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8"
+      # XcodeGen is not preinstalled on the macos-14 runner image (verified against
+      # actions/runner-images' macos-14 software manifest, 2026-08-06) but
+      # `release-testflight.sh` requires it (`xcodegen generate`, regenerating the project from
+      # project.yml before archiving) — install only when the release step will actually run.
+      - name: install XcodeGen
+        if: env.ASC_API_KEY_P8 != '' && github.ref == 'refs/heads/main'
+        run: brew install xcodegen
+      # The existing script (mobile/ios/scripts/release-testflight.sh, H6) runs unchanged apart
+      # from the new optional BUILD_NUMBER override above — same archive/export/upload steps a
+      # developer laptop already ran manually.
+      - name: release to TestFlight
+        if: env.ASC_API_KEY_P8 != '' && github.ref == 'refs/heads/main'
+        run: scripts/release-testflight.sh
+        env:
+          BUILD_NUMBER: ${{ steps.version.outputs.number }}
+      # Always runs (even if the steps above failed) so the decoded .p8 never lingers on the
+      # runner past this job; a no-op when the write step above didn't run (nonexistent path).
+      # `shred` isn't part of macOS's BSD userland (unlike Linux's coreutils), hence the
+      # overwrite-then-remove fallback.
+      - name: shred App Store Connect API key
+        if: always()
+        run: |
+          KEY_PATH="$HOME/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8"
+          if [ -f "$KEY_PATH" ]; then
+            if command -v shred >/dev/null 2>&1; then
+              shred -u "$KEY_PATH"
+            else
+              SIZE=$(wc -c < "$KEY_PATH" | tr -d ' ')
+              dd if=/dev/urandom of="$KEY_PATH" bs=1 count="$SIZE" conv=notrunc >/dev/null 2>&1 || true
+              rm -f "$KEY_PATH"
+            fi
+          fi

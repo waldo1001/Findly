@@ -9,27 +9,33 @@ on:
   # non-mobile PR would hang on "Expected — waiting for status" (same fix as backend.yml).
   pull_request:
 
-# Least privilege (docs/security-review-checklist.md §2): this workflow only checks out,
-# builds, and runs unit tests — no deploy, no write access needed.
-permissions:
-  contents: read
-
 jobs:
   build:
     # Unique job name: required status checks match on job names, and "build" would
     # collide with the ios workflow's job.
     name: android-build
     runs-on: ubuntu-latest
+    # H10 (docs/security-review-checklist.md §2): permissions moved from workflow level to job
+    # level — this is the only job in the workflow, and it still needs nothing beyond checkout.
+    # Publishing to Play (below) authenticates with its own service-account JSON secret, not a
+    # GITHUB_TOKEN scope, so `contents: read` stays correct even with publishing added.
+    permissions:
+      contents: read
     # A7 (docs/store-readiness.md §1): the four release-signing secrets are mapped to job-level
     # env here — a step's `if:` cannot read `secrets.*` directly, and cannot read env vars set in
     # its *own* `env:` block (only workflow/job-level env is visible to a step's own `if:`), so
     # job-level is the only place this works. On forks/external PRs, and before H5 provisions the
     # real secrets, these are empty strings (not missing) — every `if:` below checks `!= ''`.
+    # H10: PLAY_SERVICE_ACCOUNT_JSON (gates + feeds the Play publish step) and MAPS_API_KEY
+    # (every CI-built artifact previously shipped a blank map, docs/implementation-handoff.md
+    # H10) follow the same pattern.
     env:
       ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
       ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
       ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
       ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+      PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+      MAPS_API_KEY: ${{ secrets.MAPS_API_KEY }}
     steps:
       - uses: actions/checkout@v4
       # Structure check — cheap, always valid regardless of the Gradle project's state.
@@ -120,6 +126,19 @@ jobs:
       - name: unit tests
         working-directory: mobile/android
         run: ./gradlew test
+      # H10 (docs/implementation-handoff.md): Play (and Apple, in ios.yml) reject a reused build
+      # number, and both were bumped by hand until now (0.1.0/1 -> 1.0.0 (6) -> 1.0.0 (7),
+      # 2026-08-06) — the exact toil this task removes. `github.run_number` is this *workflow's*
+      # own run counter: it only ever increases (a new run of `android.yml`, on any branch,
+      # always gets a higher number than every prior run), so a value derived from it can never
+      # be reused across separate CI runs. The `+ 100` offset is headroom above the last
+      # hand-edited value (7) and above what a workflow-recreation-triggered counter reset could
+      # plausibly produce, not something the arithmetic depends on for correctness. Always
+      # computed (cheap, no secret needed) even though it's only consumed by the two gated steps
+      # below.
+      - name: compute release version code
+        id: version
+        run: echo "code=$((100 + ${{ github.run_number }}))" >> "$GITHUB_OUTPUT"
       # A7 (docs/store-readiness.md §1): release signing. H5 provisions the real keystore/secrets
       # in GitHub's secret store; until then — and always on PRs, which never need a signed build —
       # `ANDROID_KEYSTORE_BASE64` is empty and these steps are skipped, so the workflow never fails
@@ -129,14 +148,79 @@ jobs:
       - name: decode release keystore
         if: env.ANDROID_KEYSTORE_BASE64 != '' && github.ref == 'refs/heads/main'
         run: echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
-      - name: assemble (signed on main)
+      # H10: `-PMAPS_API_KEY` wires the CI secret into the build the same way a local dev already
+      # could via `-PMAPS_API_KEY=...` or a gitignored `gradle.properties` override (see
+      # `app/build.gradle.kts`'s `mapsApiKey` val) — every CI-built artifact previously shipped
+      # with a blank map. `MAPS_API_KEY`'s job-level env comes from a repo secret so it isn't
+      # hardcoded here, but note its sensitivity is not the same class as the signing/service-
+      # account secrets below: a Google Maps Android API key ships inside the built AAB/APK
+      # itself (extractable by anyone who downloads the app) and is meant to be restricted via
+      # HTTP-referrer/app restrictions in the Google Cloud console (docs/store-readiness.md),
+      # not kept confidential — storing it as a secret here just keeps it out of the repo, same
+      # as `JOIN_LINK_HOST` would be if it weren't a public constant.
+      #
+      # H10: kept as APK output (`assembleRelease`) alongside the new AAB below (`bundleRelease`)
+      # — Play needs the AAB, but the APK stays useful for sideload/debug installs where an AAB
+      # can't be installed directly (`adb install` needs an APK, or `bundletool` to derive one).
+      # Review fix: that claim is only real if the APK actually leaves the runner — uploaded as a
+      # workflow artifact below (it was previously built, signed, and discarded, which made the
+      # stated rationale false). This is exactly the artifact tonight's incident showed is
+      # genuinely useful to have on hand.
+      - name: assemble APK (signed on main)
         if: env.ANDROID_KEYSTORE_BASE64 != '' && github.ref == 'refs/heads/main'
         working-directory: mobile/android
-        run: ./gradlew assembleRelease
+        run: ./gradlew assembleRelease -PMAPS_API_KEY="$MAPS_API_KEY" -PVERSION_CODE="$VERSION_CODE"
         env:
           ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/release.jks
-      # Always runs (even if assemble failed) so the decoded keystore never lingers on the runner;
-      # a no-op when the step above didn't run (rm -f on a nonexistent path).
+          VERSION_CODE: ${{ steps.version.outputs.code }}
+      # H10 review fix: upload the signed APK as a workflow artifact — a single named file, not
+      # the whole outputs/ directory, so nothing incidental (output-metadata.json, baseline
+      # profiles) rides along. `actions/upload-artifact` is first-party (`actions/`), so
+      # major-version pinning is enough (docs/security-review-checklist.md §2 — full-SHA pinning
+      # is reserved for non-first-party actions like the Play publish step below). Short
+      # retention: this is a debug/sideload convenience, not a release archive of record — Play
+      # keeps the AAB, App Store Connect keeps the IPA, this is just "the APK from this build was
+      # still on hand when someone needed one tonight."
+      - name: upload APK artifact
+        if: env.ANDROID_KEYSTORE_BASE64 != '' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: findly-release-apk
+          path: mobile/android/app/build/outputs/apk/release/app-release.apk
+          retention-days: 14
+      # H10: the AAB Play actually requires (Play no longer accepts APK uploads for new releases).
+      - name: bundle AAB (signed on main, for Play)
+        if: env.ANDROID_KEYSTORE_BASE64 != '' && github.ref == 'refs/heads/main'
+        working-directory: mobile/android
+        run: ./gradlew bundleRelease -PMAPS_API_KEY="$MAPS_API_KEY" -PVERSION_CODE="$VERSION_CODE"
+        env:
+          ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/release.jks
+          VERSION_CODE: ${{ steps.version.outputs.code }}
+      # Always runs (even if assemble/bundle failed) so the decoded keystore never lingers on the
+      # runner; a no-op when the steps above didn't run (rm -f on a nonexistent path).
       - name: clean up decoded keystore
         if: always()
         run: rm -f "$RUNNER_TEMP/release.jks"
+      # H10 (docs/implementation-handoff.md, docs/store-readiness.md §4 — human prerequisites):
+      # publish the AAB to the Play internal track only. **Deliberately internal-only, forever —
+      # do not add a production (or even closed/open testing) track here.** Automatic publishing
+      # on every green `main` means the household's own devices receive every merge; widening the
+      # gate to a track real strangers can reach would mean an untested merge ships to the public
+      # the same way tonight's dark-mode bug reached a real phone. Promotion beyond internal
+      # testing stays a manual Play Console action, always. Gated the same way as the signing
+      # secrets above: `PLAY_SERVICE_ACCOUNT_JSON` empty (no secret provisioned yet, or a fork/PR
+      # run) is a silent no-op, never a failure.
+      #
+      # Pinned to the v1.1.5 tag's commit SHA (not a mutable tag — this job holds a Play-
+      # publishing service-account credential) — r0adkll/upload-google-play, verified via
+      # `gh api repos/r0adkll/upload-google-play/git/refs/tags/v1.1.5` 2026-08-06; the repo is
+      # unarchived and its most recent release predates that check by under four months.
+      - name: publish AAB to Play internal track
+        if: env.PLAY_SERVICE_ACCOUNT_JSON != '' && github.ref == 'refs/heads/main'
+        uses: r0adkll/upload-google-play@e738b9dd8f2476ea806d921b64aacd24f34515a5 # v1.1.5
+        with:
+          serviceAccountJsonPlainText: ${{ env.PLAY_SERVICE_ACCOUNT_JSON }}
+          packageName: com.findly.android
+          releaseFiles: mobile/android/app/build/outputs/bundle/release/app-release.aab
+          track: internal
+          status: completed
