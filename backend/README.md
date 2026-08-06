@@ -49,7 +49,7 @@ npm run dev:storage        # start Azurite in one terminal (state in .azurite/, 
 npm run test:integration   # in another terminal
 ```
 
-Tables/containers are created on demand by the tests themselves (Azurite doesn't auto-create them the way the one-time Azure provisioning in `docs/azure-setup.md` does); each test uses a fresh random `familyId`/`deviceId` so parallel test files never collide on shared state.
+Tables are created on demand by the tests themselves — Azurite does NOT auto-create a table on first write, matching real Azure (specs/002 §1, B23). Blob **containers** are the opposite: Azurite auto-creates them implicitly on write (real Azure does not — specs/002 §1, B25), so tests that need a container to be genuinely absent use `dropContainers`/`ensureContainers` (`test/integration/support/ensureStorage.ts`) to defeat that emulator-only behavior explicitly rather than relying on it. Each test uses a fresh random `familyId`/`deviceId` so parallel test files never collide on shared state.
 
 Current coverage of the 002 §6 checklist:
 
