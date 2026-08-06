@@ -38,14 +38,21 @@ private fun glyphFor(tone: FindlyStatusTone): String = when (tone) {
  * only [FindlyTheme] tokens (specs/003-android-client.md §4.3). Geometry/states from design 2a
  * (design/findly-design-system/2a-ember-dusk/HANDOFF.md, `StatusChip`): 24dp height, pill radius.
  *
- * **[showStatusGlyph] (A26 code-review fix, Major 3):** HANDOFF.md's "always glyph + word" rule
- * is written for a short device-status pill (`● ONLINE`, `▲ STALE`, …), not for this
- * general-purpose small badge — existing call sites also use `FindlyStatusChip` for full-sentence
- * copy ("When the group ends, everything about it disappears.", "Code: ABC123 · expires …") where
- * an auto-prepended glyph reads as broken, not accessible. Defaults to `false` (today's plain
- * behaviour, unchanged for every generic badge call site); the genuine device/location-status
- * call sites opt in explicitly — see `ui/home/HomeScreen.kt`, `ui/locate/LocateScreen.kt`,
- * `ui/map/MapScreen.kt`, `ui/groups/GroupMapScreen.kt`.
+ * **[showStatusGlyph] (A26 code-review fix, Major 3; rule tightened in re-review, Major 2):**
+ * HANDOFF.md's "always glyph + word" rule is for a short device-status **word** — the handoff's
+ * own four device states (`● ONLINE`, `▲ STALE`, `▮▮ PAUSED`, `✕ ALERT`) — never for a sentence
+ * or clause. The rule is exactly that narrow: if `label` is a single status word/short phrase,
+ * `showStatusGlyph = true`; if it is a clause or full sentence — including a *status* sentence
+ * like "Couldn't reach the device — showing last known" — it does not get one, because a glyph
+ * glued onto prose reads as broken, not accessible, even though the sentence itself is still a
+ * legitimate status message (the meaning is already carried by the words, so leaving the glyph
+ * off is not a colour-alone violation). Defaults to `false` (today's plain behaviour, unchanged
+ * for every generic badge call site). Opted in at exactly three call sites, each a short
+ * word/phrase matching HANDOFF's model — `ui/home/HomeScreen.kt` ("Device registered", …),
+ * `ui/map/MapScreen.kt` and `ui/groups/GroupMapScreen.kt` ("Live"/"Stale"/"Paused"). Deliberately
+ * **not** opted in at `ui/locate/LocateScreen.kt`'s two chips ("Waiting for a response…", and the
+ * `pushFailed` case's full sentence) — do not turn this on there without first rewriting that
+ * copy down to a short word (out of this task's scope; A27's territory).
  *
  * [Success]/[Warning] fills use [FindlyTheme.colors.onDanger] as their text/glyph color rather
  * than a bespoke "on-success"/"on-warning" token — the 11-role contract has neither, and

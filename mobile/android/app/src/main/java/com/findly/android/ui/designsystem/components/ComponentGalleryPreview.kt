@@ -52,14 +52,16 @@ private fun ComponentGallery(modifier: Modifier = Modifier) {
 
         FindlySectionHeader(title = "Status chips")
         Column(verticalArrangement = Arrangement.spacedBy(FindlyTheme.spacing.xs)) {
-            // Device-status usage: glyph opted in (matches HomeScreen/LocateScreen/MapScreen/
-            // GroupMapScreen's real call sites).
+            // Device-status usage: glyph opted in (matches HomeScreen/MapScreen/GroupMapScreen's
+            // real call sites — short status words, matching HANDOFF's own model).
             FindlyStatusChip(label = "ONLINE", tone = FindlyStatusTone.Success, showStatusGlyph = true)
             FindlyStatusChip(label = "STALE", tone = FindlyStatusTone.Warning, showStatusGlyph = true)
             FindlyStatusChip(label = "PAUSED", tone = FindlyStatusTone.Neutral, showStatusGlyph = true)
             FindlyStatusChip(label = "ALERT", tone = FindlyStatusTone.Danger, showStatusGlyph = true)
             // General-purpose badge usage (the default): plain label, no glyph — e.g.
-            // GroupDetailScreen's "Code: ABC123" or a validation-error chip.
+            // GroupDetailScreen's "Code: ABC123", a validation-error chip, or LocateScreen's
+            // prose status messages ("Waiting for a response…") where the glyph rule doesn't
+            // apply (see FindlyStatusChip's doc comment).
             FindlyStatusChip(label = "Code: ABC123", tone = FindlyStatusTone.Success)
         }
 

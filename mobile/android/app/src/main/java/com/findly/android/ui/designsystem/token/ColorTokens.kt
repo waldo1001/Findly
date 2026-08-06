@@ -104,10 +104,11 @@ data class FindlyColorTokens(
      * black, verified well clear of 4.5:1 for `onPrimary` white on top of it. Dark is **not** the
      * same literal (HANDOFF.md gives only one hex, implicitly light-only, the same gap as the two
      * Major contrast findings above) — applying it as a fixed overlay in dark would sit `onPrimary`
-     * `#0A0F27` (near-black) at only ~4.0:1 on the resulting fill, which fails normal-text AA (the
-     * button label is 16sp/600, under WCAG's 14pt-bold "large text" threshold). Dark instead uses
-     * a shallower ~12% darken of dark `primary` toward black, `#6D7AE0`, keeping `onPrimary` at
-     * **4.96:1** on it.
+     * `#0A0F27` (near-black) at only **1.93:1** on the resulting fill (measured, corrected in A26
+     * re-review — an earlier draft of this comment said "~4.0:1", which was wrong), which fails
+     * normal-text AA (the button label is 16sp/600, under WCAG's 14pt-bold "large text"
+     * threshold). Dark instead uses a shallower ~12% darken of dark `primary` toward black,
+     * `#6D7AE0`, keeping `onPrimary` at **4.96:1** on it.
      */
     val buttonPrimaryPressedFill: Color,
 )
@@ -170,9 +171,10 @@ val DarkFindlyColors = FindlyColorTokens(
     // Dark gets no tint per HANDOFF.md — a plain neutral shadow at the normal level2 alpha.
     buttonPrimaryShadowTint = Color.Black.copy(alpha = 0.45f),
     // A26 code-review fix (Minor 7): HANDOFF.md gives only the light pressed-fill hex (#2C36A0),
-    // which would put dark `onPrimary` #0A0F27 (near-black) at ~4.0:1 on it — below 4.5:1 for the
-    // 16sp/600 button label (not "large text" under WCAG's 14pt-bold threshold). A shallower ~12%
-    // darken of dark `primary` toward black keeps `onPrimary` at a measured 4.96:1 instead.
+    // which would put dark `onPrimary` #0A0F27 (near-black) at 1.93:1 on it (measured, corrected
+    // in re-review from an earlier, wrong "~4.0:1") — below 4.5:1 for the 16sp/600 button label
+    // (not "large text" under WCAG's 14pt-bold threshold). A shallower ~12% darken of dark
+    // `primary` toward black keeps `onPrimary` at a measured 4.96:1 instead.
     buttonPrimaryPressedFill = Color(0xFF6D7AE0),
 )
 
