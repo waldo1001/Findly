@@ -17,7 +17,7 @@ struct ColorContrastPairingsTests {
 
     @Test(arguments: ColorContrastPairings.textPairings)
     func textPairing_meetsWCAG_4_5(_ pairing: ColorContrastPairings.TextOrStrokePairing) {
-        let ratio = WCAGContrast.ratio(pairing.foreground, pairing.background)
+        let ratio = Self.ratio(for: pairing)
         #expect(
             ratio >= pairing.threshold,
             """
@@ -34,7 +34,7 @@ struct ColorContrastPairingsTests {
 
     @Test(arguments: ColorContrastPairings.strokePairings)
     func strokePairing_meetsWCAG_3_0(_ pairing: ColorContrastPairings.TextOrStrokePairing) {
-        let ratio = WCAGContrast.ratio(pairing.foreground, pairing.background)
+        let ratio = Self.ratio(for: pairing)
         #expect(
             ratio >= pairing.threshold,
             """
@@ -49,7 +49,7 @@ struct ColorContrastPairingsTests {
 
     @Test(arguments: ColorContrastPairings.componentPairings)
     func componentPairing_meetsWCAG_4_5(_ pairing: ColorContrastPairings.TextOrStrokePairing) {
-        let ratio = WCAGContrast.ratio(pairing.foreground, pairing.background)
+        let ratio = Self.ratio(for: pairing)
         #expect(
             ratio >= pairing.threshold,
             """
@@ -58,6 +58,16 @@ struct ColorContrastPairingsTests {
             rather than adjusting the threshold or the color if this is unexpected.
             """
         )
+    }
+
+    /// Routes a pairing through the alpha-compositing formula when it carries a translucent
+    /// foreground (`foregroundAlpha < 1.0` — e.g. `PermissionBannerView`'s message text), and the
+    /// plain opaque formula otherwise. Added I29 code-review round 2 MAJOR alongside
+    /// `WCAGContrast.ratio(foreground:alpha:background:)`.
+    private static func ratio(for pairing: ColorContrastPairings.TextOrStrokePairing) -> Double {
+        pairing.foregroundAlpha < 1.0
+            ? WCAGContrast.ratio(foreground: pairing.foreground, alpha: pairing.foregroundAlpha, background: pairing.background)
+            : WCAGContrast.ratio(pairing.foreground, pairing.background)
     }
 
     // MARK: - Decorative exemption, explicit (I29 task item 5)
@@ -85,7 +95,12 @@ struct ColorContrastPairingsTests {
         #expect(outlineRatio < 3.0, "dark `outline` must stay below 3:1 as a live regression guard — HANDOFF.md's claim that it 'clears 3:1' was wrong.")
 
         let outlineStrongRatio = WCAGContrast.ratio(Theme.dark.outlineStrong, Theme.dark.colors.surface)
+        #expect(abs(outlineStrongRatio - 4.13) < 0.01, "dark `outlineStrong`/`surface` drifted off its documented 4.13:1 (I29 code-review round 2 MINOR — was only threshold-checked before, not pinned to the exact number the way light's is).")
         #expect(outlineStrongRatio >= 3.0, "`outlineStrong` (the correct token for meaningful strokes in dark) must pass 3:1 where raw `outline` fails.")
+
+        let outlineStrongVsSurfaceVariantRatio = WCAGContrast.ratio(Theme.dark.outlineStrong, Theme.dark.colors.surfaceVariant)
+        #expect(abs(outlineStrongVsSurfaceVariantRatio - 3.61) < 0.01, "dark `outlineStrong`/`surfaceVariant` drifted off its documented 3.61:1.")
+        #expect(outlineStrongVsSurfaceVariantRatio >= 3.0)
     }
 
     // 2. dark marker pill fill vs dark `primary` (#7C8BFF): the OLD (never-shipped-for-dark)
@@ -144,5 +159,34 @@ struct ColorContrastPairingsTests {
         #expect(abs(buttonDisabledLight - 2.45) < 0.01, "FindlyButton disabled label vs light `surfaceVariant` drifted off its documented 2.45:1 (below 4.5 — legal, disabled controls are WCAG-exempt).")
         #expect(abs(buttonDisabledDark - 5.48) < 0.01, "FindlyButton disabled label vs dark `surfaceVariant` drifted off its documented 5.48:1.")
         #expect(abs(textFieldDisabled - 2.54) < 0.01, "FindlyTextField disabled text vs its disabled fill drifted off its documented 2.54:1 (below 4.5 — legal, disabled controls are WCAG-exempt).")
+
+        // FindlyButton.swift foregroundColor: `.secondary`/`.destructive` styles composite their
+        // disabled label over `Color.clear` — i.e. the ambient `surface` behind the button, NOT
+        // `surfaceVariant` (that's only `.primary`'s disabled fill). Added I29 code-review round 2
+        // MINOR — the `surfaceVariant` pin above only covers `.primary`.
+        let buttonDisabledOnSurfaceLight = WCAGContrast.ratio(Color.findlyDisabledLabel, Theme.light.colors.surface)
+        let buttonDisabledOnSurfaceDark = WCAGContrast.ratio(Color.findlyDisabledLabel, Theme.dark.colors.surface)
+        #expect(abs(buttonDisabledOnSurfaceLight - 2.77) < 0.01, "FindlyButton .secondary/.destructive disabled label vs light `surface` (ambient, through Color.clear) drifted off its documented 2.77:1 (below 4.5 — legal, disabled controls are WCAG-exempt).")
+        #expect(abs(buttonDisabledOnSurfaceDark - 6.27) < 0.01, "FindlyButton .secondary/.destructive disabled label vs dark `surface` drifted off its documented 6.27:1.")
+
+        // FindlyTextField.swift borderColor: disabled border vs the field's own disabled fill —
+        // the one disabled pair left unpinned (border-vs-fill, not label/text-vs-fill like the
+        // three above). Added I29 code-review round 2 MINOR.
+        let textFieldDisabledBorder = WCAGContrast.ratio(Color.findlyTextFieldDisabledBorder, Color.findlyTextFieldDisabledFill)
+        #expect(abs(textFieldDisabledBorder - 1.19) < 0.01, "FindlyTextField disabled border vs its disabled fill drifted off its documented 1.19:1 (below 3.0 — legal, disabled controls are WCAG-exempt; a disabled border only needs to read as \"there's a field here\", not stand out).")
+    }
+
+    // MARK: - Synthetic negative control (I29 code-review round 2, adopted per the reviewer's
+    // suggested pattern for proving detection stays live in the committed suite itself, rather
+    // than by the uncommitted manual sabotage-and-revert step used during I29's first round).
+    //
+    // Black on black is always 1:1 — always below any real threshold used on this page. If
+    // `WCAGContrast.ratio` (or the `>=` comparisons the other tests build on it) ever silently
+    // stopped measuring anything real — e.g. a future refactor makes it return a constant — this
+    // is the assertion most likely to flip first, because it has zero margin for coincidence.
+    @Test func syntheticFailingPairing_provesDetectionStaysLive() {
+        let blackOnBlack = WCAGContrast.ratio(.black, .black)
+        #expect(abs(blackOnBlack - 1.0) < 0.0001, "black-on-black must measure exactly 1:1 — the formula's own floor.")
+        #expect(blackOnBlack < 4.5, "black-on-black must stay a documented failure against the 4.5:1 text threshold — this negative control exists to prove the suite can still detect a failing pairing, permanently, without needing an uncommitted manual step.")
     }
 }

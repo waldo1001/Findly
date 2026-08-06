@@ -43,7 +43,15 @@ public struct PermissionBannerView: View {
                     Button(action: onDismiss) {
                         Image(systemName: "xmark")
                             .font(theme.typography.labelSmall.font)
-                            .foregroundColor(theme.colors.onSurface.opacity(0.6))
+                            // Was `theme.colors.onSurface.opacity(0.6)` — measured 4.43:1 against
+                            // this banner's `surfaceVariant` fill, under the 4.5:1 text/icon
+                            // threshold (I29 code-review round 2 MAJOR; Android had the identical
+                            // bug in its own permission banner). `onSurfaceMuted` is the token this
+                            // component should have used from the start — it's already tuned per
+                            // scheme for exactly this "de-emphasized but still legible" role (see
+                            // LoadingStateView's message text) rather than an ad-hoc opacity that
+                            // happens to fail in light mode.
+                            .foregroundColor(theme.onSurfaceMuted)
                             .padding(theme.spacing.xs)
                             .contentShape(Rectangle())
                     }
