@@ -5,8 +5,22 @@ import Testing
 /// trigger (001 §4.1, 000 §O4).
 struct DeviceRegistrationServiceTests {
 
+    /// A profile-exists `getMyFamily()` stub — the default for `makeService()` below, since
+    /// `registerOrUpdate` now probes `GET /families/me` before every registration attempt (I24,
+    /// specs/001 §1.5.3) and `FakeAPIClient.getMyFamilyHandler` `fatalError`s if never configured.
+    /// Mirrors `CreateGroupViewModelTests.profileExistsHandler()`.
+    private static func profileExistsHandler() -> () async throws -> Envelope<GetMyFamilyResponse> {
+        {
+            TestFeatures.envelope(GetMyFamilyResponse(
+                familyId: "fam_x", familyName: "Wauters", createdAt: "2026-07-19T08:00:00Z",
+                me: MeSummary(userId: "u1", role: "parent"), members: []
+            ))
+        }
+    }
+
     func makeService(userId: String = "u1") -> (FakeAPIClient, DeviceRegistrationService) {
         let api = FakeAPIClient()
+        api.getMyFamilyHandler = Self.profileExistsHandler()
         let service = DeviceRegistrationService(
             apiClient: api,
             deviceIdProvider: InMemoryDeviceIdProvider(generateUUID: { "fixed-device-id" }),
@@ -128,6 +142,79 @@ struct DeviceRegistrationServiceTests {
 
         #expect(!registered)
         #expect(tracker.lastRegisteredAppVersion(forUserId: "u1") == nil, "a failed call must not be remembered as done, so the next launch/foreground retries it")
+    }
+
+    // MARK: - I24 (specs/001 §1.5.3, §4.1) — `POST /devices` is not one of the four
+    // profile-bootstrapping endpoints, so a profile-less caller always gets `404
+    // PROFILE_NOT_FOUND`. `registerOrUpdate` now probes `GET /families/me` first (the I17 idiom:
+    // the component that needs the profile checks for itself) so that doomed call is never made,
+    // and the caller can distinguish "not onboarded yet" from a genuine failure.
+
+    @Test func registerOrUpdate_confirmedProfileMissing_throwsProfileNotYetBootstrapped_withoutCallingRegisterDevice() async throws {
+        let (api, service) = makeService()
+        api.getMyFamilyHandler = {
+            throw APIError.server(APIErrorBody(code: .profileNotFound, message: "no profile", details: nil, requestId: "r1"), httpStatus: 404)
+        }
+
+        do {
+            _ = try await service.registerOrUpdate()
+            Issue.record("expected DeviceRegistrationError.profileNotYetBootstrapped to be thrown")
+        } catch DeviceRegistrationError.profileNotYetBootstrapped {
+            // expected
+        } catch {
+            Issue.record("expected .profileNotYetBootstrapped, got \(error)")
+        }
+        #expect(api.registerDeviceCalls.isEmpty, "the doomed POST /devices call must never be made for a confirmed profile-less caller")
+        #expect(api.getMyFamilyCallCount == 1)
+    }
+
+    @Test func registerOrUpdate_profileExists_registersNormally() async throws {
+        let (api, service) = makeService()
+
+        _ = try await service.registerOrUpdate()
+
+        #expect(api.getMyFamilyCallCount == 1)
+        #expect(api.registerDeviceCalls.count == 1)
+    }
+
+    @Test func registerOrUpdate_inconclusiveProbe_failsOpenAndStillRegisters() async throws {
+        // A transport blip on the probe must never silently stop an already-profiled caller's
+        // device from registering/refreshing its push token — same "fail open" reasoning as
+        // CreateGroupViewModel.isBootstrappingProfile (I17).
+        let (api, service) = makeService()
+        api.getMyFamilyHandler = { throw APIError.transport("offline") }
+
+        _ = try await service.registerOrUpdate()
+
+        #expect(api.registerDeviceCalls.count == 1)
+    }
+
+    @Test func registerOrUpdate_familyNotFoundProbeResult_stillRegisters() async throws {
+        // FAMILY_NOT_FOUND means a profile exists but has no family yet (001 §1.5.3 step 4) —
+        // device registration works without a family (§4.1), so this must NOT be treated the
+        // same as PROFILE_NOT_FOUND.
+        let (api, service) = makeService()
+        api.getMyFamilyHandler = {
+            throw APIError.server(APIErrorBody(code: .familyNotFound, message: "no family", details: nil, requestId: "r1"), httpStatus: 404)
+        }
+
+        _ = try await service.registerOrUpdate()
+
+        #expect(api.registerDeviceCalls.count == 1)
+    }
+
+    @Test func registerOnLaunchIfNeeded_noProfileYet_skipsTheDoomedCall_andDoesNotMarkVersionRegistered() async throws {
+        let (api, service) = makeService(userId: "u1")
+        api.getMyFamilyHandler = {
+            throw APIError.server(APIErrorBody(code: .profileNotFound, message: "no profile", details: nil, requestId: "r1"), httpStatus: 404)
+        }
+        let tracker = InMemoryAppVersionRegistrationTracker()
+
+        let registered = await service.registerOnLaunchIfNeeded(appVersionTracker: tracker)
+
+        #expect(!registered)
+        #expect(api.registerDeviceCalls.isEmpty)
+        #expect(tracker.lastRegisteredAppVersion(forUserId: "u1") == nil, "no profile yet must not be remembered as registered, so the bootstrap-completion retry (RootView) or next launch tries again")
     }
 }
 

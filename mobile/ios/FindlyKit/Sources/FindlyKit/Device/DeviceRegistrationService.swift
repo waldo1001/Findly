@@ -1,9 +1,22 @@
 import Foundation
 
+/// specs/001-api-contract.md §1.5.3, §4.1 (I24) — `POST /devices` is NOT one of the four
+/// profile-bootstrapping endpoints (`POST /families`, `/invites/accept`, `/groups`,
+/// `/groups/join`), so a caller with no `Users` profile row yet always gets `404
+/// PROFILE_NOT_FOUND` from it. Thrown by `DeviceRegistrationService.registerOrUpdate()` instead
+/// of letting that doomed call happen, so callers can tell "this user hasn't finished onboarding
+/// yet" (expected, not an error) apart from a genuine registration failure (network/server error,
+/// which propagates as whatever `FindlyAPIClient.registerDevice`/`getMyFamily` itself throws).
+public enum DeviceRegistrationError: Error, Equatable {
+    case profileNotYetBootstrapped
+}
+
 /// specs/004-ios-client.md §5, specs/001 §4.1 — builds and sends device-registration requests.
 /// Triggers (MUST, wired by the app target through this type's public API): first launch after
 /// sign-in, every push-token refresh (`observePushTokenRefreshes`), and every app update (caller's
-/// responsibility to detect and call `registerOrUpdate()` again).
+/// responsibility to detect and call `registerOrUpdate()` again). Also retried by `RootView`
+/// (I24) once any of the four profile-bootstrap paths completes, since a call made before that
+/// point is guaranteed to hit `DeviceRegistrationError.profileNotYetBootstrapped` below.
 public final class DeviceRegistrationService {
     private let apiClient: FindlyAPIClient
     private let deviceIdProvider: DeviceIdProviding
@@ -37,6 +50,18 @@ public final class DeviceRegistrationService {
     ) async throws -> Envelope<DeviceResponse> {
         guard let userId = authProvider.currentUserId else { throw AuthError.notSignedIn }
 
+        // specs/001 §1.5.3 (I24) — probe for a profile before attempting the doomed POST /devices
+        // call. Mirrors CreateGroupViewModel/GroupJoinViewModel's `isBootstrappingProfile` idiom
+        // (I17): "the component that needs the profile" (here, this service) checks for itself via
+        // GET /families/me, rather than trusting caller-supplied context that can go stale across
+        // navigation. Only a CONFIRMED PROFILE_NOT_FOUND short-circuits — any other outcome (a
+        // genuine profile, FAMILY_NOT_FOUND, or an inconclusive probe: transport error, timeout,
+        // 5xx) fails OPEN, so a probe blip never silently stops an already-profiled device from
+        // registering or refreshing its push token.
+        if await isProfileMissing() {
+            throw DeviceRegistrationError.profileNotYetBootstrapped
+        }
+
         if let pushToken { lastPushToken = pushToken }
         if let locationPushToken { lastLocationPushToken = locationPushToken }
 
@@ -50,6 +75,18 @@ public final class DeviceRegistrationService {
             deviceName: deviceName
         )
         return try await apiClient.registerDevice(request)
+    }
+
+    /// `true` only on a confirmed `PROFILE_NOT_FOUND` (001 §1.5.3) — see `registerOrUpdate`'s doc
+    /// above for the fail-open reasoning. Identical idiom to
+    /// `CreateGroupViewModel.isBootstrappingProfile` / `GroupJoinViewModel.isBootstrappingProfile`.
+    private func isProfileMissing() async -> Bool {
+        do {
+            _ = try await apiClient.getMyFamily()
+            return false
+        } catch {
+            return (error as? APIError)?.serverCode == .profileNotFound
+        }
     }
 
     /// Subscribes to push-token refreshes and re-registers with the new token on every emission
