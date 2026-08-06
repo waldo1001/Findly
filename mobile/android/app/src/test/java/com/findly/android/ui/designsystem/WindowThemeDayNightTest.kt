@@ -1,5 +1,8 @@
 package com.findly.android.ui.designsystem
 
+import androidx.compose.ui.graphics.Color
+import com.findly.android.ui.designsystem.token.DarkFindlyColors
+import com.findly.android.ui.designsystem.token.LightFindlyColors
 import java.io.File
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
@@ -26,12 +29,19 @@ import org.junit.Test
  *
  * What this test CAN honestly do: read the actual XML resource files that shipped the bug and
  * assert the two properties whose absence caused it — a night variant exists, and its platform
- * parent is the dark one, not light. It also pins `android:windowBackground` in both variants to
- * the exact `FindlyColorTokens` `surface` hex (`ui/designsystem/token/ColorTokens.kt`) so the two
- * XML files and the Kotlin tokens can't silently drift apart. It does NOT prove Compose actually
- * paints correctly at runtime (`FindlyTheme`'s `Surface(color = colors.surface)` is the other,
- * durable half of the A32 fix, and that half genuinely has no automated guard — verified manually
- * only, see the A32 report).
+ * parent is the dark one, not light. It also pins `android:windowBackground` in both variants
+ * against the **real** `LightFindlyColors.surface` / `DarkFindlyColors.surface` values
+ * (`ui/designsystem/token/ColorTokens.kt`) — not a second hand-copied literal — by reading the
+ * actual `Color`'s `red`/`green`/`blue`/`alpha` components and deriving the `#AARRGGBB` string a
+ * plain-JVM test would compare against, the same "reference the real token, don't restate it"
+ * pattern `ColorTokenContrastTest`/`ContrastRatio.kt` already establish for this module (no
+ * Robolectric or Android runtime needed — `Color`'s channel accessors are pure Kotlin on the JVM).
+ * That closes the actual drift path this guards against: change a `surface` token and forget the
+ * XML (or vice versa) and this test fails, because it is the token driving the expectation, not a
+ * second copy of the hex. It does NOT prove Compose actually paints correctly at runtime
+ * (`FindlyTheme`'s `Surface(color = colors.surface)` is the other, durable half of the A32 fix,
+ * and that half genuinely has no automated guard — verified manually only, see the A32 report and
+ * the comment on that `Surface` call in `FindlyTheme.kt`).
  */
 class WindowThemeDayNightTest {
 
@@ -54,6 +64,19 @@ class WindowThemeDayNightTest {
         val file = File(moduleRoot, "src/main/res/$variant/themes.xml")
         assertTrue("expected ${file.path} to exist", file.isFile)
         return file.readText()
+    }
+
+    /**
+     * The actual `Color` -> `#AARRGGBB` string an `android:windowBackground` XML attribute would
+     * need to equal to resolve to the same colour. Derived from `color`'s own `red`/`green`/
+     * `blue`/`alpha` (Float 0f..1f) components — no Android/Robolectric runtime required, same as
+     * `ContrastRatio.kt`'s `relativeLuminance`. This is the actual token value, not a restated
+     * literal, so a token change with no matching XML change makes the comparison in
+     * `windowBackground is pinned to the real surface token hex in both themes` fail.
+     */
+    private fun argbHex(color: Color): String {
+        fun channel(v: Float) = Math.round(v.coerceIn(0f, 1f) * 255f)
+        return "#%02X%02X%02X%02X".format(channel(color.alpha), channel(color.red), channel(color.green), channel(color.blue))
     }
 
     @Test
@@ -92,27 +115,31 @@ class WindowThemeDayNightTest {
     }
 
     @Test
-    fun `windowBackground is pinned to the surface token hex in both themes, and they differ`() {
+    fun `windowBackground is pinned to the real surface token hex in both themes`() {
         val light = readThemesXml("values")
         val night = readThemesXml("values-night")
 
-        // FindlyColorTokens.LightFindlyColors.surface / DarkFindlyColors.surface
-        // (ui/designsystem/token/ColorTokens.kt) — kept as literal hex here on purpose: XML
-        // resources can't reference a Kotlin constant, so this pin is what stops the two files
-        // drifting apart if the token value ever changes without this test being updated too.
-        val lightSurfaceArgb = "#FFF2F4FB"
-        val darkSurfaceArgb = "#FF0B0F1C"
+        // Derived from the ACTUAL FindlyColorTokens.surface Color values
+        // (ui/designsystem/token/ColorTokens.kt), not a second hand-copied literal — change
+        // LightFindlyColors.surface or DarkFindlyColors.surface without touching the matching
+        // themes.xml and these two assertions fail, which is the entire point of this test.
+        val lightSurfaceArgb = argbHex(LightFindlyColors.surface)
+        val darkSurfaceArgb = argbHex(DarkFindlyColors.surface)
 
         assertTrue(
-            "light windowBackground should be pinned to the light surface token ($lightSurfaceArgb)",
+            "light windowBackground should be pinned to LightFindlyColors.surface " +
+                "($lightSurfaceArgb) — either the XML fell out of sync with the token, or the " +
+                "token changed and values/themes.xml needs updating to match",
             light.contains(lightSurfaceArgb),
         )
         assertTrue(
-            "night windowBackground should be pinned to the dark surface token ($darkSurfaceArgb)",
+            "night windowBackground should be pinned to DarkFindlyColors.surface " +
+                "($darkSurfaceArgb) — either the XML fell out of sync with the token, or the " +
+                "token changed and values-night/themes.xml needs updating to match",
             night.contains(darkSurfaceArgb),
         )
         assertNotEquals(
-            "light and dark windowBackground must not resolve to the same colour",
+            "light and dark surface tokens must not resolve to the same colour",
             lightSurfaceArgb,
             darkSurfaceArgb,
         )

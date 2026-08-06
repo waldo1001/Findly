@@ -125,6 +125,14 @@ fun FindlyTheme(
             typography = materialTypography,
             shapes = shapes,
         ) {
+            // A32: this Surface is the durable half of the fix and has NO automated regression
+            // guard — there is no Compose UI-test harness in this module (no Robolectric, no
+            // androidx.compose.ui.test), so nothing can render a real window and sample its
+            // background the way this was verified manually (emulator screenshots, pixel-sampled
+            // with Pillow, see the A32 dev-loop report). WindowThemeDayNightTest only guards the
+            // OTHER half (res/values{,-night}/themes.xml). If you touch this Surface — remove it,
+            // change what colors it, swap fillMaxSize for something narrower — verify on a running
+            // emulator in both themes before trusting a green `./gradlew test`.
             Surface(
                 modifier = Modifier.fillMaxSize(),
                 color = tokens.surface,
