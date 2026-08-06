@@ -2,14 +2,19 @@ import "./azuriteEnv";
 import { createTableClient } from "../../../src/adapters/tables/tableClientFactory";
 import { createContainerClient } from "../../../src/adapters/blobs/blobClientFactory";
 
-/** Azurite doesn't auto-create tables/containers (real Azure provisioning does this once,
- * docs/azure-setup.md); integration tests create-if-not-exists on their own fixtures. */
+/** Azurite doesn't auto-create tables (real Azure provisioning does this once,
+ * docs/azure-setup.md; specs/002 §1, B23); integration tests create-if-not-exists on their
+ * own fixtures. NOTE this is NOT true of blob containers — see `ensureContainers` below. */
 export async function ensureTables(...names: string[]): Promise<void> {
   for (const name of names) {
     await createTableClient(name).createTable();
   }
 }
 
+/** Unlike `ensureTables`, this is not fighting Azurite's own behavior — Azurite auto-creates
+ * containers implicitly on write. It exists so every test file's `beforeAll` can idempotently
+ * restore whatever a sibling test's `dropContainers` (below) deliberately removed, deterministically,
+ * without depending on a subsequent write happening to recreate it first (specs/002 §1, B25). */
 export async function ensureContainers(...names: string[]): Promise<void> {
   for (const name of names) {
     await createContainerClient(name).createIfNotExists();
