@@ -19,7 +19,8 @@ struct LocationPushTokenHandlingTests {
             apiClient: api,
             deviceIdProvider: InMemoryDeviceIdProvider(generateUUID: { "fixed-device-id" }),
             deviceInfoProvider: StaticDeviceInfoProvider(platform: "ios", model: "iPhone 15", appVersion: "1.2.3"),
-            authProvider: StubAuthProvider(currentUserId: "u1")
+            authProvider: StubAuthProvider(currentUserId: "u1"),
+            appVersionTracker: InMemoryAppVersionRegistrationTracker()
         )
         let locationPushTokens = StubLocationPushTokenHandler()
 
