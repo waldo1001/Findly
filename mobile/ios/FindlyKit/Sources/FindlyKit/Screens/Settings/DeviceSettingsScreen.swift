@@ -77,13 +77,13 @@ private struct DeviceCardView: View {
             VStack(alignment: .leading, spacing: theme.spacing.sm) {
                 HStack {
                     Text(device.deviceName)
-                        .font(theme.typography.titleMedium)
+                        .font(theme.typography.titleMedium.font)
                         .foregroundColor(theme.colors.onSurface)
                     Spacer()
                     StatusChip(device.trackingEnabled ? "Active" : "Paused", kind: device.trackingEnabled ? .online : .paused)
                 }
                 Text("Owner: \(device.ownerDisplayName)")
-                    .font(theme.typography.bodyMedium)
+                    .font(theme.typography.bodyMedium.font)
                     .foregroundColor(theme.colors.onSurface.opacity(0.7))
                 if viewModel.isParent {
                     FindlyToggleRow(
@@ -113,7 +113,7 @@ private struct DeviceCardView: View {
     private var intervalPicker: some View {
         VStack(alignment: .leading, spacing: theme.spacing.xs) {
             Text("Sync interval")
-                .font(theme.typography.labelSmall)
+                .font(theme.typography.labelSmall.font)
                 .foregroundColor(theme.colors.onSurface.opacity(0.7))
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: theme.spacing.sm) {

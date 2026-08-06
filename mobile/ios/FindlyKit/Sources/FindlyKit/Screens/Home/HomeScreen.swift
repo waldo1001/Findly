@@ -95,7 +95,7 @@ public struct HomeScreen: View {
             ScrollView {
                 VStack(spacing: theme.spacing.md) {
                     Text(familyName)
-                        .font(theme.typography.titleLarge)
+                        .font(theme.typography.titleLarge.font)
                         .foregroundColor(theme.colors.onSurface)
                     FindlyButton("Family map") { onSelectMap() }
                     FindlyButton("My history", style: .secondary) { onSelectHistory(myUserId) }

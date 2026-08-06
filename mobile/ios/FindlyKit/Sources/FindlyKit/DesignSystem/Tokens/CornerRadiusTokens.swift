@@ -15,6 +15,6 @@ public struct CornerRadiusTokens: Equatable {
         self.pill = pill
     }
 
-    // Findly design system (design/findly-design-system/) — softer, friendlier corners.
-    public static let standard = CornerRadiusTokens(sm: 8, md: 12, lg: 20, pill: 999)
+    // design 2a "Ember/Dusk" (design/findly-design-system/2a-ember-dusk/HANDOFF.md).
+    public static let standard = CornerRadiusTokens(sm: 12, md: 20, lg: 28, pill: 999)
 }

@@ -1,6 +1,14 @@
 import SwiftUI
 
 /// specs/004-ios-client.md §2.3 — a recoverable-error state with an optional retry action.
+///
+/// design 2a "Ember/Dusk" (design/findly-design-system/2a-ember-dusk/HANDOFF.md), shared geometry
+/// with Empty/Loading: radius `lg`, fill `surfaceVariant`, 22pt padding. Leads with `▲` in
+/// `warning` rather than a red icon — "not red — an unreachable device is not an error state for
+/// the user" — a calm, reassuring tone even for genuinely broken states (the handoff's stated
+/// emotional tone: "calm, warm, trustworthy... not a surveillance dashboard"). `danger` stays
+/// reserved for destructive confirmations elsewhere. "Raw server text never reaches the screen" is
+/// a view-model concern (`message` here is always caller-composed, human copy already).
 public struct ErrorStateView: View {
     @Environment(\.theme) private var theme
     private let message: String
@@ -15,20 +23,38 @@ public struct ErrorStateView: View {
 
     public var body: some View {
         VStack(spacing: theme.spacing.md) {
-            Text(message)
-                .font(theme.typography.bodyMedium)
-                .foregroundColor(theme.colors.danger)
-                .multilineTextAlignment(.center)
+            HStack(alignment: .top, spacing: theme.spacing.xs) {
+                Text("▲")
+                    .foregroundColor(theme.colors.warning)
+                Text(message)
+                    .foregroundColor(theme.colors.onSurface)
+            }
+            .font(theme.typography.bodyMedium.font)
+            // 15pt body at a ~1.5x (22.5pt) line height, same as EmptyStateView/LoadingStateView
+            // ("EmptyState/LoadingState/ErrorState" share one geometry bullet in the handoff).
+            .lineSpacing(theme.typography.bodyMedium.size * 1.5 - theme.typography.bodyMedium.size)
+            .multilineTextAlignment(.leading)
             if let onRetry {
                 FindlyButton(retryTitle, style: .secondary, action: onRetry)
             }
         }
-        .padding(theme.spacing.xl)
+        .padding(22)
+        .background(theme.colors.surfaceVariant)
+        .clipShape(RoundedRectangle(cornerRadius: theme.corner.lg))
     }
 }
 
-// #Preview blocks intentionally omitted: this session's build/test verification environment has
-// only Xcode Command Line Tools (no Xcode.app), which lacks the `PreviewsMacros` compiler plugin
-// `#Preview` needs — even an empty `#Preview {}` fails to compile here. Adding light/dark previews
-// back is a trivial, non-blocking follow-up once a real Xcode toolchain is available (see
-// specs/004-ios-client.md §2.3); the package must build clean in THIS environment first.
+#Preview("ErrorStateView — light") {
+    ErrorStateView(message: "We couldn't reach Sam's Pixel. It may be off or out of signal.", retryTitle: "Try again") {}
+        .padding()
+        .background(Theme.light.colors.surface)
+        .environment(\.theme, .light)
+}
+
+#Preview("ErrorStateView — dark") {
+    ErrorStateView(message: "We couldn't reach Sam's Pixel. It may be off or out of signal.", retryTitle: "Try again") {}
+        .padding()
+        .background(Theme.dark.colors.surface)
+        .environment(\.theme, .dark)
+        .preferredColorScheme(.dark)
+}

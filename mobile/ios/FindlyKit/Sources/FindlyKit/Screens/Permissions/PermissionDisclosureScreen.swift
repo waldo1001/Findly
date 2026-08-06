@@ -38,7 +38,7 @@ public struct PermissionDisclosureScreen: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: theme.spacing.md) {
                     Text(headline)
-                        .font(theme.typography.titleLarge)
+                        .font(theme.typography.titleLarge.font)
                         .foregroundColor(theme.colors.onSurface)
                         .fixedSize(horizontal: false, vertical: true)
 
@@ -48,10 +48,10 @@ public struct PermissionDisclosureScreen: View {
                                 // A plain bullet, not an icon set: these are three sentences of
                                 // disclosure, and decorating them would undercut the tone.
                                 Text("•")
-                                    .font(theme.typography.bodyLarge)
+                                    .font(theme.typography.bodyLarge.font)
                                     .foregroundColor(theme.colors.primary)
                                 Text(point)
-                                    .font(theme.typography.bodyMedium)
+                                    .font(theme.typography.bodyMedium.font)
                                     .foregroundColor(theme.colors.onSurface)
                                     .fixedSize(horizontal: false, vertical: true)
                             }
@@ -59,7 +59,7 @@ public struct PermissionDisclosureScreen: View {
                     }
 
                     Text(closing)
-                        .font(theme.typography.bodyMedium)
+                        .font(theme.typography.bodyMedium.font)
                         .foregroundColor(theme.colors.onSurface.opacity(0.75))
                         .fixedSize(horizontal: false, vertical: true)
                 }

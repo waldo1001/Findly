@@ -1,11 +1,18 @@
 import SwiftUI
 
 /// specs/004-ios-client.md §2.3 — e.g. a device's live/stale/paused state (001 §5.2 `isStale`,
-/// §5.1 `trackingEnabled`).
+/// §5.1 `trackingEnabled`), plus a `danger` kind for alert-style chips.
+///
+/// design 2a "Ember/Dusk" (design/findly-design-system/2a-ember-dusk/HANDOFF.md): "Status is
+/// never colour alone" — every chip renders a kind-specific glyph ahead of the caller's word, so
+/// it still reads in greyscale. The caller's `text` stays free-form (existing screens pass e.g.
+/// "Couldn't reach device — showing last known", not the handoff's literal "STALE"), matching how
+/// this component was already used before I27; only the glyph and styling are new.
 public enum StatusChipKind: Equatable {
     case online
     case stale
     case paused
+    case danger
 }
 
 public struct StatusChip: View {
@@ -19,26 +26,90 @@ public struct StatusChip: View {
     }
 
     public var body: some View {
-        Text(text)
-            .font(theme.typography.labelSmall)
-            .padding(.horizontal, theme.spacing.sm)
-            .padding(.vertical, theme.spacing.xs)
-            .background(backgroundColor)
-            .foregroundColor(theme.colors.onPrimary)
-            .clipShape(RoundedRectangle(cornerRadius: theme.corner.pill))
+        HStack(spacing: 4) {
+            Text(glyph)
+            Text(text)
+        }
+        // 10.5/700, uppercase, +0.3 tracking — the chip's own literal label spec (labelSmall is
+        // close but not identical: 12/700/uppercase/+0.4).
+        .font(.system(size: 10.5, weight: .bold))
+        .tracking(0.3)
+        .textCase(.uppercase)
+        .foregroundColor(foregroundColor)
+        .padding(.horizontal, 9)
+        .frame(height: 24)
+        .background(background)
+        .overlay(border)
+        .clipShape(RoundedRectangle(cornerRadius: theme.corner.pill))
+        // The word carries the same meaning the glyph and color do — never drop it for
+        // VoiceOver just because the glyph is decorative-looking.
+        .accessibilityElement(children: .combine)
     }
 
-    private var backgroundColor: Color {
+    private var glyph: String {
         switch kind {
-        case .online: return theme.colors.success
-        case .stale: return theme.colors.warning
-        case .paused: return theme.colors.outline
+        case .online: return "●"
+        case .stale: return "▲"
+        case .paused: return "▮▮"
+        case .danger: return "✕"
+        }
+    }
+
+    @ViewBuilder
+    private var background: some View {
+        switch kind {
+        case .online: theme.colors.success
+        case .stale: theme.colors.warning
+        case .paused: Color.clear
+        case .danger: theme.colors.danger
+        }
+    }
+
+    @ViewBuilder
+    private var border: some View {
+        if kind == .paused {
+            // The outline carries the row's whole status here (no fill) — a meaningful stroke,
+            // not a decorative hairline, so it uses the stronger `outlineStrong` color.
+            RoundedRectangle(cornerRadius: theme.corner.pill)
+                .strokeBorder(theme.outlineStrong, lineWidth: 1.5)
+        }
+    }
+
+    private var foregroundColor: Color {
+        switch kind {
+        // Correction (post-review, independently verified): the handoff's "onDanger-white text"
+        // for `.online` and plain "white text" for `.stale` read as a literal `Color.white` for
+        // stale — but `onDanger` differs from literal white in dark (#2A0708). Measured: literal
+        // white on dark `success`/`warning` fills = 1.64:1 / 1.58:1 (fails); the `onDanger` TOKEN
+        // on those same dark fills = 11.32:1 / 11.71:1 (both themes use the same token, matching
+        // Android's A26). Always use the token, never a literal white.
+        case .online, .stale, .danger: return theme.colors.onDanger
+        case .paused: return theme.colors.onSurface
         }
     }
 }
 
-// #Preview blocks intentionally omitted: this session's build/test verification environment has
-// only Xcode Command Line Tools (no Xcode.app), which lacks the `PreviewsMacros` compiler plugin
-// `#Preview` needs — even an empty `#Preview {}` fails to compile here. Adding light/dark previews
-// back is a trivial, non-blocking follow-up once a real Xcode toolchain is available (see
-// specs/004-ios-client.md §2.3); the package must build clean in THIS environment first.
+#Preview("StatusChip — light") {
+    HStack(spacing: 8) {
+        StatusChip("Online", kind: .online)
+        StatusChip("Stale", kind: .stale)
+        StatusChip("Paused", kind: .paused)
+        StatusChip("Alert", kind: .danger)
+    }
+    .padding()
+    .background(Theme.light.colors.surface)
+    .environment(\.theme, .light)
+}
+
+#Preview("StatusChip — dark") {
+    HStack(spacing: 8) {
+        StatusChip("Online", kind: .online)
+        StatusChip("Stale", kind: .stale)
+        StatusChip("Paused", kind: .paused)
+        StatusChip("Alert", kind: .danger)
+    }
+    .padding()
+    .background(Theme.dark.colors.surface)
+    .environment(\.theme, .dark)
+    .preferredColorScheme(.dark)
+}

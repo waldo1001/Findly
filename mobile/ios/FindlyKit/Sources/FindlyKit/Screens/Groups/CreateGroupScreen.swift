@@ -68,7 +68,7 @@ public struct CreateGroupScreen: View {
                     .tint(theme.colors.primary)
                 policyPicker
                 Text(expiryPolicy.policyCopy)
-                    .font(theme.typography.bodyMedium)
+                    .font(theme.typography.bodyMedium.font)
                     .foregroundColor(theme.colors.onSurface.opacity(0.7))
                 FindlyTextField("Your name for this group", text: $displayName, placeholder: "Eric")
                 FindlyButton("Create group") {

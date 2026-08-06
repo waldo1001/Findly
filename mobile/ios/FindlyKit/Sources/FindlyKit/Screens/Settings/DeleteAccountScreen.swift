@@ -64,7 +64,7 @@ public struct DeleteAccountScreen: View {
         ScrollView {
             VStack(spacing: theme.spacing.md) {
                 Text(DeleteAccountViewModel.confirmationMessage(cascadeWarning: cascadeWarning))
-                    .font(theme.typography.bodyMedium)
+                    .font(theme.typography.bodyMedium.font)
                     .foregroundColor(theme.colors.onSurface)
                 FindlyButton("Delete account", style: .secondary) {
                     showConfirmation = true

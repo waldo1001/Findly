@@ -52,38 +52,56 @@ The visual design MUST be fully replaceable later without touching any logic, na
 
 ### 2.1 Token vocabulary (normative — identical names to the Android client, `specs/003-android-client.md`, for one design → both platforms)
 
-**Colors** (`ColorTokens`, one instance per scheme) — "Findly — Family Location Design System" (2026-07-20, `design/findly-design-system/`); WCAG 2.1 AA verified (ratios in that README):
+**Colors** (`ColorTokens`, one instance per scheme) — design direction **2a "Ember / Dusk"** (2026-08-06, `design/findly-design-system/2a-ember-dusk/HANDOFF.md`, superseding the 2026-07-20 teal palette below it in history); WCAG 2.1 AA verified (ratios in that handoff):
 
 | Token | Light (default) | Dark (default) |
 |---|---|---|
-| `primary` | `#00696E` | `#4CD4D9` |
-| `onPrimary` | `#FFFFFF` | `#00312F` |
-| `secondary` | `#4C5FD5` | `#A9B4FF` |
-| `surface` | `#FAFAF7` | `#17181A` |
-| `onSurface` | `#1B1D1C` | `#ECECE6` |
-| `surfaceVariant` | `#EEEEE9` | `#24262A` |
-| `danger` | `#C0362C` | `#F2867B` |
-| `onDanger` | `#FFFFFF` | `#490A05` |
-| `success` | `#1E7D46` | `#5FD08A` |
-| `warning` | `#8A5A00` | `#E4B44C` |
-| `outline` | `#C9C8C2` | `#3A3D42` |
+| `primary` | `#3A46C8` | `#7C8BFF` |
+| `onPrimary` | `#FFFFFF` | `#0A0F27` |
+| `secondary` | `#0E7C8F` | `#4FE3D0` |
+| `surface` | `#F2F4FB` | `#0B0F1C` |
+| `onSurface` | `#10142A` | `#E8ECF7` |
+| `surfaceVariant` | `#E2E6F5` | `#161D33` |
+| `danger` | `#B3261E` | `#FF6B6B` |
+| `onDanger` | `#FFFFFF` | `#2A0708` |
+| `success` | `#10714A` | `#52E39B` |
+| `warning` | `#8A5A00` | `#FFC44D` |
+| `outline` | `#A9B0CE` (**decorative hairlines/dividers only** — see correction below) | `#3A4463` (**also decorative only** — see correction below) |
 
-**Typography** (`TypographyTokens`, identical across schemes — a `TypeStyle { font: Font, weight, size }` per role):
+**Additive colors** (beyond the 11 roles above, `Color.findlyX` in `ColorTokens.swift`; consumed via `Theme.outlineStrong` / `Theme.markerOnlineBadgeFill`/`Label` so no call site branches on scheme itself):
 
-| Role | Size (pt) | Weight |
-|---|---|---|
-| `displayLarge` | 34 | bold |
-| `titleLarge` | 22 | semibold |
-| `titleMedium` | 17 | semibold |
-| `bodyLarge` | 17 | regular |
-| `bodyMedium` | 15 | regular |
-| `labelSmall` | 12 | medium |
+| Color | Value | Used for | Light ratio | Dark ratio |
+|---|---|---|---|---|
+| `outline` (decorative, not additive — listed for contrast with the row below) | `#A9B0CE` / `#3A4463` | hairlines, dividers only | 1.95:1 vs `surface` | 1.99:1 vs `surface`, 1.74:1 vs `surfaceVariant` |
+| `findlyOutlineStrong` | `#6B739A` (both schemes) | unselected control border, focus ring, input outline | 4.21:1 vs `surface`, 3.71:1 vs `surfaceVariant` | 4.13:1 vs `surface`, 3.61:1 vs `surfaceVariant` |
+| `findlyMarkerOnlineDot` / `findlyMarkerOnlineDotOn` | `#52E39B` / `#062418` | "● NOW" badge — **fill+label in light**, **label only in dark** (see next row) | fill `#52E39B` vs `primary` = 4.44:1 (label-on-fill pairing not independently re-verified this round — unchanged from the original handoff pairing, not implicated in either correction) | label `#52E39B` on `#0B3B26` fill = 7.69:1 |
+| `Theme.markerOnlineBadgeFill` (dark only; light reuses `findlyMarkerOnlineDot` as fill) | `#0B3B26` | "● NOW" badge fill, dark only | — (light doesn't use this) | `#0B3B26` vs dark `primary` `#7C8BFF` = 4.19:1 |
+| `findlyDisabledLabel` | `#8D93AB` (both schemes) | `FindlyButton` disabled-state label | not contrast-driven — WCAG exempts disabled controls; named so a palette pass can't silently miss it | same |
+| `findlyTextFieldDisabledFill` / `findlyTextFieldDisabledBorder` / `findlyTextFieldDisabledText` | `#E8EAF2` / `#D3D7E6` / `#8D93AB` (all three, both schemes) | `FindlyTextField` disabled state (fill/border/text) — named to mirror Android's `TextFieldDisabledFill/Border/Text` (specs/003-android-client.md, A26) | not contrast-driven, same reasoning as `findlyDisabledLabel`; `findlyTextFieldDisabledText` shares its hex | same |
 
-**Spacing** (`SpacingTokens`, `CGFloat` points): `xs=4, sm=8, md=12, lg=16, xl=24, xxl=32`.
+All ratios in this table are **independently verified 2026-08-06** (WebAIM formula sanity-checked against `#767676`-on-`#FFFFFF` = 4.54:1), correcting `design/findly-design-system/2a-ember-dusk/HANDOFF.md` rather than restating it — that document's own numbers for `outlineStrong`/`outline` and the marker dot were wrong in both directions (overstated for dark `outline`'s "clears 3:1" claim and the marker dot's "5.4:1 in both themes"; understated for `outlineStrong`'s "3.4:1-class" and decorative `outline`'s "2.1:1"). Two corrected rules, both review-checked:
 
-**Corner radius** (`CornerRadiusTokens`, `CGFloat` points): `sm=8, md=12, lg=20, pill=999` (pill = always fully rounded regardless of view height).
+1. Decorative `outline` (`#A9B0CE` light / `#3A4463` dark) is legal only for hairlines/dividers in EITHER theme. Any stroke that carries meaning (unselected control border, focus ring, input outline) uses `findlyOutlineStrong` (`#6B739A`) in BOTH themes — **correcting HANDOFF.md's claim that dark `outline` itself "clears 3:1" and can double for both purposes** (measured 1.99:1 / 1.74:1, below threshold).
+2. The "● NOW" marker badge is `findlyMarkerOnlineDot`/`findlyMarkerOnlineDotOn` (fill/label) in light, but **inverts to fill `Theme.markerOnlineBadgeFill` (`#0B3B26`) / label `findlyMarkerOnlineDot`** in dark — **correcting HANDOFF.md's claim that `#52E39B` is "5.4:1 in both themes" against `primary`** (that ratio, independently remeasured at 4.44:1, only holds against light `primary`; against dark `primary` `#7C8BFF` it measures 1.83:1 and fails). Green still means online in both themes; only which role (fill vs label) `#52E39B` plays swaps.
 
-**Elevation** (`ElevationTokens`, a shadow spec per level — SwiftUI has no native elevation, so each level is `{ radius: CGFloat, y: CGFloat, opacity: Double }`): `level0 = {0,0,0}` (no shadow), `level1 = {2,1,0.08}`, `level2 = {4,2,0.12}`, `level3 = {8,4,0.16}`.
+**Typography** (`TypographyTokens`, a `TypeStyle { size: CGFloat, weight: Font.Weight, lineHeight: CGFloat, tracking: CGFloat }` per role, identical across schemes — pt on iOS, system font only):
+
+| Role | Size (pt) | Weight | Line height | Tracking |
+|---|---|---|---|---|
+| `displayLarge` | 34 | bold | 40 | −0.4 |
+| `titleLarge` | 24 | bold | 30 | −0.2 |
+| `titleMedium` | 18 | semibold | 24 | 0 |
+| `bodyLarge` | 17 | regular | 24 | 0 |
+| `bodyMedium` | 15 | regular | 20 | 0 |
+| `labelSmall` | 12 | bold, uppercase | 16 | +0.4 |
+
+Any elapsed-time or code value uses tabular figures (`.monospacedDigit()`).
+
+**Spacing** (`SpacingTokens`, `CGFloat` points): `xs=4, sm=8, md=12, lg=20, xl=28, xxl=40`.
+
+**Corner radius** (`CornerRadiusTokens`, `CGFloat` points): `sm=12, md=20, lg=28, pill=999` (pill = always fully rounded regardless of view height).
+
+**Elevation** (`ElevationTokens`, a shadow spec per level, resolved per scheme like colors — SwiftUI has no native elevation, so each level is `{ blur: CGFloat, y: CGFloat, opacity: Double, color: Color }`; color is neutral black at every level unless a component explicitly documents a tinted override, e.g. `FindlyButton`'s primary style): `level0 = {0,0,0,black}`; `level1 = {8,2,0.10|0.30,black}`; `level2 = {24,8,0.14|0.45,black}`; `level3 = {48,16,0.18|0.60,black}` (opacity given as light|dark — blur/y/color are scheme-independent, only opacity differs).
 
 ### 2.2 `Theme` and injection
 

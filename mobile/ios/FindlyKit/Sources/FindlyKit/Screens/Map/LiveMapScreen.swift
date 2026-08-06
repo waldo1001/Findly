@@ -50,11 +50,11 @@ public struct LiveMapScreen: View {
                             FindlyCard {
                                 VStack(alignment: .leading, spacing: theme.spacing.sm) {
                                     Text(member.displayName)
-                                        .font(theme.typography.titleMedium)
+                                        .font(theme.typography.titleMedium.font)
                                         .foregroundColor(theme.colors.onSurface)
                                     if member.devices.isEmpty {
                                         Text("No devices registered")
-                                            .font(theme.typography.bodyMedium)
+                                            .font(theme.typography.bodyMedium.font)
                                             .foregroundColor(theme.colors.onSurface.opacity(0.7))
                                     } else {
                                         ForEach(member.devices, id: \.deviceId) { device in

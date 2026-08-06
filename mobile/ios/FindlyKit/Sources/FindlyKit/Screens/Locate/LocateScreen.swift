@@ -36,13 +36,13 @@ public struct LocateScreen: View {
                 FindlyCard {
                     VStack(alignment: .leading, spacing: theme.spacing.xs) {
                         Text("Last known")
-                            .font(theme.typography.titleMedium)
+                            .font(theme.typography.titleMedium.font)
                             .foregroundColor(theme.colors.onSurface)
                         Text("\(lastKnown.lat), \(lastKnown.lon)")
-                            .font(theme.typography.bodyMedium)
+                            .font(theme.typography.bodyMedium.font)
                             .foregroundColor(theme.colors.onSurface.opacity(0.7))
                         Text(lastKnown.recordedAt)
-                            .font(theme.typography.labelSmall)
+                            .font(theme.typography.labelSmall.font)
                             .foregroundColor(theme.colors.onSurface.opacity(0.7))
                     }
                 }
@@ -66,10 +66,10 @@ public struct LocateScreen: View {
                 FindlyCard {
                     VStack(alignment: .leading, spacing: theme.spacing.xs) {
                         Text("Found!")
-                            .font(theme.typography.titleMedium)
+                            .font(theme.typography.titleMedium.font)
                             .foregroundColor(theme.colors.onSurface)
                         Text("\(fix.lat), \(fix.lon)")
-                            .font(theme.typography.bodyMedium)
+                            .font(theme.typography.bodyMedium.font)
                             .foregroundColor(theme.colors.onSurface.opacity(0.7))
                     }
                 }

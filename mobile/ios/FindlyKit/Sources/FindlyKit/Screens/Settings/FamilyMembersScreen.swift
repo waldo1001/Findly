@@ -44,7 +44,7 @@ public struct FamilyMembersScreen: View {
         ScrollView {
             VStack(spacing: theme.spacing.md) {
                 Text(familyName)
-                    .font(theme.typography.titleLarge)
+                    .font(theme.typography.titleLarge.font)
                     .foregroundColor(theme.colors.onSurface)
                 if let lastActionError = viewModel.lastActionError {
                     ErrorStateView(message: lastActionError)

@@ -60,7 +60,7 @@ public struct DeleteFamilyScreen: View {
         ScrollView {
             VStack(spacing: theme.spacing.md) {
                 Text(DeleteFamilyViewModel.confirmationMessage(familyName: familyName))
-                    .font(theme.typography.bodyMedium)
+                    .font(theme.typography.bodyMedium.font)
                     .foregroundColor(theme.colors.onSurface)
                 FindlyTextField("Type \"\(familyName)\" to confirm", text: $typedFamilyName)
                 FindlyButton("Delete family", style: .secondary) {

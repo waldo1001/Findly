@@ -1,7 +1,12 @@
 import SwiftUI
 
-/// specs/004-ios-client.md §2.3 — a generic elevated surface container. Shadow tint is derived
-/// from `onSurface` (never a literal `.black`) so it adapts automatically between light/dark.
+/// specs/004-ios-client.md §2.3 — a generic elevated surface container.
+///
+/// design 2a "Ember/Dusk" (design/findly-design-system/2a-ember-dusk/HANDOFF.md): radius `md`,
+/// fill `surfaceVariant`, **no border, no shadow**. Cards are containers for rows; when the
+/// content is a list of `FindlyListRow`s the caller separates them with a 1px `outline` divider
+/// (`FindlyCard.divider`), not a gap — `FindlyCard` itself stays a plain generic container since
+/// it has no way to see how many rows its content closure produces.
 public struct FindlyCard<Content: View>: View {
     @Environment(\.theme) private var theme
     private let content: Content
@@ -13,18 +18,48 @@ public struct FindlyCard<Content: View>: View {
     public var body: some View {
         content
             .padding(theme.spacing.md)
-            .background(theme.colors.surface)
-            .clipShape(RoundedRectangle(cornerRadius: theme.corner.lg))
-            .shadow(
-                color: theme.colors.onSurface.opacity(theme.elevation.level1.opacity),
-                radius: theme.elevation.level1.radius,
-                y: theme.elevation.level1.y
-            )
+            .background(theme.colors.surfaceVariant)
+            .clipShape(RoundedRectangle(cornerRadius: theme.corner.md))
     }
 }
 
-// #Preview blocks intentionally omitted: this session's build/test verification environment has
-// only Xcode Command Line Tools (no Xcode.app), which lacks the `PreviewsMacros` compiler plugin
-// `#Preview` needs — even an empty `#Preview {}` fails to compile here. Adding light/dark previews
-// back is a trivial, non-blocking follow-up once a real Xcode toolchain is available (see
-// specs/004-ios-client.md §2.3); the package must build clean in THIS environment first.
+/// The 1px hairline that separates rows inside a `FindlyCard`. Decorative (row separation carries
+/// no state), so the plain, lower-contrast `outline` token is correct here — not `outlineStrong`.
+/// A top-level type (not nested in `FindlyCard`) because a type nested under a generic struct
+/// forces every call site to specify that struct's generic parameter to use it.
+public struct FindlyCardDivider: View {
+    @Environment(\.theme) private var theme
+    public init() {}
+    public var body: some View {
+        Rectangle()
+            .fill(theme.colors.outline)
+            .frame(height: 1)
+    }
+}
+
+#Preview("FindlyCard — light") {
+    FindlyCard {
+        VStack(spacing: 0) {
+            FindlyListRow(title: "Noor", subtitle: "Home · just now")
+            FindlyCardDivider()
+            FindlyListRow(title: "Sam", subtitle: "Oak Street · 24 min ago")
+        }
+    }
+    .padding()
+    .background(Theme.light.colors.surface)
+    .environment(\.theme, .light)
+}
+
+#Preview("FindlyCard — dark") {
+    FindlyCard {
+        VStack(spacing: 0) {
+            FindlyListRow(title: "Noor", subtitle: "Home · just now")
+            FindlyCardDivider()
+            FindlyListRow(title: "Sam", subtitle: "Oak Street · 24 min ago")
+        }
+    }
+    .padding()
+    .background(Theme.dark.colors.surface)
+    .environment(\.theme, .dark)
+    .preferredColorScheme(.dark)
+}
