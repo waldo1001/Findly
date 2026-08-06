@@ -30,6 +30,9 @@ public struct ErrorStateView: View {
                     .foregroundColor(theme.colors.onSurface)
             }
             .font(theme.typography.bodyMedium.font)
+            // 15pt body at a ~1.5x (22.5pt) line height, same as EmptyStateView/LoadingStateView
+            // ("EmptyState/LoadingState/ErrorState" share one geometry bullet in the handoff).
+            .lineSpacing(theme.typography.bodyMedium.size * 1.5 - theme.typography.bodyMedium.size)
             .multilineTextAlignment(.leading)
             if let onRetry {
                 FindlyButton(retryTitle, style: .secondary, action: onRetry)
