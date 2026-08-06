@@ -79,6 +79,20 @@ struct DesignTokens2aTests {
         #expect(Color.findlyDisabledLabel == Color(hex: 0x8D93AB))
     }
 
+    // FindlyTextField's disabled state ("Disabled: fill #E8EAF2, border #D3D7E6, text #8D93AB" —
+    // HANDOFF.md FindlyTextField). Added post-review (code review MAJOR): FindlyTextField never
+    // read `@Environment(\.isEnabled)` at all, so a disabled field was visually indistinguishable
+    // from an enabled one. Named to mirror Android's `TextFieldDisabledFill/Border/Text` (A26) so
+    // the two platforms' additive fields stay legible side by side.
+    @Test func findlyTextFieldDisabled_matchesHandoffValues() {
+        #expect(Color.findlyTextFieldDisabledFill == Color(hex: 0xE8EAF2))
+        #expect(Color.findlyTextFieldDisabledBorder == Color(hex: 0xD3D7E6))
+        // Same hex as findlyDisabledLabel (#8D93AB) — the handoff reuses one "disabled text" value
+        // across components — but named separately for cross-platform naming symmetry with Android.
+        #expect(Color.findlyTextFieldDisabledText == Color(hex: 0x8D93AB))
+        #expect(Color.findlyTextFieldDisabledText == Color.findlyDisabledLabel)
+    }
+
     // MARK: - Typography (6 roles: size / weight / line-height / tracking)
 
     @Test func typography_displayLarge() {
