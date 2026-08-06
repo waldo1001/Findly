@@ -28,4 +28,35 @@ class ContrastRatioReferenceTest {
             0.005,
         )
     }
+
+    // Two edge-case reference values (A28 addendum, iOS I29 review parity): the mid-range
+    // #767676/#FFFFFF pair above can pass even with a coefficient or luminance-ordering bug that
+    // happens to cancel out in that particular range — these two bracket the whole possible output
+    // and catch that class of error directly.
+
+    @Test
+    fun `black on white must compute to exactly 21 to 1 — the maximum value the formula can produce`() {
+        val ratio = contrastRatio(Color(0xFF000000), Color(0xFFFFFFFF))
+
+        assertEquals(
+            "contrastRatio(#000000, #FFFFFF) must be exactly 21:1 — L(black)=0, L(white)=1, so " +
+                "(1+0.05)/(0+0.05) = 21 exactly. Got $ratio instead.",
+            21.0,
+            ratio,
+            0.0001,
+        )
+    }
+
+    @Test
+    fun `identical colors must compute to exactly 1 to 1 — the minimum value the formula can produce`() {
+        val ratio = contrastRatio(Color(0xFF4A4A4A), Color(0xFF4A4A4A))
+
+        assertEquals(
+            "contrastRatio(x, x) for any color must be exactly 1:1 — identical luminances make " +
+                "(L+0.05)/(L+0.05) = 1 regardless of which color. Got $ratio instead.",
+            1.0,
+            ratio,
+            0.0001,
+        )
+    }
 }

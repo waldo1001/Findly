@@ -22,8 +22,11 @@ class ColorTokenContrastTest {
     @Test
     fun `every declared pairing clears its WCAG threshold`() {
         val failures = declaredColorPairings.mapNotNull { pairing ->
-            val ratio = contrastRatio(pairing.foreground, pairing.background)
-            if (ratio < pairing.threshold) {
+            // failsThreshold composites any declared alpha over the background first (A28 review,
+            // Major 1) — checking pairing.foreground directly would silently re-introduce the
+            // blind spot that let FindlyPermissionBanner's alpha-blended dismiss glyph ship.
+            if (pairing.failsThreshold()) {
+                val ratio = contrastRatio(pairing.effectiveForeground, pairing.background)
                 "  [${pairing.theme}] ${pairing.name}: measured ${round2(ratio)}:1, needs >= ${pairing.threshold}:1"
             } else {
                 null
@@ -138,6 +141,36 @@ class ColorTokenContrastTest {
         )
     }
 
+    @Test
+    fun `FindlyPermissionBanner dismiss glyph is not an alpha-blended onSurface literal — that failed light`() {
+        // A28 review, Major 1 (security sweep): FindlyPermissionBanner.kt's dismiss "✕" used to
+        // render `FindlyTheme.colors.onSurface.copy(alpha = 0.6f)` in `bodyLarge` (17sp/400, not
+        // WCAG "large text") on the banner's `surfaceVariant` fill — a live, shipped pairing this
+        // suite could not see at all, because every entry in declaredColorPairings assumed a solid
+        // foreground. Blended and measured: light FAILS 4.5:1 (measured ~4.43:1); dark happens to
+        // pass (~5.87:1). Fixed by using the `subtleText` token instead (see the declared
+        // "FindlyPermissionBanner dismiss glyph (subtleText) on surfaceVariant" pairing) — this
+        // pin exists so the old alpha-blended pattern can never quietly come back.
+        val lightBlended = compositeOver(LightFindlyColors.onSurface, 0.6f, LightFindlyColors.surfaceVariant)
+        val lightRatio = contrastRatio(lightBlended, LightFindlyColors.surfaceVariant)
+        assertTrue(
+            "light `onSurface` at 60% alpha, composited onto light `surfaceVariant`, measured " +
+                "${round2(lightRatio)}:1 — expected it to stay BELOW 4.5:1 (this is the bug the fix " +
+                "removed; if this now passes, alpha compositing itself is broken, not the banner).",
+            lightRatio < TEXT_MIN_RATIO,
+        )
+
+        val darkBlended = compositeOver(DarkFindlyColors.onSurface, 0.6f, DarkFindlyColors.surfaceVariant)
+        val darkRatio = contrastRatio(darkBlended, DarkFindlyColors.surfaceVariant)
+        assertTrue(
+            "dark `onSurface` at 60% alpha, composited onto dark `surfaceVariant`, measured " +
+                "${round2(darkRatio)}:1 — expected this one to already clear 4.5:1 (the bug was " +
+                "light-only, same shape as every other A26/A28 finding: a value that worked in one " +
+                "theme and was never checked in the other).",
+            darkRatio >= TEXT_MIN_RATIO,
+        )
+    }
+
     // --- Documented decorative exemption: legal below 3:1 because it is never used for a
     // meaning-carrying stroke (outlineStrong is, for those). Encoded explicitly, per A28's filing,
     // "so the test states the rule instead of silently ignoring the token". ---
@@ -153,6 +186,93 @@ class ColorTokenContrastTest {
             1.95,
             ratio,
             0.05,
+        )
+    }
+
+    // --- Disabled-control exemptions (A28 review, Minor 5 — cross-platform parity with iOS I29).
+    // WCAG 2.1 explicitly exempts inactive/disabled UI components from its contrast success
+    // criteria (1.4.3, 1.4.11) — a disabled button or field is not required to clear 4.5:1/3:1.
+    // That is a reason to pin the measured value as a documented exemption, not a reason to leave
+    // it untested: a silent change to a disabled-state color should still show up in a diff here,
+    // exactly like the light-`outline` decorative exemption above. Values pinned to 2dp below. ---
+
+    @Test
+    fun `disabled-control pairings are documented WCAG-exempt pins, not pass-fail assertions`() {
+        val expected = mapOf(
+            "[disabled, exempt] ButtonDisabledLabel on surfaceVariant" to mapOf(
+                "light" to 2.45,
+                "dark" to 5.48,
+            ),
+            "[disabled, exempt] TextFieldDisabledText on TextFieldDisabledFill" to mapOf(
+                "fixed (non-theme)" to 2.54,
+            ),
+        )
+
+        val mismatches = disabledControlExemptionPairings.mapNotNull { pairing ->
+            val ratio = round2(contrastRatio(pairing.effectiveForeground, pairing.background))
+            val expectedRatio = expected[pairing.name]?.get(pairing.theme)
+            if (expectedRatio == null || Math.abs(ratio - expectedRatio) > 0.02) {
+                "  [${pairing.theme}] ${pairing.name}: measured $ratio:1, pinned expectation " +
+                    "$expectedRatio:1"
+            } else {
+                null
+            }
+        }
+
+        assertTrue(
+            "Disabled-control colors moved since this exemption was pinned (WCAG does not require " +
+                "them to clear any threshold, but a silent change should still be visible here):\n" +
+                mismatches.joinToString("\n"),
+            mismatches.isEmpty(),
+        )
+    }
+
+    // --- `secondary` (A28 addendum, cross-platform parity with iOS I29): documented-unrendered
+    // exemption, not a pass/fail pairing — see secondaryUnrenderedExemptionPairings's doc comment
+    // for why (it is genuinely unrendered on both platforms, and light measures BELOW 4.5:1
+    // against HANDOFF.md's own claim of 4.6:1, so a real pairing here could never pass anyway). ---
+
+    @Test
+    fun `secondary is a documented not-yet-rendered exemption — light measures below 4point5, contradicting HANDOFFmd`() {
+        val expected = mapOf("light" to 4.45, "dark" to 12.04)
+
+        val mismatches = secondaryUnrenderedExemptionPairings.mapNotNull { pairing ->
+            val ratio = round2(contrastRatio(pairing.effectiveForeground, pairing.background))
+            val expectedRatio = expected[pairing.theme]
+            if (expectedRatio == null || Math.abs(ratio - expectedRatio) > 0.02) {
+                "  [${pairing.theme}] ${pairing.name}: measured $ratio:1, pinned expectation " +
+                    "$expectedRatio:1"
+            } else {
+                null
+            }
+        }
+
+        assertTrue(
+            "`secondary`'s measured contrast against `surface` moved since this exemption was " +
+                "pinned. If light now clears 4.5:1, HANDOFF.md's claimed 4.6:1 may finally be " +
+                "accurate again — that's fine, this pin just needs updating, it does not " +
+                "automatically mean `secondary` may now be declared as a real pairing (it must " +
+                "still actually be rendered somewhere first):\n" + mismatches.joinToString("\n"),
+            mismatches.isEmpty(),
+        )
+    }
+
+    // --- Permanent proof the detection mechanism itself works (A28 addendum, iOS I29 review
+    // parity) — not a one-off manual check, live in the suite for every future reader. ---
+
+    @Test
+    fun `the failure-detection mechanism actually flags a failing pairing — synthetic proof`() {
+        // Inverted expectation: this assertion only PASSES because failsThreshold() correctly
+        // scores an impossible-to-clear pairing (black on black, 1:1) as a failure. If
+        // failsThreshold()'s comparison direction, threshold wiring, or effectiveForeground
+        // resolution ever breaks such that this synthetic pairing stops being detected as failing,
+        // this test goes red — which is the point: it proves declaredColorPairings' silence means
+        // "nothing failed", not "the check never ran".
+        assertTrue(
+            "black-on-black (1:1) must be detected as failing a ${TEXT_MIN_RATIO}:1 threshold — if " +
+                "this is false, the failure-detection mechanism itself is broken, and a real AA " +
+                "failure could pass declaredColorPairings silently.",
+            syntheticAlwaysFailingPairing.failsThreshold(),
         )
     }
 

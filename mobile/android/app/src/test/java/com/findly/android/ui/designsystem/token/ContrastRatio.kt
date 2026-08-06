@@ -33,3 +33,21 @@ fun contrastRatio(foreground: Color, background: Color): Double {
     val darker = minOf(l1, l2)
     return (lighter + 0.05) / (darker + 0.05)
 }
+
+/**
+ * Alpha-compositing (the standard "source over opaque destination" formula) — a translucent
+ * foreground drawn over an opaque background resolves to this solid color before WCAG contrast
+ * math applies at all. Added for A28's Major 1 review finding: every pairing in
+ * [declaredColorPairings] used to assume a solid foreground, so a component that renders
+ * `token.copy(alpha = x)` — e.g. `FindlyPermissionBanner`'s dismiss glyph, pre-fix,
+ * `onSurface.copy(alpha = 0.6f)` — was structurally invisible to this suite even though what
+ * actually reaches the screen is measurably different from the solid token.
+ */
+fun compositeOver(foreground: Color, foregroundAlpha: Float, background: Color): Color {
+    val a = foregroundAlpha.coerceIn(0f, 1f)
+    return Color(
+        red = foreground.red * a + background.red * (1f - a),
+        green = foreground.green * a + background.green * (1f - a),
+        blue = foreground.blue * a + background.blue * (1f - a),
+    )
+}

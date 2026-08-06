@@ -84,7 +84,17 @@ fun FindlyPermissionBanner(
                 Text(
                     text = "✕",
                     style = FindlyTheme.typography.bodyLarge,
-                    color = FindlyTheme.colors.onSurface.copy(alpha = 0.6f),
+                    // A28 security review (Major 1): was `onSurface.copy(alpha = 0.6f)`, an
+                    // ad-hoc translucent foreground the design-token contrast suite structurally
+                    // couldn't see — measured, light blends to ~4.43:1 on this banner's
+                    // `surfaceVariant` fill, below the 4.5:1 floor for 17sp/400 body text (dark
+                    // happened to pass at ~5.87:1). `subtleText` is the token that exists for
+                    // exactly this "muted body text" job (5.79:1 light / 6.49:1 dark on
+                    // `surfaceVariant`) — using it removes both the AA failure and the ad-hoc
+                    // alpha in one change (see ColorTokenContrastTest.kt's pinned regression test
+                    // for the old pattern, and the declared "FindlyPermissionBanner dismiss glyph
+                    // (subtleText) on surfaceVariant" pairing for this one).
+                    color = FindlyTheme.colors.subtleText,
                     modifier = Modifier
                         .clickable(onClick = onDismiss)
                         .padding(FindlyTheme.spacing.xs)
