@@ -57,8 +57,9 @@ enum WCAGContrast {
     /// WCAG 2.1 contrast ratio: `(L1 + 0.05) / (L2 + 0.05)`, where `L1` is the lighter of the two
     /// relative luminances. Order of the two colors passed in doesn't matter.
     static func ratio(_ a: Color, _ b: Color) -> Double {
-        // TODO(I29 red commit): placeholder pending the real WCAG formula below — deliberately
-        // wrong so `WCAGContrastFormulaTests` proves it can fail before it's trusted to pass.
-        0
+        let la = relativeLuminance(of: a)
+        let lb = relativeLuminance(of: b)
+        let (l1, l2) = la >= lb ? (la, lb) : (lb, la)
+        return (l1 + 0.05) / (l2 + 0.05)
     }
 }
