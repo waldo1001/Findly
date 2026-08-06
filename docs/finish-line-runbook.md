@@ -157,6 +157,30 @@ Hand the agent both SHA-256 fingerprints — they are **public** values, safe to
 **Verify:** `curl -s https://kind-plant-0fb99b003.7.azurestaticapps.net/.well-known/assetlinks.json`
 shows real fingerprints, then tap a join link on a real Android phone — it must open Findly, not Chrome.
 
+### B4-B6 ✅ done 2026-08-06
+
+Play account verification cleared; app created (`com.findly.android`, listing **Findly - Friends
+Locator**); AAB `6 (1.0.0)` uploaded to internal testing; **Play App Signing active**.
+
+Fingerprints, all three now registered in **both** `assetlinks.json` (live, verified) and Firebase:
+
+| Key | SHA-256 | Signs |
+|---|---|---|
+| Play app signing (Google's) | `28:DE:48:B0:…:32:54` | what users install from Play |
+| Upload (ours) | `3B:5C:9A:72:…:C3:18` | local + the sideloaded GitHub-release APK |
+| Debug | `28:0D:FB:AC:…:45:08` | development builds |
+
+**This closed a production bug**: `assetlinks.json` had served `CHANGE-ME` placeholders since W1, so
+Android never verified the App Link and every shared `https://…/g#CODE` join link opened Chrome
+instead of Findly — specs/007's whole public-join flow had never worked on Android. Registering all
+three (rather than only Google's) is deliberate: two family members are on the sideloaded APK this
+week, and the upload key is what signed it.
+
+Also worth keeping: Play's App signing page shows **both** the app signing and upload fingerprints,
+and using the upload one where the app signing one belongs fails **silently** — debug works,
+production doesn't, nothing errors. The upload fingerprint Play displayed matched the one extracted
+from the local keystore, which is how it was caught.
+
 ### B7 👤 Add the family as internal testers
 
 Play Console → internal testing → testers. They install from the Play link.
