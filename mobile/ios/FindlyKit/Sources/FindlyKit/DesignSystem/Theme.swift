@@ -39,11 +39,24 @@ public extension Theme {
     ///   cited "2.1:1" was also slightly overstated (measured 1.95:1 — moot, hairline-only).
     var outlineStrong: Color { .findlyOutlineStrong }
 
-    /// `onSurface` at ~70% opacity, using the handoff's literal per-scheme hex values (e.g.
-    /// `FindlyListRow` subtitles) rather than a computed `.opacity(0.7)` — the handoff gives exact
-    /// hexes because a computed opacity blends differently depending on what's behind it.
+    /// `onSurface` at ~70% opacity, using literal per-scheme hex values (e.g. `FindlyListRow`
+    /// subtitles) rather than a computed `.opacity(0.7)` — a computed opacity blends differently
+    /// depending on what's behind it.
+    ///
+    /// **Correction, I30 (specs/004 §2.1), mirrors Android's A30.** Light darkened from
+    /// HANDOFF.md's literal `#4E5675` to `#3A4160` — for cross-platform consistency, not because
+    /// iOS was observed failing. A user reported light mode hard to read on a real Android device
+    /// but explicitly said iOS looked fine with the identical value; sampling the rendered Android
+    /// pixels found `#4E5675` on `#F2F4FB` exactly, rendering the design faithfully at 6.56:1 —
+    /// passing AA but thin for a low-chroma color at 13pt/13sp subtitles and section headers. The
+    /// plausible reason iOS didn't draw the same complaint is that SF renders heavier than Roboto
+    /// at these sizes, or that the screens looked at differed — neither is asserted as fact, only
+    /// plausible. `#3A4160` measures 9.08:1 on `surface` / 8.01:1 on `surfaceVariant` (independently
+    /// verified), still clearly a secondary tier against `onSurface` `#10142A` (16.54:1). Dark
+    /// `#98A1BD` is unchanged: already 7.43:1 / 6.49:1, materially better than light's old value,
+    /// which is probably why dark never drew a complaint on either platform.
     var onSurfaceMuted: Color {
-        colors == ColorTokens.light ? Color(hex: 0x4E5675) : Color(hex: 0x98A1BD)
+        colors == ColorTokens.light ? Color(hex: 0x3A4160) : Color(hex: 0x98A1BD)
     }
 
     /// The "● NOW" badge inside a `.normal` `MapMarkerBubble` (contrast trap #2, corrected).
