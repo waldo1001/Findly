@@ -14,11 +14,24 @@ plugins {
 // A2/A12 (specs/003-android-client.md §13, `ui/map/MapRenderer.kt`): the real map-tile SDK
 // (A12's GoogleMapRenderer, com.google.maps.android:maps-compose below) needs a Google Maps API
 // key that only exists once H1 (docs/azure-setup.md) provisions one. Read from a Gradle project
-// property so it can be supplied via `-PMAPS_API_KEY=...` (CI secret) or a local, gitignored
-// `local.properties`/`gradle.properties` override — NEVER hardcoded here and NEVER committed
-// (docs/security-review-checklist.md §5). Empty string is the correct, safe default: the Maps
-// SDK reads this (via the manifest meta-data below) at process start and simply renders a
-// tile-less grey map when it's blank — no code branches on its presence.
+// property so it can be supplied via `-PMAPS_API_KEY=...` (CI secret, wired in H10 — see
+// .github/workflows/android.yml) or a local, gitignored `gradle.properties` override (project
+// root `mobile/android/gradle.properties` — gitignored per-user, or the user-global
+// `~/.gradle/gradle.properties`) — NEVER hardcoded here and NEVER committed
+// (docs/security-review-checklist.md §5).
+//
+// H10 correction: `project.findProperty` reads Gradle project properties — `-P` flags, this
+// project's own `gradle.properties`, `~/.gradle/gradle.properties`, or `ORG_GRADLE_PROJECT_*`
+// env vars — it does **not** read `local.properties` (that file is only ever parsed by the
+// Android Gradle Plugin itself, for SDK-location-style settings, and is never exposed as a
+// Gradle project property). A previous version of this comment claimed `local.properties` was
+// a valid place to set `MAPS_API_KEY`; that was wrong and cost real debugging time chasing a
+// blank map with the key sitting in the wrong file. Use `~/.gradle/gradle.properties` for a
+// local override instead.
+//
+// Empty string is the correct, safe default: the Maps SDK reads this (via the manifest
+// meta-data below) at process start and simply renders a tile-less grey map when it's blank —
+// no code branches on its presence.
 val mapsApiKey: String = (project.findProperty("MAPS_API_KEY") as String?).orEmpty()
 
 // A7 (docs/store-readiness.md §1): release-signing material must never be hardcoded or
@@ -59,6 +72,17 @@ val hasReleaseSigningMaterial: Boolean =
 // value (unlike BASE_URL/AUTH_MODE) — the join-link surface has no dev mode (specs/003 §12.3).
 val joinLinkHost: String = "kind-plant-0fb99b003.7.azurestaticapps.net"
 
+// H10 (docs/implementation-handoff.md): Play rejects a reused versionCode, and until now it was
+// bumped by hand on every release (0.1.0/1 -> 1.0.0 (6) -> 1.0.0 (7), 2026-08-06) — exactly the
+// toil this task exists to remove. `.github/workflows/android.yml` now passes
+// `-PVERSION_CODE=<n>` for the actual Play-publishing build, derived from
+// `100 + github.run_number` (that workflow's own run counter, which only ever increases — see
+// the workflow file for the arithmetic showing the next CI run already clears the last
+// hand-edited value of 7 by a wide margin). Local dev and any CI run that doesn't pass the
+// property (PRs, forks, pre-H10 workflow runs) fall back to the literal below unchanged, so
+// nobody's local build breaks or needs updating for this.
+val ciVersionCode: Int? = (project.findProperty("VERSION_CODE") as String?)?.toIntOrNull()
+
 android {
     namespace = "com.findly.android"
     compileSdk = 37
@@ -67,11 +91,12 @@ android {
         applicationId = "com.findly.android"
         minSdk = 26
         targetSdk = 37
-        // Aligned with iOS 2026-08-06: the GitHub release, the family install page and the iOS
-        // build all say "1.0.0 (6)" while Android still reported 0.1.0/1. Play also requires
-        // versionCode to strictly increase on every upload, so starting at 6 keeps the two
-        // platforms on one number instead of two drifting counters.
-        versionCode = 7
+        // H10: was a hand-edited literal (last value 7, see git history for the 6->7 bump). Now
+        // CI-derived when `-PVERSION_CODE` is supplied (see val ciVersionCode above); the literal
+        // fallback below is what a local `./gradlew assembleRelease`/`bundleRelease` still uses
+        // unchanged, and is intentionally left at the last real shipped value rather than bumped,
+        // since a local build is never what gets uploaded to Play.
+        versionCode = ciVersionCode ?: 7
         versionName = "1.0.0"
     }
 

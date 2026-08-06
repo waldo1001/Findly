@@ -10,10 +10,14 @@ import com.findly.android.auth.AuthMode
  * values in `app/build.gradle.kts`.
  *
  * @property mapsApiKey empty string until H1 provisions a real key. Sourced from the
- *   `MAPS_API_KEY` Gradle project property (`-PMAPS_API_KEY=…` or `gradle.properties`/
- *   `local.properties`, both gitignored — see `app/build.gradle.kts`'s `mapsApiKey` local val and
- *   `docs/security-review-checklist.md` §5), **never** hardcoded or committed. This field exists
- *   for completeness/parity with the other `BuildConfig` wrappers, but A12's
+ *   `MAPS_API_KEY` Gradle project property (`-PMAPS_API_KEY=…`, wired from the CI secret in H10 —
+ *   see `.github/workflows/android.yml` — or a local, gitignored `gradle.properties` override;
+ *   see `app/build.gradle.kts`'s `mapsApiKey` local val and `docs/security-review-checklist.md`
+ *   §5), **never** hardcoded or committed. H10 correction: `local.properties` does **not** work
+ *   here — `project.findProperty` never reads it (that file is parsed only by the Android Gradle
+ *   Plugin itself, for SDK-location settings); a previous version of this doc comment wrongly
+ *   claimed otherwise. This field exists for completeness/parity with the other `BuildConfig`
+ *   wrappers, but A12's
  *   [com.findly.android.ui.map.GoogleMapRenderer] does NOT read it — the Google Maps SDK reads
  *   the key once, at process start, straight from the manifest's `com.google.android.geo.API_KEY`
  *   meta-data (fed by the same Gradle property via `manifestPlaceholders["mapsApiKey"]`). Blank
