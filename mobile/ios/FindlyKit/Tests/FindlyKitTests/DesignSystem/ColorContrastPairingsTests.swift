@@ -17,15 +17,14 @@ struct ColorContrastPairingsTests {
 
     @Test(arguments: ColorContrastPairings.textPairings)
     func textPairing_meetsWCAG_4_5(_ pairing: ColorContrastPairings.TextOrStrokePairing) {
-        let ratio = Self.ratio(for: pairing)
         #expect(
-            ratio >= pairing.threshold,
+            Self.passes(pairing),
             """
-            "\(pairing.name)" (\(pairing.scheme.rawValue)) measures \(ratio):1, below the \
-            \(pairing.threshold):1 text threshold (WCAG 2.1 SC 1.4.3). If this is one of the four \
-            known-bad handoff numbers, it should already be fixed at the token level — see \
-            ColorContrastPairingsTests's pinned-regression tests. If this is a NEW failure, stop \
-            and report rather than adjusting the threshold or the color (I29 task instructions).
+            "\(pairing.name)" (\(pairing.scheme.rawValue)) measures \(Self.ratio(for: pairing)):1, \
+            below the \(pairing.threshold):1 text threshold (WCAG 2.1 SC 1.4.3). If this is one of \
+            the four known-bad handoff numbers, it should already be fixed at the token level — \
+            see ColorContrastPairingsTests's pinned-regression tests. If this is a NEW failure, \
+            stop and report rather than adjusting the threshold or the color (I29 task instructions).
             """
         )
     }
@@ -34,13 +33,12 @@ struct ColorContrastPairingsTests {
 
     @Test(arguments: ColorContrastPairings.strokePairings)
     func strokePairing_meetsWCAG_3_0(_ pairing: ColorContrastPairings.TextOrStrokePairing) {
-        let ratio = Self.ratio(for: pairing)
         #expect(
-            ratio >= pairing.threshold,
+            Self.passes(pairing),
             """
-            "\(pairing.name)" (\(pairing.scheme.rawValue)) measures \(ratio):1, below the \
-            \(pairing.threshold):1 meaningful-stroke threshold (WCAG 2.1 SC 1.4.11). Stop and \
-            report rather than adjusting the threshold or the color if this is unexpected.
+            "\(pairing.name)" (\(pairing.scheme.rawValue)) measures \(Self.ratio(for: pairing)):1, \
+            below the \(pairing.threshold):1 meaningful-stroke threshold (WCAG 2.1 SC 1.4.11). \
+            Stop and report rather than adjusting the threshold or the color if this is unexpected.
             """
         )
     }
@@ -49,13 +47,12 @@ struct ColorContrastPairingsTests {
 
     @Test(arguments: ColorContrastPairings.componentPairings)
     func componentPairing_meetsWCAG_4_5(_ pairing: ColorContrastPairings.TextOrStrokePairing) {
-        let ratio = Self.ratio(for: pairing)
         #expect(
-            ratio >= pairing.threshold,
+            Self.passes(pairing),
             """
-            "\(pairing.name)" (\(pairing.scheme.rawValue)) measures \(ratio):1, below the \
-            \(pairing.threshold):1 component threshold (WCAG 2.1 SC 1.4.3). Stop and report \
-            rather than adjusting the threshold or the color if this is unexpected.
+            "\(pairing.name)" (\(pairing.scheme.rawValue)) measures \(Self.ratio(for: pairing)):1, \
+            below the \(pairing.threshold):1 component threshold (WCAG 2.1 SC 1.4.3). Stop and \
+            report rather than adjusting the threshold or the color if this is unexpected.
             """
         )
     }
@@ -70,6 +67,18 @@ struct ColorContrastPairingsTests {
             : WCAGContrast.ratio(pairing.foreground, pairing.background)
     }
 
+    /// The single comparison every real pairing test above goes through — added I29 code-review
+    /// round 3 MINOR 1: the three `@Test(arguments:)` functions previously inlined their own
+    /// `ratio >= pairing.threshold` separately, so `syntheticFailingPairing_provesDetectionStaysLive`
+    /// (computing `WCAGContrast.ratio(.black, .black)` standalone) shared only the low-level
+    /// formula with them, not this comparison — an inverted `>=` inside any one of the three loops
+    /// would have sailed past it undetected. Now all three loops AND the synthetic control call
+    /// this one function, so a broken (or vacuous, e.g. hardcoded `true`) comparison here breaks
+    /// the synthetic control too, regardless of which call site it was "fixed" in.
+    private static func passes(_ pairing: ColorContrastPairings.TextOrStrokePairing) -> Bool {
+        ratio(for: pairing) >= pairing.threshold
+    }
+
     // MARK: - Decorative exemption, explicit (I29 task item 5)
     //
     // Light `outline` (#A9B0CE) is legal ONLY as a decorative hairline/divider — WCAG doesn't
@@ -82,6 +91,24 @@ struct ColorContrastPairingsTests {
         let ratio = WCAGContrast.ratio(Theme.light.colors.outline, Theme.light.colors.surface)
         #expect(abs(ratio - 1.95) < 0.01, "light decorative `outline`/`surface` drifted off its documented 1.95:1 — specs/004 §2.1.")
         #expect(ratio < 3.0, "light decorative `outline` is expected to fail the 3:1 meaningful-stroke bar — it's a documented hairline-only exemption, not a defect.")
+    }
+
+    // MARK: - `secondary` exemption, pinned numerically (I29 code-review round 3 MINOR 3)
+    //
+    // `ColorTokens.secondary` is unasserted everywhere else on this page because nothing in
+    // `Sources/FindlyKit/DesignSystem/Components` currently renders it (see the comment above
+    // `strokePairings`). That's a comment-only claim on its own — pinned here so drift shows up in
+    // a diff instead of someone's memory. At its CURRENT value, `secondary` cannot carry text on
+    // EITHER light surface: both measure below the 4.5:1 text threshold. Whoever wires `secondary`
+    // into a component text role must fix the color first, not just add a pairing that documents
+    // the failure.
+    @Test func secondaryToken_light_cannotCarryTextOnEitherSurface_pinnedExemption() {
+        let onSurface = WCAGContrast.ratio(Theme.light.colors.secondary, Theme.light.colors.surface)
+        let onSurfaceVariant = WCAGContrast.ratio(Theme.light.colors.secondary, Theme.light.colors.surfaceVariant)
+        #expect(abs(onSurface - 4.4456) < 0.001, "light `secondary`/`surface` drifted off its documented 4.4456:1.")
+        #expect(abs(onSurfaceVariant - 3.9250) < 0.001, "light `secondary`/`surfaceVariant` drifted off its documented 3.9250:1.")
+        #expect(onSurface < 4.5, "light `secondary` on `surface` must stay below 4.5:1 — it cannot carry text there today. If this ever passes, the exemption comment above is stale, not a reason to delete this test.")
+        #expect(onSurfaceVariant < 4.5, "light `secondary` on `surfaceVariant` must stay below 4.5:1 — same reasoning.")
     }
 
     // MARK: - Pinned regressions: the four values that actually failed (I29 task item 4)
@@ -178,15 +205,32 @@ struct ColorContrastPairingsTests {
 
     // MARK: - Synthetic negative control (I29 code-review round 2, adopted per the reviewer's
     // suggested pattern for proving detection stays live in the committed suite itself, rather
-    // than by the uncommitted manual sabotage-and-revert step used during I29's first round).
+    // than by the uncommitted manual sabotage-and-revert step used during I29's first round;
+    // corrected in round 3 MINOR 1 to sit ON the real assertion path, not beside it).
     //
-    // Black on black is always 1:1 — always below any real threshold used on this page. If
-    // `WCAGContrast.ratio` (or the `>=` comparisons the other tests build on it) ever silently
-    // stopped measuring anything real — e.g. a future refactor makes it return a constant — this
-    // is the assertion most likely to flip first, because it has zero margin for coincidence.
+    // Black on black is always 1:1 — always below any real threshold used on this page. Built as
+    // an actual `TextOrStrokePairing` and run through `Self.passes(_:)` — the EXACT function every
+    // real loop above asserts against — rather than calling `WCAGContrast.ratio` standalone. That
+    // matters: a standalone call only proves the low-level formula still works: it would keep
+    // passing even if someone inverted `>=` to `<=` inside one of the three `@Test(arguments:)`
+    // functions, because those used to inline their own comparison rather than share this one.
+    // Now they don't, so a broken comparison here fails BOTH the real loops (loudly, en masse) AND
+    // this control (specifically, by design) — and if the comparison instead degenerated to
+    // something vacuous like `true` (which would make every real loop pass silently, the actually
+    // dangerous failure mode), this control is the one that would still catch it, because it
+    // expects `passes` to return `false` and a vacuous `true` breaks exactly that expectation.
     @Test func syntheticFailingPairing_provesDetectionStaysLive() {
-        let blackOnBlack = WCAGContrast.ratio(.black, .black)
-        #expect(abs(blackOnBlack - 1.0) < 0.0001, "black-on-black must measure exactly 1:1 — the formula's own floor.")
-        #expect(blackOnBlack < 4.5, "black-on-black must stay a documented failure against the 4.5:1 text threshold — this negative control exists to prove the suite can still detect a failing pairing, permanently, without needing an uncommitted manual step.")
+        let synthetic = ColorContrastPairings.TextOrStrokePairing(
+            name: "SYNTHETIC negative control (expected to fail — do not fix)",
+            scheme: .light,
+            foreground: .black,
+            background: .black,
+            threshold: 4.5
+        )
+        #expect(abs(Self.ratio(for: synthetic) - 1.0) < 0.0001, "black-on-black must measure exactly 1:1 — the formula's own floor.")
+        #expect(
+            !Self.passes(synthetic),
+            "black-on-black must stay a documented failure against `Self.passes(_:)` — the exact function every real pairing test in this file asserts against. This negative control exists to prove the suite can still detect a failing pairing, permanently, on the real assertion path, without needing an uncommitted manual step."
+        )
     }
 }

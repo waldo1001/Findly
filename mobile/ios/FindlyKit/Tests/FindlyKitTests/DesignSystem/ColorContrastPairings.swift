@@ -114,6 +114,19 @@ enum ColorContrastPairings {
 
             TextOrStrokePairing(name: "FindlyTextField errorBorder/surfaceVariant", scheme: .light, foreground: light.colors.danger, background: light.colors.surfaceVariant, threshold: 3.0),
             TextOrStrokePairing(name: "FindlyTextField errorBorder/surfaceVariant", scheme: .dark, foreground: dark.colors.danger, background: dark.colors.surfaceVariant, threshold: 3.0),
+
+            // PermissionBannerView.swift: the severity stripe (`Rectangle().fill(banner ==
+            // .cannotReport ? theme.colors.danger : theme.colors.primary)`) over the banner's own
+            // `surfaceVariant` fill — added I29 code-review round 3 MINOR 4. Numerically identical
+            // to "FindlyTextField errorBorder/surfaceVariant" (danger) and
+            // "FindlyTextField focusedBorder/surfaceVariant" (primary) respectively — same
+            // "named for a distinct real UI element, not deduped away" convention as
+            // "pausedChipBorder/surface" vs "outlineStrong/surface".
+            TextOrStrokePairing(name: "PermissionBannerView stripe(cannotReport)/surfaceVariant", scheme: .light, foreground: light.colors.danger, background: light.colors.surfaceVariant, threshold: 3.0),
+            TextOrStrokePairing(name: "PermissionBannerView stripe(cannotReport)/surfaceVariant", scheme: .dark, foreground: dark.colors.danger, background: dark.colors.surfaceVariant, threshold: 3.0),
+
+            TextOrStrokePairing(name: "PermissionBannerView stripe(foregroundOnly)/surfaceVariant", scheme: .light, foreground: light.colors.primary, background: light.colors.surfaceVariant, threshold: 3.0),
+            TextOrStrokePairing(name: "PermissionBannerView stripe(foregroundOnly)/surfaceVariant", scheme: .dark, foreground: dark.colors.primary, background: dark.colors.surfaceVariant, threshold: 3.0),
         ]
     }()
 
@@ -183,6 +196,16 @@ enum ColorContrastPairings {
             // color pairing across three call sites, added I29 code-review round 2 MINOR.
             TextOrStrokePairing(name: "primary icon-or-text/surface", scheme: .light, foreground: light.colors.primary, background: light.colors.surface, threshold: 4.5),
             TextOrStrokePairing(name: "primary icon-or-text/surface", scheme: .dark, foreground: dark.colors.primary, background: dark.colors.surface, threshold: 4.5),
+
+            // FindlyTextField.swift: `Text("✕ \(errorMessage)")` renders in `danger` on the field's
+            // `surfaceVariant` fill — this is BODY TEXT (WCAG 2.1 SC 1.4.3, 4.5:1), a different
+            // claim from "FindlyTextField errorBorder/surfaceVariant" above, which is the 1.5pt
+            // border stroke (SC 1.4.11, 3:1) and happens to share the same two colors. Added I29
+            // code-review round 3 MINOR 2: same numbers as the border pairing (danger/
+            // surfaceVariant), but was previously only asserted at the border's 3:1 threshold —
+            // an untested claim held at the wrong bar, even though it clears 4.5 anyway.
+            TextOrStrokePairing(name: "FindlyTextField errorMessage/surfaceVariant", scheme: .light, foreground: light.colors.danger, background: light.colors.surfaceVariant, threshold: 4.5),
+            TextOrStrokePairing(name: "FindlyTextField errorMessage/surfaceVariant", scheme: .dark, foreground: dark.colors.danger, background: dark.colors.surfaceVariant, threshold: 4.5),
         ]
     }()
 }
