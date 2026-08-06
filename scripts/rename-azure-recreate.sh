@@ -105,6 +105,22 @@ for t in Families Users Invites Devices LastKnown Entitlements LocateRequests \
   az storage table create --name "$t" --account-name "$STORAGE" --auth-mode login
 done
 
+# REQUIRED — a freshly recreated storage account has zero blob containers either. Despite a
+# stale claim that used to live here and in specs/002 §1 ("the blob containers self-heal via
+# create-if-not-exists on append"), Azure Blob Storage does NOT auto-create a CONTAINER on
+# first write — only the per-day BLOB *inside* an already-existing container self-heals that
+# way (specs/002 §3.2). This script never created `config`/`history`/`events` during the
+# original Findly rename, which left `stfindly` with zero containers until fixed live
+# 2026-08-06: `POST /locations` and `PUT /geofences` 500'd `ContainerNotFound` for every family
+# from first deploy until this ran (B25). `backend/src/adapters/blobs/blobClientFactory.ts`
+# now also self-heals this at the code level (defense-in-depth) — provisioning still creates
+# them explicitly so the account is correct from the first request, not just after the first
+# 500.
+for c in config history events; do
+  az storage container create --name "$c" --account-name "$STORAGE" --auth-mode login \
+    --public-access off
+done
+
 # ---------------------------------------------------------------------------
 # 3. RECREATE — OIDC app registration for GitHub Actions (mirrors §2)
 # ---------------------------------------------------------------------------
