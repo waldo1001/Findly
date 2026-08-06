@@ -23,14 +23,14 @@ data class FindlySpacingTokens(
     val xxl: Dp,
 )
 
-// Findly design system (design/findly-design-system/) — unified cross-platform spacing scale.
+// Design 2a — "Ember / Dusk" (design/findly-design-system/2a-ember-dusk/HANDOFF.md).
 val FindlySpacing = FindlySpacingTokens(
     xs = 4.dp,
     sm = 8.dp,
     md = 12.dp,
-    lg = 16.dp,
-    xl = 24.dp,
-    xxl = 32.dp,
+    lg = 20.dp,
+    xl = 28.dp,
+    xxl = 40.dp,
 )
 
 val LocalFindlySpacing = staticCompositionLocalOf { FindlySpacing }
