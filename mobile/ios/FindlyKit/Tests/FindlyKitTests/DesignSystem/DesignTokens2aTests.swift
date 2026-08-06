@@ -1,0 +1,175 @@
+import SwiftUI
+import Testing
+@testable import FindlyKit
+
+/// design/findly-design-system/2a-ember-dusk/HANDOFF.md — direction 2a "Ember / Dusk", the
+/// versioned token contract picked for both mobile clients (specs/003 §4.2, specs/004 §2.1).
+/// These pin the exact values the handoff calls "final and exact" so a future edit can't drift
+/// from the handoff without a red test. Values only — token *names* are unchanged (I27).
+struct DesignTokens2aTests {
+
+    // MARK: - Colors — light
+
+    @Test func lightColors_matchHandoffHexValues() {
+        let c = ColorTokens.light
+        #expect(c.primary == Color(hex: 0x3A46C8))
+        #expect(c.onPrimary == Color(hex: 0xFFFFFF))
+        #expect(c.secondary == Color(hex: 0x0E7C8F))
+        #expect(c.surface == Color(hex: 0xF2F4FB))
+        #expect(c.onSurface == Color(hex: 0x10142A))
+        #expect(c.surfaceVariant == Color(hex: 0xE2E6F5))
+        #expect(c.danger == Color(hex: 0xB3261E))
+        #expect(c.onDanger == Color(hex: 0xFFFFFF))
+        #expect(c.success == Color(hex: 0x10714A))
+        #expect(c.warning == Color(hex: 0x8A5A00))
+        #expect(c.outline == Color(hex: 0xA9B0CE))
+    }
+
+    // MARK: - Colors — dark
+
+    @Test func darkColors_matchHandoffHexValues() {
+        let c = ColorTokens.dark
+        #expect(c.primary == Color(hex: 0x7C8BFF))
+        #expect(c.onPrimary == Color(hex: 0x0A0F27))
+        #expect(c.secondary == Color(hex: 0x4FE3D0))
+        #expect(c.surface == Color(hex: 0x0B0F1C))
+        #expect(c.onSurface == Color(hex: 0xE8ECF7))
+        #expect(c.surfaceVariant == Color(hex: 0x161D33))
+        #expect(c.danger == Color(hex: 0xFF6B6B))
+        #expect(c.onDanger == Color(hex: 0x2A0708))
+        #expect(c.success == Color(hex: 0x52E39B))
+        #expect(c.warning == Color(hex: 0xFFC44D))
+        #expect(c.outline == Color(hex: 0x3A4463))
+    }
+
+    // MARK: - The two contrast traps the handoff calls out by name
+
+    // Light `outline` (#A9B0CE) is 2.1:1 — decorative hairlines/dividers only. Any stroke that
+    // carries meaning must use this stronger, theme-invariant color (3.4:1) instead.
+    @Test func findlyOutlineStrong_isTheHandoffValue_andDistinctFromDecorativeOutline() {
+        #expect(Color.findlyOutlineStrong == Color(hex: 0x6B739A))
+        #expect(Color.findlyOutlineStrong != ColorTokens.light.outline)
+    }
+
+    // The dot inside a `primary` marker bubble is #52E39B in BOTH themes (5.4:1 on #3A46C8).
+    // Light-theme `success` (#10714A) measures 1.2:1 there and must never be substituted in.
+    @Test func findlyMarkerOnlineDot_isFixedAcrossThemes_andNotLightSuccess() {
+        #expect(Color.findlyMarkerOnlineDot == Color(hex: 0x52E39B))
+        #expect(Color.findlyMarkerOnlineDot != ColorTokens.light.success)
+        // It happens to equal dark's `success` (both are #52E39B) — that's a coincidence of this
+        // palette, not a rule; the marker dot's correctness must not depend on which theme is active.
+        #expect(Color.findlyMarkerOnlineDot == ColorTokens.dark.success)
+    }
+
+    @Test func findlyMarkerOnlineDotOn_matchesHandoffValue() {
+        // Text drawn on top of the online dot pill (labelSmall "NOW"), per HANDOFF.md MapMarkerBubble.
+        #expect(Color.findlyMarkerOnlineDotOn == Color(hex: 0x062418))
+    }
+
+    // MARK: - Typography (6 roles: size / weight / line-height / tracking)
+
+    @Test func typography_displayLarge() {
+        let t = TypographyTokens.standard.displayLarge
+        #expect(t.size == 34)
+        #expect(t.weight == .bold)
+        #expect(t.lineHeight == 40)
+        #expect(t.tracking == -0.4)
+    }
+
+    @Test func typography_titleLarge() {
+        let t = TypographyTokens.standard.titleLarge
+        #expect(t.size == 24)
+        #expect(t.weight == .bold)
+        #expect(t.lineHeight == 30)
+        #expect(t.tracking == -0.2)
+    }
+
+    @Test func typography_titleMedium() {
+        let t = TypographyTokens.standard.titleMedium
+        #expect(t.size == 18)
+        #expect(t.weight == .semibold)
+        #expect(t.lineHeight == 24)
+        #expect(t.tracking == 0)
+    }
+
+    @Test func typography_bodyLarge() {
+        let t = TypographyTokens.standard.bodyLarge
+        #expect(t.size == 17)
+        #expect(t.weight == .regular)
+        #expect(t.lineHeight == 24)
+        #expect(t.tracking == 0)
+    }
+
+    @Test func typography_bodyMedium() {
+        let t = TypographyTokens.standard.bodyMedium
+        #expect(t.size == 15)
+        #expect(t.weight == .regular)
+        #expect(t.lineHeight == 20)
+        #expect(t.tracking == 0)
+    }
+
+    @Test func typography_labelSmall() {
+        let t = TypographyTokens.standard.labelSmall
+        #expect(t.size == 12)
+        #expect(t.weight == .bold)
+        #expect(t.lineHeight == 16)
+        #expect(t.tracking == 0.4)
+    }
+
+    @Test func typeStyle_fontIsDerivedFromSizeAndWeight() {
+        let t = TypographyTokens.standard.titleMedium
+        #expect(t.font == Font.system(size: 18, weight: .semibold))
+    }
+
+    // MARK: - Spacing
+
+    @Test func spacing_matchesHandoffScale() {
+        let s = SpacingTokens.standard
+        #expect(s.xs == 4)
+        #expect(s.sm == 8)
+        #expect(s.md == 12)
+        #expect(s.lg == 20)
+        #expect(s.xl == 28)
+        #expect(s.xxl == 40)
+    }
+
+    // MARK: - Corner radius
+
+    @Test func cornerRadius_matchesHandoffScale() {
+        let r = CornerRadiusTokens.standard
+        #expect(r.sm == 12)
+        #expect(r.md == 20)
+        #expect(r.lg == 28)
+        #expect(r.pill == 999)
+    }
+
+    // MARK: - Elevation: {blur, y, opacity light|dark, color}
+
+    @Test func elevation_light_matchesHandoffTable() {
+        let e = ElevationTokens.light
+        #expect(e.level0 == ElevationLevel(blur: 0, y: 0, opacity: 0, color: .black))
+        #expect(e.level1 == ElevationLevel(blur: 8, y: 2, opacity: 0.10, color: .black))
+        #expect(e.level2 == ElevationLevel(blur: 24, y: 8, opacity: 0.14, color: .black))
+        #expect(e.level3 == ElevationLevel(blur: 48, y: 16, opacity: 0.18, color: .black))
+    }
+
+    @Test func elevation_dark_matchesHandoffTable() {
+        let e = ElevationTokens.dark
+        #expect(e.level0 == ElevationLevel(blur: 0, y: 0, opacity: 0, color: .black))
+        #expect(e.level1 == ElevationLevel(blur: 8, y: 2, opacity: 0.30, color: .black))
+        #expect(e.level2 == ElevationLevel(blur: 24, y: 8, opacity: 0.45, color: .black))
+        #expect(e.level3 == ElevationLevel(blur: 48, y: 16, opacity: 0.60, color: .black))
+    }
+
+    // Shadows are neutral black in both themes (HANDOFF.md "Spacing, radius, elevation") — the one
+    // documented exception is a component-level tint (FindlyButton primary), not a token default.
+    @Test func elevation_colorIsNeutralBlack_everyLevel_bothThemes() {
+        let light = ElevationTokens.light
+        let dark = ElevationTokens.dark
+        let levels = [light.level0, light.level1, light.level2, light.level3,
+                      dark.level0, dark.level1, dark.level2, dark.level3]
+        for level in levels {
+            #expect(level.color == .black)
+        }
+    }
+}
