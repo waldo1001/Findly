@@ -26,11 +26,13 @@ struct DeleteAccountViewModelTests {
         api: FakeAPIClient, auth: FakeAuthProviding,
         deviceIdProvider: DeviceIdProviding = InMemoryDeviceIdProvider(),
         exportArtifactStore: InMemoryExportArtifactStore = InMemoryExportArtifactStore(),
+        appVersionTracker: AppVersionRegistrationTracking = InMemoryAppVersionRegistrationTracker(),
         wipeLocalState: @escaping () async -> Void = {}
     ) -> DeleteAccountViewModel {
         DeleteAccountViewModel(
             apiClient: api, authProvider: auth, deviceIdProvider: deviceIdProvider,
-            exportArtifactStore: exportArtifactStore, wipeLocalState: wipeLocalState
+            exportArtifactStore: exportArtifactStore, appVersionTracker: appVersionTracker,
+            wipeLocalState: wipeLocalState
         )
     }
 
@@ -196,6 +198,27 @@ struct DeleteAccountViewModelTests {
         #expect(viewModel.phase == .completed)
     }
 
+    /// I25 (specs/008 §1.3, specs/004 §3.6) — `appVersionTracker` is what I24 made load-bearing:
+    /// `DeviceRegistrationService.registerOrUpdate()` reads it to decide whether a re-registration
+    /// needs to probe for a profile first. Left uncleared, a full account deletion followed by a
+    /// sign-back-in on the same Firebase uid would carry a stale "this device has registered
+    /// before" bit into a session that (post-deletion) genuinely has no profile — clearing it
+    /// alongside `deviceIdProvider` closes that gap at the tracker's own write site, rather than
+    /// depending solely on `DeviceRegistrationService`'s `PROFILE_NOT_FOUND` catch elsewhere.
+    @Test func confirmDelete_success_clearsAppVersionTracker() async {
+        let api = FakeAPIClient()
+        api.deleteAccountHandler = {}
+        let auth = FakeAuthProviding()
+        auth.currentUserId = "u1"
+        let appVersionTracker = InMemoryAppVersionRegistrationTracker()
+        appVersionTracker.setLastRegisteredAppVersion("1.0.0", forUserId: "u1")
+        let viewModel = makeViewModel(api: api, auth: auth, appVersionTracker: appVersionTracker)
+
+        await viewModel.confirmDelete()
+
+        #expect(appVersionTracker.lastRegisteredAppVersion(forUserId: "u1") == nil, "a fully torn-down account must not leave a stale 'this device already registered' bit behind")
+    }
+
     @Test func confirmDelete_backendFailure_setsErrorPhase_neverCallsFirebaseDelete() async {
         let api = FakeAPIClient()
         api.deleteAccountHandler = { throw APIError.transport("offline") }
@@ -307,6 +330,36 @@ struct DeleteAccountViewModelTests {
 
         #expect(auth.clearStoredSessionCallCount == 1, "must run even though signOut() below it failed")
         #expect(viewModel.phase == .signedOutForRetry, "the screen still navigates to sign-in — there is nothing else to offer")
+    }
+
+    /// I25 — `appVersionTracker` joins `deviceIdProvider`/`exportArtifactStore` in the "deliberately
+    /// left alone here" category this type's top doc already establishes for `signOutForRetry()`:
+    /// all three are per-account-identity state that is only meaningful to clear once
+    /// `wipeLocalStateAndComplete()` confirms the account is FULLY torn down, including client-side
+    /// (i.e. the Firebase step also succeeded). Clearing any of them earlier — on a Firebase-delete
+    /// failure that hasn't been retried yet — would not be wrong today (the backend account really
+    /// is already gone by this point), but it would split "account teardown" bookkeeping across two
+    /// call sites for no behavioral gain, since a successful retry reaches
+    /// `wipeLocalStateAndComplete()` and clears them anyway.
+    @Test func signOutForRetry_doesNotClearDeviceIdOrAppVersionTracker() async {
+        let api = FakeAPIClient()
+        api.deleteAccountHandler = {}
+        let auth = FakeAuthProviding()
+        auth.currentUserId = "u1"
+        auth.deleteCurrentUserResult = .failure(AuthError.notSignedIn)
+        let deviceIdProvider = InMemoryDeviceIdProvider()
+        let existingDeviceId = deviceIdProvider.deviceId(forUserId: "u1")
+        let appVersionTracker = InMemoryAppVersionRegistrationTracker()
+        appVersionTracker.setLastRegisteredAppVersion("1.0.0", forUserId: "u1")
+        let viewModel = makeViewModel(
+            api: api, auth: auth, deviceIdProvider: deviceIdProvider, appVersionTracker: appVersionTracker
+        )
+        await viewModel.confirmDelete()
+
+        await viewModel.signOutForRetry()
+
+        #expect(deviceIdProvider.deviceId(forUserId: "u1") == existingDeviceId, "deviceIdProvider is only cleared by wipeLocalStateAndComplete()")
+        #expect(appVersionTracker.lastRegisteredAppVersion(forUserId: "u1") == "1.0.0", "appVersionTracker is only cleared by wipeLocalStateAndComplete()")
     }
 
     // MARK: - Cascade wording (008 §4.2)

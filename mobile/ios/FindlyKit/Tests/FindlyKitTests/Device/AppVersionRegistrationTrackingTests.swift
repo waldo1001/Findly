@@ -30,4 +30,26 @@ struct AppVersionRegistrationTrackingTests {
         tracker.setLastRegisteredAppVersion("1.0.1", forUserId: "u1")
         #expect(tracker.lastRegisteredAppVersion(forUserId: "u1") == "1.0.1")
     }
+
+    // MARK: - I25 (specs/008 §1.3, specs/004 §3.6) — clearing, mirrors `DeviceIdProviding.clearDeviceId`
+
+    @Test func clearLastRegisteredAppVersion_removesTheStoredValue() {
+        let tracker = InMemoryAppVersionRegistrationTracker()
+        tracker.setLastRegisteredAppVersion("1.0.0", forUserId: "u1")
+
+        tracker.clearLastRegisteredAppVersion(forUserId: "u1")
+
+        #expect(tracker.lastRegisteredAppVersion(forUserId: "u1") == nil)
+    }
+
+    @Test func clearLastRegisteredAppVersion_onlyClearsTheGivenUser() {
+        let tracker = InMemoryAppVersionRegistrationTracker()
+        tracker.setLastRegisteredAppVersion("1.0.0", forUserId: "u1")
+        tracker.setLastRegisteredAppVersion("2.0.0", forUserId: "u2")
+
+        tracker.clearLastRegisteredAppVersion(forUserId: "u1")
+
+        #expect(tracker.lastRegisteredAppVersion(forUserId: "u1") == nil)
+        #expect(tracker.lastRegisteredAppVersion(forUserId: "u2") == "2.0.0", "clearing one user must not disturb another")
+    }
 }
