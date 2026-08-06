@@ -12,9 +12,10 @@ import androidx.compose.ui.tooling.preview.Preview
 import com.findly.android.ui.designsystem.FindlyTheme
 
 /**
- * Every design-system component rendered together — a visual regression aid so a future design
- * swap (docs/design-prompt.md, per docs/implementation-handoff.md's Mobile H1-waiver note) can
- * be checked at a glance in both themes. Not a screen; not wired into navigation.
+ * Every design-system component — and every state design 2a "Ember / Dusk"
+ * (design/findly-design-system/2a-ember-dusk/HANDOFF.md) calls out — rendered together, a visual
+ * regression aid so a future design swap can be checked at a glance in both themes. Not a screen;
+ * not wired into navigation.
  */
 @Composable
 private fun ComponentGallery(modifier: Modifier = Modifier) {
@@ -27,10 +28,15 @@ private fun ComponentGallery(modifier: Modifier = Modifier) {
     ) {
         FindlyTopBar(title = "Findly")
 
+        FindlySectionHeader(title = "Buttons")
         FindlyButton(text = "Primary action", onClick = {})
+        FindlyButton(text = "Primary disabled", onClick = {}, enabled = false)
         FindlyButton(text = "Secondary action", onClick = {}, style = FindlyButtonStyle.Secondary)
-        FindlyButton(text = "Disabled", onClick = {}, enabled = false)
+        FindlyButton(text = "Secondary disabled", onClick = {}, style = FindlyButtonStyle.Secondary, enabled = false)
+        FindlyButton(text = "Destructive action", onClick = {}, style = FindlyButtonStyle.Destructive)
+        FindlyButton(text = "Compact (inline)", onClick = {}, compact = true)
 
+        FindlySectionHeader(title = "Card")
         FindlyCard {
             Text(
                 text = "Card content",
@@ -39,19 +45,25 @@ private fun ComponentGallery(modifier: Modifier = Modifier) {
             )
         }
 
+        FindlySectionHeader(title = "List rows")
         FindlyListRow(title = "Noor", subtitle = "Last seen 2 min ago")
+        FindlyListRow(title = "Sam", subtitle = "Oak Street · 24 min ago", onClick = {})
+        FindlyListRow(title = "Dad", subtitle = "Sharing paused", enabled = false)
 
+        FindlySectionHeader(title = "Status chips")
         Column(verticalArrangement = Arrangement.spacedBy(FindlyTheme.spacing.xs)) {
-            FindlyStatusChip(label = "Registered", tone = FindlyStatusTone.Success)
-            FindlyStatusChip(label = "Stale", tone = FindlyStatusTone.Warning)
-            FindlyStatusChip(label = "Error", tone = FindlyStatusTone.Danger)
-            FindlyStatusChip(label = "Paused", tone = FindlyStatusTone.Neutral)
+            FindlyStatusChip(label = "ONLINE", tone = FindlyStatusTone.Success)
+            FindlyStatusChip(label = "STALE", tone = FindlyStatusTone.Warning)
+            FindlyStatusChip(label = "PAUSED", tone = FindlyStatusTone.Neutral)
+            FindlyStatusChip(label = "ALERT", tone = FindlyStatusTone.Danger)
         }
 
-        FindlyMapMarkerBubble(label = "Eric", state = FindlyMapMarkerState.Online)
-        FindlyMapMarkerBubble(label = "Noor", state = FindlyMapMarkerState.Stale)
+        FindlySectionHeader(title = "Map marker bubbles")
+        FindlyMapMarkerBubble(label = "Noor", state = FindlyMapMarkerState.Online)
+        FindlyMapMarkerBubble(label = "Sam", state = FindlyMapMarkerState.Stale, staleAgeText = "24m")
         FindlyMapMarkerBubble(label = "?", state = FindlyMapMarkerState.NoLocation)
 
+        FindlySectionHeader(title = "Text fields")
         FindlyTextField(
             value = "Home",
             onValueChange = {},
@@ -65,17 +77,31 @@ private fun ComponentGallery(modifier: Modifier = Modifier) {
             isError = true,
             supportingText = "Must be between 100 and 5000",
         )
+        FindlyTextField(
+            value = "Locked",
+            onValueChange = {},
+            label = "Disabled field",
+            enabled = false,
+        )
 
+        FindlySectionHeader(title = "Switch rows")
         FindlySwitchRow(title = "Tracking enabled", checked = true, onCheckedChange = {})
         FindlySwitchRow(title = "Notify on enter", checked = false, onCheckedChange = {}, subtitle = "Geofence: Home")
+        FindlySwitchRow(title = "Disabled", checked = true, onCheckedChange = {}, enabled = false)
 
-        FindlyEmptyState(title = "No devices yet", message = "Register a device to see it here.")
+        FindlySectionHeader(title = "Empty / loading / error states")
+        FindlyEmptyState(
+            title = "No devices yet",
+            message = "Register a device to see it here.",
+            actionLabel = "Add a device",
+            onAction = {},
+        )
         FindlyLoadingState(message = "Loading…")
-        FindlyErrorState(title = "Something went wrong", message = "Couldn't reach the server.", onRetry = {})
+        FindlyErrorState(title = "Couldn't reach Sam's Pixel", message = "It may be off or out of signal.", onRetry = {})
     }
 }
 
-@Preview(name = "Component gallery — light", showBackground = true)
+@Preview(name = "Component gallery — light", showBackground = true, heightDp = 3200)
 @Composable
 private fun ComponentGalleryLightPreview() {
     FindlyTheme(darkTheme = false) {
@@ -83,7 +109,7 @@ private fun ComponentGalleryLightPreview() {
     }
 }
 
-@Preview(name = "Component gallery — dark", showBackground = true)
+@Preview(name = "Component gallery — dark", showBackground = true, heightDp = 3200)
 @Composable
 private fun ComponentGalleryDarkPreview() {
     FindlyTheme(darkTheme = true) {
