@@ -1,0 +1,13 @@
+<resources>
+    <!-- A32 (specs/003-android-client.md §4.1): dark half of the "DayNight" pair — see
+         values/themes.xml for the full rationale. Before this file existed there was no
+         values-night/ variant at all, so the window stayed permanently light even when the system
+         was in dark mode (`cmd uimode night yes`), and Compose's dark tokens (near-white
+         onSurface #E8ECF7) landed on that light window. Dark platform parent
+         (android:Theme.Material.NoActionBar — no ".Light") plus windowBackground pinned to the
+         exact dark `surface` token (#0B0F1C, ui/designsystem/token/ColorTokens.kt) so the
+         pre-Compose splash frame is already dark and matches what FindlyTheme paints next. -->
+    <style name="Theme.Findly" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">#FF0B0F1C</item>
+    </style>
+</resources>

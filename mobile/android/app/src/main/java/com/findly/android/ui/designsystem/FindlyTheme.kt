@@ -1,14 +1,17 @@
 package com.findly.android.ui.designsystem
 
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Shapes
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.Modifier
 import com.findly.android.ui.designsystem.token.DarkFindlyColors
 import com.findly.android.ui.designsystem.token.LightFindlyColors
 import com.findly.android.ui.designsystem.token.LocalFindlyColors
@@ -50,6 +53,17 @@ object FindlyTheme {
  * un-migrated Material3 primitive still themes correctly. Ships both light and dark token sets
  * from day one (specs/003 §4) — swapping either is a one-file change to
  * `ui/designsystem/token/ColorTokens.kt`, nothing else.
+ *
+ * A32: also paints the backdrop itself with a [Surface] coloured from `tokens.surface`, so the
+ * screen background is token-driven rather than inherited from the *window* background
+ * (`res/values{,-night}/themes.xml`). Before this, `content` sat directly under [MaterialTheme]
+ * with nothing painting a background, so every screen's backdrop was whatever the XML window
+ * theme happened to be — permanently light pre-A32, since there was no `values-night` variant
+ * either. Dark tokens (e.g. near-white `onSurface` #E8ECF7) were then flipped correctly by
+ * Compose while the backdrop stayed light, an unreadable combination the contrast suite cannot
+ * catch because it only asserts token-vs-token, never token-vs-window. This is the durable half
+ * of the fix: it makes the Compose layer self-sufficient regardless of what the window theme
+ * does, so the window theme only has to be right for the brief pre-Compose splash frame.
  */
 @Composable
 fun FindlyTheme(
@@ -110,7 +124,13 @@ fun FindlyTheme(
             colorScheme = colorScheme,
             typography = materialTypography,
             shapes = shapes,
-            content = content,
-        )
+        ) {
+            Surface(
+                modifier = Modifier.fillMaxSize(),
+                color = tokens.surface,
+                contentColor = tokens.onSurface,
+                content = content,
+            )
+        }
     }
 }

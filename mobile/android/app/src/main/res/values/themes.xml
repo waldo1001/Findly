@@ -2,6 +2,18 @@
     <!-- Minimal manifest-level theme for the pre-Compose window chrome only — all real theming
          (color/typography/shape) is Compose-side via ui/designsystem/FindlyTheme.kt. Built-in
          platform parent on purpose: no AppCompat/Material-Components dependency is needed since
-         every screen is Compose + Material3. -->
-    <style name="Theme.Findly" parent="android:Theme.Material.Light.NoActionBar" />
+         every screen is Compose + Material3.
+
+         A32 (specs/003-android-client.md §4.1): this is the "DayNight" light half — see
+         values-night/themes.xml for the dark half, which swaps the platform parent rather than
+         relying on a single parent to auto-switch (the framework has no
+         Theme.Material.Light.DayNight; that pattern is AppCompat/Material-Components only, which
+         this app deliberately doesn't depend on). windowBackground is pinned to the exact light
+         `surface` token (#F2F4FB, ui/designsystem/token/ColorTokens.kt) so the pre-Compose splash
+         frame matches what FindlyTheme paints a moment later — no flash of a different colour.
+         Compose's own Surface(color = colors.surface) in FindlyTheme.kt is the durable fix for
+         every screen after that; this window theme only governs the frame before Compose draws. -->
+    <style name="Theme.Findly" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">#FFF2F4FB</item>
+    </style>
 </resources>
