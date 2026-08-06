@@ -52,8 +52,20 @@ az functionapp config appsettings set -n $FUNCAPP -g $RG --settings \
   TABLES_ENDPOINT="https://$STORAGE.table.core.windows.net" \
   BLOB_ENDPOINT="https://$STORAGE.blob.core.windows.net"
 
-# REQUIRED — Azure Table Storage does NOT auto-create a table on first write (unlike the
-# blob containers, which the app creates lazily via create-if-not-exists on append, 002 §3.2).
+# REQUIRED — Azure Table Storage does NOT auto-create a table on first write. NEITHER DO THE
+# BLOB CONTAINERS: the parenthetical that used to sit here claimed "the blob containers, which
+# the app creates lazily via create-if-not-exists on append, 002 §3.2" — that was FALSE, and it
+# cost the project a live P0. `grep -rn createIfNotExists backend/src/` returns nothing; no code
+# has ever created a container. Azurite auto-creates on write, which is exactly why 704 unit
+# tests and 29 Azurite integration tests were all green against a backend that could not store a
+# single location in production. Found live 2026-08-06 — `stfindly` held only the two
+# azure-webjobs-* containers, so `POST /locations` (history append) and `PUT /geofences` both
+# returned 500 ContainerNotFound for every family. Create `config`, `history` and `events`
+# alongside the tables below, and see B25 for the code-level fix.
+#   for c in config history events; do
+#     az storage container create --name $c --account-name $STORAGE --auth-mode login \
+#       --public-access off
+#   done
 # Every table in specs/002 §2 must exist before the app can write to it, or every create/insert
 # hits a raw TableNotFound (a 500, not a handled error — reads happen to survive because Table
 # Storage's TableNotFound is also a 404, identical to "row not found", which the read paths
