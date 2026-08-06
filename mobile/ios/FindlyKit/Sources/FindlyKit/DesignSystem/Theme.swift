@@ -24,16 +24,19 @@ public struct Theme: Equatable {
 
 public extension Theme {
     /// design 2a "Ember/Dusk" contrast trap (design/findly-design-system/2a-ember-dusk/HANDOFF.md):
-    /// light `outline` (`#A9B0CE`) is only 2.1:1 — legal for decorative hairlines/dividers only.
-    /// Any stroke that carries meaning (an unselected control border, a focus ring, an input
-    /// outline) MUST use this instead.
+    /// decorative `outline` (`#A9B0CE` light / `#3A4463` dark) is legal only for hairlines/
+    /// dividers. Any stroke that carries meaning (an unselected control border, a focus ring, an
+    /// input outline) MUST use this instead.
     ///
-    /// **Correction (post-review, independently verified):** the handoff also claims dark
-    /// `outline` (`#3A4463`) "clears 3:1" and can double as both decorative and meaningful — that
-    /// is wrong. Measured: `#3A4463` vs dark `surface` (`#0B0F1C`) = 1.99:1; vs `surfaceVariant`
-    /// (`#161D33`) = 1.74:1. Both themes therefore use the SAME `#6B739A` for meaningful strokes
-    /// (vs dark `surface` = 4.13:1, vs `surfaceVariant` = 3.61:1 — both clear 3:1). Decorative
-    /// `outline` is unchanged in either theme; only this stronger color is now theme-invariant.
+    /// **Correction (post-review, independently verified, two rounds):**
+    /// - The handoff claims dark `outline` "clears 3:1" and can double as both decorative and
+    ///   meaningful — that is wrong. Measured: `#3A4463` vs dark `surface` (`#0B0F1C`) = 1.99:1;
+    ///   vs `surfaceVariant` (`#161D33`) = 1.74:1. Both themes therefore use the SAME `#6B739A`
+    ///   for meaningful strokes; decorative `outline` stays unchanged in either theme.
+    /// - The handoff's own ratios for THIS color were also off, understated this time: measured
+    ///   4.21:1 vs light `surface` / 3.71:1 vs `surfaceVariant` (not "3.4:1-class"), and 4.13:1 /
+    ///   3.61:1 in dark (both clear 3:1, per the first correction). Light decorative `outline`'s
+    ///   cited "2.1:1" was also slightly overstated (measured 1.95:1 — moot, hairline-only).
     var outlineStrong: Color { .findlyOutlineStrong }
 
     /// `onSurface` at ~70% opacity, using the handoff's literal per-scheme hex values (e.g.

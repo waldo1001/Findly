@@ -66,12 +66,22 @@ The visual design MUST be fully replaceable later without touching any logic, na
 | `onDanger` | `#FFFFFF` | `#2A0708` |
 | `success` | `#10714A` | `#52E39B` |
 | `warning` | `#8A5A00` | `#FFC44D` |
-| `outline` | `#A9B0CE` (2.1:1 — **decorative hairlines/dividers only**) | `#3A4463` (**also decorative only — see correction below**) |
+| `outline` | `#A9B0CE` (**decorative hairlines/dividers only** — see correction below) | `#3A4463` (**also decorative only** — see correction below) |
 
-Two rules the handoff calls out explicitly and review checks, **both corrected post-review** (independently verified 2026-08-06, WebAIM formula sanity-checked against `#767676`-on-`#FFFFFF` = 4.54:1; both were errors in the handoff document itself):
+**Additive colors** (beyond the 11 roles above, `Color.findlyX` in `ColorTokens.swift`; consumed via `Theme.outlineStrong` / `Theme.markerOnlineBadgeFill`/`Label` so no call site branches on scheme itself):
 
-1. Light `outline` is 2.1:1 and legal only for decorative hairlines/dividers. Any stroke that carries meaning (unselected control border, focus ring, input outline) uses `theme.outlineStrong` (`#6B739A`, 3.4:1-class) instead. **Correction:** the handoff claims dark `outline` (`#3A4463`) "clears 3:1" and can double for both purposes — measured, it does not (1.99:1 vs dark `surface` `#0B0F1C`, 1.74:1 vs `surfaceVariant` `#161D33`). Dark therefore uses the SAME `#6B739A` as light for meaningful strokes (4.13:1 vs `surface`, 3.61:1 vs `surfaceVariant` — both clear 3:1); dark `outline` itself stays decorative-only, same as light.
-2. The dot inside a `primary` marker bubble's "● NOW" pill is `Color.findlyMarkerOnlineDot` (`#52E39B`) — light-theme `success` (`#10714A`) measures 1.2:1 there and must never be used for it. **Correction:** the handoff claims `#52E39B` is "5.4:1 in both themes" against `primary` — independently remeasured at 4.44:1 against LIGHT `primary` (`#3A46C8`; the handoff's number was also slightly off) but only 1.83:1 against DARK `primary` (`#7C8BFF`), which fails. Dark inverts the badge instead of reusing light's fill/label pairing: fill `#0B3B26` (vs dark `primary` = 4.19:1), label `#52E39B` (on that fill = 7.69:1). See `Theme.markerOnlineBadgeFill`/`Label`.
+| Color | Value | Used for | Light ratio | Dark ratio |
+|---|---|---|---|---|
+| `outline` (decorative, not additive — listed for contrast with the row below) | `#A9B0CE` / `#3A4463` | hairlines, dividers only | 1.95:1 vs `surface` | 1.99:1 vs `surface`, 1.74:1 vs `surfaceVariant` |
+| `findlyOutlineStrong` | `#6B739A` (both schemes) | unselected control border, focus ring, input outline | 4.21:1 vs `surface`, 3.71:1 vs `surfaceVariant` | 4.13:1 vs `surface`, 3.61:1 vs `surfaceVariant` |
+| `findlyMarkerOnlineDot` / `findlyMarkerOnlineDotOn` | `#52E39B` / `#062418` | "● NOW" badge — **fill+label in light**, **label only in dark** (see next row) | fill `#52E39B` vs `primary` = 4.44:1 (label-on-fill pairing not independently re-verified this round — unchanged from the original handoff pairing, not implicated in either correction) | label `#52E39B` on `#0B3B26` fill = 7.69:1 |
+| `Theme.markerOnlineBadgeFill` (dark only; light reuses `findlyMarkerOnlineDot` as fill) | `#0B3B26` | "● NOW" badge fill, dark only | — (light doesn't use this) | `#0B3B26` vs dark `primary` `#7C8BFF` = 4.19:1 |
+| `findlyDisabledLabel` | `#8D93AB` (both schemes) | `FindlyButton` disabled-state label | not contrast-driven — WCAG exempts disabled controls; named so a palette pass can't silently miss it | same |
+
+All ratios in this table are **independently verified 2026-08-06** (WebAIM formula sanity-checked against `#767676`-on-`#FFFFFF` = 4.54:1), correcting `design/findly-design-system/2a-ember-dusk/HANDOFF.md` rather than restating it — that document's own numbers for `outlineStrong`/`outline` and the marker dot were wrong in both directions (overstated for dark `outline`'s "clears 3:1" claim and the marker dot's "5.4:1 in both themes"; understated for `outlineStrong`'s "3.4:1-class" and decorative `outline`'s "2.1:1"). Two corrected rules, both review-checked:
+
+1. Decorative `outline` (`#A9B0CE` light / `#3A4463` dark) is legal only for hairlines/dividers in EITHER theme. Any stroke that carries meaning (unselected control border, focus ring, input outline) uses `findlyOutlineStrong` (`#6B739A`) in BOTH themes — **correcting HANDOFF.md's claim that dark `outline` itself "clears 3:1" and can double for both purposes** (measured 1.99:1 / 1.74:1, below threshold).
+2. The "● NOW" marker badge is `findlyMarkerOnlineDot`/`findlyMarkerOnlineDotOn` (fill/label) in light, but **inverts to fill `Theme.markerOnlineBadgeFill` (`#0B3B26`) / label `findlyMarkerOnlineDot`** in dark — **correcting HANDOFF.md's claim that `#52E39B` is "5.4:1 in both themes" against `primary`** (that ratio, independently remeasured at 4.44:1, only holds against light `primary`; against dark `primary` `#7C8BFF` it measures 1.83:1 and fails). Green still means online in both themes; only which role (fill vs label) `#52E39B` plays swaps.
 
 **Typography** (`TypographyTokens`, a `TypeStyle { size: CGFloat, weight: Font.Weight, lineHeight: CGFloat, tracking: CGFloat }` per role, identical across schemes — pt on iOS, system font only):
 

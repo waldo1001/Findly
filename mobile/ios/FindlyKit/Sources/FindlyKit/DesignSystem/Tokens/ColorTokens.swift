@@ -65,14 +65,19 @@ public struct ColorTokens: Equatable {
 // `Theme.markerOnlineBadgeFill`/`Label` at call sites rather than these directly — those resolve
 // the corrections below per scheme.
 public extension Color {
-    /// Light `outline` (`#A9B0CE`) is only 2.1:1 — legal for decorative hairlines/dividers only.
-    /// Any stroke that carries meaning (unselected control border, focus ring, input outline) uses
-    /// this stronger color (3.4:1) instead.
+    /// Light `outline` (`#A9B0CE`) is decorative-only — legal for hairlines/dividers, not for a
+    /// stroke that carries meaning (unselected control border, focus ring, input outline), which
+    /// uses this stronger color instead.
     ///
-    /// **Correction (post-review, independently verified):** the handoff also claims dark
-    /// `outline` (`#3A4463`, `ColorTokens.dark.outline`) "clears 3:1" and can double for both
-    /// purposes — that is wrong (measured 1.99:1 vs dark `surface`, 1.74:1 vs `surfaceVariant`).
-    /// This color is used in BOTH themes for meaningful strokes; see `Theme.outlineStrong`.
+    /// **Correction (post-review, independently verified, two rounds):**
+    /// - The handoff claims dark `outline` (`#3A4463`, `ColorTokens.dark.outline`) "clears 3:1"
+    ///   and can double for both purposes — that is wrong (measured 1.99:1 vs dark `surface`,
+    ///   1.74:1 vs `surfaceVariant`). This color is used in BOTH themes for meaningful strokes;
+    ///   see `Theme.outlineStrong`.
+    /// - The handoff's own "2.1:1" for decorative light `outline` was also slightly overstated
+    ///   (measured 1.95:1 — no threshold applies either way, it's hairline-only), and its "3.4:1"
+    ///   for THIS color was understated: measured 4.21:1 vs light `surface`, 3.71:1 vs
+    ///   `surfaceVariant` (dark: 4.13:1 / 3.61:1, per the first correction above).
     static let findlyOutlineStrong = Color(hex: 0x6B739A)
     /// The fixed "online green" used by a `primary` marker bubble's "● NOW" pill — as fill in
     /// light, as label in dark (see `Theme.markerOnlineBadgeFill`/`Label`). Light-theme `success`
@@ -86,4 +91,10 @@ public extension Color {
     static let findlyMarkerOnlineDot = Color(hex: 0x52E39B)
     /// Text drawn on top of `findlyMarkerOnlineDot`.
     static let findlyMarkerOnlineDotOn = Color(hex: 0x062418)
+    /// `FindlyButton`'s disabled-state label ("Disabled: fill surfaceVariant, label #8D93AB, no
+    /// shadow" — HANDOFF.md FindlyButton primary). WCAG exempts disabled controls, so this isn't
+    /// a contrast-driven value; it's named so a future palette pass can't silently skip it the way
+    /// an inline literal would let it. The handoff gives only one value (no dark variant), so this
+    /// stays theme-invariant like the two colors above until a design pass says otherwise.
+    static let findlyDisabledLabel = Color(hex: 0x8D93AB)
 }

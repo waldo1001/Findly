@@ -100,7 +100,7 @@ public struct FindlyButton: View {
     }
 
     private var foregroundColor: Color {
-        guard isEnabled else { return Color(hex: 0x8D93AB) }
+        guard isEnabled else { return .findlyDisabledLabel }
         switch style {
         case .primary: return theme.colors.onPrimary
         case .secondary: return theme.colors.onSurface

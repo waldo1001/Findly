@@ -78,7 +78,14 @@ public struct FindlyNavBar: View {
                 Button(trailingActionTitle, action: trailingAction)
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundColor(theme.colors.primary)
+                    // Text alone is ~15pt tall — well under the 44pt minimum touch target the
+                    // back button two lines above already enforces. `minHeight` grows the tap
+                    // area without shifting the label's visual position; `contentShape` makes the
+                    // whole padded frame hit-testable, not just the glyphs' own bounds (found in
+                    // I27 review — matters outdoors, one-handed, in a hurry, per the handoff).
+                    .frame(minHeight: 44)
                     .padding(.trailing, theme.spacing.md)
+                    .contentShape(Rectangle())
             }
         }
         .frame(height: 52)

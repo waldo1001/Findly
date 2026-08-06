@@ -5,6 +5,14 @@ import SwiftUI
 /// design 2a "Ember/Dusk" (design/findly-design-system/2a-ember-dusk/HANDOFF.md): min height 60,
 /// an optional 40×40 leading avatar circle (initial, `primary` fill for "self" rows, `surfaceVariant`
 /// otherwise), title 16/600, subtitle 13/400 in `Theme.onSurfaceMuted`, disabled rows dim to 45%.
+///
+/// **Not implemented: "Pressed: light `#D8DDF0` overlay."** This row has never owned a tap
+/// gesture — every screen wraps it in its own `Button`/`NavigationLink` (see `Screens/**`) — so
+/// there is no press state here to style. Applying the overlay correctly is a `Screens/`-level
+/// concern, deferred to **I28** (same category of caller-owned spacing/interaction deferral as
+/// `FindlySectionHeader.swift`'s "10pt below the previous block" note) rather than inventing a
+/// one-off `Button` style per screen, which is exactly the drift a shared component exists to
+/// prevent.
 public struct FindlyListRow<Trailing: View>: View {
     @Environment(\.theme) private var theme
     @Environment(\.isEnabled) private var isEnabled
