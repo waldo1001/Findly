@@ -174,6 +174,14 @@ struct DesignTokens2aTests {
     }
 
     // MARK: - Theme.outlineStrong (contrast-trap #1)
+    //
+    // Correction (post-review, independently verified — WebAIM formula sanity-checked against
+    // #767676-on-#FFFFFF = 4.54:1): the handoff's claim that dark `outline` (#3A4463) "clears
+    // 3:1" is wrong — measured 1.99:1 against dark `surface` (#0B0F1C), 1.74:1 against
+    // `surfaceVariant` (#161D33). `outlineStrong` therefore uses the SAME #6B739A in both themes
+    // (light was already correct at 3.4:1-class; against dark surface it measures 4.13:1, against
+    // dark surfaceVariant 3.61:1 — both clear 3:1). Decorative `outline` is unchanged in either
+    // theme; only the "carries meaning" strong color is now theme-invariant.
 
     @Test func outlineStrong_inLight_isTheStrongerColor_notTheDecorativeOutline() {
         #expect(Theme.light.outlineStrong == Color(hex: 0x6B739A))
@@ -181,10 +189,13 @@ struct DesignTokens2aTests {
         #expect(Theme.light.outlineStrong != Theme.light.colors.outline)
     }
 
-    @Test func outlineStrong_inDark_isJustTheRegularOutline() {
-        // Dark `outline` already clears 3:1, so it doubles for both decorative and meaningful use
-        // — no separate strong color needed there.
-        #expect(Theme.dark.outlineStrong == Theme.dark.colors.outline)
+    @Test func outlineStrong_inDark_isTheSameStrongColorAsLight_notTheDecorativeOutline() {
+        // Dark `outline` (#3A4463) does NOT clear 3:1 (measured 1.99:1 / 1.74:1) despite the
+        // handoff's claim — so dark needs `outlineStrong` too, and reuses light's #6B739A rather
+        // than a separate dark-tuned value.
+        #expect(Theme.dark.outlineStrong == Color(hex: 0x6B739A))
+        #expect(Theme.dark.outlineStrong == Color.findlyOutlineStrong)
+        #expect(Theme.dark.outlineStrong != Theme.dark.colors.outline)
     }
 
     // MARK: - Theme.onSurfaceMuted (row subtitles etc. — literal per-scheme hex, not a computed opacity)
@@ -192,5 +203,25 @@ struct DesignTokens2aTests {
     @Test func onSurfaceMuted_matchesHandoffLiteralHexValues() {
         #expect(Theme.light.onSurfaceMuted == Color(hex: 0x4E5675))
         #expect(Theme.dark.onSurfaceMuted == Color(hex: 0x98A1BD))
+    }
+
+    // MARK: - Theme.markerOnlineBadge (contrast-trap #2, corrected)
+    //
+    // The handoff cites 5.4:1 for #52E39B "in both themes", but that ratio is against LIGHT
+    // `primary` (#3A46C8) only — independently verified 4.44:1 there (the cited 5.4 was also
+    // slightly wrong, harmlessly). Against DARK `primary` (#7C8BFF), #52E39B measures 1.83:1 and
+    // fails. Fix: invert the badge in dark — fill #0B3B26 / label #52E39B (fill vs dark primary
+    // 4.19:1 ✓, label vs fill 7.69:1 ✓). Green still means online in both themes.
+
+    @Test func markerOnlineBadge_light_usesTheHandoffLiteralFillAndLabel() {
+        #expect(Theme.light.markerOnlineBadgeFill == Color.findlyMarkerOnlineDot)
+        #expect(Theme.light.markerOnlineBadgeLabel == Color.findlyMarkerOnlineDotOn)
+    }
+
+    @Test func markerOnlineBadge_dark_isInvertedForContrastAgainstDarkPrimary() {
+        #expect(Theme.dark.markerOnlineBadgeFill == Color(hex: 0x0B3B26))
+        #expect(Theme.dark.markerOnlineBadgeLabel == Color.findlyMarkerOnlineDot)
+        // The label is still the same fixed "online green" — only fill/label roles swap.
+        #expect(Theme.dark.markerOnlineBadgeLabel != Theme.dark.markerOnlineBadgeFill)
     }
 }
