@@ -71,7 +71,7 @@ android {
         // build all say "1.0.0 (6)" while Android still reported 0.1.0/1. Play also requires
         // versionCode to strictly increase on every upload, so starting at 6 keeps the two
         // platforms on one number instead of two drifting counters.
-        versionCode = 6
+        versionCode = 7
         versionName = "1.0.0"
     }
 
