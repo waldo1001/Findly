@@ -332,16 +332,23 @@ struct DeleteAccountViewModelTests {
         #expect(viewModel.phase == .signedOutForRetry, "the screen still navigates to sign-in — there is nothing else to offer")
     }
 
-    /// I25 — `appVersionTracker` joins `deviceIdProvider`/`exportArtifactStore` in the "deliberately
-    /// left alone here" category this type's top doc already establishes for `signOutForRetry()`:
-    /// all three are per-account-identity state that is only meaningful to clear once
-    /// `wipeLocalStateAndComplete()` confirms the account is FULLY torn down, including client-side
-    /// (i.e. the Firebase step also succeeded). Clearing any of them earlier — on a Firebase-delete
-    /// failure that hasn't been retried yet — would not be wrong today (the backend account really
-    /// is already gone by this point), but it would split "account teardown" bookkeeping across two
-    /// call sites for no behavioral gain, since a successful retry reaches
-    /// `wipeLocalStateAndComplete()` and clears them anyway.
-    @Test func signOutForRetry_doesNotClearDeviceIdOrAppVersionTracker() async {
+    /// I25 review fix — `appVersionTracker` does NOT join `deviceIdProvider`/`exportArtifactStore`
+    /// in the "deliberately left alone here" category, despite all three being per-uid state set by
+    /// a completed registration/session. `deviceIdProvider`/`exportArtifactStore` are plain VALUES:
+    /// a stale read after `signOutForRetry()` is harmless (a stale deviceId just re-registers under
+    /// the same UUID; a stale export artifact just gets overwritten), so clearing them is deferred
+    /// to `wipeLocalStateAndComplete()`, which only runs once the account is FULLY torn down.
+    /// `appVersionTracker` is different in kind — it GATES CONTROL FLOW:
+    /// `DeviceRegistrationService.registerOnLaunchIfNeeded()` no-ops entirely (never calls
+    /// `registerOrUpdate()` at all) whenever the stored version already matches the running app
+    /// version. Left stale across sign-out/sign-back-in on the SAME uid (whose backend profile this
+    /// flow already erased), every I24 bootstrap-completion retry (`RootView`'s `onSignedIn`
+    /// re-invocations) also no-ops, and nothing in this flow itself schedules another attempt — the
+    /// user is left signed in with no registered device until an unrelated trigger (a push-token
+    /// refresh, which calls `registerOrUpdate()` directly and ungated, or the `DEVICE_NOT_FOUND`
+    /// self-heal) happens to fire. Clearing it early is always safe to re-enter —
+    /// `registerOrUpdate()`'s probe-then-register path fails open — so it is cleared here instead.
+    @Test func signOutForRetry_clearsAppVersionTracker_butLeavesDeviceIdAlone() async {
         let api = FakeAPIClient()
         api.deleteAccountHandler = {}
         let auth = FakeAuthProviding()
@@ -358,8 +365,8 @@ struct DeleteAccountViewModelTests {
 
         await viewModel.signOutForRetry()
 
-        #expect(deviceIdProvider.deviceId(forUserId: "u1") == existingDeviceId, "deviceIdProvider is only cleared by wipeLocalStateAndComplete()")
-        #expect(appVersionTracker.lastRegisteredAppVersion(forUserId: "u1") == "1.0.0", "appVersionTracker is only cleared by wipeLocalStateAndComplete()")
+        #expect(deviceIdProvider.deviceId(forUserId: "u1") == existingDeviceId, "deviceIdProvider is a plain value — only cleared by wipeLocalStateAndComplete()")
+        #expect(appVersionTracker.lastRegisteredAppVersion(forUserId: "u1") == nil, "appVersionTracker gates registerOnLaunchIfNeeded() — must not survive signOutForRetry(), or a user who abandons the retry is left with no registered device and no scheduled retry")
     }
 
     // MARK: - Cascade wording (008 §4.2)
