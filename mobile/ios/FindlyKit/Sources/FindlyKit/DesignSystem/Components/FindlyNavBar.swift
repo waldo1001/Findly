@@ -22,6 +22,10 @@ public extension EnvironmentValues {
 
 /// specs/004-ios-client.md §2.3 — a lightweight top bar; screens compose this rather than relying
 /// on the system navigation bar's default (unthemed) chrome.
+///
+/// design 2a "Ember/Dusk" (design/findly-design-system/2a-ember-dusk/HANDOFF.md): height 52, a
+/// 44×44 back touch target around a 22pt chevron, title 18/600 at −0.2 tracking, and an optional
+/// trailing text action (15/600, `primary`) — e.g. "Edit" on Family & devices.
 public struct FindlyNavBar: View {
     @Environment(\.theme) private var theme
     /// specs/004 §2.5 — the central back action, published once by `RootView`. Screens do NOT
@@ -32,43 +36,71 @@ public struct FindlyNavBar: View {
     /// Explicit override, for the rare bar that is not the screen's navigation root (and for
     /// previews/tests). When nil — the normal case — the environment action is used.
     private let onBack: (() -> Void)?
+    private let trailingActionTitle: String?
+    private let trailingAction: (() -> Void)?
 
-    public init(_ title: String, onBack: (() -> Void)? = nil) {
+    public init(
+        _ title: String,
+        onBack: (() -> Void)? = nil,
+        trailingActionTitle: String? = nil,
+        trailingAction: (() -> Void)? = nil
+    ) {
         self.title = title
         self.onBack = onBack
+        self.trailingActionTitle = trailingActionTitle
+        self.trailingAction = trailingAction
     }
 
     public var body: some View {
-        HStack(spacing: theme.spacing.sm) {
+        HStack(spacing: 0) {
             if let onBack = onBack ?? environmentBackAction {
                 Button(action: onBack) {
                     // SF Symbol, not a literal glyph: it mirrors for right-to-left layouts and
                     // scales with Dynamic Type automatically.
                     Image(systemName: "chevron.backward")
-                        .font(theme.typography.titleMedium)
+                        .font(.system(size: 22, weight: .semibold))
                         .foregroundColor(theme.colors.primary)
-                        // A bare chevron is a small tap target. Pad with tokens (§2.1 forbids
-                        // hardcoded point sizes here) and make the whole padded area — not just
-                        // the glyph's own bounds — hit-testable.
-                        .padding(.vertical, theme.spacing.xs)
-                        .padding(.trailing, theme.spacing.sm)
+                        .frame(width: 44, height: 44)
                         .contentShape(Rectangle())
                 }
                 .accessibilityLabel("Back")
             }
 
             Text(title)
-                .font(theme.typography.titleLarge)
+                .font(.system(size: 18, weight: .semibold))
+                .tracking(-0.2)
                 .foregroundColor(theme.colors.onSurface)
                 .frame(maxWidth: .infinity, alignment: .leading)
+                // Keep the title visually aligned even when there's no back button.
+                .padding(.leading, (onBack ?? environmentBackAction) == nil ? theme.spacing.md : 0)
+
+            if let trailingActionTitle, let trailingAction {
+                Button(trailingActionTitle, action: trailingAction)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundColor(theme.colors.primary)
+                    .padding(.trailing, theme.spacing.md)
+            }
         }
-        .padding(theme.spacing.md)
+        .frame(height: 52)
         .background(theme.colors.surface)
     }
 }
 
-// #Preview blocks intentionally omitted: this session's build/test verification environment has
-// only Xcode Command Line Tools (no Xcode.app), which lacks the `PreviewsMacros` compiler plugin
-// `#Preview` needs — even an empty `#Preview {}` fails to compile here. Adding light/dark previews
-// back is a trivial, non-blocking follow-up once a real Xcode toolchain is available (see
-// specs/004-ios-client.md §2.3); the package must build clean in THIS environment first.
+#Preview("FindlyNavBar — light") {
+    VStack(spacing: 1) {
+        FindlyNavBar("Live map")
+        FindlyNavBar("Family & devices", onBack: {}, trailingActionTitle: "Edit", trailingAction: {})
+    }
+    .background(Theme.light.colors.surface)
+    .environment(\.theme, .light)
+}
+
+#Preview("FindlyNavBar — dark") {
+    VStack(spacing: 1) {
+        FindlyNavBar("Live map")
+        FindlyNavBar("Family & devices", onBack: {}, trailingActionTitle: "Edit", trailingAction: {})
+    }
+    .background(Theme.dark.colors.surface)
+    .environment(\.theme, .dark)
+    .preferredColorScheme(.dark)
+}
