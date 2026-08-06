@@ -232,7 +232,14 @@ None bundled. No licensed imagery, no custom fonts — SF Pro on iOS, Roboto on 
 1. Drop values into `mobile/android/.../ui/designsystem/token/` and `mobile/ios/FindlyKit/Sources/FindlyKit/DesignSystem/Tokens/`.
 2. Re-run the design-seam greps — nothing outside the seam may hardcode a value:
    - `grep -rn "Color(" mobile/android/app/src/main/java/com/findly/android/ui | grep -v designsystem`
-   - `grep -rn "Color(\|\.font(\.system" mobile/ios/FindlyKit/Sources | grep -v DesignSystem`
+   - `grep -rn "Color(hex:\|Color(red:\|Color(\.s\|\.font(\.system" mobile/ios/FindlyKit/Sources | grep -v DesignSystem`
+     (**Corrected post-review, 2026-08-06** — the original `"Color(\|..."` pattern matches the
+     substring inside SwiftUI's own `.foregroundColor(`/`.backgroundColor(` modifiers, which every
+     correctly-token-driven component and screen calls constantly. On this codebase it produced 34
+     hits and zero signal. The corrected pattern anchors on the actual literal-construction forms —
+     `Color(hex:` is the one this codebase's `ColorTokens.swift` actually defines and uses;
+     `Color(red:`/`Color(.s...` cover other common literal forms SwiftUI supports, so the grep
+     still catches them if introduced later — and ignores the modifier-name false positive.)
 3. Render `ComponentGalleryPreview.kt` and the iOS `#Preview`s in light and dark.
 4. Check the two contrast traps: light `outline` used only for hairlines, and `#52E39B` for the dot inside a `primary` marker.
 
