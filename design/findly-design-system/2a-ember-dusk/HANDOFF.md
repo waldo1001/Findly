@@ -103,7 +103,9 @@ Same geometry, transparent fill, 1.5px `outline` border, label `onSurface`. Pres
 Radius `md` (20), fill `surfaceVariant`, no border, no shadow. Cards are containers for rows; rows inside are divided by a 1px `outline` line, not by gaps.
 
 ### FindlyListRow
-Min height 60, padding 12/14, 12pt gap. Leading 40×40 avatar (circle, `primary` fill for self, `surfaceVariant` otherwise, initial at 15/700). Title 16/600, subtitle 13/400 in `onSurface` at 70% (use `#4E5675` light, `#98A1BD` dark). Optional trailing metadata, chip or 18pt chevron in `outline`. Pressed: light `#D8DDF0` overlay on iOS, standard ripple on Android. Disabled: 45% opacity.
+Min height 60, padding 12/14, 12pt gap. Leading 40×40 avatar (circle, `primary` fill for self, `surfaceVariant` otherwise, initial at 15/700). Title 16/600, subtitle 13/400 in `onSurface` at 70% (use `#3A4160` light, `#98A1BD` dark — see correction below). Optional trailing metadata, chip or 18pt chevron in `outline`. Pressed: light `#D8DDF0` overlay on iOS, standard ripple on Android. Disabled: 45% opacity.
+
+**Corrected by Android A30 / iOS I30 (2026-08-06), applies to both platforms:** this spec originally said "use `#4E5675` light". That hex was not wrong in the sense of the seven contrast-table errors found elsewhere in this handoff — it rendered exactly as specified, with no alpha or platform default diluting it, and already cleared WCAG AA (6.56:1 on `surface`, 5.79:1 on `surfaceVariant`). A real user found it barely readable in practice at the sizes this handoff uses it for (13/400 subtitles here, and 12/700 uppercase for `FindlySectionHeader`) — a low-chroma blue-grey is a legitimate design problem even while passing AA, which is a floor, not a target. Light is darkened to `#3A4160` (9.08:1 / 8.01:1). Dark `#98A1BD` is unchanged — it already measured 7.43:1 / 6.49:1, well clear of light's original value, which is likely why only light drew the complaint.
 
 ### StatusChip
 Height 24, radius `pill`, padding 0/9, label 10.5/700 with +0.3 tracking, always **glyph + word**:

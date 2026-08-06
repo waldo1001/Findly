@@ -171,6 +171,66 @@ class ColorTokenContrastTest {
         )
     }
 
+    // --- A30 (specs/003-android-client.md §4.2 correction, filed 2026-08-06): a real-device
+    // report called light-mode secondary text "barely readable". Investigation found this was NOT
+    // a bug — pixel-sampled off an actual screenshot, the rendered color was exactly HANDOFF.md's
+    // own specified `#4E5675` on `surface`, no alpha or Material3 default involved, measuring
+    // 6.56:1 on `surface` / 5.79:1 on `surfaceVariant` — both already clear AA's 4.5:1 floor. The
+    // design itself was the problem (low-chroma blue-grey at 13sp/400 subtitles / 12sp/700
+    // uppercase headers): AA is a floor, not a target. `subtleText` light is darkened to `#3A4160`,
+    // pinned below at 9.08:1 / 8.01:1. Dark `#98A1BD` is deliberately unchanged — it already
+    // measures 7.43:1 / 6.49:1, materially better than light's original, which is likely why dark
+    // never drew the complaint. This test is written to the NEW expected values while the token
+    // still held the OLD `#4E5675` hex, so it went red first (matching this repo's strict TDD
+    // convention) before ColorTokens.kt was updated to turn it green — see git log. ---
+
+    @Test
+    fun `light subtleText is A30's darkened value, not HANDOFFs original barely-readable one`() {
+        val onSurfaceRatio = contrastRatio(LightFindlyColors.subtleText, LightFindlyColors.surface)
+        assertEquals(
+            "light `subtleText` on light `surface` expected 9.08:1 (A30's darkened `#3A4160` — up " +
+                "from the original `#4E5675`'s 6.56:1, which already passed AA's 4.5:1 floor; this " +
+                "pin is about the corrected design intent, not the pass/fail threshold, which " +
+                "declaredColorPairings already covers). Got ${round2(onSurfaceRatio)}:1.",
+            9.08,
+            onSurfaceRatio,
+            0.02,
+        )
+
+        val onSurfaceVariantRatio = contrastRatio(LightFindlyColors.subtleText, LightFindlyColors.surfaceVariant)
+        assertEquals(
+            "light `subtleText` on light `surfaceVariant` expected 8.01:1 (A30's darkened " +
+                "`#3A4160` — up from the original `#4E5675`'s 5.79:1). Got " +
+                "${round2(onSurfaceVariantRatio)}:1.",
+            8.01,
+            onSurfaceVariantRatio,
+            0.02,
+        )
+    }
+
+    @Test
+    fun `dark subtleText is deliberately unchanged by A30 — already better than light's original`() {
+        val onSurfaceRatio = contrastRatio(DarkFindlyColors.subtleText, DarkFindlyColors.surface)
+        assertEquals(
+            "dark `subtleText` (`#98A1BD`) on dark `surface` expected 7.43:1, unchanged by A30 — " +
+                "already materially better than light's pre-A30 6.56:1, which is likely why dark " +
+                "never drew the real-device complaint that prompted A30. Got " +
+                "${round2(onSurfaceRatio)}:1.",
+            7.43,
+            onSurfaceRatio,
+            0.02,
+        )
+
+        val onSurfaceVariantRatio = contrastRatio(DarkFindlyColors.subtleText, DarkFindlyColors.surfaceVariant)
+        assertEquals(
+            "dark `subtleText` (`#98A1BD`) on dark `surfaceVariant` expected 6.49:1, unchanged by " +
+                "A30. Got ${round2(onSurfaceVariantRatio)}:1.",
+            6.49,
+            onSurfaceVariantRatio,
+            0.02,
+        )
+    }
+
     // --- Documented decorative exemption: legal below 3:1 because it is never used for a
     // meaning-carrying stroke (outlineStrong is, for those). Encoded explicitly, per A28's filing,
     // "so the test states the rule instead of silently ignoring the token". ---
