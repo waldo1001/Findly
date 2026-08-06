@@ -97,4 +97,13 @@ public extension Color {
     /// an inline literal would let it. The handoff gives only one value (no dark variant), so this
     /// stays theme-invariant like the two colors above until a design pass says otherwise.
     static let findlyDisabledLabel = Color(hex: 0x8D93AB)
+    /// `FindlyTextField`'s disabled state ("Disabled: fill #E8EAF2, border #D3D7E6, text #8D93AB"
+    /// — HANDOFF.md FindlyTextField). Named to mirror Android's `TextFieldDisabledFill/Border/
+    /// Text` (A26, per the code-review round that raised this) so the two platforms' additive
+    /// fields stay legible side by side. `findlyTextFieldDisabledText` shares `findlyDisabledLabel`'s
+    /// hex (the handoff reuses one "disabled text" value across components) but keeps its own name
+    /// for that cross-platform symmetry.
+    static let findlyTextFieldDisabledFill = Color(hex: 0xE8EAF2)
+    static let findlyTextFieldDisabledBorder = Color(hex: 0xD3D7E6)
+    static let findlyTextFieldDisabledText = Color(hex: 0x8D93AB)
 }

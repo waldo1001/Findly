@@ -7,9 +7,12 @@ import SwiftUI
 /// design 2a "Ember/Dusk" (design/findly-design-system/2a-ember-dusk/HANDOFF.md): height 52,
 /// `surfaceVariant` fill, a 1.5px border (`outlineStrong` at rest — an input outline is exactly
 /// the "carries meaning" example the handoff names — `primary` + a soft ring when focused,
-/// `danger` with an inline `✕` message when there's an error).
+/// `danger` with an inline `✕` message when there's an error, and — added post-review, the field
+/// previously never read `isEnabled` at all — `findlyTextFieldDisabledFill`/`Border`/`Text` when
+/// disabled, taking priority over focus/error styling).
 public struct FindlyTextField: View {
     @Environment(\.theme) private var theme
+    @Environment(\.isEnabled) private var isEnabled
     @FocusState private var isFocused: Bool
     private let label: String
     @Binding private var text: String
@@ -30,12 +33,13 @@ public struct FindlyTextField: View {
                 .tracking(theme.typography.labelSmall.tracking)
                 .foregroundColor(theme.onSurfaceMuted)
             TextField(placeholder, text: $text)
+                .disabled(!isEnabled)
                 .focused($isFocused)
                 .font(theme.typography.bodyLarge.font)
-                .foregroundColor(theme.colors.onSurface)
+                .foregroundColor(isEnabled ? theme.colors.onSurface : .findlyTextFieldDisabledText)
                 .padding(.horizontal, theme.spacing.sm)
                 .frame(height: 52)
-                .background(theme.colors.surfaceVariant)
+                .background(isEnabled ? theme.colors.surfaceVariant : .findlyTextFieldDisabledFill)
                 .clipShape(RoundedRectangle(cornerRadius: theme.corner.md))
                 .overlay(
                     RoundedRectangle(cornerRadius: theme.corner.md)
@@ -51,6 +55,7 @@ public struct FindlyTextField: View {
     }
 
     private var borderColor: Color {
+        guard isEnabled else { return .findlyTextFieldDisabledBorder }
         if errorMessage != nil { return theme.colors.danger }
         if isFocused { return theme.colors.primary }
         return theme.outlineStrong
@@ -58,7 +63,7 @@ public struct FindlyTextField: View {
 
     @ViewBuilder
     private var focusRing: some View {
-        if isFocused && errorMessage == nil {
+        if isEnabled && isFocused && errorMessage == nil {
             RoundedRectangle(cornerRadius: theme.corner.md)
                 .strokeBorder(theme.colors.primary.opacity(0.18), lineWidth: 3)
                 .padding(-3)
@@ -70,6 +75,7 @@ public struct FindlyTextField: View {
     VStack(spacing: 16) {
         FindlyTextField("Name", text: .constant(""), placeholder: "Add someone to The Haddads")
         FindlyTextField("Invite code", text: .constant("A1B2C3"), errorMessage: "That code has expired")
+        FindlyTextField("Sync interval", text: .constant("15 min")).disabled(true)
     }
     .padding()
     .background(Theme.light.colors.surface)
@@ -80,6 +86,7 @@ public struct FindlyTextField: View {
     VStack(spacing: 16) {
         FindlyTextField("Name", text: .constant(""), placeholder: "Add someone to The Haddads")
         FindlyTextField("Invite code", text: .constant("A1B2C3"), errorMessage: "That code has expired")
+        FindlyTextField("Sync interval", text: .constant("15 min")).disabled(true)
     }
     .padding()
     .background(Theme.dark.colors.surface)
