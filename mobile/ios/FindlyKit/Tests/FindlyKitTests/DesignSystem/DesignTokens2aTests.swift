@@ -226,9 +226,17 @@ struct DesignTokens2aTests {
     }
 
     // MARK: - Theme.onSurfaceMuted (row subtitles etc. — literal per-scheme hex, not a computed opacity)
-
-    @Test func onSurfaceMuted_matchesHandoffLiteralHexValues() {
-        #expect(Theme.light.onSurfaceMuted == Color(hex: 0x4E5675))
+    //
+    // I30 (specs/004 §2.1): light darkened `#4E5675` → `#3A4160` for cross-platform consistency
+    // with Android's A30, not because iOS was observed failing — a user reported light mode hard
+    // to read on a real Android device; the identical value was independently reported as fine on
+    // iOS. Investigation found `#4E5675` on `#F2F4FB` rendering exactly as specified (6.56:1,
+    // passing AA) — a legitimate "AA is a floor, not a target" complaint about a low-chroma color
+    // at 13pt/13sp, not a bug. `#3A4160` measures 9.08:1 on `surface` / 8.01:1 on `surfaceVariant`
+    // (independently verified). Dark `#98A1BD` (7.43:1 / 6.49:1, already stronger than light's old
+    // value) is unchanged, same rationale as A30.
+    @Test func onSurfaceMuted_light_isDarkenedPastHandoffForCrossPlatformConsistency_darkUnchanged() {
+        #expect(Theme.light.onSurfaceMuted == Color(hex: 0x3A4160))
         #expect(Theme.dark.onSurfaceMuted == Color(hex: 0x98A1BD))
     }
 
