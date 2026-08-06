@@ -12,13 +12,24 @@ import androidx.compose.ui.graphics.Color
  * contrast column was wrong seven times, four of which shipped as real AA failures. Per A28's
  * scope, this stays under `app/src/test/` — it is not added to the shipped app.
  *
- * TODO(A28 red commit): this is a deliberately wrong stub — [contrastRatio] always returns 1.0 —
- * so that [ContrastRatioReferenceTest] and [ColorTokenContrastTest] are proven to fail for real
- * before the actual formula is implemented (red-before-green, visible in git log per the process
- * this task mandates). The next commit replaces this with the real relative-luminance formula.
+ * Formula: WCAG 2.1 §1.4.3 relative luminance — linearize each sRGB channel (divide by 12.92 below
+ * the 0.03928 threshold, otherwise `((c + 0.055) / 1.055) ^ 2.4`), then
+ * `L = 0.2126*R + 0.7152*G + 0.0722*B`. Contrast ratio is `(L1 + 0.05) / (L2 + 0.05)` with L1 the
+ * lighter of the two relative luminances. [ContrastRatioReferenceTest] pins this against the
+ * published `#767676` on `#FFFFFF` = 4.54:1 reference value.
  */
 fun relativeLuminance(color: Color): Double {
-    TODO("A28 red commit: not implemented yet — see ContrastRatio.kt")
+    fun linearize(channel: Float): Double {
+        val c = channel.toDouble()
+        return if (c <= 0.03928) c / 12.92 else Math.pow((c + 0.055) / 1.055, 2.4)
+    }
+    return 0.2126 * linearize(color.red) + 0.7152 * linearize(color.green) + 0.0722 * linearize(color.blue)
 }
 
-fun contrastRatio(foreground: Color, background: Color): Double = 1.0
+fun contrastRatio(foreground: Color, background: Color): Double {
+    val l1 = relativeLuminance(foreground)
+    val l2 = relativeLuminance(background)
+    val lighter = maxOf(l1, l2)
+    val darker = minOf(l1, l2)
+    return (lighter + 0.05) / (darker + 0.05)
+}
