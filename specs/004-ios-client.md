@@ -52,38 +52,45 @@ The visual design MUST be fully replaceable later without touching any logic, na
 
 ### 2.1 Token vocabulary (normative — identical names to the Android client, `specs/003-android-client.md`, for one design → both platforms)
 
-**Colors** (`ColorTokens`, one instance per scheme) — "Findly — Family Location Design System" (2026-07-20, `design/findly-design-system/`); WCAG 2.1 AA verified (ratios in that README):
+**Colors** (`ColorTokens`, one instance per scheme) — design direction **2a "Ember / Dusk"** (2026-08-06, `design/findly-design-system/2a-ember-dusk/HANDOFF.md`, superseding the 2026-07-20 teal palette below it in history); WCAG 2.1 AA verified (ratios in that handoff):
 
 | Token | Light (default) | Dark (default) |
 |---|---|---|
-| `primary` | `#00696E` | `#4CD4D9` |
-| `onPrimary` | `#FFFFFF` | `#00312F` |
-| `secondary` | `#4C5FD5` | `#A9B4FF` |
-| `surface` | `#FAFAF7` | `#17181A` |
-| `onSurface` | `#1B1D1C` | `#ECECE6` |
-| `surfaceVariant` | `#EEEEE9` | `#24262A` |
-| `danger` | `#C0362C` | `#F2867B` |
-| `onDanger` | `#FFFFFF` | `#490A05` |
-| `success` | `#1E7D46` | `#5FD08A` |
-| `warning` | `#8A5A00` | `#E4B44C` |
-| `outline` | `#C9C8C2` | `#3A3D42` |
+| `primary` | `#3A46C8` | `#7C8BFF` |
+| `onPrimary` | `#FFFFFF` | `#0A0F27` |
+| `secondary` | `#0E7C8F` | `#4FE3D0` |
+| `surface` | `#F2F4FB` | `#0B0F1C` |
+| `onSurface` | `#10142A` | `#E8ECF7` |
+| `surfaceVariant` | `#E2E6F5` | `#161D33` |
+| `danger` | `#B3261E` | `#FF6B6B` |
+| `onDanger` | `#FFFFFF` | `#2A0708` |
+| `success` | `#10714A` | `#52E39B` |
+| `warning` | `#8A5A00` | `#FFC44D` |
+| `outline` | `#A9B0CE` (2.1:1 — **decorative hairlines/dividers only**) | `#3A4463` (3:1+, usable for meaningful strokes too) |
 
-**Typography** (`TypographyTokens`, identical across schemes — a `TypeStyle { font: Font, weight, size }` per role):
+Two rules the handoff calls out explicitly and review checks:
 
-| Role | Size (pt) | Weight |
-|---|---|---|
-| `displayLarge` | 34 | bold |
-| `titleLarge` | 22 | semibold |
-| `titleMedium` | 17 | semibold |
-| `bodyLarge` | 17 | regular |
-| `bodyMedium` | 15 | regular |
-| `labelSmall` | 12 | medium |
+1. Light `outline` is 2.1:1 and legal only for decorative hairlines/dividers. Any stroke that carries meaning (unselected control border, focus ring, input outline) uses `Color.findlyOutlineStrong` (`#6B739A`, 3.4:1) instead. Dark `outline` itself clears 3:1 and serves both purposes.
+2. The dot inside a `primary` marker bubble is `Color.findlyMarkerOnlineDot` (`#52E39B`) in **both** themes (5.4:1 on `#3A46C8`). Light-theme `success` (`#10714A`) measures 1.2:1 there and must never be used for it.
 
-**Spacing** (`SpacingTokens`, `CGFloat` points): `xs=4, sm=8, md=12, lg=16, xl=24, xxl=32`.
+**Typography** (`TypographyTokens`, a `TypeStyle { size: CGFloat, weight: Font.Weight, lineHeight: CGFloat, tracking: CGFloat }` per role, identical across schemes — pt on iOS, system font only):
 
-**Corner radius** (`CornerRadiusTokens`, `CGFloat` points): `sm=8, md=12, lg=20, pill=999` (pill = always fully rounded regardless of view height).
+| Role | Size (pt) | Weight | Line height | Tracking |
+|---|---|---|---|---|
+| `displayLarge` | 34 | bold | 40 | −0.4 |
+| `titleLarge` | 24 | bold | 30 | −0.2 |
+| `titleMedium` | 18 | semibold | 24 | 0 |
+| `bodyLarge` | 17 | regular | 24 | 0 |
+| `bodyMedium` | 15 | regular | 20 | 0 |
+| `labelSmall` | 12 | bold, uppercase | 16 | +0.4 |
 
-**Elevation** (`ElevationTokens`, a shadow spec per level — SwiftUI has no native elevation, so each level is `{ radius: CGFloat, y: CGFloat, opacity: Double }`): `level0 = {0,0,0}` (no shadow), `level1 = {2,1,0.08}`, `level2 = {4,2,0.12}`, `level3 = {8,4,0.16}`.
+Any elapsed-time or code value uses tabular figures (`.monospacedDigit()`).
+
+**Spacing** (`SpacingTokens`, `CGFloat` points): `xs=4, sm=8, md=12, lg=20, xl=28, xxl=40`.
+
+**Corner radius** (`CornerRadiusTokens`, `CGFloat` points): `sm=12, md=20, lg=28, pill=999` (pill = always fully rounded regardless of view height).
+
+**Elevation** (`ElevationTokens`, a shadow spec per level, resolved per scheme like colors — SwiftUI has no native elevation, so each level is `{ blur: CGFloat, y: CGFloat, opacity: Double, color: Color }`; color is neutral black at every level unless a component explicitly documents a tinted override, e.g. `FindlyButton`'s primary style): `level0 = {0,0,0,black}`; `level1 = {8,2,0.10|0.30,black}`; `level2 = {24,8,0.14|0.45,black}`; `level3 = {48,16,0.18|0.60,black}` (opacity given as light|dark — blur/y/color are scheme-independent, only opacity differs).
 
 ### 2.2 `Theme` and injection
 
