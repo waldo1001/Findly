@@ -234,7 +234,14 @@ struct RootView: View {
                 AcceptInviteScreen(
                     viewModel: AcceptInviteViewModel(apiClient: apiClient),
                     prefillInviteCode: prefillCode,
-                    prefillDisplayName: pendingOnboardingDisplayName
+                    prefillDisplayName: pendingOnboardingDisplayName,
+                    // I24 (001 §1.5.3, §4.1) — accept-invite is one of the four profile-bootstrap
+                    // endpoints, so any device registration attempted before this point (e.g. at
+                    // sign-in) hit `DeviceRegistrationError.profileNotYetBootstrapped` and was
+                    // skipped. Retry the SAME `onSignedIn` closure now that a profile exists,
+                    // rather than waiting for the next cold start — it's idempotent (harmless if
+                    // already registered for this app version).
+                    onAccepted: { Task { await onSignedIn() } }
                 )
 
             // MARK: - I17 profile-bootstrap route (001 §1.5.3, §3.1) — see `CreateFamilyViewModel`'s
@@ -244,7 +251,11 @@ struct RootView: View {
                 CreateFamilyScreen(
                     viewModel: CreateFamilyViewModel(apiClient: apiClient),
                     prefillDisplayName: pendingOnboardingDisplayName,
-                    onCreated: { _ in coordinator.showHome() }
+                    onCreated: { _ in
+                        coordinator.showHome()
+                        // I24 — same re-registration retry as `.acceptInvite`'s `onAccepted` above.
+                        Task { await onSignedIn() }
+                    }
                 )
 
             // MARK: - I5 groups routes (specs/004 §3.4)
@@ -276,6 +287,9 @@ struct RootView: View {
                     onCreated: { group in
                         coordinator.popTo(.groupsList)
                         coordinator.showGroupDetail(groupId: group.groupId)
+                        // I24 — same re-registration retry as `.createFamily`'s `onCreated` above
+                        // (create-group is also a 001 §1.5.3 profile-bootstrap path).
+                        Task { await onSignedIn() }
                     }
                 )
             case .groupDetail(let groupId):
@@ -300,6 +314,9 @@ struct RootView: View {
                     onJoined: { group in
                         coordinator.popTo(.groupsList)
                         coordinator.showGroupDetail(groupId: group.groupId)
+                        // I24 — same re-registration retry (join-group is also a 001 §1.5.3
+                        // profile-bootstrap path).
+                        Task { await onSignedIn() }
                     }
                 )
             case .groupMap(let groupId):

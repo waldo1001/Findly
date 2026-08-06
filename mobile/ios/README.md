@@ -323,11 +323,11 @@ rationale on each:
   Android's model). Wired into the already-existing, already-tested `DeviceRegistrationService.
   observePushTokenRefreshes` with zero call-site change (same "swap the stub, keep the interface"
   pattern Android's `RealPushTokenProvider` used). `DeviceRegistrationService` gains
-  `registerOnLaunchIfNeeded(appVersionTracker:)` — the two remaining specs/004 §5 triggers (first
-  launch after sign-in, every app update, keyed per-`userId` via the new
-  `AppVersionRegistrationTracking` protocol) — called once at cold launch (`FindlyApp.init()`, if
-  already signed in) and again from `RootView`'s `SignInViewModel.onSignedIn` completion (a session
-  that starts at the sign-in screen).
+  `registerOnLaunchIfNeeded()` — the two remaining specs/004 §5 triggers (first launch after
+  sign-in, every app update, keyed per-`userId` via the new `AppVersionRegistrationTracking`
+  protocol, injected into `DeviceRegistrationService.init` rather than passed per-call as of I24) —
+  called once at cold launch (`FindlyApp.init()`, if already signed in) and again from `RootView`'s
+  `SignInViewModel.onSignedIn` completion (a session that starts at the sign-in screen).
 - **`LOCATE_REQUEST`'s background-wake payload, checked against the real backend source** (not
   assumed): `backend/src/adapters/push/fcmV1Sender.ts`'s `buildLocateRequestBody` already sends
   `apns.payload.aps["content-available"]: 1` (+ `Info.plist`'s pre-existing `UIBackgroundModes:

@@ -150,8 +150,14 @@ struct FindlyApp: App {
         }
 
         let deviceInfoProvider = SystemDeviceInfoProvider()
+        // specs/004-ios-client.md §5 (I24 review, Finding 2) — moved up from further below so it
+        // can be handed to `DeviceRegistrationService` itself: `registerOrUpdate()` now consults it
+        // to decide whether a profile-probe round trip is worth making at all (see that method's
+        // doc), not just to record "first launch after sign-in"/"every app update".
+        let appVersionTracker = UserDefaultsAppVersionRegistrationTracker()
         let deviceRegistrationService = DeviceRegistrationService(
-            apiClient: apiClient, deviceIdProvider: deviceIdProvider, deviceInfoProvider: deviceInfoProvider, authProvider: authProvider
+            apiClient: apiClient, deviceIdProvider: deviceIdProvider, deviceInfoProvider: deviceInfoProvider,
+            authProvider: authProvider, appVersionTracker: appVersionTracker
         )
         let locationProvider = SystemLocationProvider()
         // specs/009-device-runtime.md §6.2 (I11) — the real, CLLocationManager-region-monitoring-
@@ -182,10 +188,34 @@ struct FindlyApp: App {
             // re-run registration. `onSignedIn` below (I12) now also explicitly registers on first
             // launch after sign-in and on every app update, per specs/004 §5's trigger list — this
             // remains the backstop for any registration `onSignedIn` missed or that failed silently.
+            //
+            // I24 fix: this call goes to `registerOrUpdate()` DIRECTLY rather than through one of
+            // `DeviceRegistrationService`'s own best-effort wrappers (`registerOnLaunchIfNeeded`,
+            // `observePushTokenRefreshes`) — its doc comment's own convention is that such direct
+            // callers "need failure visibility", so a bare `try?` here was defeating that by
+            // discarding the very error it was written to expose. Anything but
+            // `.profileNotYetBootstrapped` is a genuine failure, now logged (via the curated,
+            // log-safe `loggableSummary(forDeviceRegistrationFailure:)` — never the raw `Error`,
+            // whose `message`/`details` text is only safe today by backend convention, not by
+            // anything enforced at this call site) instead of vanishing.
+            //
+            // I24 review (Finding 4) — `.profileNotYetBootstrapped` here does NOT mean "hasn't
+            // onboarded yet": `onReRegisterDevice` only fires on a `404 DEVICE_NOT_FOUND` for a
+            // device that WAS registered, which proves a profile existed at that point. Reaching
+            // this case means the profile was deleted out from under this in-flight session — e.g.
+            // a concurrent `DELETE /users/me` from another device — between then and now. Silence
+            // remains correct: there is nothing to retry once the account itself is gone (no
+            // RootView bootstrap callback will ever fire for this session either).
             onReRegisterDevice: { [weak authProvider] in
                 guard let uid = authProvider?.currentUserId else { return }
                 deviceIdProvider.clearDeviceId(forUserId: uid)
-                _ = try? await deviceRegistrationService.registerOrUpdate()
+                do {
+                    _ = try await deviceRegistrationService.registerOrUpdate()
+                } catch DeviceRegistrationError.profileNotYetBootstrapped {
+                    // Expected — see this closure's top doc (I24 review, Finding 4).
+                } catch {
+                    Self.deviceRegistrationLog.error("device re-registration after DEVICE_NOT_FOUND failed: \(loggableSummary(forDeviceRegistrationFailure: error), privacy: .public)")
+                }
             },
             // specs/009 §9: a second AUTH_TOKEN_EXPIRED means signed-out - wipe local state and
             // return to sign-in. Reads the container back through the holder (populated a few
@@ -271,7 +301,10 @@ struct FindlyApp: App {
         // eventually yields an FCM token via `FirebasePushTokenProvider`. Gated on already being
         // signed in so this is a no-op for a session that starts at the sign-in screen — `RootView`
         // calls this same closure again once `SignInViewModel` reports success.
-        let appVersionTracker = UserDefaultsAppVersionRegistrationTracker()
+        //
+        // `appVersionTracker` itself now lives above, handed to `DeviceRegistrationService.init`
+        // (I24 review, Finding 2) — `registerOnLaunchIfNeeded()` reads it internally.
+        //
         // A local `let`, not `self.onSignedIn` directly - capturing `self` in the `Task` closure
         // below would be an escaping-closure-captures-mutating-self error inside a struct's
         // `init()`. Assigned to the stored property immediately after, so both this cold-launch
@@ -279,7 +312,7 @@ struct FindlyApp: App {
         let onSignedInClosure: () async -> Void = { [weak authProvider] in
             guard authProvider?.currentUserId != nil else { return }
             UIApplication.shared.registerForRemoteNotifications()
-            await deviceRegistrationService.registerOnLaunchIfNeeded(appVersionTracker: appVersionTracker)
+            await deviceRegistrationService.registerOnLaunchIfNeeded()
         }
         self.onSignedIn = onSignedInClosure
         // specs/004 §2.6: NOT fired from here any more. This closure reads `currentUserId`, i.e.
@@ -309,6 +342,13 @@ struct FindlyApp: App {
                 .onOpenURL { url in coordinator.handleDeepLink(url) }
         }
     }
+
+    /// I24 — makes a genuine device re-registration failure observable (see `onReRegisterDevice`
+    /// above) instead of the bare `try?` that used to discard it silently. `docs/security-review-
+    /// checklist.md`: the logged value is always `loggableSummary(forDeviceRegistrationFailure:)`'s
+    /// curated `code`/`httpStatus`/`requestId` projection (I24 review, security Minor) — never the
+    /// raw `Error`, and never device/user IDs, tokens, or coordinates.
+    private static let deviceRegistrationLog = Logger(subsystem: "com.findly.ios", category: "DeviceRegistration")
 
     /// specs/009-device-runtime.md §2 / docs/security-review-checklist.md — the fix-queue's
     /// 1 000-cap overflow log line: a **count only**, never coordinates/fixId/deviceId. `.debug`

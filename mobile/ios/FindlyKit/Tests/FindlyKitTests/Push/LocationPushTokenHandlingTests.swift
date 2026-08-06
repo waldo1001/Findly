@@ -7,11 +7,20 @@ struct LocationPushTokenHandlingTests {
 
     @Test func locationPushTokenUpdate_triggersExactlyOneReRegistrationWithTheToken() async throws {
         let api = FakeAPIClient()
+        // I24 (specs/001 §1.5.3) — `registerOrUpdate` now probes `GET /families/me` first;
+        // `FakeAPIClient.getMyFamilyHandler` `fatalError`s if left unconfigured.
+        api.getMyFamilyHandler = {
+            TestFeatures.envelope(GetMyFamilyResponse(
+                familyId: "fam_x", familyName: "Wauters", createdAt: "2026-07-19T08:00:00Z",
+                me: MeSummary(userId: "u1", role: "parent"), members: []
+            ))
+        }
         let service = DeviceRegistrationService(
             apiClient: api,
             deviceIdProvider: InMemoryDeviceIdProvider(generateUUID: { "fixed-device-id" }),
             deviceInfoProvider: StaticDeviceInfoProvider(platform: "ios", model: "iPhone 15", appVersion: "1.2.3"),
-            authProvider: StubAuthProvider(currentUserId: "u1")
+            authProvider: StubAuthProvider(currentUserId: "u1"),
+            appVersionTracker: InMemoryAppVersionRegistrationTracker()
         )
         let locationPushTokens = StubLocationPushTokenHandler()
 
