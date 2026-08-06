@@ -38,6 +38,11 @@ struct FindlyApp: App {
     private let apiClient: FindlyAPIClient
     private let deviceIdProvider: DeviceIdProviding
     private let exportArtifactStore: ExportArtifactStoring
+    // specs/008-privacy-endpoints.md §1.3, specs/004-ios-client.md §3.6 (I25) — the SAME instance
+    // handed to `DeviceRegistrationService` below; also threaded down into `RootView` so
+    // `DeleteAccountViewModel`'s local wipe can clear it, the same way it already clears
+    // `deviceIdProvider`.
+    private let appVersionTracker: AppVersionRegistrationTracking
     // specs/009-device-runtime.md (I10) — the real capture/sync engine. `fixQueue` is
     // `locationRuntimeContainer.fixQueue`, never a second, separately-constructed `FixQueue` — see
     // `LocationRuntimeContainer`'s doc for why two instances over the same on-disk file would
@@ -155,6 +160,7 @@ struct FindlyApp: App {
         // to decide whether a profile-probe round trip is worth making at all (see that method's
         // doc), not just to record "first launch after sign-in"/"every app update".
         let appVersionTracker = UserDefaultsAppVersionRegistrationTracker()
+        self.appVersionTracker = appVersionTracker
         let deviceRegistrationService = DeviceRegistrationService(
             apiClient: apiClient, deviceIdProvider: deviceIdProvider, deviceInfoProvider: deviceInfoProvider,
             authProvider: authProvider, appVersionTracker: appVersionTracker
@@ -331,6 +337,7 @@ struct FindlyApp: App {
                 apiClient: apiClient,
                 deviceIdProvider: deviceIdProvider,
                 exportArtifactStore: exportArtifactStore,
+                appVersionTracker: appVersionTracker,
                 locationRuntimeContainer: locationRuntimeContainer,
                 onSignedIn: onSignedIn
             )

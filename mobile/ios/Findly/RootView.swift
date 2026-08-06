@@ -53,6 +53,11 @@ struct RootView: View {
     // exclusion, specs/008 §3.1 rules 1/4) — never the in-memory test fake — is what a real device
     // build always gets here.
     private let exportArtifactStore: ExportArtifactStoring
+    // specs/008-privacy-endpoints.md §1.3, specs/004-ios-client.md §3.6 (I25) — the SAME instance
+    // `DeviceRegistrationService` (built once in `FindlyApp.init()`) reads to decide whether
+    // `registerOrUpdate()` needs to probe for a profile; `DeleteAccountViewModel`'s local wipe must
+    // clear it here for exactly the same reason it clears `deviceIdProvider`.
+    private let appVersionTracker: AppVersionRegistrationTracking
     // specs/009-device-runtime.md §5 (I12) — device re-registration + push-notification
     // registration, run once at cold launch (in `FindlyApp.init()`, if already signed in) and
     // again here once `SignInViewModel` reports a fresh interactive sign-in (a session that starts
@@ -87,6 +92,7 @@ struct RootView: View {
         apiClient: FindlyAPIClient,
         deviceIdProvider: DeviceIdProviding,
         exportArtifactStore: ExportArtifactStoring,
+        appVersionTracker: AppVersionRegistrationTracking,
         locationRuntimeContainer: LocationRuntimeContainer,
         onSignedIn: @escaping () async -> Void
     ) {
@@ -96,6 +102,7 @@ struct RootView: View {
         self.apiClient = apiClient
         self.deviceIdProvider = deviceIdProvider
         self.exportArtifactStore = exportArtifactStore
+        self.appVersionTracker = appVersionTracker
         self.locationRuntimeContainer = locationRuntimeContainer
         self.onSignedIn = onSignedIn
         // specs/009 §7. Built from the container's read-only seams rather than a second
@@ -347,6 +354,7 @@ struct RootView: View {
                         apiClient: apiClient, authProvider: authProvider,
                         deviceIdProvider: deviceIdProvider,
                         exportArtifactStore: exportArtifactStore,
+                        appVersionTracker: appVersionTracker,
                         // Post-review (security review, High finding): the ONE consolidated
                         // LocationRuntimeContainer.wipeLocalState() — covers the fix queue,
                         // geofence-event queue, cached geofence config/ETag, cached device
