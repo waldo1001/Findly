@@ -27,9 +27,28 @@ import Foundation
 /// fresh session lets `user.delete()` succeed. No in-place re-authentication sub-flow is built.
 /// `signOutForRetry()` also runs `wipeLocalState()` (security review addition — the backend account
 /// is already gone by this point, so this device's location/geofence local state has no live
-/// account to belong to either); `deviceIdProvider`/`exportArtifactStore`/`appVersionTracker`
-/// (I25) are deliberately left alone here, same as before — they're only cleared once
-/// `wipeLocalStateAndComplete()` confirms the account is FULLY torn down, including client-side.
+/// account to belong to either); `deviceIdProvider`/`exportArtifactStore` are deliberately left
+/// alone here, same as before — they're only cleared once `wipeLocalStateAndComplete()` confirms
+/// the account is FULLY torn down, including client-side.
+///
+/// **`appVersionTracker` is the one exception (I25 review fix) — do NOT re-merge it into the
+/// "leave alone" group above.** `deviceIdProvider`/`exportArtifactStore` are plain VALUES: reusing
+/// a stale one after `signOutForRetry()` is harmless (a stale deviceId just re-registers under the
+/// same UUID; a stale export artifact just gets overwritten), so deferring their clear costs
+/// nothing. `appVersionTracker` GATES CONTROL FLOW instead —
+/// `DeviceRegistrationService.registerOnLaunchIfNeeded()` no-ops entirely (never calls
+/// `registerOrUpdate()` at all) once the stored version already matches the running app version.
+/// Left stale here, a user who signs back in on this same uid (whose backend profile this flow
+/// already erased) and then abandons the retry — rather than reopening this screen to finish — is
+/// left signed in with no registered device, and every I24 bootstrap-completion retry
+/// (`RootView`'s `onSignedIn` re-invocations) hits the identical no-op, since none of them bypass
+/// `registerOnLaunchIfNeeded()`'s gate. Recoverable only by an unrelated trigger (a push-token
+/// refresh, which calls `registerOrUpdate()` directly and ungated, or the `DEVICE_NOT_FOUND`
+/// self-heal) — not a permanent failure, but a real, avoidable window. Clearing it early is always
+/// safe to re-enter: `registerOrUpdate()`'s own probe-then-register path fails open. So
+/// `signOutForRetry()` clears `appVersionTracker` itself, and `wipeLocalStateAndComplete()` also
+/// clears it (harmless double-clear) for the direct-success path that never goes through
+/// `signOutForRetry()` at all.
 @MainActor
 public final class DeleteAccountViewModel: ObservableObject {
     public enum Phase: Equatable {
@@ -41,11 +60,12 @@ public final class DeleteAccountViewModel: ObservableObject {
         case firebaseDeleteFailed
         /// `signOutForRetry()` ran — the screen navigates to sign-in, same as `.completed`.
         /// Location/geofence local state WAS wiped (`wipeLocalState()`, security review addition —
-        /// the backend account is already gone by this point); `deviceId`/export artifact/
-        /// app-version-tracker entry (I25) were NOT (the account isn't confirmed torn down
-        /// client-side yet) — the user re-opens this screen after signing back in to finish (a
-        /// no-op backend call + a now-succeeding Firebase delete), at which point
-        /// `wipeLocalStateAndComplete()` clears those too.
+        /// the backend account is already gone by this point); `deviceId`/export artifact were NOT
+        /// (the account isn't confirmed torn down client-side yet) — the user re-opens this screen
+        /// after signing back in to finish (a no-op backend call + a now-succeeding Firebase
+        /// delete), at which point `wipeLocalStateAndComplete()` clears those too. The
+        /// app-version-tracker entry (I25) is the one exception: it WAS already cleared here — see
+        /// this type's top doc for why it cannot wait like the other two.
         case signedOutForRetry
         /// Both steps succeeded and local state has been wiped — the screen navigates to sign-in.
         case completed
@@ -59,11 +79,12 @@ public final class DeleteAccountViewModel: ObservableObject {
     private let deviceIdProvider: DeviceIdProviding
     private let exportArtifactStore: ExportArtifactStoring
     /// specs/008-privacy-endpoints.md §1.3, specs/004-ios-client.md §3.6 (I25) — I24 made this
-    /// load-bearing for `DeviceRegistrationService.registerOrUpdate()`'s probe-skip decision, but
-    /// this view model previously never cleared it, so a completed account deletion left a stale
-    /// "this device has registered before" bit behind for the uid. Cleared alongside
-    /// `deviceIdProvider` in `wipeLocalStateAndComplete()` — see that method's doc and this type's
-    /// top doc for why NOT in `signOutForRetry()`.
+    /// load-bearing for `DeviceRegistrationService.registerOrUpdate()`/`registerOnLaunchIfNeeded()`'s
+    /// probe-skip/no-op decisions, but this view model previously never cleared it, so a completed
+    /// account deletion left a stale "this device has registered before" bit behind for the uid.
+    /// Cleared in BOTH `signOutForRetry()` and `wipeLocalStateAndComplete()` — unlike
+    /// `deviceIdProvider`/`exportArtifactStore`, which are only cleared in the latter. See this
+    /// type's top doc for why: this one gates control flow, not just a value a stale read reuses.
     private let appVersionTracker: AppVersionRegistrationTracking
     /// **Post-review addition (security review, High finding).** The single consolidated
     /// `LocationRuntimeContainer.wipeLocalState()` call, injected as a closure rather than this
@@ -144,7 +165,19 @@ public final class DeleteAccountViewModel: ObservableObject {
     /// device settings) survived untouched, exactly the same deterministic leak-into-the-next-
     /// session bug the forced-sign-out path had. Now `async` (was synchronous) to await the wipe —
     /// callers use `Task { await viewModel.signOutForRetry() }` (see `DeleteAccountScreen`).
+    ///
+    /// **I25 review fix — also clears `appVersionTracker`, unlike `deviceIdProvider`/
+    /// `exportArtifactStore` below it (which stay untouched here — see this type's top doc for the
+    /// asymmetry).** Skipping this would leave a user who abandons the retry (signs back in on this
+    /// uid, whose profile the backend deletion already erased, but never reopens this screen)
+    /// signed in with `DeviceRegistrationService.registerOnLaunchIfNeeded()` permanently believing
+    /// this device already registered for the current app version — silently no-op-ing forever
+    /// rather than retrying, since every I24 bootstrap-completion retry goes through that same
+    /// gated call.
     public func signOutForRetry() async {
+        if let uid = pendingWipeUserId {
+            appVersionTracker.clearLastRegisteredAppVersion(forUserId: uid)
+        }
         await wipeLocalState()
         // clearStoredSession() is unconditional (finding #5) — NOT nested inside the swallowed
         // signOut() call below, so a signOut() failure can never strand it.
@@ -164,6 +197,11 @@ public final class DeleteAccountViewModel: ObservableObject {
             // because `registerOrUpdate()` separately maps a genuine `PROFILE_NOT_FOUND` from
             // `POST /devices` to the same typed error every caller already treats as expected — this
             // clears it at the tracker's own write site instead of relying solely on that.
+            //
+            // A harmless double-clear on the retry path: `signOutForRetry()` already cleared this
+            // for the same uid (I25 review fix — see this type's top doc). Kept here too because
+            // this is also reached DIRECTLY from `confirmDelete()` when the Firebase step succeeds
+            // on the first attempt, which never calls `signOutForRetry()` at all.
             appVersionTracker.clearLastRegisteredAppVersion(forUserId: uid)
         }
         // Post-review change (security review, High finding) — was three separate ad-hoc clear
