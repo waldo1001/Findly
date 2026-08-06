@@ -71,7 +71,15 @@ data class FindlyColorTokens(
      * measured contrast. */
     val markerOnlineDotOn: Color,
     /** [onSurface] at ~70% — used for muted/secondary text (e.g. `FindlyListRow` subtitles).
-     * HANDOFF.md gives exact hex per theme rather than a computed alpha. */
+     * HANDOFF.md gives exact hex per theme rather than a computed alpha.
+     *
+     * **A30 correction (specs/003 §4.2, real-device report 2026-08-06):** light darkened from
+     * HANDOFF.md's original `#4E5675` to `#3A4160`. Not a bug fix in the "wrong value" sense —
+     * the original rendered exactly as specified and already cleared AA (6.56:1 on `surface`,
+     * 5.79:1 on `surfaceVariant`) — but a real user found it barely readable at the small,
+     * low-chroma sizes it's used at (13sp/400 subtitles, 12sp/700 uppercase section headers). AA
+     * is a floor, not a target. New value measures 9.08:1 / 8.01:1. Dark `#98A1BD` is unchanged;
+     * see its own inline comment in [DarkFindlyColors] for why. */
     val subtleText: Color,
     /** Neutral-black shadow opacity for `FindlyTheme.elevation.level1/2/3` (HANDOFF.md's
      * elevation table: `{blur, y, opacity light|dark}`). Shadows stay neutral black in both
@@ -133,7 +141,14 @@ val LightFindlyColors = FindlyColorTokens(
     outlineStrong = Color(0xFF6B739A),
     markerOnlineDot = Color(0xFF52E39B),
     markerOnlineDotOn = Color(0xFF062418),
-    subtleText = Color(0xFF4E5675),
+    // A30 (specs/003-android-client.md §4.2 correction, real-device report 2026-08-06): darkened
+    // from HANDOFF.md's original `#4E5675` — that value was not a bug (it rendered exactly as
+    // pixel-sampled, no alpha/M3 default involved) and already passed AA at 6.56:1 on `surface` /
+    // 5.79:1 on `surfaceVariant`. The design itself — low-chroma blue-grey at 13sp/400 subtitles /
+    // 12sp/700 uppercase headers — was legitimately hard to read; AA is a floor, not a target.
+    // `#3A4160` measures 9.08:1 / 8.01:1 (see ColorTokenContrastTest.kt's pinned regression test).
+    // Dark `#98A1BD` below is deliberately unchanged — see its own inline comment.
+    subtleText = Color(0xFF3A4160),
     shadowLevel1Alpha = 0.10f,
     shadowLevel2Alpha = 0.14f,
     shadowLevel3Alpha = 0.18f,
@@ -164,6 +179,9 @@ val DarkFindlyColors = FindlyColorTokens(
     // to #52E39B on top of it (7.69:1).
     markerOnlineDot = Color(0xFF0B3B26),
     markerOnlineDotOn = Color(0xFF52E39B),
+    // A30: deliberately unchanged — dark already measures 7.43:1 on `surface` / 6.49:1 on
+    // `surfaceVariant`, materially better than light's pre-A30 value, which is likely why dark
+    // never drew the real-device "barely readable" complaint that prompted A30.
     subtleText = Color(0xFF98A1BD),
     shadowLevel1Alpha = 0.30f,
     shadowLevel2Alpha = 0.45f,
