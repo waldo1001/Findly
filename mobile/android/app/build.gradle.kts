@@ -275,7 +275,7 @@ dependencies {
     implementation("com.google.android.gms:play-services-location:21.3.0")
 
     // Real Firebase Auth (specs/003 §7, H1) — FirebaseAuthProvider's only consumer.
-    implementation(platform("com.google.firebase:firebase-bom:34.16.0"))
+    implementation(platform("com.google.firebase:firebase-bom:34.17.0"))
     implementation("com.google.firebase:firebase-auth")
     // A9 (specs/003 §9, specs/009-device-runtime.md §5): real FCM — RealPushTokenProvider +
     // FindlyMessagingService's only new dependency (the BOM above pins its version).
