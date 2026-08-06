@@ -67,8 +67,12 @@ android {
         applicationId = "com.findly.android"
         minSdk = 26
         targetSdk = 37
-        versionCode = 1
-        versionName = "0.1.0"
+        // Aligned with iOS 2026-08-06: the GitHub release, the family install page and the iOS
+        // build all say "1.0.0 (6)" while Android still reported 0.1.0/1. Play also requires
+        // versionCode to strictly increase on every upload, so starting at 6 keeps the two
+        // platforms on one number instead of two drifting counters.
+        versionCode = 6
+        versionName = "1.0.0"
     }
 
     // A7 (docs/store-readiness.md §1): defined unconditionally (Gradle requires the DSL block to
