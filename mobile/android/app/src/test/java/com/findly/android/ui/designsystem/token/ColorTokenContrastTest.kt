@@ -206,6 +206,12 @@ class ColorTokenContrastTest {
             "[disabled, exempt] TextFieldDisabledText on TextFieldDisabledFill" to mapOf(
                 "fixed (non-theme)" to 2.54,
             ),
+            // A28 review round 2, outstanding item 2 (iOS parity): FindlyTextField.kt's `!enabled`
+            // branch draws this as a real 1.5dp stroke; WCAG-exempt (disabled control), pinned so a
+            // silent change still shows in a diff.
+            "[disabled, exempt] TextFieldDisabledBorder on TextFieldDisabledFill" to mapOf(
+                "fixed (non-theme)" to 1.19,
+            ),
         )
 
         val mismatches = disabledControlExemptionPairings.mapNotNull { pairing ->
@@ -230,15 +236,20 @@ class ColorTokenContrastTest {
     // --- `secondary` (A28 addendum, cross-platform parity with iOS I29): documented-unrendered
     // exemption, not a pass/fail pairing — see secondaryUnrenderedExemptionPairings's doc comment
     // for why (it is genuinely unrendered on both platforms, and light measures BELOW 4.5:1
-    // against HANDOFF.md's own claim of 4.6:1, so a real pairing here could never pass anyway). ---
+    // against HANDOFF.md's own claim of 4.6:1, so a real pairing here could never pass anyway).
+    // A28 review round 2, outstanding item 3: extended to `surfaceVariant` too — at its current
+    // value, `secondary` cannot carry text on EITHER light surface, not just `surface`. ---
 
     @Test
-    fun `secondary is a documented not-yet-rendered exemption — light measures below 4point5, contradicting HANDOFFmd`() {
-        val expected = mapOf("light" to 4.45, "dark" to 12.04)
+    fun `secondary is a documented not-yet-rendered exemption — light measures below 4point5 on both surfaces, contradicting HANDOFFmd`() {
+        val expected = mapOf(
+            "[unrendered, exempt] secondary on surface" to mapOf("light" to 4.45, "dark" to 12.04),
+            "[unrendered, exempt] secondary on surfaceVariant" to mapOf("light" to 3.92, "dark" to 10.52),
+        )
 
         val mismatches = secondaryUnrenderedExemptionPairings.mapNotNull { pairing ->
             val ratio = round2(contrastRatio(pairing.effectiveForeground, pairing.background))
-            val expectedRatio = expected[pairing.theme]
+            val expectedRatio = expected[pairing.name]?.get(pairing.theme)
             if (expectedRatio == null || Math.abs(ratio - expectedRatio) > 0.02) {
                 "  [${pairing.theme}] ${pairing.name}: measured $ratio:1, pinned expectation " +
                     "$expectedRatio:1"
@@ -248,11 +259,11 @@ class ColorTokenContrastTest {
         }
 
         assertTrue(
-            "`secondary`'s measured contrast against `surface` moved since this exemption was " +
-                "pinned. If light now clears 4.5:1, HANDOFF.md's claimed 4.6:1 may finally be " +
-                "accurate again — that's fine, this pin just needs updating, it does not " +
-                "automatically mean `secondary` may now be declared as a real pairing (it must " +
-                "still actually be rendered somewhere first):\n" + mismatches.joinToString("\n"),
+            "`secondary`'s measured contrast against `surface`/`surfaceVariant` moved since this " +
+                "exemption was pinned. If light now clears 4.5:1 on both, HANDOFF.md's claimed " +
+                "4.6:1 may finally be accurate again — that's fine, this pin just needs updating, " +
+                "it does not automatically mean `secondary` may now be declared as a real pairing " +
+                "(it must still actually be rendered somewhere first):\n" + mismatches.joinToString("\n"),
             mismatches.isEmpty(),
         )
     }

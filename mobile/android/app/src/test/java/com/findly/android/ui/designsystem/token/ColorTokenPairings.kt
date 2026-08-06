@@ -93,6 +93,28 @@ val declaredColorPairings: List<ColorPairing> = buildList {
         // named separately because the review specifically flagged this render site.
         add(textPairing("FindlyPermissionBanner dismiss glyph (subtleText) on surfaceVariant", theme, colors.subtleText, colors.surfaceVariant))
 
+        // A28 review round 2 (interrupted-round outstanding item 1): FindlyPermissionBanner.kt:81
+        // renders its message body as `onSurface.copy(alpha = 0.75f)` on the banner's own
+        // `surfaceVariant` fill — a different, still-live alpha blend six lines from the dismiss
+        // glyph above that was structurally invisible to this suite until now. Unlike the dismiss
+        // glyph, this one was never wrong: composited, it measures 7.19:1 light / 8.45:1 dark
+        // (computed from LightFindlyColors/DarkFindlyColors via the same relativeLuminance/
+        // contrastRatio formula this file's tests are pinned against — see ContrastRatioReferenceTest),
+        // comfortably clearing 4.5:1 in both themes. Declared via [foregroundAlpha] so a future
+        // change to `onSurface`, `surfaceVariant`, or the 0.75 alpha itself cannot silently drop
+        // below AA without this suite catching it — do not change the component's color to "fix"
+        // this entry, it already passes.
+        add(textPairing("FindlyPermissionBanner message (onSurface at 75%) on surfaceVariant", theme, colors.onSurface, colors.surfaceVariant, fgAlpha = 0.75f))
+
+        // A28 review round 2 (interrupted-round outstanding item 4): PermissionDisclosureScreen.kt:88
+        // renders its closing paragraph with the identical `onSurface.copy(alpha = 0.75f)` on
+        // `surfaceVariant` pattern as the banner message above — same tokens, same alpha, so
+        // numerically identical (7.19:1 light / 8.45:1 dark), but declared as its own entry because
+        // it is a distinct render site in a screen file. Declaring a pairing here is scope-appropriate
+        // for A28 (it is a test/doc addition over an existing token combination, not a screen redesign
+        // — that is A27) and does not restyle the screen.
+        add(textPairing("PermissionDisclosureScreen closing text (onSurface at 75%) on surfaceVariant", theme, colors.onSurface, colors.surfaceVariant, fgAlpha = 0.75f))
+
         // A28 review, Minor 5 (cross-platform parity with iOS I29): FindlyStatusChip's
         // Neutral/paused tone renders its `onSurface` label directly on whatever `surface` it's
         // placed on (HomeScreen's member list, per HANDOFF.md). Numerically identical to
@@ -158,6 +180,15 @@ val disabledControlExemptionPairings: List<ColorPairing> = buildList {
     // FindlyTextField.kt: disabled fill/text are both the fixed (non-theme) HANDOFF.md palette —
     // one pairing, not per-theme, since neither side varies with the active theme.
     add(textPairing("[disabled, exempt] TextFieldDisabledText on TextFieldDisabledFill", "fixed (non-theme)", TextFieldDisabledText, TextFieldDisabledFill))
+    // A28 review round 2 (interrupted-round outstanding item 2, cross-platform parity — iOS already
+    // pins this): FindlyTextField.kt's `!enabled` branch draws TextFieldDisabledBorder as a real
+    // 1.5dp stroke around TextFieldDisabledFill, not a decorative artifact — it had no coverage at
+    // all before this pin. Measured 1.19:1, well under the 3:1 a meaning-carrying stroke would need,
+    // but WCAG 2.1 (1.4.3, 1.4.11) exempts disabled controls from its contrast criteria entirely, so
+    // this is a documented exemption like the others in this list, not a failure. Graphical (border),
+    // not text, hence [graphicalPairing] — the threshold field is unused by the exemption test below,
+    // which pins the exact measured value instead of asserting pass/fail.
+    add(graphicalPairing("[disabled, exempt] TextFieldDisabledBorder on TextFieldDisabledFill", "fixed (non-theme)", TextFieldDisabledBorder, TextFieldDisabledFill))
 }
 
 /**
@@ -173,15 +204,23 @@ val disabledControlExemptionPairings: List<ColorPairing> = buildList {
  * own contrast column is wrong" class of bug A26 found seven times, just never yet shipped because
  * nothing renders this pairing.
  *
+ * **Plainly: at its current value, `secondary` cannot carry text on either light surface.**
+ * `surfaceVariant` is worse than `surface`, not better — measured **3.92:1** in light (vs. `surface`'s
+ * 4.45:1), still comfortably clear in dark at **10.52:1** (vs. `surface`'s 12.04:1). Both light
+ * surfaces are pinned here for exactly that reason: this is not a one-surface fluke, it is the color
+ * itself.
+ *
  * Pinned here instead, the same shape as the disabled-control exemptions above, so a token change
  * still shows in a diff. **Whoever first wires `secondary` into a real component MUST add a real
  * [declaredColorPairings] entry for whatever it's actually rendered against at that time** — and
- * per the note above, that will very likely mean `secondary` cannot go directly on `surface` in
- * light without a token change first.
+ * per the note above, that will very likely mean `secondary` cannot go directly on `surface` OR
+ * `surfaceVariant` in light without a token change first.
  */
 val secondaryUnrenderedExemptionPairings: List<ColorPairing> = listOf(
     textPairing("[unrendered, exempt] secondary on surface", "light", LightFindlyColors.secondary, LightFindlyColors.surface),
     textPairing("[unrendered, exempt] secondary on surface", "dark", DarkFindlyColors.secondary, DarkFindlyColors.surface),
+    textPairing("[unrendered, exempt] secondary on surfaceVariant", "light", LightFindlyColors.secondary, LightFindlyColors.surfaceVariant),
+    textPairing("[unrendered, exempt] secondary on surfaceVariant", "dark", DarkFindlyColors.secondary, DarkFindlyColors.surfaceVariant),
 )
 
 /**
