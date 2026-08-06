@@ -221,6 +221,13 @@ Easy to forget, and awkward to undo once real location history is interleaved wi
 
 ## Track E — M2, public release
 
+> **Every console answer for both stores is written out, paste-ready, in
+> [`store-submission-pack.md`](store-submission-pack.md)** — listing copy, Play data-safety table, the
+> background-location declaration text and video script, Apple privacy nutrition labels, review notes.
+> It also opens with the honest caveat: production listings buy **reach**, not iteration speed — the
+> Play internal track and TestFlight already deliver a fix to a family phone in minutes, while every
+> production update goes through review.
+
 ### E1 — Apple (H6 tail) 👤 → ⏳
 
 Steps 1–7 of [`h6-apple-portal-runbook.md`](h6-apple-portal-runbook.md) are **done**: both App IDs, App Store
@@ -262,8 +269,10 @@ mismatch blocks an in-place upgrade either way.
 ### E2 — Play (H5 tail) 👤 → ⏳
 
 1. **Background-location declaration** + a demo video of the in-app prominent disclosure that precedes the
-   runtime permission prompt (the 003 §11 / 009 §7 flow already matches policy). Historically the slow part
-   of review — budget time.
+   runtime permission prompt. The flow is now **implemented as well as specified** — wired into the
+   request path on Android (`7283783`) and iOS (`ed8182c`) on 2026-08-05, so the video can finally be
+   recorded of something that exists. Declaration text + shot list: `store-submission-pack.md` §2.3.
+   Historically the slow part of review — budget time.
 2. **Data-safety form**, truthful and matching the specs: precise location collected, shared with other app
    users, encrypted in transit, not sold, deletable in-app and on the web; phone number collected by Firebase
    Auth for authentication, not by the backend. Account-deletion URL:
