@@ -231,8 +231,10 @@ struct DeviceRegistrationServiceTests {
         let tracker = InMemoryAppVersionRegistrationTracker()
         tracker.setLastRegisteredAppVersion("1.2.2", forUserId: "u1")
         let (api, service) = makeService(userId: "u1", appVersionTracker: tracker)
-        // No getMyFamilyHandler override: FakeAPIClient's default fatalErrors if called, so this
-        // test fails loudly (not silently) if the probe ever fires here.
+        // No getMyFamilyHandler override — `makeService()` always installs
+        // `Self.profileExistsHandler()` as the default, so a regression here would NOT fatalError;
+        // it would silently succeed. The `#expect(api.getMyFamilyCallCount == 0, ...)` assertion
+        // below is what actually catches the probe firing when it shouldn't.
 
         _ = try await service.registerOrUpdate()
 
