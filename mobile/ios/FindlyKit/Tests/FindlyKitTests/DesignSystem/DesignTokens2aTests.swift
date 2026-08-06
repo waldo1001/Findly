@@ -172,4 +172,25 @@ struct DesignTokens2aTests {
             #expect(level.color == .black)
         }
     }
+
+    // MARK: - Theme.outlineStrong (contrast-trap #1)
+
+    @Test func outlineStrong_inLight_isTheStrongerColor_notTheDecorativeOutline() {
+        #expect(Theme.light.outlineStrong == Color(hex: 0x6B739A))
+        #expect(Theme.light.outlineStrong == Color.findlyOutlineStrong)
+        #expect(Theme.light.outlineStrong != Theme.light.colors.outline)
+    }
+
+    @Test func outlineStrong_inDark_isJustTheRegularOutline() {
+        // Dark `outline` already clears 3:1, so it doubles for both decorative and meaningful use
+        // — no separate strong color needed there.
+        #expect(Theme.dark.outlineStrong == Theme.dark.colors.outline)
+    }
+
+    // MARK: - Theme.onSurfaceMuted (row subtitles etc. — literal per-scheme hex, not a computed opacity)
+
+    @Test func onSurfaceMuted_matchesHandoffLiteralHexValues() {
+        #expect(Theme.light.onSurfaceMuted == Color(hex: 0x4E5675))
+        #expect(Theme.dark.onSurfaceMuted == Color(hex: 0x98A1BD))
+    }
 }

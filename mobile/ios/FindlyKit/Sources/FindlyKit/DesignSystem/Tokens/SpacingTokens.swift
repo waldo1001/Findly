@@ -18,5 +18,6 @@ public struct SpacingTokens: Equatable {
         self.xxl = xxl
     }
 
-    public static let standard = SpacingTokens(xs: 4, sm: 8, md: 12, lg: 16, xl: 24, xxl: 32)
+    // design 2a "Ember/Dusk" (design/findly-design-system/2a-ember-dusk/HANDOFF.md).
+    public static let standard = SpacingTokens(xs: 4, sm: 8, md: 12, lg: 20, xl: 28, xxl: 40)
 }

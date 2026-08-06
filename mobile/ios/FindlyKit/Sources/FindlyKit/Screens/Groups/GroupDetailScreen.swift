@@ -123,13 +123,13 @@ public struct GroupDetailScreen: View {
         HStack(alignment: .top) {
             VStack(alignment: .leading, spacing: theme.spacing.xs) {
                 Text(detail.name)
-                    .font(theme.typography.titleLarge)
+                    .font(theme.typography.titleLarge.font)
                     .foregroundColor(theme.colors.onSurface)
                 Text("\(detail.memberCount) member\(detail.memberCount == 1 ? "" : "s")")
-                    .font(theme.typography.bodyMedium)
+                    .font(theme.typography.bodyMedium.font)
                     .foregroundColor(theme.colors.onSurface.opacity(0.7))
                 Text(GroupCountdown.text(from: detail.endsAt))
-                    .font(theme.typography.labelSmall)
+                    .font(theme.typography.labelSmall.font)
                     .foregroundColor(theme.colors.onSurface.opacity(0.7))
             }
             Spacer()
@@ -147,7 +147,7 @@ public struct GroupDetailScreen: View {
         return FindlyCard {
             VStack(spacing: theme.spacing.sm) {
                 Text(GroupDetailViewModel.shareText(for: code, groupName: name))
-                    .font(theme.typography.titleMedium)
+                    .font(theme.typography.titleMedium.font)
                     .foregroundColor(theme.colors.onSurface)
                     .multilineTextAlignment(.center)
                 GroupJoinQRCodeView(text: joinLink.absoluteString)

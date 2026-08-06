@@ -81,16 +81,16 @@ public struct GroupsListScreen: View {
             VStack(alignment: .leading, spacing: theme.spacing.sm) {
                 HStack {
                     Text(group.name)
-                        .font(theme.typography.titleMedium)
+                        .font(theme.typography.titleMedium.font)
                         .foregroundColor(theme.colors.onSurface)
                     Spacer()
                     StatusChip(GroupStateChip.label(for: group.state), kind: GroupStateChip.kind(for: group.state))
                 }
                 Text("\(group.memberCount) member\(group.memberCount == 1 ? "" : "s")")
-                    .font(theme.typography.bodyMedium)
+                    .font(theme.typography.bodyMedium.font)
                     .foregroundColor(theme.colors.onSurface.opacity(0.7))
                 Text(GroupCountdown.text(from: group.endsAt))
-                    .font(theme.typography.labelSmall)
+                    .font(theme.typography.labelSmall.font)
                     .foregroundColor(theme.colors.onSurface.opacity(0.7))
             }
         }

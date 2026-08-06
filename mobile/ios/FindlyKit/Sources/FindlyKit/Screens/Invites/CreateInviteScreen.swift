@@ -61,7 +61,7 @@ public struct CreateInviteScreen: View {
             FindlyCard {
                 VStack(spacing: theme.spacing.sm) {
                     Text(CreateInviteViewModel.shareText(for: code))
-                        .font(theme.typography.titleMedium)
+                        .font(theme.typography.titleMedium.font)
                         .foregroundColor(theme.colors.onSurface)
                         .multilineTextAlignment(.center)
                     StatusChip(role == "parent" ? "Parent invite" : "Member invite", kind: .online)

@@ -31,10 +31,10 @@ public struct PermissionBannerView: View {
                 HStack(alignment: .top, spacing: theme.spacing.sm) {
                     VStack(alignment: .leading, spacing: theme.spacing.xs) {
                         Text(title)
-                            .font(theme.typography.titleMedium)
+                            .font(theme.typography.titleMedium.font)
                             .foregroundColor(theme.colors.onSurface)
                         Text(message)
-                            .font(theme.typography.bodyMedium)
+                            .font(theme.typography.bodyMedium.font)
                             .foregroundColor(theme.colors.onSurface.opacity(0.75))
                             .fixedSize(horizontal: false, vertical: true)
                     }
@@ -42,7 +42,7 @@ public struct PermissionBannerView: View {
 
                     Button(action: onDismiss) {
                         Image(systemName: "xmark")
-                            .font(theme.typography.labelSmall)
+                            .font(theme.typography.labelSmall.font)
                             .foregroundColor(theme.colors.onSurface.opacity(0.6))
                             .padding(theme.spacing.xs)
                             .contentShape(Rectangle())

@@ -64,7 +64,7 @@ public struct ExportScreen: View {
                 exportRow(title: "Export my data", userId: nil)
                 if isParent && !members.isEmpty {
                     Text("Export a family member's data")
-                        .font(theme.typography.labelSmall)
+                        .font(theme.typography.labelSmall.font)
                         .foregroundColor(theme.colors.onSurface.opacity(0.7))
                     ForEach(members, id: \.userId) { member in
                         exportRow(title: "Export \(member.displayName)'s data", userId: member.userId)

@@ -42,20 +42,36 @@ public struct ColorTokens: Equatable {
         self.outline = outline
     }
 
-    // "Findly — Family Location Design System" (design/findly-design-system/, 2026-07-20).
-    // Calm teal-forward palette; every text/essential-icon pairing verified WCAG 2.1 AA
-    // (ratios in design/findly-design-system/README.md and specs/004 §2.1).
+    // Design direction 2a "Ember / Dusk" (design/findly-design-system/2a-ember-dusk/HANDOFF.md,
+    // 2026-08-06) — supersedes the 2026-07-20 teal palette. Every text/essential-icon pairing
+    // verified WCAG 2.1 AA (ratios in that handoff and specs/004 §2.1).
     public static let light = ColorTokens(
-        primary: Color(hex: 0x00696E), onPrimary: Color(hex: 0xFFFFFF), secondary: Color(hex: 0x4C5FD5),
-        surface: Color(hex: 0xFAFAF7), onSurface: Color(hex: 0x1B1D1C), surfaceVariant: Color(hex: 0xEEEEE9),
-        danger: Color(hex: 0xC0362C), onDanger: Color(hex: 0xFFFFFF), success: Color(hex: 0x1E7D46),
-        warning: Color(hex: 0x8A5A00), outline: Color(hex: 0xC9C8C2)
+        primary: Color(hex: 0x3A46C8), onPrimary: Color(hex: 0xFFFFFF), secondary: Color(hex: 0x0E7C8F),
+        surface: Color(hex: 0xF2F4FB), onSurface: Color(hex: 0x10142A), surfaceVariant: Color(hex: 0xE2E6F5),
+        danger: Color(hex: 0xB3261E), onDanger: Color(hex: 0xFFFFFF), success: Color(hex: 0x10714A),
+        warning: Color(hex: 0x8A5A00), outline: Color(hex: 0xA9B0CE)
     )
 
     public static let dark = ColorTokens(
-        primary: Color(hex: 0x4CD4D9), onPrimary: Color(hex: 0x00312F), secondary: Color(hex: 0xA9B4FF),
-        surface: Color(hex: 0x17181A), onSurface: Color(hex: 0xECECE6), surfaceVariant: Color(hex: 0x24262A),
-        danger: Color(hex: 0xF2867B), onDanger: Color(hex: 0x490A05), success: Color(hex: 0x5FD08A),
-        warning: Color(hex: 0xE4B44C), outline: Color(hex: 0x3A3D42)
+        primary: Color(hex: 0x7C8BFF), onPrimary: Color(hex: 0x0A0F27), secondary: Color(hex: 0x4FE3D0),
+        surface: Color(hex: 0x0B0F1C), onSurface: Color(hex: 0xE8ECF7), surfaceVariant: Color(hex: 0x161D33),
+        danger: Color(hex: 0xFF6B6B), onDanger: Color(hex: 0x2A0708), success: Color(hex: 0x52E39B),
+        warning: Color(hex: 0xFFC44D), outline: Color(hex: 0x3A4463)
     )
+}
+
+// design/findly-design-system/2a-ember-dusk/HANDOFF.md — two theme-invariant colors called out by
+// name, both contrast traps a naive substitution would get wrong:
+public extension Color {
+    /// Light `outline` (`#A9B0CE`) is only 2.1:1 — legal for decorative hairlines/dividers only.
+    /// Any stroke that carries meaning (unselected control border, focus ring, input outline) uses
+    /// this stronger color (3.4:1) instead. In dark, `ColorTokens.dark.outline` itself already
+    /// clears 3:1 and may be used for both purposes.
+    static let findlyOutlineStrong = Color(hex: 0x6B739A)
+    /// The dot inside a `primary` marker bubble's "● NOW" pill — fixed at `#52E39B` in BOTH
+    /// themes (5.4:1 on `#3A46C8`). Light-theme `success` (`#10714A`) measures 1.2:1 there and
+    /// must never be substituted in.
+    static let findlyMarkerOnlineDot = Color(hex: 0x52E39B)
+    /// Text drawn on top of `findlyMarkerOnlineDot`.
+    static let findlyMarkerOnlineDotOn = Color(hex: 0x062418)
 }

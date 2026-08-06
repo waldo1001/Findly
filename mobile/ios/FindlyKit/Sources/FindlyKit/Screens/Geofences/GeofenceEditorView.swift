@@ -54,7 +54,7 @@ public struct GeofenceEditorView: View {
                     FindlyTextField("Longitude", text: $lon, placeholder: "3.7174")
                     VStack(alignment: .leading, spacing: theme.spacing.xs) {
                         Text("Radius: \(Int(radiusM))m")
-                            .font(theme.typography.labelSmall)
+                            .font(theme.typography.labelSmall.font)
                             .foregroundColor(theme.colors.onSurface.opacity(0.7))
                         Slider(value: $radiusM, in: 100...5000, step: 50)
                             .tint(theme.colors.primary)

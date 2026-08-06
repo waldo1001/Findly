@@ -58,7 +58,7 @@ public struct SignInScreen: View {
         let build = info?["CFBundleVersion"] as? String ?? "?"
         let host = (info?["FindlyBaseURL"] as? String).flatMap { URL(string: $0)?.host } ?? "unconfigured"
         Text("v\(version) (\(build)) · \(host)")
-            .font(theme.typography.labelSmall)
+            .font(theme.typography.labelSmall.font)
             .foregroundColor(theme.colors.outline)
             .padding(.bottom, theme.spacing.sm)
             .accessibilityIdentifier("signIn.buildLabel")
@@ -86,7 +86,7 @@ public struct SignInScreen: View {
             FindlyTextField("Phone number", text: $phoneInput, placeholder: "+32…")
             if let error {
                 Text(error)
-                    .font(theme.typography.bodyMedium)
+                    .font(theme.typography.bodyMedium.font)
                     .foregroundColor(theme.colors.danger)
             }
             FindlyButton("Send code") {
@@ -100,12 +100,12 @@ public struct SignInScreen: View {
     private func codeEntry(phone: String, resendSecondsLeft: Int, error: String?) -> some View {
         VStack(spacing: theme.spacing.md) {
             Text("Code sent to \(phone)")
-                .font(theme.typography.bodyMedium)
+                .font(theme.typography.bodyMedium.font)
                 .foregroundColor(theme.colors.onSurface.opacity(0.7))
             FindlyTextField("Verification code", text: $codeInput, placeholder: "6-digit code")
             if let error {
                 Text(error)
-                    .font(theme.typography.bodyMedium)
+                    .font(theme.typography.bodyMedium.font)
                     .foregroundColor(theme.colors.danger)
             }
             FindlyButton("Verify") {
@@ -113,7 +113,7 @@ public struct SignInScreen: View {
             }
             if resendSecondsLeft > 0 {
                 Text("Resend in \(resendSecondsLeft)s")
-                    .font(theme.typography.labelSmall)
+                    .font(theme.typography.labelSmall.font)
                     .foregroundColor(theme.colors.onSurface.opacity(0.5))
             } else {
                 FindlyButton("Resend code", style: .secondary) {
