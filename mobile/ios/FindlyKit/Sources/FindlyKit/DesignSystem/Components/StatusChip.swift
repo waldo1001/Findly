@@ -77,8 +77,13 @@ public struct StatusChip: View {
 
     private var foregroundColor: Color {
         switch kind {
-        case .online, .danger: return theme.colors.onDanger
-        case .stale: return .white
+        // Correction (post-review, independently verified): the handoff's "onDanger-white text"
+        // for `.online` and plain "white text" for `.stale` read as a literal `Color.white` for
+        // stale — but `onDanger` differs from literal white in dark (#2A0708). Measured: literal
+        // white on dark `success`/`warning` fills = 1.64:1 / 1.58:1 (fails); the `onDanger` TOKEN
+        // on those same dark fills = 11.32:1 / 11.71:1 (both themes use the same token, matching
+        // Android's A26). Always use the token, never a literal white.
+        case .online, .stale, .danger: return theme.colors.onDanger
         case .paused: return theme.colors.onSurface
         }
     }

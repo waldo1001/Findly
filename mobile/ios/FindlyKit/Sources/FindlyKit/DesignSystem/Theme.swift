@@ -26,16 +26,38 @@ public extension Theme {
     /// design 2a "Ember/Dusk" contrast trap (design/findly-design-system/2a-ember-dusk/HANDOFF.md):
     /// light `outline` (`#A9B0CE`) is only 2.1:1 — legal for decorative hairlines/dividers only.
     /// Any stroke that carries meaning (an unselected control border, a focus ring, an input
-    /// outline) MUST use this instead. In dark, `colors.outline` itself already clears 3:1, so it
-    /// doubles for both purposes and this simply returns it unchanged.
-    var outlineStrong: Color {
-        colors == ColorTokens.light ? .findlyOutlineStrong : colors.outline
-    }
+    /// outline) MUST use this instead.
+    ///
+    /// **Correction (post-review, independently verified):** the handoff also claims dark
+    /// `outline` (`#3A4463`) "clears 3:1" and can double as both decorative and meaningful — that
+    /// is wrong. Measured: `#3A4463` vs dark `surface` (`#0B0F1C`) = 1.99:1; vs `surfaceVariant`
+    /// (`#161D33`) = 1.74:1. Both themes therefore use the SAME `#6B739A` for meaningful strokes
+    /// (vs dark `surface` = 4.13:1, vs `surfaceVariant` = 3.61:1 — both clear 3:1). Decorative
+    /// `outline` is unchanged in either theme; only this stronger color is now theme-invariant.
+    var outlineStrong: Color { .findlyOutlineStrong }
 
     /// `onSurface` at ~70% opacity, using the handoff's literal per-scheme hex values (e.g.
     /// `FindlyListRow` subtitles) rather than a computed `.opacity(0.7)` — the handoff gives exact
     /// hexes because a computed opacity blends differently depending on what's behind it.
     var onSurfaceMuted: Color {
         colors == ColorTokens.light ? Color(hex: 0x4E5675) : Color(hex: 0x98A1BD)
+    }
+
+    /// The "● NOW" badge inside a `.normal` `MapMarkerBubble` (contrast trap #2, corrected).
+    ///
+    /// The handoff cites `#52E39B` at "5.4:1 in both themes", but that ratio is against LIGHT
+    /// `primary` (`#3A46C8`) only — independently verified 4.44:1 there (the cited 5.4 was also
+    /// slightly wrong, harmlessly). Against DARK `primary` (`#7C8BFF`), `#52E39B` measures only
+    /// 1.83:1 and fails outright. Fix: invert the badge in dark rather than reuse the light
+    /// pairing — fill `#0B3B26` vs dark bubble `#7C8BFF` = 4.19:1 ✓; label `#52E39B` on that fill
+    /// = 7.69:1 ✓. Green still means online in both themes; only which role (fill vs label) it
+    /// plays swaps.
+    var markerOnlineBadgeFill: Color {
+        colors == ColorTokens.light ? .findlyMarkerOnlineDot : Color(hex: 0x0B3B26)
+    }
+
+    /// See `markerOnlineBadgeFill`.
+    var markerOnlineBadgeLabel: Color {
+        colors == ColorTokens.light ? .findlyMarkerOnlineDotOn : .findlyMarkerOnlineDot
     }
 }

@@ -61,16 +61,28 @@ public struct ColorTokens: Equatable {
 }
 
 // design/findly-design-system/2a-ember-dusk/HANDOFF.md — two theme-invariant colors called out by
-// name, both contrast traps a naive substitution would get wrong:
+// name, both contrast traps a naive substitution would get wrong. Use `Theme.outlineStrong` /
+// `Theme.markerOnlineBadgeFill`/`Label` at call sites rather than these directly — those resolve
+// the corrections below per scheme.
 public extension Color {
     /// Light `outline` (`#A9B0CE`) is only 2.1:1 — legal for decorative hairlines/dividers only.
     /// Any stroke that carries meaning (unselected control border, focus ring, input outline) uses
-    /// this stronger color (3.4:1) instead. In dark, `ColorTokens.dark.outline` itself already
-    /// clears 3:1 and may be used for both purposes.
+    /// this stronger color (3.4:1) instead.
+    ///
+    /// **Correction (post-review, independently verified):** the handoff also claims dark
+    /// `outline` (`#3A4463`, `ColorTokens.dark.outline`) "clears 3:1" and can double for both
+    /// purposes — that is wrong (measured 1.99:1 vs dark `surface`, 1.74:1 vs `surfaceVariant`).
+    /// This color is used in BOTH themes for meaningful strokes; see `Theme.outlineStrong`.
     static let findlyOutlineStrong = Color(hex: 0x6B739A)
-    /// The dot inside a `primary` marker bubble's "● NOW" pill — fixed at `#52E39B` in BOTH
-    /// themes (5.4:1 on `#3A46C8`). Light-theme `success` (`#10714A`) measures 1.2:1 there and
-    /// must never be substituted in.
+    /// The fixed "online green" used by a `primary` marker bubble's "● NOW" pill — as fill in
+    /// light, as label in dark (see `Theme.markerOnlineBadgeFill`/`Label`). Light-theme `success`
+    /// (`#10714A`) measures 1.2:1 there and must never be substituted in.
+    ///
+    /// **Correction (post-review, independently verified):** the handoff claims this is "5.4:1 in
+    /// both themes" against `primary` — that ratio (independently remeasured at 4.44:1, the
+    /// handoff's number was also slightly off) only holds against LIGHT `primary` (`#3A46C8`).
+    /// Against dark `primary` (`#7C8BFF`) it measures 1.83:1 and fails outright, which is why dark
+    /// inverts fill/label instead of reusing this color as a fill directly.
     static let findlyMarkerOnlineDot = Color(hex: 0x52E39B)
     /// Text drawn on top of `findlyMarkerOnlineDot`.
     static let findlyMarkerOnlineDotOn = Color(hex: 0x062418)

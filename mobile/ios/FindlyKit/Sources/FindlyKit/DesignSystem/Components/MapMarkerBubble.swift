@@ -103,17 +103,20 @@ public struct MapMarkerBubble: View {
     private func badge(_ text: String) -> some View {
         Group {
             if state == .normal {
-                // "● NOW" — fixed #52E39B fill / #062418 text in BOTH themes (design 2a contrast
-                // trap #2: light `success` measures 1.2:1 here and must never be substituted in).
+                // "● NOW" — design 2a contrast trap #2. Light `success` (#10714A) measures 1.2:1
+                // here and must never be substituted in; the badge itself is NOT a fixed pair
+                // across themes either (corrected post-review) — #52E39B is only 4.44:1 on light
+                // `primary` and fails at 1.83:1 on dark `primary`, so dark inverts fill/label via
+                // `Theme.markerOnlineBadgeFill`/`Label` (4.19:1 / 7.69:1 there). See Theme.swift.
                 HStack(spacing: 3) {
                     Text("●")
                     Text(text)
                 }
                 .font(.system(size: 9, weight: .heavy))
-                .foregroundColor(.findlyMarkerOnlineDotOn)
+                .foregroundColor(theme.markerOnlineBadgeLabel)
                 .padding(.horizontal, 6)
                 .frame(height: 18)
-                .background(Color.findlyMarkerOnlineDot)
+                .background(theme.markerOnlineBadgeFill)
                 .clipShape(Capsule())
             } else {
                 HStack(spacing: 3) {
