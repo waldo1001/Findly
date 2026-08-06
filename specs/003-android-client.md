@@ -103,7 +103,25 @@ Dark:
 | `onSurface` | `#E8ECF7` | `outline` | `#3A4463` |
 | `surfaceVariant` | `#161D33` | | |
 
-`outline` in light is only 2.1:1 — legal for decorative hairlines/dividers only; any stroke that carries meaning (an unselected control border, a focus ring, an input outline) uses `#6B739A` (3.4:1) instead. In dark, `outline` itself clears 3:1 and serves both. The dot inside a `primary` `FindlyMapMarkerBubble`'s "NOW" pill is `#52E39B` in **both** themes — never light `success` there (1.2:1, disappears). Both rules are implemented as additive, non-contract fields on `FindlyColorTokens` (`outlineStrong`, `markerOnlineDot`/`markerOnlineDotOn`) rather than call-site literals — see `ui/designsystem/token/ColorTokens.kt`.
+`outline` in light is only 2.1:1 — legal for decorative hairlines/dividers only; any stroke that carries meaning (an unselected control border, a focus ring, an input outline) uses `outlineStrong` `#6B739A` (3.4:1 in light) instead.
+
+**Corrected in A26's security review (2026-08-06) — measured reality, not HANDOFF.md's claim:** HANDOFF.md and this section originally asserted "in dark, `outline` itself clears 3:1 and serves both". Measured, dark `outline` `#3A4463` is only **1.99:1** against dark `surface` `#0B0F1C` and **1.74:1** against dark `surfaceVariant` `#161D33` — it does not clear 3:1, and the unfocused text-field border/secondary-button border/paused-chip border built on that assumption were nearly invisible in dark. `outlineStrong` is therefore its own dark value too, not an alias of dark `outline`: `#6B739A` — the same hex light already uses — measuring **4.13:1** on dark `surface` and **3.61:1** on dark `surfaceVariant`. Decorative `outline` itself is unchanged and stays fine for hairlines/dividers in both themes.
+
+The dot inside a `primary` `FindlyMapMarkerBubble`'s "NOW" pill: HANDOFF.md asserted `#52E39B` "in both themes ... 5.4:1 on #3A46C8" (light `primary`). Measured, that citation is against light `primary` only, and is itself slightly off (**4.44:1** measured, not 5.4 — still passes) — it was never checked against dark `primary` `#7C8BFF`, where `#52E39B` measures **1.83:1** and disappears. Dark now uses its own pill fill, `#0B3B26` (**4.19:1** on dark `primary`), with the label color inverted to `#52E39B` on top of it (**7.69:1**). Light is unchanged: fill `#52E39B`, label `#062418`. Never light-theme `success` as the fill — that measures 1.2:1 there and disappears (this part of HANDOFF.md's rule was correct).
+
+Both rules are implemented as additive, non-contract fields on `FindlyColorTokens` (`outlineStrong`, `markerOnlineDot`/`markerOnlineDotOn`, now genuinely per-theme) rather than call-site literals — see `ui/designsystem/token/ColorTokens.kt`. The full set of additive (non-11-role, per-theme-resolved) `FindlyColorTokens` fields, none of which rename or replace anything in the §4.1 vocabulary (A26 code review Major 5 — this list was previously undocumented here even though it shipped):
+
+| Field | Light | Dark | Purpose |
+|---|---|---|---|
+| `outlineStrong` | `#6B739A` | `#6B739A` | Meaning-carrying strokes (see above) |
+| `markerOnlineDot` | `#52E39B` | `#0B3B26` | `FindlyMapMarkerBubble`'s "NOW" pill fill |
+| `markerOnlineDotOn` | `#062418` | `#52E39B` | Label color on `markerOnlineDot` |
+| `subtleText` | `#4E5675` | `#98A1BD` | Muted/secondary text (`FindlyListRow` subtitles, `FindlyTextField` placeholder/label, `FindlyEmptyState`/`FindlyErrorState` body, `FindlySectionHeader`) — HANDOFF.md's "`onSurface` at ~70%" given as exact per-theme hex rather than a computed alpha |
+| `shadowLevel1Alpha`/`2`/`3` | `.10`/`.14`/`.18` | `.30`/`.45`/`.60` | Neutral-black shadow opacity per `FindlyTheme.elevation` level (the elevation singleton itself is theme-invariant, so this can't live there) |
+| `buttonPrimaryShadowTint` | `primary` @ 35% (`#3A46C8` alpha .35) | black @ `shadowLevel2Alpha` (.45) | `FindlyButton` primary's `level2` shadow — tinted in light only per HANDOFF.md, plain neutral in dark |
+| `buttonPrimaryPressedFill` | `#2C36A0` (HANDOFF.md's literal) | `#6D7AE0` | `FindlyButton` primary's pressed fill — HANDOFF.md gives only the light hex; applying it unchanged in dark would put `onPrimary` `#0A0F27` at ~4.0:1 on it (fails 4.5:1 for the 16sp/600, non-"large text" label), so dark uses a shallower ~12% darken of dark `primary` instead, measured **4.96:1** |
+
+There is deliberately no `isDark` boolean on `FindlyColorTokens` — `buttonPrimaryShadowTint`/`buttonPrimaryPressedFill` above are how the one HANDOFF.md-specified light-only exception (the button's shadow tint) is resolved instead, so no call site ever needs to branch on which theme is active.
 
 Typography (same in both themes — only color varies by theme): `displayLarge` 34/40sp bold (tracking −0.4sp), `titleLarge` 24/30sp bold (tracking −0.2sp), `titleMedium` 18/24sp semibold, `bodyLarge` 17/24sp regular, `bodyMedium` 15/20sp regular, `labelSmall` 12/16sp bold uppercase (tracking 0.4sp).
 

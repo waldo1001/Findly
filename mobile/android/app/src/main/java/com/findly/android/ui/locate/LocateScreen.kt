@@ -70,7 +70,7 @@ fun LocateScreen(
                 )
 
                 is LocateUiState.Polling -> {
-                    FindlyStatusChip(label = "Waiting for a response…", tone = FindlyStatusTone.Neutral)
+                    FindlyStatusChip(label = "Waiting for a response…", tone = FindlyStatusTone.Neutral, showStatusGlyph = true)
                     state.lastKnown?.let { lastKnown ->
                         FindlyCard {
                             FindlyListRow(
@@ -88,7 +88,7 @@ fun LocateScreen(
                         "pushFailed" -> "Couldn't reach the device — showing last known" to FindlyStatusTone.Warning
                         else -> "Request expired" to FindlyStatusTone.Neutral
                     }
-                    FindlyStatusChip(label = label, tone = tone)
+                    FindlyStatusChip(label = label, tone = tone, showStatusGlyph = true)
 
                     val point = state.fix?.let { it.lat to it.lon } ?: state.lastKnown?.let { it.lat to it.lon }
                     if (point != null) {

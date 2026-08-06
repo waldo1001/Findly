@@ -52,10 +52,15 @@ private fun ComponentGallery(modifier: Modifier = Modifier) {
 
         FindlySectionHeader(title = "Status chips")
         Column(verticalArrangement = Arrangement.spacedBy(FindlyTheme.spacing.xs)) {
-            FindlyStatusChip(label = "ONLINE", tone = FindlyStatusTone.Success)
-            FindlyStatusChip(label = "STALE", tone = FindlyStatusTone.Warning)
-            FindlyStatusChip(label = "PAUSED", tone = FindlyStatusTone.Neutral)
-            FindlyStatusChip(label = "ALERT", tone = FindlyStatusTone.Danger)
+            // Device-status usage: glyph opted in (matches HomeScreen/LocateScreen/MapScreen/
+            // GroupMapScreen's real call sites).
+            FindlyStatusChip(label = "ONLINE", tone = FindlyStatusTone.Success, showStatusGlyph = true)
+            FindlyStatusChip(label = "STALE", tone = FindlyStatusTone.Warning, showStatusGlyph = true)
+            FindlyStatusChip(label = "PAUSED", tone = FindlyStatusTone.Neutral, showStatusGlyph = true)
+            FindlyStatusChip(label = "ALERT", tone = FindlyStatusTone.Danger, showStatusGlyph = true)
+            // General-purpose badge usage (the default): plain label, no glyph — e.g.
+            // GroupDetailScreen's "Code: ABC123" or a validation-error chip.
+            FindlyStatusChip(label = "Code: ABC123", tone = FindlyStatusTone.Success)
         }
 
         FindlySectionHeader(title = "Map marker bubbles")

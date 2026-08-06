@@ -48,6 +48,13 @@ fun FindlySwitchRow(
                     checkedThumbColor = SwitchThumbColor,
                     checkedTrackColor = FindlyTheme.colors.primary,
                     uncheckedThumbColor = SwitchThumbColor,
+                    // Intentionally the decorative `outline` (not `outlineStrong`), matching
+                    // HANDOFF.md exactly — flagged in A26 security review as a possible
+                    // status-by-colour-alone risk and judged NOT one: the native M3 `Switch`
+                    // conveys on/off primarily via thumb position (and its accessibility
+                    // role/state for TalkBack), not track colour, so a low-contrast off-track
+                    // doesn't hide any state a user depends on colour alone to read. Do not
+                    // "fix" this to outlineStrong without re-checking that reasoning.
                     uncheckedTrackColor = FindlyTheme.colors.outline,
                 ),
             )

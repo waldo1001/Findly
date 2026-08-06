@@ -6,6 +6,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.wrapContentHeight
@@ -40,10 +41,10 @@ private val ButtonLabelStyle = TextStyle(fontSize = 16.sp, fontWeight = FontWeig
  * spacing, or corner radius (specs/003-android-client.md §4.3). Geometry/states from design 2a
  * (design/findly-design-system/2a-ember-dusk/HANDOFF.md, `FindlyButton — primary`/`— secondary`):
  * pill radius, 52dp height (48dp via [compact], for inline use in a header row), a themed focus
- * ring, and — Android's own idiom, not cross-ported from iOS's opacity dim — the platform ripple
- * for the pressed state (HANDOFF.md "Interactions & behaviour": "Presses: opacity dim on iOS,
- * ripple on Android. Do not cross-port." — the default `LocalIndication` inside `FindlyTheme`'s
- * `MaterialTheme` wrapper already renders that ripple; nothing extra is wired here).
+ * ring, and the handoff's explicit pressed-fill colors per style — layered underneath the
+ * platform ripple (Android's own idiom, not cross-ported from iOS's opacity dim — HANDOFF.md
+ * "Interactions & behaviour": "Presses: opacity dim on iOS, ripple on Android. Do not
+ * cross-port."), rather than instead of it.
  */
 @Composable
 fun FindlyButton(
@@ -58,6 +59,10 @@ fun FindlyButton(
     val shape = RoundedCornerShape(FindlyTheme.corner.pill)
     val height = if (compact) 48.dp else 52.dp
 
+    val interactionSource = remember { MutableInteractionSource() }
+    val isFocused by interactionSource.collectIsFocusedAsState()
+    val isPressed by interactionSource.collectIsPressedAsState()
+
     val background: Color
     val onBackground: Color
     val borderColor: Color?
@@ -68,24 +73,26 @@ fun FindlyButton(
             borderColor = null
         }
         style == FindlyButtonStyle.Primary -> {
-            background = colors.primary
+            // HANDOFF.md: "Pressed: fill #2C36A0" — implemented as its own per-theme token
+            // (buttonPrimaryPressedFill) rather than at this call site; the platform ripple still
+            // layers on top (Android's own idiom — HANDOFF.md "do not cross-port" — this fill is
+            // in addition to it, not instead of it).
+            background = if (isPressed) colors.buttonPrimaryPressedFill else colors.primary
             onBackground = colors.onPrimary
             borderColor = null
         }
         style == FindlyButtonStyle.Secondary -> {
-            background = Color.Transparent
+            // HANDOFF.md: "Pressed fills surfaceVariant".
+            background = if (isPressed) colors.surfaceVariant else Color.Transparent
             onBackground = colors.onSurface
             borderColor = colors.outlineStrong
         }
-        else -> { // Destructive — Secondary's geometry, danger border + label, never a filled button.
-            background = Color.Transparent
+        else -> { // Destructive — Secondary's geometry+pressed treatment, danger border + label, never a filled button.
+            background = if (isPressed) colors.surfaceVariant else Color.Transparent
             onBackground = colors.danger
             borderColor = colors.danger
         }
     }
-
-    val interactionSource = remember { MutableInteractionSource() }
-    val isFocused by interactionSource.collectIsFocusedAsState()
 
     var shaped = modifier
         .defaultMinSize(minHeight = height)
@@ -94,12 +101,8 @@ fun FindlyButton(
             if (enabled && style == FindlyButtonStyle.Primary) {
                 // level2 shadow, tinted with `primary` at 35% on light only; a plain neutral
                 // shadow in dark (HANDOFF.md: "level2 shadow tinted rgba(58,70,200,.35) on
-                // light").
-                val tint = if (colors.isDark) {
-                    Color.Black.copy(alpha = colors.shadowLevel2Alpha)
-                } else {
-                    colors.primary.copy(alpha = 0.35f)
-                }
+                // light") — buttonPrimaryShadowTint already resolves this per-theme.
+                val tint = colors.buttonPrimaryShadowTint
                 Modifier.shadow(elevation = FindlyTheme.elevation.level2, shape = shape, ambientColor = tint, spotColor = tint)
             } else {
                 Modifier

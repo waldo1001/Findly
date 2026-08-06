@@ -76,7 +76,13 @@ fun FindlyMapMarkerBubble(
  * (possibly wrong) position. HANDOFF.md: "52pt circle, surfaceVariant fill, 2px dashed outline,
  * '?' glyph. Not placed on the map — shown as the row's leading element only when a device has
  * never checked in." Callers are responsible for not placing this at any default coordinate on
- * the actual map (specs/003-android-client.md §12.1) — this component only renders the circle. */
+ * the actual map (specs/003-android-client.md §12.1) — this component only renders the circle.
+ *
+ * A26 code-review fix (Major 4): the dashed ring uses [FindlyTheme.colors.outlineStrong], not the
+ * decorative `outline` HANDOFF.md's prose names — this ring is the primary cue that a device has
+ * never reported, i.e. a stroke that carries meaning, the same reasoning already applied to
+ * `FindlyButton`'s secondary border, `FindlyStatusChip`'s paused border, and
+ * `FindlyTextField`'s default border. */
 @Composable
 private fun NoLocationCircle(modifier: Modifier = Modifier) {
     Box(
@@ -85,7 +91,7 @@ private fun NoLocationCircle(modifier: Modifier = Modifier) {
             .size(52.dp)
             .clip(CircleShape)
             .background(FindlyTheme.colors.surfaceVariant)
-            .dashedRing(color = FindlyTheme.colors.outline, strokeWidth = 2.dp),
+            .dashedRing(color = FindlyTheme.colors.outlineStrong, strokeWidth = 2.dp),
     ) {
         Text(
             text = "?",

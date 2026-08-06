@@ -106,7 +106,7 @@ fun MapScreen(
                                         onClick = { onSelectMember(member.userId, member.displayName) },
                                         trailing = {
                                             val (label, tone) = deviceStatus(device)
-                                            FindlyStatusChip(label = label, tone = tone)
+                                            FindlyStatusChip(label = label, tone = tone, showStatusGlyph = true)
                                         },
                                     )
                                 }

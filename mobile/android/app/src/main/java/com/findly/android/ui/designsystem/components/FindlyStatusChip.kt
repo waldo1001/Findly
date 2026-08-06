@@ -36,10 +36,16 @@ private fun glyphFor(tone: FindlyStatusTone): String = when (tone) {
 /**
  * A small pill-shaped status indicator (device registered / paused / stale / error, …). Reads
  * only [FindlyTheme] tokens (specs/003-android-client.md §4.3). Geometry/states from design 2a
- * (design/findly-design-system/2a-ember-dusk/HANDOFF.md, `StatusChip`): 24dp height, pill radius,
- * a mandatory leading glyph per tone so status never reads by color alone. [label] is prefixed
- * with the glyph rather than callers spelling it out, so every existing call site (screens are
- * out of scope for this task) gets the greyscale-readable treatment for free.
+ * (design/findly-design-system/2a-ember-dusk/HANDOFF.md, `StatusChip`): 24dp height, pill radius.
+ *
+ * **[showStatusGlyph] (A26 code-review fix, Major 3):** HANDOFF.md's "always glyph + word" rule
+ * is written for a short device-status pill (`● ONLINE`, `▲ STALE`, …), not for this
+ * general-purpose small badge — existing call sites also use `FindlyStatusChip` for full-sentence
+ * copy ("When the group ends, everything about it disappears.", "Code: ABC123 · expires …") where
+ * an auto-prepended glyph reads as broken, not accessible. Defaults to `false` (today's plain
+ * behaviour, unchanged for every generic badge call site); the genuine device/location-status
+ * call sites opt in explicitly — see `ui/home/HomeScreen.kt`, `ui/locate/LocateScreen.kt`,
+ * `ui/map/MapScreen.kt`, `ui/groups/GroupMapScreen.kt`.
  *
  * [Success]/[Warning] fills use [FindlyTheme.colors.onDanger] as their text/glyph color rather
  * than a bespoke "on-success"/"on-warning" token — the 11-role contract has neither, and
@@ -52,6 +58,7 @@ fun FindlyStatusChip(
     label: String,
     tone: FindlyStatusTone,
     modifier: Modifier = Modifier,
+    showStatusGlyph: Boolean = false,
 ) {
     val colors = FindlyTheme.colors
     val background: Color
@@ -89,7 +96,7 @@ fun FindlyStatusChip(
     }
 
     Text(
-        text = "${glyphFor(tone)} $label",
+        text = if (showStatusGlyph) "${glyphFor(tone)} $label" else label,
         color = onBackground,
         style = ChipLabelStyle,
         modifier = chipModifier

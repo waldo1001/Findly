@@ -106,7 +106,7 @@ fun GroupMapScreen(
                                 subtitle = if (member.hasLocation) "Updated ${member.recordedAt}" else "No location yet",
                                 trailing = {
                                     val (label, tone) = groupMemberStatus(member)
-                                    FindlyStatusChip(label = label, tone = tone)
+                                    FindlyStatusChip(label = label, tone = tone, showStatusGlyph = true)
                                 },
                             )
                         }

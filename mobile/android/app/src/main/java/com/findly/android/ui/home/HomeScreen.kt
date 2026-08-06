@@ -87,7 +87,7 @@ fun HomeScreen(
                         HomeUiState.RegistrationStatus.Failed ->
                             "Registration failed" to FindlyStatusTone.Danger
                     }
-                    FindlyStatusChip(label = label, tone = tone)
+                    FindlyStatusChip(label = label, tone = tone, showStatusGlyph = true)
                     if (state.registration == HomeUiState.RegistrationStatus.Failed) {
                         FindlyErrorState(
                             title = "Couldn't register this device",
