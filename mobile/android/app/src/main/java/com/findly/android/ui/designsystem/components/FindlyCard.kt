@@ -12,8 +12,12 @@ import com.findly.android.ui.designsystem.FindlyTheme
 
 /**
  * A stateless surface container. Reads only [FindlyTheme] tokens (specs/003-android-client.md
- * §4.3). Elevation is expressed as a [FindlyTheme.elevation]-derived surface tint rather than a
- * shadow, since Material3's tonal-elevation model already uses that approach.
+ * §4.3). Design 2a (design/findly-design-system/2a-ember-dusk/HANDOFF.md, `FindlyCard`): radius
+ * `md` (20dp), fill `surfaceVariant`, no border, no shadow. Cards are containers for rows; rows
+ * inside are meant to be divided by a 1px `outline` line rather than a gap between them — that is
+ * the caller's responsibility (e.g. via [androidx.compose.material3.HorizontalDivider] colored
+ * `FindlyTheme.colors.outline` between children), since this component only owns the container,
+ * not its content's internal layout.
  */
 @Composable
 fun FindlyCard(
@@ -22,7 +26,7 @@ fun FindlyCard(
 ) {
     Column(
         modifier = modifier
-            .clip(RoundedCornerShape(FindlyTheme.corner.lg))
+            .clip(RoundedCornerShape(FindlyTheme.corner.md))
             .background(FindlyTheme.colors.surfaceVariant)
             .padding(FindlyTheme.spacing.md),
         content = content,

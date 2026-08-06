@@ -19,14 +19,17 @@ data class FindlyTypographyTokens(
     val labelSmall: TextStyle,
 )
 
-// Findly design system (design/findly-design-system/) — platform system font (Roboto); sizes in sp.
+// Design 2a — "Ember / Dusk" (design/findly-design-system/2a-ember-dusk/HANDOFF.md) — platform
+// system font (Roboto); sizes in sp. `labelSmall` is additionally uppercase per HANDOFF.md
+// ("12 / 700, uppercase") — Compose `TextStyle` has no text-transform, so callers that use
+// `labelSmall` (`FindlyStatusChip`, `FindlySectionHeader`) uppercase the string itself.
 val FindlyTypography = FindlyTypographyTokens(
-    displayLarge = TextStyle(fontSize = 34.sp, lineHeight = 40.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.68).sp),
-    titleLarge = TextStyle(fontSize = 22.sp, lineHeight = 28.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.22).sp),
-    titleMedium = TextStyle(fontSize = 17.sp, lineHeight = 22.sp, fontWeight = FontWeight.SemiBold),
+    displayLarge = TextStyle(fontSize = 34.sp, lineHeight = 40.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.4).sp),
+    titleLarge = TextStyle(fontSize = 24.sp, lineHeight = 30.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.2).sp),
+    titleMedium = TextStyle(fontSize = 18.sp, lineHeight = 24.sp, fontWeight = FontWeight.SemiBold),
     bodyLarge = TextStyle(fontSize = 17.sp, lineHeight = 24.sp, fontWeight = FontWeight.Normal),
     bodyMedium = TextStyle(fontSize = 15.sp, lineHeight = 20.sp, fontWeight = FontWeight.Normal),
-    labelSmall = TextStyle(fontSize = 12.sp, lineHeight = 16.sp, fontWeight = FontWeight.Medium, letterSpacing = 0.4.sp),
+    labelSmall = TextStyle(fontSize = 12.sp, lineHeight = 16.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.4.sp),
 )
 
 val LocalFindlyTypography = staticCompositionLocalOf { FindlyTypography }

@@ -15,11 +15,11 @@ data class FindlyCornerTokens(
     val pill: Dp,
 )
 
-// Findly design system (design/findly-design-system/) — softer, friendlier corners.
+// Design 2a — "Ember / Dusk" (design/findly-design-system/2a-ember-dusk/HANDOFF.md).
 val FindlyCorner = FindlyCornerTokens(
-    sm = 8.dp,
-    md = 12.dp,
-    lg = 20.dp,
+    sm = 12.dp,
+    md = 20.dp,
+    lg = 28.dp,
     pill = 999.dp,
 )
 
