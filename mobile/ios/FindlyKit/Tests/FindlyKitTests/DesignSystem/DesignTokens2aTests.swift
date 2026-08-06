@@ -44,8 +44,11 @@ struct DesignTokens2aTests {
 
     // MARK: - The two contrast traps the handoff calls out by name
 
-    // Light `outline` (#A9B0CE) is 2.1:1 — decorative hairlines/dividers only. Any stroke that
-    // carries meaning must use this stronger, theme-invariant color (3.4:1) instead.
+    // Light `outline` (#A9B0CE) is decorative-only (measured 1.95:1 vs `surface` — the handoff's
+    // "2.1:1" was slightly overstated; no threshold applies to it either way, it's hairline-only).
+    // Any stroke that carries meaning must use this stronger, theme-invariant color instead —
+    // measured 4.21:1 vs light `surface` / 3.71:1 vs `surfaceVariant`, and 4.13:1 / 3.61:1 in dark
+    // (the handoff's "3.4:1" for this color was understated in the other direction).
     @Test func findlyOutlineStrong_isTheHandoffValue_andDistinctFromDecorativeOutline() {
         #expect(Color.findlyOutlineStrong == Color(hex: 0x6B739A))
         #expect(Color.findlyOutlineStrong != ColorTokens.light.outline)
@@ -64,6 +67,16 @@ struct DesignTokens2aTests {
     @Test func findlyMarkerOnlineDotOn_matchesHandoffValue() {
         // Text drawn on top of the online dot pill (labelSmall "NOW"), per HANDOFF.md MapMarkerBubble.
         #expect(Color.findlyMarkerOnlineDotOn == Color(hex: 0x062418))
+    }
+
+    // FindlyButton's disabled label ("Disabled: fill surfaceVariant, label #8D93AB, no shadow" —
+    // HANDOFF.md FindlyButton primary). Added post-review: this was a literal `Color(hex:
+    // 0x8D93AB)` inline in FindlyButton.swift, violating ColorTokens.swift's own stated invariant
+    // ("Components read these fields ONLY, never a literal Color(...)"). WCAG exempts disabled
+    // controls, so this isn't a contrast fix — just routing an existing value through a named,
+    // additive token so a future palette pass can't silently miss it.
+    @Test func findlyDisabledLabel_matchesHandoffValue() {
+        #expect(Color.findlyDisabledLabel == Color(hex: 0x8D93AB))
     }
 
     // MARK: - Typography (6 roles: size / weight / line-height / tracking)
