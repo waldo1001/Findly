@@ -273,7 +273,14 @@ fun FindlyNavHost(
 
         composable(Destinations.Invites.route) {
             val invitesViewModel: InvitesViewModel = viewModel(factory = InvitesViewModelFactory(container.findlyApiClient))
-            InvitesRoute(viewModel = invitesViewModel, prefillDisplayName = pendingOnboardingDisplayName)
+            InvitesRoute(
+                viewModel = invitesViewModel,
+                prefillDisplayName = pendingOnboardingDisplayName,
+                // A24 (001 §1.5.3): accepting an invite is one of the four profile-bootstrap
+                // paths — register the device immediately rather than leaving it unregistered
+                // until the app cold-starts and re-observes SignedIn.
+                onAccepted = { homeViewModel.retryRegistration() },
+            )
         }
 
         // A21 (001 §3.1, specs/003 §12.2's ProfileNeeded flow): the client's only POST /families
@@ -284,7 +291,11 @@ fun FindlyNavHost(
             CreateFamilyRoute(
                 viewModel = createFamilyViewModel,
                 prefillDisplayName = pendingOnboardingDisplayName,
-                onCreated = { navController.popBackStack() },
+                onCreated = {
+                    // A24: creating a family is one of the four profile-bootstrap paths.
+                    homeViewModel.retryRegistration()
+                    navController.popBackStack()
+                },
             )
         }
 
@@ -331,7 +342,14 @@ fun FindlyNavHost(
             CreateGroupRoute(
                 viewModel = createGroupViewModel,
                 prefillDisplayName = context?.prefillDisplayName.orEmpty(),
-                onCreated = { navController.popBackStack() },
+                onCreated = {
+                    // A24 (001 §1.5.3): creating a group is one of the four profile-bootstrap
+                    // paths — a no-op via HomeStateHolder's retryRegistration() re-probe when the
+                    // caller already had a profile (e.g. reached via Content's ordinary "Create
+                    // group" button rather than ProfileNeeded's first-run one).
+                    homeViewModel.retryRegistration()
+                    navController.popBackStack()
+                },
             )
         }
 
@@ -367,6 +385,9 @@ fun FindlyNavHost(
                 // launchSingleTop avoids stacking a redundant entry on the common in-app path
                 // (Groups -> GroupJoin -> Groups) and is itself a safe no-op if Home isn't present.
                 onJoined = {
+                    // A24 (001 §1.5.3): joining a group is one of the four profile-bootstrap
+                    // paths — same no-op-if-already-registered note as GroupCreate's onCreated.
+                    homeViewModel.retryRegistration()
                     navController.navigate(Destinations.Groups.route) {
                         popUpTo(Destinations.Home.route)
                         launchSingleTop = true

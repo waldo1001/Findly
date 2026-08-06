@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -27,12 +28,19 @@ import com.findly.android.ui.designsystem.components.FindlyTopBar
  * The A2 invites screen (001-api-contract.md §3.3/§3.4, specs/003-android-client.md §12): create
  * an invite (parent, shared out-of-band per §3.3) and accept an invite (join a family, §3.4) —
  * two independent forms on one screen, driven by [InvitesViewModel]/[InvitesStateHolder].
+ *
+ * [onAccepted] (A24) fires once per successful accept — [state.acceptedFamily] is the only
+ * bootstrap-completion signal this screen has, since (unlike [com.findly.android.ui.family.CreateFamilyScreen]/
+ * [com.findly.android.ui.groups.CreateGroupScreen]/[com.findly.android.ui.groups.GroupJoinScreen])
+ * it does not navigate away on success. Deliberately does **not** trigger on [state.createdInvite]
+ * — creating an invite (parent, already-profiled) never bootstraps a profile.
  */
 @Composable
 fun InvitesRoute(
     viewModel: InvitesViewModel,
     modifier: Modifier = Modifier,
     prefillDisplayName: String = "",
+    onAccepted: () -> Unit = {},
 ) {
     val state by viewModel.state.collectAsState()
     InvitesScreen(
@@ -40,6 +48,7 @@ fun InvitesRoute(
         prefillDisplayName = prefillDisplayName,
         onCreateInvite = viewModel::createInvite,
         onAcceptInvite = viewModel::acceptInvite,
+        onAccepted = onAccepted,
         modifier = modifier,
     )
 }
@@ -51,6 +60,7 @@ fun InvitesScreen(
     prefillDisplayName: String = "",
     onCreateInvite: (role: String, emailHint: String?) -> Unit = { _, _ -> },
     onAcceptInvite: (inviteCode: String, displayName: String) -> Unit = { _, _ -> },
+    onAccepted: () -> Unit = {},
 ) {
     var selectedRole by remember { mutableStateOf("member") }
     var emailHint by remember { mutableStateOf("") }
@@ -58,6 +68,10 @@ fun InvitesScreen(
     // A21: seeded from the profile-less first-run screen's shared display-name entry
     // (GroupsListScreen's ProfileNeeded branch) when reached from "I have an invite code".
     var displayName by remember { mutableStateOf(prefillDisplayName) }
+
+    LaunchedEffect(state.acceptedFamily) {
+        if (state.acceptedFamily != null) onAccepted()
+    }
 
     Column(modifier = modifier.fillMaxSize()) {
         FindlyTopBar(title = "Invites")

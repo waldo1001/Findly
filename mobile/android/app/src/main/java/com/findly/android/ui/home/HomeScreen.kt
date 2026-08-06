@@ -66,6 +66,18 @@ fun HomeScreen(
                     FindlyButton(text = "Sign in", onClick = onSignIn)
                 }
 
+                // A24 (001 §1.5.3): a brand-new user has no profile yet — this is onboarding, not
+                // a registration failure, so it gets FindlyEmptyState (not FindlyErrorState) and a
+                // path straight to the same GroupsListScreen ProfileNeeded first-run flow A21
+                // built (specs/003 §12.2), which is where the four bootstrap paths actually live.
+                is HomeUiState.ProfileNeeded -> {
+                    FindlyEmptyState(
+                        title = "Welcome to Findly",
+                        message = "Create or join a family, or start a temporary group to get going.",
+                    )
+                    FindlyButton(text = "Get started", onClick = { onNavigate(Destinations.Groups.route) })
+                }
+
                 is HomeUiState.SignedIn -> {
                     val (label, tone) = when (state.registration) {
                         HomeUiState.RegistrationStatus.Registering ->

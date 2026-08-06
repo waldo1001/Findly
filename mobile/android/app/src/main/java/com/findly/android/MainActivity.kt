@@ -215,6 +215,7 @@ class MainActivity : ComponentActivity() {
                         container.authProvider,
                         container.deviceRegistrar,
                         container.pushTokenProvider,
+                        container.findlyApiClient,
                     ),
                 )
                 // Sign-in navigation lives inside FindlyNavHost itself (specs/003 §7, §12) — it
