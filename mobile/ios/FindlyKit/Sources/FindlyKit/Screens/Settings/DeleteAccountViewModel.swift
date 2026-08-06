@@ -27,9 +27,9 @@ import Foundation
 /// fresh session lets `user.delete()` succeed. No in-place re-authentication sub-flow is built.
 /// `signOutForRetry()` also runs `wipeLocalState()` (security review addition — the backend account
 /// is already gone by this point, so this device's location/geofence local state has no live
-/// account to belong to either); `deviceIdProvider`/`exportArtifactStore` are deliberately left
-/// alone here, same as before — they're only cleared once `wipeLocalStateAndComplete()` confirms
-/// the account is FULLY torn down, including client-side.
+/// account to belong to either); `deviceIdProvider`/`exportArtifactStore`/`appVersionTracker`
+/// (I25) are deliberately left alone here, same as before — they're only cleared once
+/// `wipeLocalStateAndComplete()` confirms the account is FULLY torn down, including client-side.
 @MainActor
 public final class DeleteAccountViewModel: ObservableObject {
     public enum Phase: Equatable {
@@ -41,10 +41,11 @@ public final class DeleteAccountViewModel: ObservableObject {
         case firebaseDeleteFailed
         /// `signOutForRetry()` ran — the screen navigates to sign-in, same as `.completed`.
         /// Location/geofence local state WAS wiped (`wipeLocalState()`, security review addition —
-        /// the backend account is already gone by this point); `deviceId`/export artifact were NOT
-        /// (the account isn't confirmed torn down client-side yet) — the user re-opens this screen
-        /// after signing back in to finish (a no-op backend call + a now-succeeding Firebase
-        /// delete), at which point `wipeLocalStateAndComplete()` clears those too.
+        /// the backend account is already gone by this point); `deviceId`/export artifact/
+        /// app-version-tracker entry (I25) were NOT (the account isn't confirmed torn down
+        /// client-side yet) — the user re-opens this screen after signing back in to finish (a
+        /// no-op backend call + a now-succeeding Firebase delete), at which point
+        /// `wipeLocalStateAndComplete()` clears those too.
         case signedOutForRetry
         /// Both steps succeeded and local state has been wiped — the screen navigates to sign-in.
         case completed
@@ -57,6 +58,13 @@ public final class DeleteAccountViewModel: ObservableObject {
     private let authProvider: AuthProviding
     private let deviceIdProvider: DeviceIdProviding
     private let exportArtifactStore: ExportArtifactStoring
+    /// specs/008-privacy-endpoints.md §1.3, specs/004-ios-client.md §3.6 (I25) — I24 made this
+    /// load-bearing for `DeviceRegistrationService.registerOrUpdate()`'s probe-skip decision, but
+    /// this view model previously never cleared it, so a completed account deletion left a stale
+    /// "this device has registered before" bit behind for the uid. Cleared alongside
+    /// `deviceIdProvider` in `wipeLocalStateAndComplete()` — see that method's doc and this type's
+    /// top doc for why NOT in `signOutForRetry()`.
+    private let appVersionTracker: AppVersionRegistrationTracking
     /// **Post-review addition (security review, High finding).** The single consolidated
     /// `LocationRuntimeContainer.wipeLocalState()` call, injected as a closure rather than this
     /// view model taking `fixQueue`/`geofenceEventQueue`/`geofenceConfigStore` directly (I11's
@@ -75,12 +83,14 @@ public final class DeleteAccountViewModel: ObservableObject {
     public init(
         apiClient: FindlyAPIClient, authProvider: AuthProviding, deviceIdProvider: DeviceIdProviding,
         exportArtifactStore: ExportArtifactStoring = InMemoryExportArtifactStore(),
+        appVersionTracker: AppVersionRegistrationTracking,
         wipeLocalState: @escaping () async -> Void
     ) {
         self.apiClient = apiClient
         self.authProvider = authProvider
         self.deviceIdProvider = deviceIdProvider
         self.exportArtifactStore = exportArtifactStore
+        self.appVersionTracker = appVersionTracker
         self.wipeLocalState = wipeLocalState
     }
 
@@ -146,6 +156,15 @@ public final class DeleteAccountViewModel: ObservableObject {
     private func wipeLocalStateAndComplete() async {
         if let uid = pendingWipeUserId {
             deviceIdProvider.clearDeviceId(forUserId: uid)
+            // I25 (specs/008 §1.3, specs/004 §3.6) — same per-uid identity bit as
+            // `deviceIdProvider` above, cleared alongside it for the same reason: left stale, a
+            // later sign-in on this same uid would carry a false "this device has already
+            // registered" signal into `DeviceRegistrationService.registerOrUpdate()`'s probe-skip
+            // decision (I24), for a user whose profile this call just erased. Harmless today only
+            // because `registerOrUpdate()` separately maps a genuine `PROFILE_NOT_FOUND` from
+            // `POST /devices` to the same typed error every caller already treats as expected — this
+            // clears it at the tracker's own write site instead of relying solely on that.
+            appVersionTracker.clearLastRegisteredAppVersion(forUserId: uid)
         }
         // Post-review change (security review, High finding) — was three separate ad-hoc clear
         // calls (fixQueue/geofenceEventQueue/geofenceConfigStore) that had already drifted out of
