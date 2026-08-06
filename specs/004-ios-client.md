@@ -66,12 +66,12 @@ The visual design MUST be fully replaceable later without touching any logic, na
 | `onDanger` | `#FFFFFF` | `#2A0708` |
 | `success` | `#10714A` | `#52E39B` |
 | `warning` | `#8A5A00` | `#FFC44D` |
-| `outline` | `#A9B0CE` (2.1:1 — **decorative hairlines/dividers only**) | `#3A4463` (3:1+, usable for meaningful strokes too) |
+| `outline` | `#A9B0CE` (2.1:1 — **decorative hairlines/dividers only**) | `#3A4463` (**also decorative only — see correction below**) |
 
-Two rules the handoff calls out explicitly and review checks:
+Two rules the handoff calls out explicitly and review checks, **both corrected post-review** (independently verified 2026-08-06, WebAIM formula sanity-checked against `#767676`-on-`#FFFFFF` = 4.54:1; both were errors in the handoff document itself):
 
-1. Light `outline` is 2.1:1 and legal only for decorative hairlines/dividers. Any stroke that carries meaning (unselected control border, focus ring, input outline) uses `Color.findlyOutlineStrong` (`#6B739A`, 3.4:1) instead. Dark `outline` itself clears 3:1 and serves both purposes.
-2. The dot inside a `primary` marker bubble is `Color.findlyMarkerOnlineDot` (`#52E39B`) in **both** themes (5.4:1 on `#3A46C8`). Light-theme `success` (`#10714A`) measures 1.2:1 there and must never be used for it.
+1. Light `outline` is 2.1:1 and legal only for decorative hairlines/dividers. Any stroke that carries meaning (unselected control border, focus ring, input outline) uses `theme.outlineStrong` (`#6B739A`, 3.4:1-class) instead. **Correction:** the handoff claims dark `outline` (`#3A4463`) "clears 3:1" and can double for both purposes — measured, it does not (1.99:1 vs dark `surface` `#0B0F1C`, 1.74:1 vs `surfaceVariant` `#161D33`). Dark therefore uses the SAME `#6B739A` as light for meaningful strokes (4.13:1 vs `surface`, 3.61:1 vs `surfaceVariant` — both clear 3:1); dark `outline` itself stays decorative-only, same as light.
+2. The dot inside a `primary` marker bubble's "● NOW" pill is `Color.findlyMarkerOnlineDot` (`#52E39B`) — light-theme `success` (`#10714A`) measures 1.2:1 there and must never be used for it. **Correction:** the handoff claims `#52E39B` is "5.4:1 in both themes" against `primary` — independently remeasured at 4.44:1 against LIGHT `primary` (`#3A46C8`; the handoff's number was also slightly off) but only 1.83:1 against DARK `primary` (`#7C8BFF`), which fails. Dark inverts the badge instead of reusing light's fill/label pairing: fill `#0B3B26` (vs dark `primary` = 4.19:1), label `#52E39B` (on that fill = 7.69:1). See `Theme.markerOnlineBadgeFill`/`Label`.
 
 **Typography** (`TypographyTokens`, a `TypeStyle { size: CGFloat, weight: Font.Weight, lineHeight: CGFloat, tracking: CGFloat }` per role, identical across schemes — pt on iOS, system font only):
 
