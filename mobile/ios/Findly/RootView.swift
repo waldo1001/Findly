@@ -107,6 +107,14 @@ struct RootView: View {
         self.onSignedIn = onSignedIn
         // specs/009 §7. Built from the container's read-only seams rather than a second
         // CLLocationManager, so the authorization this reports is the one the capture stack uses.
+        //
+        // I31 fix (mirrors A25's Major 2 / the I26 pattern): `disclosureStore` used to be a
+        // STANDALONE `UserDefaultsPermissionDisclosureStore()` built right here — a different
+        // instance from anything `LocationRuntimeContainer.wipeLocalState()` could reach, so its
+        // documented "part of the account-deletion local wipe" comment was a promise nothing kept.
+        // Now it is `locationRuntimeContainer.permissionDisclosureStore` — the SAME instance the
+        // container's own `wipeLocalState()` clears — so this view model and the wipe path can
+        // never disagree about what has been acknowledged/declined.
         _permissionFlow = StateObject(wrappedValue: PermissionFlowViewModel(
             authorization: { [weak locationRuntimeContainer] in
                 locationRuntimeContainer?.locationAuthorization ?? .notDetermined
@@ -114,7 +122,7 @@ struct RootView: View {
             requiresBackground: { [weak locationRuntimeContainer] in
                 locationRuntimeContainer?.requiresBackgroundLocation ?? false
             },
-            disclosureStore: UserDefaultsPermissionDisclosureStore(),
+            disclosureStore: locationRuntimeContainer.permissionDisclosureStore,
             requestForeground: { [weak locationRuntimeContainer] in
                 locationRuntimeContainer?.requestForegroundAuthorization()
             },
@@ -130,7 +138,9 @@ struct RootView: View {
         VStack(spacing: 0) {
             PermissionBannerView(
                 banner: permissionFlow.banner,
+                reopensDisclosure: permissionFlow.bannerReopenKind != nil,
                 onOpenSettings: { openSystemSettings() },
+                onReopenDisclosure: { permissionFlow.reopenDisclosure() },
                 onDismiss: { permissionFlow.dismissBanner() }
             )
             content

@@ -189,6 +189,13 @@ struct FindlyApp: App {
             geofenceConfigStore: UserDefaultsGeofenceConfigStateStore(),
             geofenceEventStore: geofenceEventStore,
             lastQueuedFixAtStore: UserDefaultsLastQueuedFixAtStore(),
+            // specs/009-device-runtime.md §7 (I31) — the one, real, `UserDefaults`-backed instance.
+            // `RootView` reads this SAME instance back (`locationRuntimeContainer.
+            // permissionDisclosureStore`) for its `PermissionFlowViewModel`, instead of
+            // constructing a second, disconnected store the way it used to (the I26 pattern this
+            // task fixes) — see `LocationRuntimeContainer.wipeLocalState()`'s doc for why sharing
+            // one instance is what makes the account-deletion wipe's clear() a live call.
+            permissionDisclosureStore: UserDefaultsPermissionDisclosureStore(),
             isPermissionGranted: { [weak locationProvider] in locationProvider?.isAuthorized ?? false },
             // specs/009 §9: 404 DEVICE_NOT_FOUND -> stop the schedule, clear local device state,
             // re-run registration. `onSignedIn` below (I12) now also explicitly registers on first

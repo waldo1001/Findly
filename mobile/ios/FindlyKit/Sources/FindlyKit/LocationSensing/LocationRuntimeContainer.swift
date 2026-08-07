@@ -52,6 +52,12 @@ public final class LocationRuntimeContainer {
     // at all. `wipeLocalState()` below needs it directly for the unregister-all half of the fix.
     private let geofenceRegistrar: GeofenceRegistering
 
+    /// specs/009 §7 (I31, mirrors A25's Major 2) — the SAME instance the app target's
+    /// `PermissionFlowViewModel` reads/writes, exposed here (not built standalone in `RootView`,
+    /// the exact I26 disconnect) so `wipeLocalState()` below can be its clear()'s one real caller
+    /// on the account-deletion path, instead of a documented-but-uncalled promise.
+    public let permissionDisclosureStore: PermissionDisclosureStateStoring
+
     /// Consecutive-transient-failure counter for `BackoffPolicy` (specs/009 §9) — reset to 0 on
     /// any non-retry outcome. In-memory only: a process restart naturally resets backoff, which is
     /// fine (spec is silent on this surviving restart, unlike the batch identity in `FixStoring`).
@@ -119,6 +125,7 @@ public final class LocationRuntimeContainer {
         geofenceConfigStore: GeofenceConfigStateStoring = InMemoryGeofenceConfigStateStore(),
         geofenceEventStore: GeofenceEventQueueStoring = InMemoryGeofenceEventQueueStore(),
         lastQueuedFixAtStore: LastQueuedFixAtStoring = InMemoryLastQueuedFixAtStore(),
+        permissionDisclosureStore: PermissionDisclosureStateStoring = InMemoryPermissionDisclosureStore(),
         isPermissionGranted: @escaping () -> Bool = { false },
         batteryLevelProvider: @escaping () -> Int = { 100 },
         onReRegisterDevice: @escaping () async -> Void = {},
@@ -129,6 +136,7 @@ public final class LocationRuntimeContainer {
         self.stateStore = stateStore
         self.geofenceConfigStore = geofenceConfigStore
         self.geofenceRegistrar = geofenceRegistrar
+        self.permissionDisclosureStore = permissionDisclosureStore
 
         let queue = FixQueue(store: fixStore)
         self.fixQueue = queue
@@ -343,6 +351,16 @@ public final class LocationRuntimeContainer {
     /// everything". This is why `clear()` runs as this method's **first** step, synchronously,
     /// before any `await`.
     ///
+    /// **I31 addition (mirrors A25's Major 2): also clears `permissionDisclosureStore`.** The
+    /// disclosure acknowledgement/decline state was documented, from the moment it was written
+    /// (`PermissionDisclosureStateStoring.clear()`'s own doc comment), as "part of the
+    /// account-deletion local wipe" — but until this fix nothing on the actual wipe path called it:
+    /// `RootView` built a standalone `UserDefaultsPermissionDisclosureStore()` disconnected from
+    /// this container entirely (I26's exact pattern — a documented clear that nothing calls). Now
+    /// this container owns the one instance (`permissionDisclosureStore`, injected here and read
+    /// back by the app target for `PermissionFlowViewModel`), so this step is a real, live-called
+    /// step of the same wipe every other local store already goes through.
+    ///
     /// Idempotent-safe to call more than once (every step it delegates to already is).
     public func wipeLocalState() async {
         // Post-review fix (concurrency re-review): `stateStore.clear()` MUST run FIRST, before
@@ -368,6 +386,7 @@ public final class LocationRuntimeContainer {
         await fixQueue.clearAll()
         await geofenceEventQueue.clearAll()
         geofenceConfigStore.clear()
+        permissionDisclosureStore.clear()
     }
 
     /// specs/009 §4: "at least every 6 hours" — the ONE explicit cadence number the spec gives for
