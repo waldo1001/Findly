@@ -117,52 +117,56 @@ jobs:
         env:
           IOS_GOOGLE_SERVICE_INFO_PLIST: ${{ secrets.IOS_GOOGLE_SERVICE_INFO_PLIST }}
         run: |
-          # H10 follow-up, 2026-08-07. The placeholder below was harmless while this job only
-          # COMPILED. H10 turned the same job into the one that uploads to TestFlight, so build
-          # 170 shipped to a real device with a fake Firebase config — FirebaseApp.configure()
-          # raised an NSException and the app aborted during App.main(). The step's own comment
-          # had predicted exactly this ("so this job doesn't silently start depending on an
-          # untracked, gitignored file the moment that dependency is added"); the dependency
-          # landed and nobody revisited it. Real config now comes from a secret; the placeholder
-          # survives only so forks and secret-less PRs still compile.
+          # H10 follow-up, 2026-08-07. Harmless while this job only COMPILED; H10 made the same
+          # job upload to TestFlight, so build 170 reached a real iPhone with a fake Firebase
+          # config and aborted at launch (FirebaseApp.configure() raised an NSException inside
+          # App.main()). This step's own earlier comment predicted it; the dependency landed and
+          # nobody revisited it. Real config comes from a secret now; the placeholder survives
+          # only so forks and secret-less PRs still compile.
+          #
+          # The heredoc body and its PLIST terminator MUST stay at this exact indentation. YAML
+          # strips the block's base indent, so these land at column 0 in the real script, which
+          # is what <<'PLIST' requires. Indenting them one level deeper to sit "inside" the else
+          # is what broke run 31172279053 with "syntax error: unexpected end of file".
           if [ -n "$IOS_GOOGLE_SERVICE_INFO_PLIST" ]; then
             echo "$IOS_GOOGLE_SERVICE_INFO_PLIST" | base64 -d > GoogleService-Info.plist
             echo "Using the real GoogleService-Info.plist from secrets."
           else
-            echo "No IOS_GOOGLE_SERVICE_INFO_PLIST secret — writing the CI placeholder (compile-only)."
-            cat > GoogleService-Info.plist <<'PLIST'
-            <?xml version="1.0" encoding="UTF-8"?>
-            <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-            <plist version="1.0">
-            <dict>
-              <key>API_KEY</key>
-              <string>CI-PLACEHOLDER-NOT-A-REAL-API-KEY</string>
-              <key>GCM_SENDER_ID</key>
-              <string>000000000000</string>
-              <key>PLIST_VERSION</key>
-              <string>1</string>
-              <key>BUNDLE_ID</key>
-              <string>com.findly.ios</string>
-              <key>PROJECT_ID</key>
-              <string>findly-ci-placeholder</string>
-              <key>STORAGE_BUCKET</key>
-              <string>findly-ci-placeholder.appspot.com</string>
-              <key>IS_ADS_ENABLED</key>
-              <false/>
-              <key>IS_ANALYTICS_ENABLED</key>
-              <false/>
-              <key>IS_APPINVITE_ENABLED</key>
-              <true/>
-              <key>IS_GCM_ENABLED</key>
-              <true/>
-              <key>IS_SIGNIN_ENABLED</key>
-              <true/>
-              <key>GOOGLE_APP_ID</key>
-              <string>1:000000000000:ios:0000000000000000000000</string>
-            </dict>
-            </plist>
-            PLIST
+          echo "No IOS_GOOGLE_SERVICE_INFO_PLIST secret — writing the CI placeholder (compile-only)."
+          cat > GoogleService-Info.plist <<'PLIST'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>API_KEY</key>
+            <string>CI-PLACEHOLDER-NOT-A-REAL-API-KEY</string>
+            <key>GCM_SENDER_ID</key>
+            <string>000000000000</string>
+            <key>PLIST_VERSION</key>
+            <string>1</string>
+            <key>BUNDLE_ID</key>
+            <string>com.findly.ios</string>
+            <key>PROJECT_ID</key>
+            <string>findly-ci-placeholder</string>
+            <key>STORAGE_BUCKET</key>
+            <string>findly-ci-placeholder.appspot.com</string>
+            <key>IS_ADS_ENABLED</key>
+            <false/>
+            <key>IS_ANALYTICS_ENABLED</key>
+            <false/>
+            <key>IS_APPINVITE_ENABLED</key>
+            <true/>
+            <key>IS_GCM_ENABLED</key>
+            <true/>
+            <key>IS_SIGNIN_ENABLED</key>
+            <true/>
+            <key>GOOGLE_APP_ID</key>
+            <string>1:000000000000:ios:0000000000000000000000</string>
+          </dict>
+          </plist>
+          PLIST
           fi
+          plutil -lint GoogleService-Info.plist
       # Real build (not just a structure check): compiles the Findly app target + links FindlyKit
       # as a local SPM dependency. A pinned device name + `OS:latest` (the previous form) broke
       # when the runner image's newest simulator runtime (18.2) stopped pairing with "iPhone 15"
@@ -218,9 +222,9 @@ jobs:
       # from the new optional BUILD_NUMBER override above — same archive/export/upload steps a
       # developer laptop already ran manually.
       # Refuse to upload a build carrying the CI placeholder Firebase config. Build 170 reached
-      # a real device that way and aborted at launch; a green pipeline that ships an
-      # unlaunchable app is worse than a red one. Checks the plist that was actually staged for
-      # the build, not the secret, so it catches a decode failure too.
+      # a real device that way and aborted at launch; a green pipeline that ships an unlaunchable
+      # app is worse than a red one. Inspects the plist the build actually staged, so a failed
+      # base64 decode is caught too.
       - name: refuse to ship a placeholder Firebase config
         if: github.ref == 'refs/heads/main'
         run: |
