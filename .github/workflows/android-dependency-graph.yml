@@ -66,7 +66,7 @@ jobs:
       # the same MIT-licensed, open-source caching v4 always used.
       - uses: gradle/actions/setup-gradle@v6
         with:
-          gradle-version: "9.4.1"
+          gradle-version: "9.6.1"
           cache-provider: basic
           dependency-graph: generate-and-submit
       # H1 (specs/003 §13): the google-services plugin needs app/google-services.json present to

@@ -69,11 +69,11 @@ jobs:
       # input exists at all — caching was unconditionally open-source).
       - uses: gradle/actions/setup-gradle@v6
         with:
-          gradle-version: "9.4.1"
+          gradle-version: "9.6.1"
           cache-provider: basic
       - name: generate Gradle wrapper
         working-directory: mobile/android
-        run: gradle wrapper --gradle-version 9.4.1 --distribution-type bin
+        run: gradle wrapper --gradle-version 9.6.1 --distribution-type bin
       # A14 (docs/implementation-handoff.md, mobile/android/app/build.gradle.kts): compileSdk/
       # targetSdk 37 needs the `platforms;android-37.0` SDK component. AGP *can* auto-download
       # missing components on demand (verified locally — see A14's report), but that path is
