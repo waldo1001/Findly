@@ -225,7 +225,11 @@ class MainActivity : ComponentActivity() {
                     // kind means the OS was never actually asked (the user only declined the in-app
                     // explanation), so the explicit action instead forgets that decline and reopens
                     // the full-screen disclosure, which can still lead to a real OS prompt.
-                    val reopenKind = PermissionFlowPolicy.bannerReopenKind(permissionState.authorization)
+                    val reopenKind = PermissionFlowPolicy.bannerReopenKind(
+                        authorization = permissionState.authorization,
+                        foregroundDisclosureAcknowledged = permissionState.foregroundAcknowledged,
+                        backgroundDisclosureAcknowledged = permissionState.backgroundAcknowledged,
+                    )
                     FindlyPermissionBanner(
                         banner = PermissionFlowPolicy.banner(
                             authorization = permissionState.authorization,

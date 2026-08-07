@@ -289,31 +289,87 @@ class PermissionFlowPolicyTest {
     }
 
     // --- A25 (009 §7): the banner's action button re-opens the full-screen disclosure, except when
-    // the OS itself has already irrevocably refused — there, only system settings can help. ---
+    // the OS itself has already been asked for that kind — there, only system settings can help. ---
 
     @Test
     fun `an OS-level denial routes the banner action to system settings, not the disclosure`() {
-        assertEquals(null, PermissionFlowPolicy.bannerReopenKind(LocationAuthorization.DENIED))
+        assertEquals(
+            null,
+            PermissionFlowPolicy.bannerReopenKind(
+                authorization = LocationAuthorization.DENIED,
+                foregroundDisclosureAcknowledged = false,
+                backgroundDisclosureAcknowledged = false,
+            ),
+        )
     }
 
     @Test
     fun `a never-asked foreground state reopens the foreground disclosure`() {
         assertEquals(
             PermissionDisclosureKind.FOREGROUND,
-            PermissionFlowPolicy.bannerReopenKind(LocationAuthorization.NOT_DETERMINED),
+            PermissionFlowPolicy.bannerReopenKind(
+                authorization = LocationAuthorization.NOT_DETERMINED,
+                foregroundDisclosureAcknowledged = false,
+                backgroundDisclosureAcknowledged = false,
+            ),
+        )
+    }
+
+    // --- Code-review fix (A25 round 1, Major 1): FOREGROUND_ONLY's two sub-states must route
+    // differently — the dominant real-world one is "the OS already refused", not "never asked". ---
+
+    @Test
+    fun `a when-in-use state with the background disclosure only declined (OS never asked) reopens it`() {
+        assertEquals(
+            PermissionDisclosureKind.BACKGROUND,
+            PermissionFlowPolicy.bannerReopenKind(
+                authorization = LocationAuthorization.WHEN_IN_USE,
+                foregroundDisclosureAcknowledged = true,
+                backgroundDisclosureAcknowledged = false,
+            ),
         )
     }
 
     @Test
-    fun `a when-in-use state reopens the background disclosure`() {
+    fun `a when-in-use state with the background disclosure acknowledged (OS already asked and refused) routes to settings, not a dead-end reopen`() {
+        // Reopening here would compute RequestBackgroundUpgrade from nextStep() — a step
+        // MainActivity never consumes (launch() only fires from the disclosure's onContinue) — so
+        // the banner would silently re-render with no forward progress. Pre-A25 this state's
+        // action was unconditionally "Open settings" and worked; this must not regress that.
         assertEquals(
-            PermissionDisclosureKind.BACKGROUND,
-            PermissionFlowPolicy.bannerReopenKind(LocationAuthorization.WHEN_IN_USE),
+            null,
+            PermissionFlowPolicy.bannerReopenKind(
+                authorization = LocationAuthorization.WHEN_IN_USE,
+                foregroundDisclosureAcknowledged = true,
+                backgroundDisclosureAcknowledged = true,
+            ),
+        )
+    }
+
+    @Test
+    fun `a not-determined state with the foreground disclosure acknowledged also routes to settings`() {
+        // Not reachable via LocationAuthorizationResolver today (acknowledged-but-not-granted maps
+        // to DENIED, never NOT_DETERMINED) — asserted anyway so this function does not silently
+        // depend on that invariant holding forever.
+        assertEquals(
+            null,
+            PermissionFlowPolicy.bannerReopenKind(
+                authorization = LocationAuthorization.NOT_DETERMINED,
+                foregroundDisclosureAcknowledged = true,
+                backgroundDisclosureAcknowledged = false,
+            ),
         )
     }
 
     @Test
     fun `fully authorized has no reopen action (no banner is shown anyway)`() {
-        assertEquals(null, PermissionFlowPolicy.bannerReopenKind(LocationAuthorization.ALWAYS))
+        assertEquals(
+            null,
+            PermissionFlowPolicy.bannerReopenKind(
+                authorization = LocationAuthorization.ALWAYS,
+                foregroundDisclosureAcknowledged = true,
+                backgroundDisclosureAcknowledged = true,
+            ),
+        )
     }
 }

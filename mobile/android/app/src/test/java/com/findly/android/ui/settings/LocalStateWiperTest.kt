@@ -2,6 +2,8 @@ package com.findly.android.ui.settings
 
 import com.findly.android.fakes.InMemoryDeviceIdStore
 import com.findly.android.fakes.InMemoryGeofenceConfigStateStore
+import com.findly.android.location.InMemoryPermissionDisclosureStore
+import com.findly.android.location.PermissionDisclosureKind
 import com.findly.android.location.settings.CachedGeofenceConfig
 import com.findly.android.queue.FixBatch
 import com.findly.android.queue.FixQueueStore
@@ -12,6 +14,7 @@ import com.findly.android.queue.QueuedFix
 import com.findly.android.queue.QueuedGeofenceEvent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -29,12 +32,14 @@ class LocalStateWiperTest {
         exportArtifactCleaner: ExportArtifactCleaner = ExportArtifactCleaner {},
         geofenceEventQueueStore: InMemoryGeofenceEventQueueStore = InMemoryGeofenceEventQueueStore(),
         geofenceConfigStateStore: InMemoryGeofenceConfigStateStore = InMemoryGeofenceConfigStateStore(),
+        permissionDisclosureStore: InMemoryPermissionDisclosureStore = InMemoryPermissionDisclosureStore(),
     ) = DefaultLocalStateWiper(
         fixQueueStore,
         deviceIdStore,
         exportArtifactCleaner,
         geofenceEventQueueStore,
         geofenceConfigStateStore,
+        permissionDisclosureStore,
     )
 
     @Test
@@ -103,6 +108,22 @@ class LocalStateWiperTest {
         assertNull(geofenceConfigStateStore.current())
     }
 
+    /** Code-review fix (A25 round 1, Major 2): `permissionDisclosureStore.clear()` previously had
+     * NO caller in production code at all — the spec's own MUST ("a different user on the same
+     * device MUST see the disclosure again", specs/009 §7 A25 paragraph) was unenforced. Same shape
+     * as the iOS I26 mistake ("a documented clear that nothing calls"). */
+    @Test
+    fun `wipeAll also clears both acknowledgement and decline state from the permission disclosure store`() = runTest {
+        val permissionDisclosureStore = InMemoryPermissionDisclosureStore()
+        permissionDisclosureStore.acknowledge(PermissionDisclosureKind.FOREGROUND)
+        permissionDisclosureStore.decline(PermissionDisclosureKind.BACKGROUND)
+
+        wiper(permissionDisclosureStore = permissionDisclosureStore).wipeAll("uid-1")
+
+        assertFalse(permissionDisclosureStore.isAcknowledged(PermissionDisclosureKind.FOREGROUND))
+        assertFalse(permissionDisclosureStore.isDeclined(PermissionDisclosureKind.BACKGROUND))
+    }
+
     /** Security-review fix (post-A11 review): five unguarded sequential suspend calls meant one
      * throwing (e.g. a Room `deleteAll()` disk I/O error) skipped everything after it - worst case,
      * the family's named places (home, school, ...) stayed cached on disk after an account
@@ -121,6 +142,8 @@ class LocalStateWiperTest {
             QueuedGeofenceEvent(eventId = "evt-1", geofenceId = "gf_home", transition = "enter", recordedAt = "2026-07-19T09:00:00Z"),
         )
         val geofenceConfigStateStore = InMemoryGeofenceConfigStateStore(CachedGeofenceConfig("\"1\"", emptyList()))
+        val permissionDisclosureStore = InMemoryPermissionDisclosureStore()
+        permissionDisclosureStore.acknowledge(PermissionDisclosureKind.FOREGROUND)
 
         DefaultLocalStateWiper(
             throwingFixQueueStore,
@@ -128,6 +151,7 @@ class LocalStateWiperTest {
             exportArtifactCleaner,
             geofenceEventQueueStore,
             geofenceConfigStateStore,
+            permissionDisclosureStore,
         ).wipeAll("uid-1")
 
         assertTrue("the throwing step was actually attempted", throwingFixQueueStore.clearAllCallCount > 0)
@@ -135,6 +159,10 @@ class LocalStateWiperTest {
         assertEquals("export artifacts are cleared too", 1, exportCleanerCallCount)
         assertEquals("the geofence-event queue is cleared too", 0, geofenceEventQueueStore.pendingCount())
         assertNull("the geofence config cache is cleared too - the most sensitive of the new stores", geofenceConfigStateStore.current())
+        assertFalse(
+            "the permission disclosure store is cleared too",
+            permissionDisclosureStore.isAcknowledged(PermissionDisclosureKind.FOREGROUND),
+        )
     }
 
     @Test
@@ -165,6 +193,7 @@ class LocalStateWiperTest {
             ExportArtifactCleaner {},
             InMemoryGeofenceEventQueueStore(),
             throwingConfigStore,
+            InMemoryPermissionDisclosureStore(),
         ).wipeAll("uid-1")
 
         assertEquals("the fix queue - which runs BEFORE the throwing step - still gets cleared", 0, fixQueueStore.pendingCount())

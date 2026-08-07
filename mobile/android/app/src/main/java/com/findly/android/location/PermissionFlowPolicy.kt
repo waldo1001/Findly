@@ -151,16 +151,35 @@ object PermissionFlowPolicy {
 
     /**
      * Which disclosure kind an explicit action on the banner should reopen, or `null` when the OS
-     * itself has already irrevocably refused and system settings is the only route back (A25,
-     * 009 §7). Android will not show its own dialog again once permanently denied, so reopening the
-     * in-app disclosure there would just dead-end at the same refused `requestPermissions` call;
-     * every other banner-producing state has never actually reached the OS prompt, so reopening the
-     * disclosure can still succeed.
+     * itself has already been asked for that kind and system settings is the only route back
+     * (A25, 009 §7).
+     *
+     * **Code-review fix (A25 round 1, Major 1): `authorization` alone conflates two different
+     * WHEN_IN_USE states.** The FOREGROUND_ONLY banner (WHEN_IN_USE + `requiresBackground`) shows
+     * for two different reasons: the background disclosure was declined (OS never asked — reopening
+     * it can still lead to a real prompt), OR the disclosure was acknowledged and
+     * `backgroundLocationLauncher.launch()` already fired and was refused (the OS was already
+     * asked). Reopening the disclosure in the second case would compute `RequestBackgroundUpgrade`
+     * from [nextStep] — a step [com.findly.android.MainActivity] never consumes (the actual
+     * `launch()` call only happens from the disclosure's `onContinue`), so the banner would
+     * silently re-render with no forward progress — a regression from the pre-A25 behaviour, where
+     * that state's action was unconditionally "Open settings" and worked. [backgroundDisclosureAcknowledged]
+     * disambiguates: acknowledged means the OS was already asked, so route to settings instead.
+     *
+     * The equivalent NOT_DETERMINED + [foregroundDisclosureAcknowledged] case is not reachable in
+     * practice today — [LocationAuthorizationResolver.resolve] maps "acknowledged but not granted"
+     * straight to DENIED, never NOT_DETERMINED — but is accepted here too rather than trusted as an
+     * invariant this function silently depends on.
      */
-    fun bannerReopenKind(authorization: LocationAuthorization): PermissionDisclosureKind? =
-        when (authorization) {
-            LocationAuthorization.NOT_DETERMINED -> PermissionDisclosureKind.FOREGROUND
-            LocationAuthorization.WHEN_IN_USE -> PermissionDisclosureKind.BACKGROUND
-            LocationAuthorization.DENIED, LocationAuthorization.ALWAYS -> null
-        }
+    fun bannerReopenKind(
+        authorization: LocationAuthorization,
+        foregroundDisclosureAcknowledged: Boolean,
+        backgroundDisclosureAcknowledged: Boolean,
+    ): PermissionDisclosureKind? = when (authorization) {
+        LocationAuthorization.NOT_DETERMINED ->
+            if (foregroundDisclosureAcknowledged) null else PermissionDisclosureKind.FOREGROUND
+        LocationAuthorization.WHEN_IN_USE ->
+            if (backgroundDisclosureAcknowledged) null else PermissionDisclosureKind.BACKGROUND
+        LocationAuthorization.DENIED, LocationAuthorization.ALWAYS -> null
+    }
 }
