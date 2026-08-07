@@ -9,19 +9,33 @@ import SwiftUI
 ///
 /// Stateless and presentational like every other component here: what to show is decided by
 /// `PermissionFlowPolicy.banner(...)`, never by this view.
+///
+/// **I31 (mirrors A25):** the action button is one control with two possible jobs, selected by
+/// `reopensDisclosure` — computed by the caller from `PermissionFlowPolicy.bannerReopenKind`. When
+/// the OS permission has already been irrevocably refused, only system settings can fix it
+/// (`onOpenSettings`). Otherwise the OS was never actually asked — the user only declined the
+/// in-app explanation — so the button instead re-opens the full-screen disclosure
+/// (`onReopenDisclosure`), which can still lead to a real OS prompt. A25's round-1 Major 1 was
+/// exactly a dead-end button from a caller that keyed this off authorization status alone.
 public struct PermissionBannerView: View {
     @Environment(\.theme) private var theme
     private let banner: PermissionBanner
+    private let reopensDisclosure: Bool
     private let onOpenSettings: () -> Void
+    private let onReopenDisclosure: () -> Void
     private let onDismiss: () -> Void
 
     public init(
         banner: PermissionBanner,
+        reopensDisclosure: Bool,
         onOpenSettings: @escaping () -> Void,
+        onReopenDisclosure: @escaping () -> Void,
         onDismiss: @escaping () -> Void
     ) {
         self.banner = banner
+        self.reopensDisclosure = reopensDisclosure
         self.onOpenSettings = onOpenSettings
+        self.onReopenDisclosure = onReopenDisclosure
         self.onDismiss = onDismiss
     }
 
@@ -58,9 +72,16 @@ public struct PermissionBannerView: View {
                     .accessibilityLabel("Dismiss")
                 }
 
-                // 009 §7 requires "a route into system settings" — a banner that only states the
-                // problem leaves the user to find Settings themselves, which most will not.
-                FindlyButton("Open Settings", style: .secondary, action: onOpenSettings)
+                // 009 §7 requires "a route into system settings" when the OS has already
+                // irrevocably refused — but I31 (mirrors A25) adds the more common case first: the
+                // OS was never actually asked (only the in-app explanation was declined), where
+                // re-opening the disclosure is the more useful route back than a settings screen
+                // that cannot help.
+                FindlyButton(
+                    reopensDisclosure ? "Review permission" : "Open Settings",
+                    style: .secondary,
+                    action: reopensDisclosure ? onReopenDisclosure : onOpenSettings
+                )
             }
             .padding(theme.spacing.md)
             .background(theme.colors.surfaceVariant)

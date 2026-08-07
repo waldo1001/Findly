@@ -428,6 +428,26 @@ struct LocationRuntimeContainerTests {
         #expect(scheduler.cancelCallCount == 1, "the scheduled BGAppRefreshTask must be canceled")
     }
 
+    /// I31 (mirrors A25's Major 2, 009 §7): the permission-disclosure decline/acknowledgement state
+    /// MUST be wiped by the REAL account-deletion path, not a documented-but-uncalled `clear()` —
+    /// I26's exact pattern. Proving it here (against the container's own `wipeLocalState()`, the
+    /// method `DeleteAccountViewModel`'s `wipeLocalState` closure and the forced-sign-out/
+    /// sign-out-for-retry paths all actually call) is what makes this a live caller, not a promise.
+    @Test func wipeLocalState_clearsThePermissionDisclosureState() async {
+        let store = InMemoryPermissionDisclosureStore()
+        store.acknowledge(.foreground)
+        store.decline(.background)
+        let container = LocationRuntimeContainer(
+            apiClient: FakeAPIClient(), deviceId: { "device-1" },
+            permissionDisclosureStore: store
+        )
+
+        await container.wipeLocalState()
+
+        #expect(store.isAcknowledged(.foreground) == false, "a different user on this device must see the disclosure again")
+        #expect(store.isDeclined(.background) == false, "the decline is consent, not a device-level preference — it must not survive account deletion either")
+    }
+
     @Test func wipeLocalState_calledTwice_isIdempotentSafe() async {
         let registrar = FakeGeofenceRegistering()
         let container = LocationRuntimeContainer(apiClient: FakeAPIClient(), deviceId: { "device-1" }, geofenceRegistrar: registrar)
