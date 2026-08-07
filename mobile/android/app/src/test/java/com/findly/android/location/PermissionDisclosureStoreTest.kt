@@ -60,6 +60,93 @@ class PermissionDisclosureStoreTest {
         assertFalse(store.isAcknowledged(PermissionDisclosureKind.BACKGROUND))
     }
 
+    // --- A25 (009 §7): "Not now" is answered too, and MUST be persisted so the full-screen
+    // disclosure does not auto-re-present on the next cold launch. ---
+
+    @Test
+    fun `nothing is declined initially`() {
+        val store = InMemoryPermissionDisclosureStore()
+
+        assertFalse(store.isDeclined(PermissionDisclosureKind.FOREGROUND))
+        assertFalse(store.isDeclined(PermissionDisclosureKind.BACKGROUND))
+    }
+
+    @Test
+    fun `declining one kind does not decline the other`() {
+        val store = InMemoryPermissionDisclosureStore()
+
+        store.decline(PermissionDisclosureKind.FOREGROUND)
+
+        assertTrue(store.isDeclined(PermissionDisclosureKind.FOREGROUND))
+        assertFalse(store.isDeclined(PermissionDisclosureKind.BACKGROUND))
+    }
+
+    @Test
+    fun `decline is idempotent`() {
+        val store = InMemoryPermissionDisclosureStore()
+
+        store.decline(PermissionDisclosureKind.BACKGROUND)
+        store.decline(PermissionDisclosureKind.BACKGROUND)
+
+        assertTrue(store.isDeclined(PermissionDisclosureKind.BACKGROUND))
+    }
+
+    @Test
+    fun `decline survives independently of acknowledgement`() {
+        // A kind is never both at once in practice, but the store must not conflate the two flags.
+        val store = InMemoryPermissionDisclosureStore()
+
+        store.decline(PermissionDisclosureKind.FOREGROUND)
+
+        assertTrue(store.isDeclined(PermissionDisclosureKind.FOREGROUND))
+        assertFalse(store.isAcknowledged(PermissionDisclosureKind.FOREGROUND))
+    }
+
+    @Test
+    fun `clearDeclined forgets only that kind's decline, for reopening from the banner`() {
+        // A25 (009 §7): an explicit action on the banner re-opens the full-screen disclosure —
+        // implemented by forgetting the prior decline so the flow gate presents it again.
+        val store = InMemoryPermissionDisclosureStore()
+        store.decline(PermissionDisclosureKind.FOREGROUND)
+        store.decline(PermissionDisclosureKind.BACKGROUND)
+
+        store.clearDeclined(PermissionDisclosureKind.FOREGROUND)
+
+        assertFalse(store.isDeclined(PermissionDisclosureKind.FOREGROUND))
+        assertTrue(store.isDeclined(PermissionDisclosureKind.BACKGROUND))
+    }
+
+    @Test
+    fun `clear forgets declines too — part of the account-deletion local wipe`() {
+        val store = InMemoryPermissionDisclosureStore()
+        store.decline(PermissionDisclosureKind.FOREGROUND)
+        store.decline(PermissionDisclosureKind.BACKGROUND)
+
+        store.clear()
+
+        assertFalse(store.isDeclined(PermissionDisclosureKind.FOREGROUND))
+        assertFalse(store.isDeclined(PermissionDisclosureKind.BACKGROUND))
+    }
+
+    @Test
+    fun `the flow gate does not re-present after a persisted decline`() {
+        // The actual bug (A25): "Not now" used to live only in Compose `remember` state, so a
+        // fresh process (cold launch) always saw an empty decline set and re-showed the disclosure.
+        val store = InMemoryPermissionDisclosureStore()
+
+        store.decline(PermissionDisclosureKind.FOREGROUND)
+        val afterColdLaunch = PermissionFlowPolicy.nextStep(
+            authorization = LocationAuthorization.NOT_DETERMINED,
+            foregroundDisclosureAcknowledged = store.isAcknowledged(PermissionDisclosureKind.FOREGROUND),
+            foregroundDisclosureDeclined = store.isDeclined(PermissionDisclosureKind.FOREGROUND),
+            backgroundDisclosureAcknowledged = false,
+            backgroundDisclosureDeclined = false,
+            requiresBackground = false,
+        )
+
+        assertEquals(PermissionFlowStep.None, afterColdLaunch)
+    }
+
     @Test
     fun `the flow gate reads through the store`() {
         // The pairing that matters: an acknowledged disclosure is what lets the policy advance from
@@ -70,14 +157,18 @@ class PermissionDisclosureStoreTest {
         val before = PermissionFlowPolicy.nextStep(
             authorization = LocationAuthorization.NOT_DETERMINED,
             foregroundDisclosureAcknowledged = store.isAcknowledged(PermissionDisclosureKind.FOREGROUND),
+            foregroundDisclosureDeclined = store.isDeclined(PermissionDisclosureKind.FOREGROUND),
             backgroundDisclosureAcknowledged = false,
+            backgroundDisclosureDeclined = false,
             requiresBackground = false,
         )
         store.acknowledge(PermissionDisclosureKind.FOREGROUND)
         val after = PermissionFlowPolicy.nextStep(
             authorization = LocationAuthorization.NOT_DETERMINED,
             foregroundDisclosureAcknowledged = store.isAcknowledged(PermissionDisclosureKind.FOREGROUND),
+            foregroundDisclosureDeclined = store.isDeclined(PermissionDisclosureKind.FOREGROUND),
             backgroundDisclosureAcknowledged = false,
+            backgroundDisclosureDeclined = false,
             requiresBackground = false,
         )
 

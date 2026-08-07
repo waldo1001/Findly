@@ -76,11 +76,19 @@ object PermissionFlowPolicy {
      * [requiresBackground] is whether this device's configured `syncIntervalMinutes` needs
      * background reporting at all (003 §11.3). A device that only reports while open never asks
      * for the background upgrade, and never nags about lacking it.
+     *
+     * **A25 (009 §7): "Not now" is answered too.** [foregroundDisclosureDeclined]/
+     * [backgroundDisclosureDeclined] gate `ShowDisclosure` exactly like the acknowledged flags do —
+     * once a kind has been declined, this returns [PermissionFlowStep.None] rather than re-showing
+     * the disclosure *or* silently promoting the decline into an OS prompt (that would invert §7's
+     * "disclosure precedes the OS prompt" ordering just as badly as skipping the disclosure would).
      */
     fun nextStep(
         authorization: LocationAuthorization,
         foregroundDisclosureAcknowledged: Boolean,
+        foregroundDisclosureDeclined: Boolean,
         backgroundDisclosureAcknowledged: Boolean,
+        backgroundDisclosureDeclined: Boolean,
         requiresBackground: Boolean,
     ): PermissionFlowStep = when (authorization) {
         // The OS dialog is spent. Re-prompting cannot succeed and re-explaining is nagging;
@@ -90,16 +98,17 @@ object PermissionFlowPolicy {
         LocationAuthorization.ALWAYS -> PermissionFlowStep.None
 
         LocationAuthorization.NOT_DETERMINED ->
-            if (foregroundDisclosureAcknowledged) {
-                PermissionFlowStep.RequestForeground
-            } else {
-                PermissionFlowStep.ShowDisclosure(PermissionDisclosureKind.FOREGROUND)
+            when {
+                foregroundDisclosureAcknowledged -> PermissionFlowStep.RequestForeground
+                foregroundDisclosureDeclined -> PermissionFlowStep.None
+                else -> PermissionFlowStep.ShowDisclosure(PermissionDisclosureKind.FOREGROUND)
             }
 
         LocationAuthorization.WHEN_IN_USE ->
             when {
                 !requiresBackground -> PermissionFlowStep.None
                 backgroundDisclosureAcknowledged -> PermissionFlowStep.RequestBackgroundUpgrade
+                backgroundDisclosureDeclined -> PermissionFlowStep.None
                 else -> PermissionFlowStep.ShowDisclosure(PermissionDisclosureKind.BACKGROUND)
             }
     }
@@ -111,10 +120,19 @@ object PermissionFlowPolicy {
      * "dismissible-per-session": a user who waves it away once should still be told, next launch,
      * that this device is not reporting. Persisting dismissal would let a silently broken device
      * stay silently broken forever.
+     *
+     * **A25 (009 §7): [foregroundDisclosureDeclined] closes the gap the auto-re-present fix would
+     * otherwise leave.** Once [nextStep] stops auto-showing a declined foreground disclosure, a
+     * NOT_DETERMINED authorization with no disclosure on screen would otherwise show *nothing at
+     * all* — worse than the old nagging, since the device genuinely cannot report and the banner is
+     * the only thing left saying so. Reuses [PermissionBanner.CANNOT_REPORT] rather than adding a
+     * new state: from the user's point of view, "declined the explanation" and "asked the OS and
+     * was refused" are the same degraded fact — this device is not sharing its location.
      */
     fun banner(
         authorization: LocationAuthorization,
         requiresBackground: Boolean,
+        foregroundDisclosureDeclined: Boolean,
         dismissedThisSession: Boolean,
     ): PermissionBanner {
         if (dismissedThisSession) return PermissionBanner.NONE
@@ -125,9 +143,24 @@ object PermissionFlowPolicy {
             LocationAuthorization.DENIED -> PermissionBanner.CANNOT_REPORT
             LocationAuthorization.WHEN_IN_USE ->
                 if (requiresBackground) PermissionBanner.FOREGROUND_ONLY else PermissionBanner.NONE
-            // NOT_DETERMINED shows nothing: the user has refused nothing yet, and the
-            // disclosure/prompt flow is what should be running instead.
-            LocationAuthorization.ALWAYS, LocationAuthorization.NOT_DETERMINED -> PermissionBanner.NONE
+            LocationAuthorization.NOT_DETERMINED ->
+                if (foregroundDisclosureDeclined) PermissionBanner.CANNOT_REPORT else PermissionBanner.NONE
+            LocationAuthorization.ALWAYS -> PermissionBanner.NONE
         }
     }
+
+    /**
+     * Which disclosure kind an explicit action on the banner should reopen, or `null` when the OS
+     * itself has already irrevocably refused and system settings is the only route back (A25,
+     * 009 §7). Android will not show its own dialog again once permanently denied, so reopening the
+     * in-app disclosure there would just dead-end at the same refused `requestPermissions` call;
+     * every other banner-producing state has never actually reached the OS prompt, so reopening the
+     * disclosure can still succeed.
+     */
+    fun bannerReopenKind(authorization: LocationAuthorization): PermissionDisclosureKind? =
+        when (authorization) {
+            LocationAuthorization.NOT_DETERMINED -> PermissionDisclosureKind.FOREGROUND
+            LocationAuthorization.WHEN_IN_USE -> PermissionDisclosureKind.BACKGROUND
+            LocationAuthorization.DENIED, LocationAuthorization.ALWAYS -> null
+        }
 }

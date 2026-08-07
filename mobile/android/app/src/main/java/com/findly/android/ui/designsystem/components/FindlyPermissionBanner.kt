@@ -29,11 +29,21 @@ import com.findly.android.ui.designsystem.FindlyTheme
  * Stateless like every other component in this package: what to show is decided by
  * [com.findly.android.location.PermissionFlowPolicy.banner], never here. Copy mirrors iOS's
  * `PermissionBannerView`.
+ *
+ * **A25 (009 §7):** the action button is one control with two possible jobs, selected by
+ * [reopensDisclosure] — computed by the caller from
+ * [com.findly.android.location.PermissionFlowPolicy.bannerReopenKind]. When the OS permission has
+ * already been irrevocably refused, only system settings can fix it ([onOpenSettings]). Otherwise
+ * the OS was never actually asked — the user only declined the in-app explanation — so the button
+ * instead re-opens the full-screen disclosure ([onReopenDisclosure]), which can still lead to a
+ * real OS prompt.
  */
 @Composable
 fun FindlyPermissionBanner(
     banner: PermissionBanner,
+    reopensDisclosure: Boolean,
     onOpenSettings: () -> Unit,
+    onReopenDisclosure: () -> Unit,
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -102,12 +112,14 @@ fun FindlyPermissionBanner(
                 )
             }
 
-            // 009 §7 requires "a route into system settings" — a banner that only states the
-            // problem leaves the user to find Settings themselves, which most will not.
+            // 009 §7 requires "a route into system settings" when the OS has already irrevocably
+            // refused — but A25 adds the more common case first: the OS was never actually asked
+            // (only the in-app explanation was declined), where re-opening the disclosure is the
+            // more useful route back than a settings screen that can't help.
             FindlyButton(
-                text = "Open settings",
+                text = if (reopensDisclosure) "Review permission" else "Open settings",
                 style = FindlyButtonStyle.Secondary,
-                onClick = onOpenSettings,
+                onClick = if (reopensDisclosure) onReopenDisclosure else onOpenSettings,
             )
         }
     }
