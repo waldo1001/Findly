@@ -344,7 +344,7 @@ Normative for A2's implementation (no permission-request UI ships in A1 beyond d
 2. If granted, and the device's configured `syncIntervalMinutes` requires background reporting, request `ACCESS_BACKGROUND_LOCATION` as a **separate, later** request (Android 11+ forbids bundling foreground+background in one dialog) — shown only after a dedicated rationale explaining family-tracking background use (Play policy prep, `mobile/android/README.md`).
 3. `syncIntervalMinutes` ∈ {5, 10} (000 §O2) additionally requires the persistent-notification foreground service; ≥15 uses WorkManager periodic work — this determines which permission/consent path §2 above continues into, but the actual foreground-service implementation is A2.
 4. `POST_NOTIFICATIONS` (API 33+) is requested independently, for geofence/locate push alerts.
-5. **Denial handling:** `ACCESS_FINE_LOCATION` denied → app still shows the family map (open system, others' locations unaffected) but this device cannot report; `ACCESS_BACKGROUND_LOCATION` denied → falls back to foreground-only reporting (only while the app is open) with a persistent in-app banner; the rationale flow is re-enterable from device settings (A2 screen).
+5. **Denial handling:** `ACCESS_FINE_LOCATION` denied → app still shows the family map (open system, others' locations unaffected) but this device cannot report; `ACCESS_BACKGROUND_LOCATION` denied → falls back to foreground-only reporting (only while the app is open) with a persistent in-app banner; the rationale flow is re-enterable from device settings (A2 screen) and, per 009 §7 (A25), from an explicit action on the banner itself — it does not auto-re-present on launch once "Not now" has been answered.
 
 ## 12. Navigation & proof screen
 
