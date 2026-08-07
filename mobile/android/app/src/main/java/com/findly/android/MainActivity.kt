@@ -31,6 +31,7 @@ import com.findly.android.ui.designsystem.components.FindlyPermissionBanner
 import com.findly.android.ui.permissions.PermissionDisclosureScreen
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.displayCutoutPadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.ui.Modifier
@@ -142,8 +143,18 @@ class MainActivity : ComponentActivity() {
                 // back chevron sits in the status bar's own tap region — taps there go to the
                 // system, not the app, making the upper half of the back button dead. Verified on
                 // an emulator 2026-08-05: a tap at y=70 did nothing, y=90 popped correctly.
-                // Applied once at the root so every screen inherits it, rather than per-screen.
-                Box(modifier = Modifier.statusBarsPadding().navigationBarsPadding()) {
+                // Applied once at the root so every screen inherits it, rather than per-screen —
+                // that includes the degraded-state banner below (A25): it is a direct child of this
+                // same Box, not a sibling rendered outside it, so it inherits this same inset.
+                // displayCutoutPadding() (A25) closes the one system-UI region statusBarsPadding()
+                // does NOT cover: on a device whose cutout (notch/punch-hole) extends beyond the
+                // reported status-bar height, content could still sit under it otherwise.
+                Box(
+                    modifier = Modifier
+                        .statusBarsPadding()
+                        .displayCutoutPadding()
+                        .navigationBarsPadding(),
+                ) {
                 // specs/009 §7 — the disclosure gate. Re-read on every recomposition triggered by
                 // `permissionEpoch` (a permission result) and by `ON_RESUME` below, which is §7's
                 // "re-checked on every foreground": the user can revoke from system settings at any
@@ -162,17 +173,21 @@ class MainActivity : ComponentActivity() {
                     mutableStateOf(readPermissionState())
                 }
                 var bannerDismissed by rememberSaveable { mutableStateOf(false) }
-                var declinedThisSession by remember { mutableStateOf(setOf<PermissionDisclosureKind>()) }
 
                 val step = PermissionFlowPolicy.nextStep(
                     authorization = permissionState.authorization,
                     foregroundDisclosureAcknowledged = permissionState.foregroundAcknowledged,
+                    foregroundDisclosureDeclined = permissionState.foregroundDeclined,
                     backgroundDisclosureAcknowledged = permissionState.backgroundAcknowledged,
+                    backgroundDisclosureDeclined = permissionState.backgroundDeclined,
                     requiresBackground = permissionState.requiresBackground,
                 )
-                val pendingDisclosure = (step as? PermissionFlowStep.ShowDisclosure)
-                    ?.kind
-                    ?.takeIf { it !in declinedThisSession }
+                // A25 (009 §7): "Not now" is now persisted (readPermissionState() below), so
+                // nextStep() itself already returns None for a declined kind — no more session-only
+                // `declinedThisSession` filter here. That in-memory set was exactly the bug: it
+                // reset on every cold launch, so a fresh process always saw an empty decline set and
+                // re-showed the disclosure regardless of what the user had already answered.
+                val pendingDisclosure = (step as? PermissionFlowStep.ShowDisclosure)?.kind
 
                 if (pendingDisclosure != null) {
                     // Full-screen, and returned INSTEAD of the app content: nothing may reach an OS
@@ -190,9 +205,13 @@ class MainActivity : ComponentActivity() {
                             }
                             permissionEpoch.intValue++
                         },
-                        // A real choice, not a formality: no prompt, no acknowledgement recorded,
-                        // and not re-presented for the rest of this session.
-                        onNotNow = { declinedThisSession = declinedThisSession + pendingDisclosure },
+                        // A real choice, not a formality: no prompt, no acknowledgement recorded.
+                        // A25: now persisted, so it is not re-presented on ANY future launch either
+                        // — only the banner's own explicit "reopen" action (below) brings it back.
+                        onNotNow = {
+                            container.permissionDisclosureStore.decline(pendingDisclosure)
+                            permissionEpoch.intValue++
+                        },
                     )
                     return@Box
                 }
@@ -201,13 +220,29 @@ class MainActivity : ComponentActivity() {
                 LaunchedEffect(Unit) { requestNotificationPermissionIfNeeded() }
 
                 Column {
+                    // A25 (009 §7): null means the OS itself already irrevocably refused — the
+                    // banner's action routes to system settings there, same as before. A non-null
+                    // kind means the OS was never actually asked (the user only declined the in-app
+                    // explanation), so the explicit action instead forgets that decline and reopens
+                    // the full-screen disclosure, which can still lead to a real OS prompt.
+                    val reopenKind = PermissionFlowPolicy.bannerReopenKind(
+                        authorization = permissionState.authorization,
+                        foregroundDisclosureAcknowledged = permissionState.foregroundAcknowledged,
+                        backgroundDisclosureAcknowledged = permissionState.backgroundAcknowledged,
+                    )
                     FindlyPermissionBanner(
                         banner = PermissionFlowPolicy.banner(
                             authorization = permissionState.authorization,
                             requiresBackground = permissionState.requiresBackground,
+                            foregroundDisclosureDeclined = permissionState.foregroundDeclined,
                             dismissedThisSession = bannerDismissed,
                         ),
+                        reopensDisclosure = reopenKind != null,
                         onOpenSettings = { openAppSettings() },
+                        onReopenDisclosure = {
+                            reopenKind?.let { container.permissionDisclosureStore.clearDeclined(it) }
+                            permissionEpoch.intValue++
+                        },
                         onDismiss = { bannerDismissed = true },
                     )
                 val homeViewModel: HomeViewModel = viewModel(
@@ -236,7 +271,9 @@ class MainActivity : ComponentActivity() {
     private data class PermissionSnapshot(
         val authorization: LocationAuthorization,
         val foregroundAcknowledged: Boolean,
+        val foregroundDeclined: Boolean,
         val backgroundAcknowledged: Boolean,
+        val backgroundDeclined: Boolean,
         val requiresBackground: Boolean,
     )
 
@@ -256,7 +293,11 @@ class MainActivity : ComponentActivity() {
                 foregroundDisclosureAcknowledged = foregroundAcknowledged,
             ),
             foregroundAcknowledged = foregroundAcknowledged,
+            // A25 (009 §7): "Not now" is persisted so it survives a cold launch (isDeclined()),
+            // instead of the old in-memory-only `declinedThisSession` set that reset every launch.
+            foregroundDeclined = store.isDeclined(PermissionDisclosureKind.FOREGROUND),
             backgroundAcknowledged = store.isAcknowledged(PermissionDisclosureKind.BACKGROUND),
+            backgroundDeclined = store.isDeclined(PermissionDisclosureKind.BACKGROUND),
             // Tracking paused means this device is not reporting by choice, so it must not nag for
             // a permission it is not using. Read synchronously here; the flow only needs the
             // coarse answer, not a suspending settings load.

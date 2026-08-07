@@ -1,6 +1,7 @@
 package com.findly.android.ui.settings
 
 import com.findly.android.device.DeviceIdStore
+import com.findly.android.location.PermissionDisclosureStore
 import com.findly.android.location.settings.GeofenceConfigStateStore
 import com.findly.android.queue.FixQueueStore
 import com.findly.android.queue.GeofenceEventQueueStore
@@ -30,16 +31,23 @@ fun interface ExportArtifactCleaner {
 /**
  * The real [LocalStateWiper], wired by `AppContainer`. Covers every piece of concrete, persisted
  * client state that exists in this codebase today: the fix queue, the per-uid `deviceId` store,
- * the export artifact directory (specs/008 §3.1), and — as of A11 — the durable geofence-event
- * queue and the cached geofence config document/ETag (specs/009-device-runtime.md §6.1). The
- * "any cached config/ETags" wording this class's doc has always quoted had nothing concrete to
- * wire until [GeofenceConfigStateStore] landed; a plaintext cache of a family's configured
- * geofence names/coordinates must not outlive the account it belongs to, same reasoning as the
- * export-artifact rule right above it.
+ * the export artifact directory (specs/008 §3.1), the durable geofence-event queue and the cached
+ * geofence config document/ETag (specs/009-device-runtime.md §6.1, A11), and — as of A25 — the
+ * permission-disclosure acknowledgement/decline flags (specs/009 §7). The "any cached config/
+ * ETags" wording this class's doc has always quoted had nothing concrete to wire until
+ * [GeofenceConfigStateStore] landed; a plaintext cache of a family's configured geofence names/
+ * coordinates must not outlive the account it belongs to, same reasoning as the export-artifact
+ * rule right above it.
+ *
+ * **Code-review fix (A25 round 1, Major 2): [permissionDisclosureStore] was documented as part of
+ * the account-deletion wipe (this task's own spec commit: "a different user on the same device
+ * MUST see the disclosure again") but had no caller anywhere in production code** — the same shape
+ * of mistake as the iOS I26 finding ("a documented clear that nothing calls"). Wired in here so the
+ * documented behaviour and the actual behaviour agree.
  *
  * Security-review fix (post-A11 review): each step runs independently of the others'
  * success/failure ([runCatching], swallowing only the exception itself — nothing sensitive is
- * logged). Five unguarded sequential suspend calls meant one throwing (e.g. a Room `deleteAll()`
+ * logged). Unguarded sequential suspend calls meant one throwing (e.g. a Room `deleteAll()`
  * disk I/O error) silently skipped every step after it — worst case, the geofence config cache
  * (the most sensitive of the local stores: a family's named places) could survive an account
  * deletion that otherwise appeared to complete. Reordering alone would not have fixed this — a
@@ -52,6 +60,7 @@ class DefaultLocalStateWiper(
     private val exportArtifactCleaner: ExportArtifactCleaner,
     private val geofenceEventQueueStore: GeofenceEventQueueStore,
     private val geofenceConfigStateStore: GeofenceConfigStateStore,
+    private val permissionDisclosureStore: PermissionDisclosureStore,
 ) : LocalStateWiper {
     override suspend fun wipeAll(uid: String) {
         runCatching { fixQueueStore.clearAll() }
@@ -59,5 +68,6 @@ class DefaultLocalStateWiper(
         runCatching { exportArtifactCleaner.clear() }
         runCatching { geofenceEventQueueStore.clearAll() }
         runCatching { geofenceConfigStateStore.clear() }
+        runCatching { permissionDisclosureStore.clear() }
     }
 }

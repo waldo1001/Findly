@@ -361,6 +361,9 @@ class AppContainer(context: Context) {
         exportArtifactCleaner = exportArtifactCleaner,
         geofenceEventQueueStore = geofenceEventQueueStore,
         geofenceConfigStateStore = geofenceConfigStateStore,
+        // A25 (specs/009 §7): a different user on the same device MUST see the disclosure again —
+        // code-review fix, this was previously documented but never wired to any caller.
+        permissionDisclosureStore = permissionDisclosureStore,
     )
 
     /** 008 §3.1 rule 2 (amended)'s cold-start trigger — see [ColdStartExportCleanup]'s doc for why
