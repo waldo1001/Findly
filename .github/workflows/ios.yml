@@ -1,6 +1,10 @@
 name: ios
 
 on:
+  # Manual trigger (H10 follow-up): the publish steps only fire on a push touching
+  # mobile/**, so without this there is no way to re-run a failed store upload, or to
+  # prove the pipeline works, without inventing a code change.
+  workflow_dispatch:
   push:
     branches: [main]
     paths: ["mobile/ios/**", ".github/workflows/ios.yml"]
@@ -15,7 +19,7 @@ jobs:
     # system — builds & tests on a real macOS/Xcode runner. This is real CI (not a structure
     # check): a genuine `swift build` + `swift test` gate for every PR touching mobile/ios/.
     name: ios-package
-    runs-on: macos-14
+    runs-on: macos-26
     # H10 (docs/security-review-checklist.md §2): explicit, minimal, job-level permissions —
     # this job only checks out and builds/tests a local SPM package, no deploy.
     permissions:
@@ -28,12 +32,15 @@ jobs:
       # H1 CI note (2026-07-20): this runner's default active developer directory can select
       # an Xcode whose compiler (Swift 5.10) is older than the Command Line Tools' bundled
       # `Testing.framework` (built with Swift 6.0.3) — "this SDK is not supported by the
-      # compiler". Explicitly select the newest available Xcode 16.x before building.
+      # compiler". Explicitly select the newest available Xcode before building.
       - name: select a Swift-6-capable Xcode
         run: |
-          XCODE_APP=$(ls -d /Applications/Xcode_16*.app 2>/dev/null | sort -V | tail -1)
+          # Apple rejects uploads built with an SDK older than iOS 26 (Xcode 26+), so pick the
+          # NEWEST Xcode on the image rather than pinning a major — a pinned Xcode_16* is what
+          # made a full archive+export succeed and then fail at upload with a 409 SDK error.
+          XCODE_APP=$(ls -d /Applications/Xcode_*.app 2>/dev/null | sort -V | tail -1)
           if [ -z "$XCODE_APP" ]; then
-            echo "::error::No Xcode 16.x found on this runner. Available Xcode installs:"
+            echo "::error::No Xcode found on this runner. Available Xcode installs:"
             ls -d /Applications/Xcode*.app 2>/dev/null
             exit 1
           fi
@@ -41,6 +48,14 @@ jobs:
           sudo xcode-select -s "$XCODE_APP/Contents/Developer"
           xcodebuild -version
           swift --version
+          # Fail fast rather than after a full archive+export: Apple's upload validator rejects
+          # anything built with an SDK older than iOS 26, and that 409 only surfaces at the very
+          # last step (cost one full CI run to learn, 2026-08-07).
+          XCODE_MAJOR=$(xcodebuild -version | head -1 | sed -E 's/Xcode ([0-9]+).*/\1/')
+          if [ "$XCODE_MAJOR" -lt 26 ]; then
+            echo "::error::Xcode $XCODE_MAJOR is too old — App Store Connect requires the iOS 26 SDK (Xcode 26+). Runner image needs updating."
+            exit 1
+          fi
       - name: swift build
         run: swift build
       - name: swift test
@@ -52,7 +67,7 @@ jobs:
     name: ios-build
     # I9: the Findly.xcodeproj app target now exists (generated via xcodegen, specs/004 §1.1) —
     # real xcodebuild CI, not a structure check. Needs a real macOS/Xcode runner.
-    runs-on: macos-14
+    runs-on: macos-26
     # H10 (docs/security-review-checklist.md §2): explicit, minimal, job-level permissions.
     # TestFlight publishing (below) authenticates with its own App Store Connect API key secret,
     # not a GITHUB_TOKEN scope, so `contents: read` stays correct even with publishing added.
@@ -76,9 +91,12 @@ jobs:
       # differs and a shared step needs its own working-directory handling either way.
       - name: select a Swift-6-capable Xcode
         run: |
-          XCODE_APP=$(ls -d /Applications/Xcode_16*.app 2>/dev/null | sort -V | tail -1)
+          # Apple rejects uploads built with an SDK older than iOS 26 (Xcode 26+), so pick the
+          # NEWEST Xcode on the image rather than pinning a major — a pinned Xcode_16* is what
+          # made a full archive+export succeed and then fail at upload with a 409 SDK error.
+          XCODE_APP=$(ls -d /Applications/Xcode_*.app 2>/dev/null | sort -V | tail -1)
           if [ -z "$XCODE_APP" ]; then
-            echo "::error::No Xcode 16.x found on this runner. Available Xcode installs:"
+            echo "::error::No Xcode found on this runner. Available Xcode installs:"
             ls -d /Applications/Xcode*.app 2>/dev/null
             exit 1
           fi
@@ -95,8 +113,26 @@ jobs:
       # no `AIza…`-prefixed key, which the checklist's own secret-scan grep matches); this file
       # never authenticates against anything real. The real file (gitignored, developer-machine
       # only) has the actual `com.findly.ios` / `findly-71f7b` project values.
-      - name: generate placeholder GoogleService-Info.plist
+      - name: write GoogleService-Info.plist (real when available, placeholder otherwise)
+        env:
+          IOS_GOOGLE_SERVICE_INFO_PLIST: ${{ secrets.IOS_GOOGLE_SERVICE_INFO_PLIST }}
         run: |
+          # H10 follow-up, 2026-08-07. Harmless while this job only COMPILED; H10 made the same
+          # job upload to TestFlight, so build 170 reached a real iPhone with a fake Firebase
+          # config and aborted at launch (FirebaseApp.configure() raised an NSException inside
+          # App.main()). This step's own earlier comment predicted it; the dependency landed and
+          # nobody revisited it. Real config comes from a secret now; the placeholder survives
+          # only so forks and secret-less PRs still compile.
+          #
+          # The heredoc body and its PLIST terminator MUST stay at this exact indentation. YAML
+          # strips the block's base indent, so these land at column 0 in the real script, which
+          # is what <<'PLIST' requires. Indenting them one level deeper to sit "inside" the else
+          # is what broke run 31172279053 with "syntax error: unexpected end of file".
+          if [ -n "$IOS_GOOGLE_SERVICE_INFO_PLIST" ]; then
+            echo "$IOS_GOOGLE_SERVICE_INFO_PLIST" | base64 -d > GoogleService-Info.plist
+            echo "Using the real GoogleService-Info.plist from secrets."
+          else
+          echo "No IOS_GOOGLE_SERVICE_INFO_PLIST secret — writing the CI placeholder (compile-only)."
           cat > GoogleService-Info.plist <<'PLIST'
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -129,6 +165,8 @@ jobs:
           </dict>
           </plist>
           PLIST
+          fi
+          plutil -lint GoogleService-Info.plist
       # Real build (not just a structure check): compiles the Findly app target + links FindlyKit
       # as a local SPM dependency. A pinned device name + `OS:latest` (the previous form) broke
       # when the runner image's newest simulator runtime (18.2) stopped pairing with "iPhone 15"
@@ -183,6 +221,19 @@ jobs:
       # The existing script (mobile/ios/scripts/release-testflight.sh, H6) runs unchanged apart
       # from the new optional BUILD_NUMBER override above — same archive/export/upload steps a
       # developer laptop already ran manually.
+      # Refuse to upload a build carrying the CI placeholder Firebase config. Build 170 reached
+      # a real device that way and aborted at launch; a green pipeline that ships an unlaunchable
+      # app is worse than a red one. Inspects the plist the build actually staged, so a failed
+      # base64 decode is caught too.
+      - name: refuse to ship a placeholder Firebase config
+        if: github.ref == 'refs/heads/main'
+        run: |
+          if grep -q "CI-PLACEHOLDER-NOT-A-REAL-API-KEY\|findly-ci-placeholder" GoogleService-Info.plist; then
+            echo "::error::GoogleService-Info.plist is the CI placeholder — refusing to upload. Set the IOS_GOOGLE_SERVICE_INFO_PLIST secret (base64 of the real plist)."
+            exit 1
+          fi
+          echo "Firebase config is the real one."
+
       - name: release to TestFlight
         if: env.ASC_API_KEY_P8 != '' && github.ref == 'refs/heads/main'
         run: scripts/release-testflight.sh

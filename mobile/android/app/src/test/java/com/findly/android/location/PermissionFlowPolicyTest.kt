@@ -1,6 +1,7 @@
 package com.findly.android.location
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Test
 
 /**
@@ -26,7 +27,9 @@ class PermissionFlowPolicyTest {
         val step = PermissionFlowPolicy.nextStep(
             authorization = LocationAuthorization.NOT_DETERMINED,
             foregroundDisclosureAcknowledged = false,
+            foregroundDisclosureDeclined = false,
             backgroundDisclosureAcknowledged = false,
+            backgroundDisclosureDeclined = false,
             requiresBackground = false,
         )
 
@@ -38,7 +41,9 @@ class PermissionFlowPolicyTest {
         val step = PermissionFlowPolicy.nextStep(
             authorization = LocationAuthorization.NOT_DETERMINED,
             foregroundDisclosureAcknowledged = true,
+            foregroundDisclosureDeclined = false,
             backgroundDisclosureAcknowledged = false,
+            backgroundDisclosureDeclined = false,
             requiresBackground = false,
         )
 
@@ -52,7 +57,9 @@ class PermissionFlowPolicyTest {
         val step = PermissionFlowPolicy.nextStep(
             authorization = LocationAuthorization.WHEN_IN_USE,
             foregroundDisclosureAcknowledged = true,
+            foregroundDisclosureDeclined = false,
             backgroundDisclosureAcknowledged = false,
+            backgroundDisclosureDeclined = false,
             requiresBackground = true,
         )
 
@@ -64,7 +71,9 @@ class PermissionFlowPolicyTest {
         val step = PermissionFlowPolicy.nextStep(
             authorization = LocationAuthorization.WHEN_IN_USE,
             foregroundDisclosureAcknowledged = true,
+            foregroundDisclosureDeclined = false,
             backgroundDisclosureAcknowledged = true,
+            backgroundDisclosureDeclined = false,
             requiresBackground = true,
         )
 
@@ -76,7 +85,9 @@ class PermissionFlowPolicyTest {
         val step = PermissionFlowPolicy.nextStep(
             authorization = LocationAuthorization.WHEN_IN_USE,
             foregroundDisclosureAcknowledged = true,
+            foregroundDisclosureDeclined = false,
             backgroundDisclosureAcknowledged = false,
+            backgroundDisclosureDeclined = false,
             requiresBackground = false,
         )
 
@@ -88,7 +99,9 @@ class PermissionFlowPolicyTest {
         val step = PermissionFlowPolicy.nextStep(
             authorization = LocationAuthorization.ALWAYS,
             foregroundDisclosureAcknowledged = true,
+            foregroundDisclosureDeclined = false,
             backgroundDisclosureAcknowledged = true,
+            backgroundDisclosureDeclined = false,
             requiresBackground = true,
         )
 
@@ -102,7 +115,57 @@ class PermissionFlowPolicyTest {
         val step = PermissionFlowPolicy.nextStep(
             authorization = LocationAuthorization.DENIED,
             foregroundDisclosureAcknowledged = false,
+            foregroundDisclosureDeclined = false,
             backgroundDisclosureAcknowledged = false,
+            backgroundDisclosureDeclined = false,
+            requiresBackground = true,
+        )
+
+        assertEquals(PermissionFlowStep.None, step)
+    }
+
+    // --- A25 (009 §7): "Not now" is answered too — the disclosure MUST NOT auto-re-present once
+    // declined, on this or any later launch. ---
+
+    @Test
+    fun `a declined foreground disclosure does not auto-re-present`() {
+        val step = PermissionFlowPolicy.nextStep(
+            authorization = LocationAuthorization.NOT_DETERMINED,
+            foregroundDisclosureAcknowledged = false,
+            foregroundDisclosureDeclined = true,
+            backgroundDisclosureAcknowledged = false,
+            backgroundDisclosureDeclined = false,
+            requiresBackground = false,
+        )
+
+        assertEquals(PermissionFlowStep.None, step)
+    }
+
+    @Test
+    fun `a declined foreground disclosure also does not fire the OS prompt`() {
+        // Declining the in-app explanation must not be silently promoted into consent to ask the
+        // OS — that would invert 009 §7's "disclosure precedes the OS prompt" ordering.
+        val step = PermissionFlowPolicy.nextStep(
+            authorization = LocationAuthorization.NOT_DETERMINED,
+            foregroundDisclosureAcknowledged = false,
+            foregroundDisclosureDeclined = true,
+            backgroundDisclosureAcknowledged = false,
+            backgroundDisclosureDeclined = false,
+            requiresBackground = false,
+        )
+
+        assertEquals(PermissionFlowStep.None, step)
+        assertNotEquals(PermissionFlowStep.RequestForeground, step)
+    }
+
+    @Test
+    fun `a declined background disclosure does not auto-re-present`() {
+        val step = PermissionFlowPolicy.nextStep(
+            authorization = LocationAuthorization.WHEN_IN_USE,
+            foregroundDisclosureAcknowledged = true,
+            foregroundDisclosureDeclined = false,
+            backgroundDisclosureAcknowledged = false,
+            backgroundDisclosureDeclined = true,
             requiresBackground = true,
         )
 
@@ -116,6 +179,7 @@ class PermissionFlowPolicyTest {
         val banner = PermissionFlowPolicy.banner(
             authorization = LocationAuthorization.DENIED,
             requiresBackground = false,
+            foregroundDisclosureDeclined = false,
             dismissedThisSession = false,
         )
 
@@ -129,6 +193,7 @@ class PermissionFlowPolicyTest {
         val banner = PermissionFlowPolicy.banner(
             authorization = LocationAuthorization.WHEN_IN_USE,
             requiresBackground = true,
+            foregroundDisclosureDeclined = false,
             dismissedThisSession = false,
         )
 
@@ -140,6 +205,7 @@ class PermissionFlowPolicyTest {
         val banner = PermissionFlowPolicy.banner(
             authorization = LocationAuthorization.WHEN_IN_USE,
             requiresBackground = false,
+            foregroundDisclosureDeclined = false,
             dismissedThisSession = false,
         )
 
@@ -151,6 +217,7 @@ class PermissionFlowPolicyTest {
         val banner = PermissionFlowPolicy.banner(
             authorization = LocationAuthorization.ALWAYS,
             requiresBackground = true,
+            foregroundDisclosureDeclined = false,
             dismissedThisSession = false,
         )
 
@@ -164,11 +231,13 @@ class PermissionFlowPolicyTest {
         val dismissed = PermissionFlowPolicy.banner(
             authorization = LocationAuthorization.DENIED,
             requiresBackground = false,
+            foregroundDisclosureDeclined = false,
             dismissedThisSession = true,
         )
         val freshSession = PermissionFlowPolicy.banner(
             authorization = LocationAuthorization.DENIED,
             requiresBackground = false,
+            foregroundDisclosureDeclined = false,
             dismissedThisSession = false,
         )
 
@@ -181,9 +250,126 @@ class PermissionFlowPolicyTest {
         val banner = PermissionFlowPolicy.banner(
             authorization = LocationAuthorization.DENIED,
             requiresBackground = true,
+            foregroundDisclosureDeclined = false,
             dismissedThisSession = false,
         )
 
         assertEquals(PermissionBanner.CANNOT_REPORT, banner)
+    }
+
+    // --- A25 (009 §7): once the full-screen disclosure stops auto-re-presenting, the banner is the
+    // only thing left telling a never-actually-asked user that this device cannot report. ---
+
+    @Test
+    fun `a declined foreground disclosure shows the cannot-report banner too`() {
+        // Without this, declining once would go from "re-nagged every launch" straight to
+        // "silently invisible forever" — neither is 009 §7's persistent, honest degraded state.
+        val banner = PermissionFlowPolicy.banner(
+            authorization = LocationAuthorization.NOT_DETERMINED,
+            requiresBackground = false,
+            foregroundDisclosureDeclined = true,
+            dismissedThisSession = false,
+        )
+
+        assertEquals(PermissionBanner.CANNOT_REPORT, banner)
+    }
+
+    @Test
+    fun `an undecided undetermined state still shows no banner`() {
+        // The disclosure/prompt flow is what should be running instead — not yet declined, not yet
+        // answered.
+        val banner = PermissionFlowPolicy.banner(
+            authorization = LocationAuthorization.NOT_DETERMINED,
+            requiresBackground = false,
+            foregroundDisclosureDeclined = false,
+            dismissedThisSession = false,
+        )
+
+        assertEquals(PermissionBanner.NONE, banner)
+    }
+
+    // --- A25 (009 §7): the banner's action button re-opens the full-screen disclosure, except when
+    // the OS itself has already been asked for that kind — there, only system settings can help. ---
+
+    @Test
+    fun `an OS-level denial routes the banner action to system settings, not the disclosure`() {
+        assertEquals(
+            null,
+            PermissionFlowPolicy.bannerReopenKind(
+                authorization = LocationAuthorization.DENIED,
+                foregroundDisclosureAcknowledged = false,
+                backgroundDisclosureAcknowledged = false,
+            ),
+        )
+    }
+
+    @Test
+    fun `a never-asked foreground state reopens the foreground disclosure`() {
+        assertEquals(
+            PermissionDisclosureKind.FOREGROUND,
+            PermissionFlowPolicy.bannerReopenKind(
+                authorization = LocationAuthorization.NOT_DETERMINED,
+                foregroundDisclosureAcknowledged = false,
+                backgroundDisclosureAcknowledged = false,
+            ),
+        )
+    }
+
+    // --- Code-review fix (A25 round 1, Major 1): FOREGROUND_ONLY's two sub-states must route
+    // differently — the dominant real-world one is "the OS already refused", not "never asked". ---
+
+    @Test
+    fun `a when-in-use state with the background disclosure only declined (OS never asked) reopens it`() {
+        assertEquals(
+            PermissionDisclosureKind.BACKGROUND,
+            PermissionFlowPolicy.bannerReopenKind(
+                authorization = LocationAuthorization.WHEN_IN_USE,
+                foregroundDisclosureAcknowledged = true,
+                backgroundDisclosureAcknowledged = false,
+            ),
+        )
+    }
+
+    @Test
+    fun `a when-in-use state with the background disclosure acknowledged (OS already asked and refused) routes to settings, not a dead-end reopen`() {
+        // Reopening here would compute RequestBackgroundUpgrade from nextStep() — a step
+        // MainActivity never consumes (launch() only fires from the disclosure's onContinue) — so
+        // the banner would silently re-render with no forward progress. Pre-A25 this state's
+        // action was unconditionally "Open settings" and worked; this must not regress that.
+        assertEquals(
+            null,
+            PermissionFlowPolicy.bannerReopenKind(
+                authorization = LocationAuthorization.WHEN_IN_USE,
+                foregroundDisclosureAcknowledged = true,
+                backgroundDisclosureAcknowledged = true,
+            ),
+        )
+    }
+
+    @Test
+    fun `a not-determined state with the foreground disclosure acknowledged also routes to settings`() {
+        // Not reachable via LocationAuthorizationResolver today (acknowledged-but-not-granted maps
+        // to DENIED, never NOT_DETERMINED) — asserted anyway so this function does not silently
+        // depend on that invariant holding forever.
+        assertEquals(
+            null,
+            PermissionFlowPolicy.bannerReopenKind(
+                authorization = LocationAuthorization.NOT_DETERMINED,
+                foregroundDisclosureAcknowledged = true,
+                backgroundDisclosureAcknowledged = false,
+            ),
+        )
+    }
+
+    @Test
+    fun `fully authorized has no reopen action (no banner is shown anyway)`() {
+        assertEquals(
+            null,
+            PermissionFlowPolicy.bannerReopenKind(
+                authorization = LocationAuthorization.ALWAYS,
+                foregroundDisclosureAcknowledged = true,
+                backgroundDisclosureAcknowledged = true,
+            ),
+        )
     }
 }
