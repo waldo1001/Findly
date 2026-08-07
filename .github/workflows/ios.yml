@@ -1,6 +1,10 @@
 name: ios
 
 on:
+  # Manual trigger (H10 follow-up): the publish steps only fire on a push touching
+  # mobile/**, so without this there is no way to re-run a failed store upload, or to
+  # prove the pipeline works, without inventing a code change.
+  workflow_dispatch:
   push:
     branches: [main]
     paths: ["mobile/ios/**", ".github/workflows/ios.yml"]
