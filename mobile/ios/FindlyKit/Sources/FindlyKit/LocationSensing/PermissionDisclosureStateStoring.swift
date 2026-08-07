@@ -15,21 +15,41 @@ public protocol PermissionDisclosureStateStoring {
     func isAcknowledged(_ kind: PermissionDisclosureKind) -> Bool
     func acknowledge(_ kind: PermissionDisclosureKind)
 
-    /// Drops both acknowledgements — part of the account-deletion local wipe (specs/008 §4.4).
-    /// A different user on the same device must see the explanation again: this is consent, not a
-    /// device-level preference.
+    /// Whether the user has already answered "Not now" to this kind's disclosure (I31, mirrors
+    /// A25, specs/009-device-runtime.md §7). Tracked as a separate flag from
+    /// `isAcknowledged`/`acknowledge` (never conflated) so `clearDeclined` can forget only the
+    /// decline when the banner's explicit "reopen the disclosure" action fires, without also
+    /// fabricating an acknowledgement that was never given.
+    func isDeclined(_ kind: PermissionDisclosureKind) -> Bool
+    func decline(_ kind: PermissionDisclosureKind)
+
+    /// Forgets a prior decline for this kind only — used when an explicit user action on the
+    /// degraded-state banner re-opens the full-screen disclosure (I31, specs/009 §7), so the flow
+    /// gate presents it again instead of staying suppressed.
+    func clearDeclined(_ kind: PermissionDisclosureKind)
+
+    /// Drops both acknowledgements and both declines — part of the account-deletion local wipe
+    /// (specs/008 §4.4). A different user on the same device must see the explanation again: this
+    /// is consent, not a device-level preference.
     func clear()
 }
 
 /// Test/default in-memory implementation.
 public final class InMemoryPermissionDisclosureStore: PermissionDisclosureStateStoring {
     private var acknowledged: Set<PermissionDisclosureKind> = []
+    private var declined: Set<PermissionDisclosureKind> = []
 
     public init() {}
 
     public func isAcknowledged(_ kind: PermissionDisclosureKind) -> Bool { acknowledged.contains(kind) }
     public func acknowledge(_ kind: PermissionDisclosureKind) { acknowledged.insert(kind) }
-    public func clear() { acknowledged.removeAll() }
+    public func isDeclined(_ kind: PermissionDisclosureKind) -> Bool { declined.contains(kind) }
+    public func decline(_ kind: PermissionDisclosureKind) { declined.insert(kind) }
+    public func clearDeclined(_ kind: PermissionDisclosureKind) { declined.remove(kind) }
+    public func clear() {
+        acknowledged.removeAll()
+        declined.removeAll()
+    }
 }
 
 /// The real, `UserDefaults`-backed implementation — same shape as
@@ -51,6 +71,13 @@ public final class UserDefaultsPermissionDisclosureStore: PermissionDisclosureSt
         }
     }
 
+    private func declinedKey(for kind: PermissionDisclosureKind) -> String {
+        switch kind {
+        case .foreground: return "com.findly.permissionDisclosure.foreground.declined"
+        case .background: return "com.findly.permissionDisclosure.background.declined"
+        }
+    }
+
     public func isAcknowledged(_ kind: PermissionDisclosureKind) -> Bool {
         defaults.bool(forKey: key(for: kind))
     }
@@ -59,9 +86,23 @@ public final class UserDefaultsPermissionDisclosureStore: PermissionDisclosureSt
         defaults.set(true, forKey: key(for: kind))
     }
 
+    public func isDeclined(_ kind: PermissionDisclosureKind) -> Bool {
+        defaults.bool(forKey: declinedKey(for: kind))
+    }
+
+    public func decline(_ kind: PermissionDisclosureKind) {
+        defaults.set(true, forKey: declinedKey(for: kind))
+    }
+
+    public func clearDeclined(_ kind: PermissionDisclosureKind) {
+        defaults.removeObject(forKey: declinedKey(for: kind))
+    }
+
     public func clear() {
         defaults.removeObject(forKey: key(for: .foreground))
         defaults.removeObject(forKey: key(for: .background))
+        defaults.removeObject(forKey: declinedKey(for: .foreground))
+        defaults.removeObject(forKey: declinedKey(for: .background))
     }
 }
 

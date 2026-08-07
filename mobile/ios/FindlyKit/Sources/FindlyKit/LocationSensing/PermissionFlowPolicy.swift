@@ -63,10 +63,19 @@ public enum PermissionFlowPolicy {
     ///   - requiresBackground: whether this device's configured `syncIntervalMinutes` needs
     ///     background reporting at all (003 §11.3). A device that only reports while open never
     ///     asks for the background upgrade, and never nags about lacking it.
+    ///
+    /// **I31 (mirrors A25), 009 §7: "Not now" is answered too.**
+    /// `foregroundDisclosureDeclined`/`backgroundDisclosureDeclined` gate `.showDisclosure` exactly
+    /// like the acknowledged flags do — once a kind has been declined, this returns `.none` rather
+    /// than re-showing the disclosure *or* silently promoting the decline into an OS prompt (that
+    /// would invert §7's "disclosure precedes the OS prompt" ordering just as badly as skipping the
+    /// disclosure would).
     public static func nextStep(
         authorization: LocationAuthorization,
         foregroundDisclosureAcknowledged: Bool,
+        foregroundDisclosureDeclined: Bool,
         backgroundDisclosureAcknowledged: Bool,
+        backgroundDisclosureDeclined: Bool,
         requiresBackground: Bool
     ) -> PermissionFlowStep {
         switch authorization {
@@ -79,11 +88,15 @@ public enum PermissionFlowPolicy {
             return .none
 
         case .notDetermined:
-            return foregroundDisclosureAcknowledged ? .requestForeground : .showDisclosure(.foreground)
+            if foregroundDisclosureAcknowledged { return .requestForeground }
+            if foregroundDisclosureDeclined { return .none }
+            return .showDisclosure(.foreground)
 
         case .whenInUse:
             guard requiresBackground else { return .none }
-            return backgroundDisclosureAcknowledged ? .requestBackgroundUpgrade : .showDisclosure(.background)
+            if backgroundDisclosureAcknowledged { return .requestBackgroundUpgrade }
+            if backgroundDisclosureDeclined { return .none }
+            return .showDisclosure(.background)
         }
     }
 
@@ -93,9 +106,18 @@ public enum PermissionFlowPolicy {
     ///   "dismissible-per-session": a user who waves it away once should still be told, next
     ///   launch, that this device is not reporting. Persisting dismissal would let a silently
     ///   broken device stay silently broken forever.
+    ///
+    /// **I31 (mirrors A25): `foregroundDisclosureDeclined` closes the gap the auto-re-present fix
+    /// would otherwise leave.** Once `nextStep` stops auto-showing a declined foreground
+    /// disclosure, a `.notDetermined` authorization with no disclosure on screen would otherwise
+    /// show *nothing at all* — worse than the old nagging, since the device genuinely cannot report
+    /// and the banner is the only thing left saying so. Reuses `.cannotReport` rather than adding a
+    /// new state: from the user's point of view, "declined the explanation" and "asked the OS and
+    /// was refused" are the same degraded fact — this device is not sharing its location.
     public static func banner(
         authorization: LocationAuthorization,
         requiresBackground: Bool,
+        foregroundDisclosureDeclined: Bool,
         dismissedThisSession: Bool
     ) -> PermissionBanner {
         guard !dismissedThisSession else { return .none }
@@ -107,10 +129,46 @@ public enum PermissionFlowPolicy {
             return .cannotReport
         case .whenInUse:
             return requiresBackground ? .foregroundOnly : .none
-        case .always, .notDetermined:
-            // `.notDetermined` shows nothing: the user has not refused anything yet, and the
-            // disclosure/prompt flow is what should be running instead.
+        case .notDetermined:
+            return foregroundDisclosureDeclined ? .cannotReport : .none
+        case .always:
             return .none
+        }
+    }
+
+    /// Which disclosure kind an explicit action on the banner should reopen, or `nil` when the OS
+    /// itself has already been asked for that kind and system settings is the only route back
+    /// (I31, mirrors A25, 009 §7).
+    ///
+    /// **The acknowledged/declined distinction is load-bearing here (A25's round-1 Major 1):**
+    /// `authorization` alone conflates two different `.whenInUse` states. The `.foregroundOnly`
+    /// banner (`.whenInUse` + `requiresBackground`) shows for two different reasons: the background
+    /// disclosure was declined (OS never asked — reopening it can still lead to a real prompt), OR
+    /// the disclosure was acknowledged and the real Always-upgrade prompt already fired and was
+    /// refused (the OS was already asked — includes the "When-In-Use granted but Always refused"
+    /// state). Reopening the disclosure in the second case would compute `.requestBackgroundUpgrade`
+    /// from `nextStep` again — a step nothing would actually re-fire a live OS prompt from, so the
+    /// banner would silently re-render with no forward progress: a regression from the pre-A25
+    /// behaviour, where that state's action was unconditionally "Open settings" and worked.
+    /// `backgroundDisclosureAcknowledged` disambiguates: acknowledged means the OS was already
+    /// asked, so route to settings instead.
+    ///
+    /// The equivalent `.notDetermined` + `foregroundDisclosureAcknowledged` case is not reachable in
+    /// practice today on this codebase's authorization-resolution path either, but is accepted here
+    /// too rather than trusted as an invariant this function silently depends on (mirrors Android's
+    /// identical defensive stance in its own `bannerReopenKind`).
+    public static func bannerReopenKind(
+        authorization: LocationAuthorization,
+        foregroundDisclosureAcknowledged: Bool,
+        backgroundDisclosureAcknowledged: Bool
+    ) -> PermissionDisclosureKind? {
+        switch authorization {
+        case .notDetermined:
+            return foregroundDisclosureAcknowledged ? nil : .foreground
+        case .whenInUse:
+            return backgroundDisclosureAcknowledged ? nil : .background
+        case .denied, .always:
+            return nil
         }
     }
 }
