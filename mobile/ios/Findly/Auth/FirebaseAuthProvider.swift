@@ -233,6 +233,12 @@ final class FirebaseAuthProvider: AuthProviding {
     /// SDK failure onto the closed `PhoneAuthError` set by its `AuthErrorCode`.
     private static func mapError(_ error: Error) -> PhoneAuthError {
         let nsError = error as NSError
+        // Observability, docs/security-review-checklist.md-compliant (domain + numeric code ONLY —
+        // never the message or userInfo, which can carry identifiers): phone-auth failures on
+        // device are otherwise invisible (release UI shows a generic message; os_log payloads are
+        // privacy-masked in the device syslog). NSLog is deliberate — its content survives the
+        // syslog privacy mask, which is the entire point.
+        NSLog("Findly phone-auth failure: domain=%@ code=%ld", nsError.domain, nsError.code)
         switch AuthErrorCode(rawValue: nsError.code) {
         case .invalidPhoneNumber, .missingPhoneNumber:
             return .invalidPhoneNumber
