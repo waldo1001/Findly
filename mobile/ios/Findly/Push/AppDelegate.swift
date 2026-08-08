@@ -40,10 +40,13 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
 
     func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
         FirebasePushTokenProvider.shared.setAPNSToken(deviceToken)
-        // Deliberately NOT forwarded to FirebaseAuth here. `c725a41` added
-        // `FirebaseAuthProvider.setAPNSToken(deviceToken)` on the reasoning that Auth is a separate
-        // component needing its own copy of the token. True in principle, but it crashed the app on
-        // launch:
+        // I32 (2026-08-08): now forwarded to FirebaseAuth too — swizzling is OFF (see
+        // `Info.plist`'s `FirebaseAppDelegateProxyEnabled`), so Auth no longer receives this token
+        // through its own swizzled interceptor at all. Without this call, phone sign-in has no APNs
+        // silent-push verification path in any build, which is the root cause this task fixes
+        // (`FIRAuthErrorDomain 17054 ERROR_NOTIFICATION_NOT_FORWARDED`).
+        //
+        // Still routed through a readiness guard, not a bare call — `c725a41`'s trap is still real:
         //
         //   FirebaseAuth/Auth.swift:1592: Fatal error: Unexpectedly found nil while implicitly
         //   unwrapping an Optional value
@@ -52,15 +55,12 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         // implicitly-unwrapped optional assigned only inside `Auth.protectedDataInitialization()`.
         // That runs asynchronously (and can be deferred to
         // `protectedDataDidBecomeAvailableNotification`), so an APNs callback arriving first hits
-        // nil and traps.
-        //
-        // Firebase's OWN path does not have this problem: it registers its app-delegate interceptor
-        // via `GULAppDelegateSwizzler.registerAppDelegateInterceptor(self)` *inside* that same
-        // initialization, i.e. strictly after `tokenManager` exists — so it cannot fire too early.
-        // Swizzling is enabled (this target sets no `FirebaseAppDelegateProxyEnabled` key), so Auth
-        // already receives the token by itself. Forwarding manually is redundant AND unguarded,
-        // which is the entire bug. Only re-add this if swizzling is ever disabled, and then only
-        // behind a readiness check.
+        // nil and traps. Previously Firebase's OWN swizzled interceptor avoided this by registering
+        // itself *inside* that same initialization, i.e. strictly after `tokenManager` existed —
+        // with swizzling off that safety net is gone, so `FirebaseAuthProvider.setAPNSToken` now
+        // stashes the token behind `PendingAPNSTokenGate` instead of calling `Auth.setAPNSToken`
+        // directly; see that method's doc for the readiness call site.
+        FirebaseAuthProvider.setAPNSToken(deviceToken)
     }
 
     func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {
@@ -86,6 +86,9 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
             completionHandler(.noData)
             return
         }
+        // I32 — swizzling is OFF, so Messaging no longer auto-observes delivery of the payloads
+        // Auth didn't claim; forward explicitly so its own delivery bookkeeping still runs.
+        FirebasePushTokenProvider.shared.appDidReceiveMessage(userInfo)
         guard let dispatcher = PushRuntimeContainerHolder.shared.container?.dispatcher else {
             completionHandler(.noData)
             return

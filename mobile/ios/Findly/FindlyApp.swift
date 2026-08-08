@@ -353,7 +353,16 @@ struct FindlyApp: App {
                 // parsed/validated in FindlyKit (AppCoordinator.handleDeepLink, backed by the pure
                 // GroupCodeParsing); this is just the OS-lifecycle forwarding, the one piece of
                 // "logic" the app target is allowed (specs/004 §1.1).
-                .onOpenURL { url in coordinator.handleDeepLink(url) }
+                //
+                // I32 (specs/004 §4.1) — Auth gets first refusal. The reCAPTCHA web-sheet fallback
+                // returns via the `app-1-…` REVERSED_CLIENT_ID scheme; `Auth.canHandle(url)` claims
+                // that one and resumes verification itself. Everything else (the app's own
+                // findly://.../https://{joinLinkHost} links) falls through unclaimed to the
+                // coordinator exactly as before.
+                .onOpenURL { url in
+                    guard !FirebaseAuthProvider.canHandle(url) else { return }
+                    coordinator.handleDeepLink(url)
+                }
         }
     }
 

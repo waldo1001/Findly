@@ -98,20 +98,42 @@ final class FirebaseAuthProvider: AuthProviding {
     /// is phone-auth-only, specs/006 §1). With no verification path available and
     /// `uiDelegate: nil`, `verifyPhoneNumber` had nowhere to go.
     ///
+    /// **I32 (2026-08-08):** fixing the above by linking `FirebaseAuth` was not enough — Auth's
+    /// notification-forwarding self-check never reached `AppDelegate.didReceiveRemoteNotification`
+    /// because Firebase's method swizzling is incompatible with SwiftUI's
+    /// `UIApplicationDelegateAdaptor` here, so `verifyPhoneNumber` failed instantly with
+    /// `FIRAuthErrorDomain 17054 ERROR_NOTIFICATION_NOT_FORWARDED` in every Release/TestFlight
+    /// build (Debug hid it via `configureForCurrentBuild()`'s `isAppVerificationDisabledForTesting`,
+    /// and the Simulator has no APNs to expose it either way). Fixed by disabling swizzling
+    /// (`FirebaseAppDelegateProxyEnabled = NO`, `Info.plist`) and forwarding every callback it used
+    /// to intercept manually — this method is now called for real; see `apnsTokenGate` below for
+    /// why it is still not a bare, unguarded `Auth.setAPNSToken` call.
+    ///
     /// Call from `AppDelegate.application(_:didRegisterForRemoteNotificationsWithDeviceToken:)`,
     /// alongside the Messaging equivalent. `.unknown` lets Firebase detect sandbox vs production
     /// itself, which matters because debug builds use the APNs sandbox and TestFlight/App Store
     /// builds use production, against the same uploaded `.p8` key.
-    /// **Do not call while Firebase method swizzling is enabled** — see `AppDelegate`'s
-    /// `didRegisterForRemoteNotificationsWithDeviceToken` for the full account. `Auth.setAPNSToken`
-    /// force-unwraps `tokenManager`, which only exists after `protectedDataInitialization()` has
-    /// run, so calling it from an APNs callback traps on launch. Auth receives the token via its
-    /// own swizzled interceptor, which is registered only after that initialization completes.
     ///
-    /// Kept (unused) so the fix is discoverable rather than looking like an oversight: anyone who
-    /// disables swizzling will need this, guarded by a readiness check.
+    /// **Still must not call `Auth.setAPNSToken` unguarded from this raw callback** — see
+    /// `AppDelegate`'s `didRegisterForRemoteNotificationsWithDeviceToken` for the full account of
+    /// the `c725a41` trap this guards against. With swizzling now OFF, nothing else forwards the
+    /// token to Auth at all, so the guard can no longer just defer to Firebase's own (now-disabled)
+    /// interceptor — `apnsTokenGate` is that guard: it stashes the token until
+    /// `markAuthReadyForAPNSToken()` confirms Auth is safe to touch.
+    private static let apnsTokenGate = PendingAPNSTokenGate()
+
     static func setAPNSToken(_ deviceToken: Data) {
-        Auth.auth().setAPNSToken(deviceToken, type: .unknown)
+        apnsTokenGate.offer(deviceToken) { Auth.auth().setAPNSToken($0, type: .unknown) }
+    }
+
+    /// Marks Auth as safe to receive the APNs token directly and flushes anything `setAPNSToken`
+    /// stashed before this ran. Called defensively from the top of `startPhoneVerification` —by
+    /// the time a user reaches "send code" the app has been running long enough that the launch-
+    /// time race `apnsTokenGate` guards against (Auth's async `protectedDataInitialization()` not
+    /// having assigned `tokenManager` yet) cannot still be in flight, so this is a safe point
+    /// regardless of how early or late the APNs callback itself fired.
+    private static func markAuthReadyForAPNSToken() {
+        apnsTokenGate.markReady { Auth.auth().setAPNSToken($0, type: .unknown) }
     }
 
     /// Call FIRST from `AppDelegate.application(_:didReceiveRemoteNotification:...)`. Firebase's
@@ -120,6 +142,16 @@ final class FirebaseAuthProvider: AuthProviding {
     /// if it were one of specs/001 §8's own push types.
     static func canHandleNotification(_ userInfo: [AnyHashable: Any]) -> Bool {
         Auth.auth().canHandleNotification(userInfo)
+    }
+
+    /// Call from `FindlyApp`'s `.onOpenURL`, BEFORE `AppCoordinator.handleDeepLink`. specs/004
+    /// §4.1's reCAPTCHA web-sheet fallback (used when APNs verification isn't available — the
+    /// Simulator, or a device before the silent push completes) returns control to the app via the
+    /// `app-1-…` `REVERSED_CLIENT_ID` custom scheme already declared in `Info.plist`; `Auth` claims
+    /// that URL and resumes verification itself. Any URL Auth doesn't recognize — the app's own
+    /// `findly://`/`https://{joinLinkHost}` deep links — falls through unclaimed to the coordinator.
+    static func canHandle(_ url: URL) -> Bool {
+        Auth.auth().canHandle(url)
     }
 
     /// Configures the default `FirebaseApp` if it isn't configured yet, and is safe to call more
@@ -161,6 +193,9 @@ final class FirebaseAuthProvider: AuthProviding {
     }
 
     func startPhoneVerification(phoneNumberE164: String) async throws {
+        // I32 — defensive flush of any APNs token stashed by an early `setAPNSToken` callback; see
+        // that method's doc and `apnsTokenGate` for why this is the safe point to apply it.
+        Self.markAuthReadyForAPNSToken()
         do {
             verificationID = try await PhoneAuthProvider.provider().verifyPhoneNumber(phoneNumberE164, uiDelegate: nil)
         } catch {
@@ -221,6 +256,7 @@ final class FirebaseAuthProvider: AuthProviding {
     func confirmCode(_ code: String) async throws { throw PhoneAuthError.unknown }
     static func setAPNSToken(_ deviceToken: Data) {}
     static func canHandleNotification(_ userInfo: [AnyHashable: Any]) -> Bool { false }
+    static func canHandle(_ url: URL) -> Bool { false }
     static func configureForCurrentBuild() {}
     static func configureFirebaseIfNeeded() {}
     /// No SDK linked means no persisted session to restore — the app starts at sign-in, which is

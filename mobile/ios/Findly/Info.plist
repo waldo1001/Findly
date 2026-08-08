@@ -33,6 +33,14 @@
 	</array>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<!-- I32 (specs/004 §4.1) — Firebase's method swizzling never delivers Auth's notification-
+	     forwarding self-check through SwiftUI's UIApplicationDelegateAdaptor, so phone sign-in
+	     failed instantly with FIRAuthErrorDomain 17054 in every Release/TestFlight build. Disabling
+	     swizzling means nothing auto-forwards APNs/FCM callbacks any more — AppDelegate now forwards
+	     them manually (see its didRegisterForRemoteNotificationsWithDeviceToken/
+	     didReceiveRemoteNotification, and FirebaseAuthProvider/FirebasePushTokenProvider). -->
+	<key>FirebaseAppDelegateProxyEnabled</key>
+	<false/>
 	<key>FindlyAuthMode</key>
 	<string>firebase</string>
 	<key>FindlyBaseURL</key>
