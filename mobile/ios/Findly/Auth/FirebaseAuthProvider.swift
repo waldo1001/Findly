@@ -150,6 +150,16 @@ final class FirebaseAuthProvider: AuthProviding {
     /// `app-1-…` `REVERSED_CLIENT_ID` custom scheme already declared in `Info.plist`; `Auth` claims
     /// that URL and resumes verification itself. Any URL Auth doesn't recognize — the app's own
     /// `findly://`/`https://{joinLinkHost}` deep links — falls through unclaimed to the coordinator.
+    ///
+    /// **Safe to call at cold launch**, unlike its `c725a41`-trap-family siblings
+    /// (`setAPNSToken`/`markAuthReadyForAPNSToken`, guarded above by `apnsTokenGate` for exactly
+    /// this reason): verified against the Firebase iOS SDK source, `Auth.canHandle(_:)` reads only
+    /// `authURLPresenter`, which `Auth.init()` assigns synchronously during initialization —
+    /// strictly before the async `protectedDataInitialization()` that later assigns `tokenManager`/
+    /// `notificationManager`. It never touches either of those, so a universal-link cold launch
+    /// (this method can run before `protectedDataInitialization()` has completed, e.g. a join link
+    /// tapped in the seconds after install) cannot hit the implicitly-unwrapped-optional trap that
+    /// `setAPNSToken` needs the gate to avoid.
     static func canHandle(_ url: URL) -> Bool {
         Auth.auth().canHandle(url)
     }
