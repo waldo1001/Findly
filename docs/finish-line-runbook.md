@@ -208,6 +208,8 @@ Play's data-safety form requires a working account-deletion URL.
 
 ## Track D — before the family uses it for real 👤
 
+**✅ DONE 2026-08-08.** Firebase users deleted (user, console); `stfindly` wiped by script (user-executed, agent-authored): **128 entities across all 13 app tables + 14 blobs across config/history/events**, structure and `azure-webjobs-*` runtime state untouched. The backend is factory-fresh; the next sign-in bootstraps the real family. The store-review test number survives (console config, not a user).
+
 **Account reset (specs/006 §8) — one-time, and it must happen before real onboarding, not after.**
 
 1. Delete every Firebase test user from `findly-71f7b`.
@@ -220,6 +222,8 @@ Easy to forget, and awkward to undo once real location history is interleaved wi
 ---
 
 ## Track E — M2, public release
+
+> **✅ BOTH STORES SUBMITTED 2026-08-08.** Apple: build 187 "Waiting for Review" (submission `a599d5da-…`). Play: production release 183 (1.0.0) + countries **BE/NL/HR** sent for review via Publishing overview (managed publishing off → auto-send after pre-review checks). Both declaration videos live (unlisted): background location `watch?v=abCvUqBHjtU`, foreground service `watch?v=vaoBdUKhhMI`. All console answers used are recorded in `store-submission-pack.md`; screenshots/graphics in `design/store-assets/` (Play 1080×2400, App Store 6.5" 1284×2778 as uploaded). Remaining: wait for the two review verdicts — status arrives by email (Play → account owner, Apple → Apple ID).
 
 > **Every console answer for both stores is written out, paste-ready, in
 > [`store-submission-pack.md`](store-submission-pack.md)** — listing copy, Play data-safety table, the
@@ -236,7 +240,7 @@ uploaded, signing wired, builds uploading via `mobile/ios/scripts/release-testfl
 
 Remaining:
 
-1. Register iOS **App Check** (App Attest) — also an H8 precondition.
+1. ✅ Register iOS **App Check** (App Attest) — done 2026-08-08 (user, console; both mobile apps now show "Registered", nothing enforced). The **web** provider remains the only App Check registration left, owned by H8 (Track F).
 2. **Privacy nutrition labels**, matching the Play data-safety answers exactly: precise location, linked to
    identity, shared with other app users; phone number for authentication.
 3. Age rating; verify the `NSLocationAlwaysAndWhenInUseUsageDescription` purpose strings honestly describe
