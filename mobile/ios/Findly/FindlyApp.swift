@@ -77,10 +77,17 @@ struct FindlyApp: App {
         case .stubLocal:
             authProvider = StubAuthProvider(firebaseProjectId: config.firebaseProjectId)
         case .firebase:
-            // SwiftUI runs `App.init()` before `didFinishLaunchingWithOptions`, so nothing has
-            // configured Firebase yet — and touching `Auth` unconfigured is a hard crash. Configure
-            // here; `AppDelegate`'s own (now idempotent) call becomes a no-op.
-            FirebaseAuthProvider.configureFirebaseIfNeeded()
+            // I33 — Firebase is deliberately NOT configured here. `App.init()` runs before
+            // `UIApplicationMain` establishes `UIApplication.shared` and its delegate, so calling
+            // `FirebaseApp.configure()` this early makes Firebase's method-swizzler install its
+            // remote-notification interceptor against a not-yet-existent delegate. That interceptor
+            // never fires, so Firebase's phone-auth notification-forwarding self-check always failed
+            // with `FIRAuthErrorDomain 17054` on device — regardless of the swizzling toggle.
+            // Configuration now happens only in `AppDelegate.didFinishLaunchingWithOptions`, where
+            // the delegate is guaranteed live. Constructing `FirebaseAuthProvider()` is safe
+            // unconfigured — it touches only the Keychain, never `Auth.auth()` — and the launch-route
+            // read of `currentUserId` already lives in `RootView`'s `.task`, which runs strictly
+            // after `didFinishLaunchingWithOptions`.
             authProvider = FirebaseAuthProvider()
         }
         self.authProvider = authProvider

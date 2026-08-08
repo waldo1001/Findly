@@ -33,14 +33,15 @@
 	</array>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
-	<!-- I32 (specs/004 §4.1) — Firebase's method swizzling never delivers Auth's notification-
-	     forwarding self-check through SwiftUI's UIApplicationDelegateAdaptor, so phone sign-in
-	     failed instantly with FIRAuthErrorDomain 17054 in every Release/TestFlight build. Disabling
-	     swizzling means nothing auto-forwards APNs/FCM callbacks any more — AppDelegate now forwards
-	     them manually (see its didRegisterForRemoteNotificationsWithDeviceToken/
-	     didReceiveRemoteNotification, and FirebaseAuthProvider/FirebasePushTokenProvider). -->
-	<key>FirebaseAppDelegateProxyEnabled</key>
-	<false/>
+	<!-- I33 (specs/004 §4.1) — Firebase method swizzling is ENABLED (the default; the key is
+	     omitted). The I32 attempt to disable it and forward APNs/FCM callbacks manually was the
+	     wrong architecture: manually calling Auth.setAPNSToken races Firebase's async
+	     protectedDataInitialization (tokenManager is a nil-until-init IUO), which trapped on device
+	     the instant the pending-token gate flushed. Firebase's swizzler registers its own APNs
+	     interceptor INSIDE that initialization, so it is the only crash-safe way to hand Auth the
+	     token. The genuine 17054 root cause was unrelated: registerForRemoteNotifications() was
+	     gated behind sign-in, so no APNs token existed at verify time (see AppDelegate's
+	     didFinishLaunchingWithOptions) — fixed by registering unconditionally at launch. -->
 	<key>FindlyAuthMode</key>
 	<string>firebase</string>
 	<key>FindlyBaseURL</key>

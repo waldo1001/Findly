@@ -35,32 +35,30 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         FirebaseAuthProvider.configureForCurrentBuild()
         FirebasePushTokenProvider.shared.startObservingMessaging()
         UNUserNotificationCenter.current().delegate = self
+        // I33 — register for remote notifications UNCONDITIONALLY at launch. This obtains the APNs
+        // device token WITHOUT prompting the user (user-facing alerts need UNUserNotificationCenter
+        // authorization; a silent device token does not). Firebase phone-auth's app attestation
+        // needs that token BEFORE `verifyPhoneNumber` runs: with a token, Auth uses the silent-push
+        // credential path; without one it falls back to the notification-forwarding prober, which
+        // is unreachable through SwiftUI's `UIApplicationDelegateAdaptor` proxy and fails every
+        // sign-in with `FIRAuthErrorDomain 17054`. Previously this call was gated behind
+        // `currentUserId != nil` in FindlyApp's onSignedIn closure — a chicken-and-egg deadlock: no
+        // token until signed in, no sign-in without the token. Proven on-device 2026-08-08.
+        application.registerForRemoteNotifications()
         return true
     }
 
     func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
+        // I33 — Firebase method swizzling is ON (default), so Firebase's own interceptor forwards
+        // this token to BOTH Messaging and Auth, and it does so crash-safely because that
+        // interceptor is registered inside Auth's `protectedDataInitialization()` — strictly after
+        // the `tokenManager` IUO exists. We deliberately do NOT call `Auth.setAPNSToken` ourselves:
+        // I32 tried that (with swizzling off) and it trapped on device the instant the pending-token
+        // gate flushed, because there is no point in our own code that is guaranteed to run after
+        // that async init. Messaging's APNs token is likewise handled by the swizzler; this explicit
+        // call is retained only as the FCM-token provider's documented feed and is trap-free
+        // (`Messaging.apnsToken` is a plain settable property).
         FirebasePushTokenProvider.shared.setAPNSToken(deviceToken)
-        // I32 (2026-08-08): now forwarded to FirebaseAuth too — swizzling is OFF (see
-        // `Info.plist`'s `FirebaseAppDelegateProxyEnabled`), so Auth no longer receives this token
-        // through its own swizzled interceptor at all. Without this call, phone sign-in has no APNs
-        // silent-push verification path in any build, which is the root cause this task fixes
-        // (`FIRAuthErrorDomain 17054 ERROR_NOTIFICATION_NOT_FORWARDED`).
-        //
-        // Still routed through a readiness guard, not a bare call — `c725a41`'s trap is still real:
-        //
-        //   FirebaseAuth/Auth.swift:1592: Fatal error: Unexpectedly found nil while implicitly
-        //   unwrapping an Optional value
-        //
-        // `Auth.setAPNSToken` writes `self.tokenManager.token`, and `tokenManager` is an
-        // implicitly-unwrapped optional assigned only inside `Auth.protectedDataInitialization()`.
-        // That runs asynchronously (and can be deferred to
-        // `protectedDataDidBecomeAvailableNotification`), so an APNs callback arriving first hits
-        // nil and traps. Previously Firebase's OWN swizzled interceptor avoided this by registering
-        // itself *inside* that same initialization, i.e. strictly after `tokenManager` existed —
-        // with swizzling off that safety net is gone, so `FirebaseAuthProvider.setAPNSToken` now
-        // stashes the token behind `PendingAPNSTokenGate` instead of calling `Auth.setAPNSToken`
-        // directly; see that method's doc for the readiness call site.
-        FirebaseAuthProvider.setAPNSToken(deviceToken)
     }
 
     func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {
@@ -82,13 +80,13 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         // Firebase's phone-auth verification push must be offered to Auth first: it looks like any
         // other silent push, and if Auth never sees it, verification stalls and we would also try
         // to dispatch it as though it were one of specs/001 §8's own types.
+        // With swizzling ON (I33), Firebase's interceptor already had first look at this payload and
+        // consumed its own phone-auth receipt/verification pushes before this method runs. This
+        // remaining call is defensive for our own §8 types: if Auth still claims it, defer.
         if FirebaseAuthProvider.canHandleNotification(userInfo) {
             completionHandler(.noData)
             return
         }
-        // I32 — swizzling is OFF, so Messaging no longer auto-observes delivery of the payloads
-        // Auth didn't claim; forward explicitly so its own delivery bookkeeping still runs.
-        FirebasePushTokenProvider.shared.appDidReceiveMessage(userInfo)
         guard let dispatcher = PushRuntimeContainerHolder.shared.container?.dispatcher else {
             completionHandler(.noData)
             return

@@ -56,22 +56,11 @@ final class FirebasePushTokenProvider: NSObject, PushTokenProviding {
     func setAPNSToken(_ deviceToken: Data) {
         Messaging.messaging().apnsToken = deviceToken
     }
-
-    /// I32 (specs/004 §4.1) — call from `AppDelegate.didReceiveRemoteNotification`, for any payload
-    /// `FirebaseAuthProvider.canHandleNotification` did not claim. With Firebase method swizzling
-    /// disabled (`FirebaseAppDelegateProxyEnabled = NO`), `Messaging` no longer auto-observes
-    /// notification delivery through its own swizzled interceptor, so its delivery-analytics/
-    /// message-info bookkeeping needs this explicit forward to keep running — this app target
-    /// doesn't consume the returned `MessagingMessageInfo` itself, so the result is discarded.
-    func appDidReceiveMessage(_ userInfo: [AnyHashable: Any]) {
-        _ = Messaging.messaging().appDidReceiveMessage(userInfo)
-    }
 #else
     // Firebase SDK not linked (shouldn't happen once project.yml's FirebaseMessaging dependency is
     // wired, but keeps this file buildable in isolation the same way FirebaseAuthProvider does).
     func startObservingMessaging() {}
     func setAPNSToken(_ deviceToken: Data) {}
-    func appDidReceiveMessage(_ userInfo: [AnyHashable: Any]) {}
 #endif
 }
 
