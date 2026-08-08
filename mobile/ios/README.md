@@ -518,3 +518,31 @@ dependency.
 - **Offline (I10, durable):** `FixQueue` (actor, now stateless — every call delegates to `FixStoring`) — freeze-on-first-send `batchId` idempotency, batch upload per 001 §5.1. `SQLiteFixStore` (raw `SQLite3` C API, app-private `Library/Application Support/findly-fixqueue.sqlite`) persists both the fix rows *and* the frozen in-flight batch's identity, so a retry after a crash resends identical content (specs/009 §2) — proven by a test that reopens a fresh store instance against the same file and by a real on-simulator file inspection (see the I10 section above). 1 000-fix cap, oldest-pending-dropped-first, one debug-level count-only log line per drop.
 - **I7 hardening (Keychain, not UserDefaults):** `FirebaseAuthProvider`'s `verificationID` — previously plaintext in `UserDefaults` (flagged non-blocking in I3's security review) — now lives behind `KeychainStoring` (`FindlyKit`, protocol + `InMemoryKeychainStore` fake) with a real `Security`-framework `KeychainStore` (app target, generic-password item, `kSecAttrAccessibleWhenUnlockedThisDeviceOnly`). Storage-mechanism swap only; the verify/confirm lifecycle is unchanged.
 - **I8 privacy (export/delete account/delete family, specs/004 §3.6, specs/008):** `Screens/Settings/` gains a hub (`PrivacySettingsScreen`, reachable unconditionally from Home — a store requirement, 008 §4.4) plus `ExportScreen`/`DeleteAccountScreen`/`DeleteFamilyScreen`. `FindlyAPIClient` gains `exportData(userId:)` (raw `Data`, the one unenveloped success response in the API, via a new `URLSessionAPIClient.sendRawData`), `deleteAccount()`, `deleteFamily()` (both bare-204). `AuthProviding` gains `deleteCurrentUser()` — the 008 §1.3 seam FindlyKit calls after `DELETE /users/me` returns 204; `FirebaseAuthProvider` (app target) implements it as `Auth.auth().currentUser?.delete()`, kept out of FindlyKit like the rest of the real Firebase surface. `DeleteAccountViewModel` derives the 008 §4.2 cascade-warning wording from the caller's own role/roster (last parent or sole member), orders backend-then-Firebase-then-local-wipe (`FixQueue.clearAll()` + `DeviceIdProviding.clearDeviceId` + `signOut()` for the Keychain entry), and offers a Firebase-step-only retry on failure. `DeleteFamilyScreen` layers a typed-family-name gate on top of the standard `.confirmationDialog` two-step (008 §5.4's recommended UX).
+
+## Debugging auth / push / APNs: use a real device FIRST (I33, 2026-08-08)
+
+Firebase phone-auth, APNs registration, and silent-push verification are **not faithfully
+reproducible on the Simulator** — Firebase Auth's async `protectedDataInitialization` never completes
+there, so `verifyPhoneNumber` fails with the *same* `FIRAuthErrorDomain 17054` whether the code is
+correct or broken. Diagnosing these on the Simulator, or by shipping TestFlight builds for someone
+else to tap through, is working blind and wasted a full evening on I32/I33.
+
+For anything touching auth, push, APNs, or the app-delegate lifecycle, go straight to on-device
+diagnosis with a cabled iPhone:
+- `xcrun devicectl list devices` — get the device id.
+- Register the device for development signing if needed (App Store Connect API `POST /v1/devices`),
+  then build Release with `-allowProvisioningUpdates -authenticationKeyPath ... CODE_SIGN_STYLE=Automatic`.
+- `xcrun devicectl device install app --device <id> <App.app>`.
+- `xcrun devicectl device process launch --console --device <id> <bundleId>` reliably captures the
+  app's `NSLog` output (the `pymobiledevice3 syslog live` stream is flaky and drops). A temporary
+  `NSLog("...domain=%@ code=%ld", nsError.domain, nsError.code)` in the error path — codes only, never
+  the message/userInfo (`docs/security-review-checklist.md`) — surfaces the real failure through the
+  syslog privacy mask. Crash reports: `pymobiledevice3 crash pull`.
+
+The I33 root cause was invisible without this: `FirebaseApp.configure()` ran in `FindlyApp.init()`,
+which SwiftUI executes **before** `UIApplicationMain` establishes the app delegate, so Firebase's
+swizzler installed its remote-notification interceptor against a delegate that did not yet exist and
+the phone-auth notification-forwarding self-check never passed. Configure Firebase in
+`AppDelegate.didFinishLaunchingWithOptions` (delegate guaranteed live), and call
+`registerForRemoteNotifications()` unconditionally at launch (not gated behind sign-in — Firebase
+phone-auth needs the APNs token *before* verification).
