@@ -59,7 +59,7 @@ Firebase or `maps-compose`, however many CVEs land. Until this toggle flips, A18
 Firebase console → the `findly-71f7b` project:
 
 1. **Blaze plan + budget alert €5.** Phone auth needs Blaze for real numbers.
-2. **Authentication → Settings → SMS region policy →** allow **BE** and **NL** only (family mode, specs/006 §6.3).
+2. **Authentication → Settings → SMS region policy →** allow **BE** and **NL** only (family mode, specs/006 §6.3). **2026-08-08: HR (Croatia) added by the user** — the allowlist is now BE+NL+HR; Play store countries and (optionally) App Store availability should match.
 
 **Why:** without this, sign-in with a *real* phone number fails. The test number
 (`+32 470 00 00 01` / `123456`) works regardless, which is exactly why this gap can hide until a family
