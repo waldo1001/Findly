@@ -259,3 +259,15 @@ jobs:
           releaseFiles: mobile/android/app/build/outputs/bundle/release/app-release.aab
           track: internal
           status: completed
+          # 2026-08-16: without this, committing the edit fails with "Changes cannot be sent for
+          # review automatically" and the upload is discarded — the AAB transfers, the edit never
+          # commits, nothing reaches the internal track. Play refuses to auto-submit an edit while
+          # the app has a review state needing attention, which first became true when build 183 was
+          # rejected on 2026-08-14; before that this workflow had never met the condition.
+          #
+          # `true` means "commit the edit, but don't send changes for review" — exactly right here.
+          # This job only ever uploads an AAB to the *internal* track, which needs no review, and
+          # promotion to production plus the review submission are deliberately manual Play Console
+          # actions (see the track comment above, and finish-line-runbook.md B8). So this makes the
+          # internal publish work again without granting CI any ability to submit for review.
+          changesNotSentForReview: true
