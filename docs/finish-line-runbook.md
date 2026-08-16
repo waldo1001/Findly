@@ -164,11 +164,25 @@ Locator**); AAB `6 (1.0.0)` uploaded to internal testing; **Play App Signing act
 
 Fingerprints, all three now registered in **both** `assetlinks.json` (live, verified) and Firebase:
 
-| Key | SHA-256 | Signs |
+| Key | SHA-256 | SHA-1 | Signs |
+|---|---|---|---|
+| Play app signing (Google's) | `28:DE:48:B0:03:67:55:FE:29:79:5B:8E:A2:AD:E1:F6:57:EC:D8:91:24:39:B8:EE:47:AD:86:7C:B5:21:32:54` | `BC:7F:AA:30:EC:18:C7:80:F7:48:CE:80:6E:BA:20:CB:6B:AD:AB:9C` | what users install from Play |
+| Upload (ours) | `3B:5C:9A:72:D0:15:8B:C1:CF:CD:0C:6C:6F:49:13:6B:25:1A:B3:F0:2C:83:8E:71:A9:4A:E9:FB:32:14:C3:18` | `E5:F9:0A:0A:49:F4:DF:C1:A9:60:A4:8C:81:79:B3:B3:65:09:2B:C3` | local + the sideloaded GitHub-release APK |
+| Debug | `28:0D:FB:AC:…:45:08` | `BA:EE:F6:F7:6F:DE:5B:83:AE:48:21:FF:34:0E:24:21:…` | development builds |
+
+**Both digests are recorded on purpose — different registries want different ones, and getting this
+wrong fails silently:**
+
+| Registry | Digest | Which keys |
 |---|---|---|
-| Play app signing (Google's) | `28:DE:48:B0:…:32:54` | what users install from Play |
-| Upload (ours) | `3B:5C:9A:72:…:C3:18` | local + the sideloaded GitHub-release APK |
-| Debug | `28:0D:FB:AC:…:45:08` | development builds |
+| Firebase Android app / App Check | SHA-256 | all three |
+| `assetlinks.json` (App Links, 007 §3) | SHA-256 | all three |
+| **Google Maps API key restriction** | **SHA-1** | **all three** |
+
+All fingerprints here are **public** values (they ship inside any distributed APK) — safe to commit and
+to paste in chat. The two truncated entries above are the ones not yet re-read in full; complete them
+from Play Console → Protected with Play → App signing and from `keytool -list -v` on the debug keystore
+next time either is opened.
 
 **This closed a production bug**: `assetlinks.json` had served `CHANGE-ME` placeholders since W1, so
 Android never verified the App Link and every shared `https://…/g#CODE` join link opened Chrome
@@ -181,11 +195,51 @@ and using the upload one where the app signing one belongs fails **silently** �
 production doesn't, nothing errors. The upload fingerprint Play displayed matched the one extracted
 from the local keystore, which is how it was caught.
 
+> ⚠️ **This exact trap recurred and cost a Play rejection (2026-08-14).** The Maps API key
+> (`Findly Maps (Android)`) was restricted to the **debug and upload** SHA-1s only. The app signing
+> SHA-1 was missing, so every Play-distributed install — internal track *and* production review — got
+> a **blank map**: Google watermark and zoom controls render, no tiles, no error, no crash. Play
+> rejected it as *Broken Functionality — "unresponsive UI elements"*, since the map is the app's main
+> surface. Nobody caught it because every human test ran on a debug or sideloaded build, which are
+> signed by the two keys that *were* registered. Fixed by adding
+> `BC:7F:AA:30:EC:18:C7:80:F7:48:CE:80:6E:BA:20:CB:6B:AD:AB:9C` to the key's Android restrictions.
+> Root cause of the omission: this table recorded SHA-256 only, and Maps needs SHA-1 — so there was no
+> correct value to copy. Hence the two-digest table above.
+
 ### B7 👤 Add the family as internal testers
 
 Play Console → internal testing → testers. They install from the Play link.
 
 **→ M1-Android reached.**
+
+### B8 👤 Pre-promotion gate — MANDATORY before any promotion to production
+
+**Never promote a build to production review without running this on a Play-installed copy.** CI
+cannot substitute for it: `./gradlew test` is 578 pure-JVM tests that never start the app, there are
+**zero instrumentation tests**, and — decisively — the APK CI builds and uploads as an artifact is
+signed with the **upload** key, while Play re-signs the AAB with the **app signing** key. The artifact
+you can test locally is therefore *not* the binary users receive, and any defect gated on the signing
+identity (Maps key restrictions, Firebase App Check, App Links) is invisible to every local check.
+
+Install from the **internal track** (not `adb install` of the CI artifact, not a sideload), then:
+
+1. **Open the family map.** Tiles must render, not just the Google watermark and zoom controls. A
+   blank map here is the 2026-08-14 rejection, and it is silent — no crash, no error, nothing in
+   logcat from the app itself.
+2. **Open a group map**, same check.
+3. **Tap a shared join link** (`https://…/g#CODE`) — it must open Findly, not Chrome (App Links,
+   007 §3; this is the other SHA-256-registration-dependent surface).
+4. **Sign in from a fresh install** with the store-review test number, all the way to the map.
+5. **Confirm sign-in fails gracefully** for a number outside the §6.3 allowlist — expected message is
+   "Findly can't send a code to that country yet.", never "Couldn't sign in. Try again."
+
+Steps 1–3 all depend on fingerprint registrations that fail *silently* when wrong, which is precisely
+why they need a human on a Play-signed build rather than a CI assertion.
+
+> **Also relevant to how build 183 reached review:** `android.yml` auto-publishes every green `main`
+> push to the internal track, so a **Dependabot merge commit** produced the artifact that was promoted
+> to production the next morning, gated only by JVM unit tests and never launched by anyone. Automatic
+> internal publishing is fine; promotion is the gate, and this checklist is that gate.
 
 ---
 
