@@ -146,7 +146,7 @@ class FirebaseAuthProvider(
         is FirebaseAuthMissingActivityForRecaptchaException -> PhoneAuthError.APP_VERIFICATION_FAILED
         is FirebaseTooManyRequestsException -> PhoneAuthError.TOO_MANY_REQUESTS
         is FirebaseNetworkException -> PhoneAuthError.NETWORK
-        is FirebaseAuthException -> mapByErrorCode(e.errorCode)
+        is FirebaseAuthException -> phoneAuthErrorForFirebaseCode(e.errorCode)
         else -> PhoneAuthError.UNKNOWN
     }
 
@@ -156,18 +156,7 @@ class FirebaseAuthProvider(
         is FirebaseAuthInvalidCredentialsException -> PhoneAuthError.INVALID_CODE
         is FirebaseTooManyRequestsException -> PhoneAuthError.TOO_MANY_REQUESTS
         is FirebaseNetworkException -> PhoneAuthError.NETWORK
-        is FirebaseAuthException -> mapByErrorCode(e.errorCode)
-        else -> PhoneAuthError.UNKNOWN
-    }
-
-    private fun mapByErrorCode(errorCode: String?): PhoneAuthError = when (errorCode) {
-        "ERROR_QUOTA_EXCEEDED" -> PhoneAuthError.SMS_QUOTA_EXCEEDED
-        "ERROR_TOO_MANY_REQUESTS" -> PhoneAuthError.TOO_MANY_REQUESTS
-        "ERROR_SESSION_EXPIRED" -> PhoneAuthError.CODE_EXPIRED
-        "ERROR_INVALID_VERIFICATION_CODE" -> PhoneAuthError.INVALID_CODE
-        "ERROR_INVALID_PHONE_NUMBER" -> PhoneAuthError.INVALID_PHONE_NUMBER
-        "ERROR_APP_NOT_AUTHORIZED" -> PhoneAuthError.APP_VERIFICATION_FAILED
-        "ERROR_NETWORK_REQUEST_FAILED" -> PhoneAuthError.NETWORK
+        is FirebaseAuthException -> phoneAuthErrorForFirebaseCode(e.errorCode)
         else -> PhoneAuthError.UNKNOWN
     }
 }

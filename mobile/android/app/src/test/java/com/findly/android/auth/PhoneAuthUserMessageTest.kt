@@ -24,6 +24,10 @@ class PhoneAuthUserMessageTest {
             PhoneAuthError.SMS_QUOTA_EXCEEDED.userMessage(),
         )
         assertEquals(
+            "Findly can't send a code to that country yet.",
+            PhoneAuthError.REGION_NOT_ALLOWED.userMessage(),
+        )
+        assertEquals(
             "Couldn't verify this device. Update the app and try again.",
             PhoneAuthError.APP_VERIFICATION_FAILED.userMessage(),
         )

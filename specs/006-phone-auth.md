@@ -68,11 +68,22 @@ Each platform maps Firebase SDK failures onto this closed set; the v1 user-facin
 | `INVALID_PHONE_NUMBER` | Failed §3 validation, or provider rejected the number | "That doesn't look like a valid phone number." |
 | `TOO_MANY_REQUESTS` | Firebase per-device/number throttling | "Too many attempts. Wait a while and try again." |
 | `SMS_QUOTA_EXCEEDED` | Project SMS quota exhausted | "SMS limit reached for now. Try again later." |
+| `REGION_NOT_ALLOWED` | The number's country is outside the SMS region policy allowlist (§6.3) | "Findly can't send a code to that country yet." |
 | `APP_VERIFICATION_FAILED` | Play Integrity / App Attest / reCAPTCHA / APNs app verification failed | "Couldn't verify this device. Update the app and try again." |
 | `INVALID_CODE` | Wrong SMS code | "That code isn't right. Check the SMS and try again." |
 | `CODE_EXPIRED` | Verification session / code expired | "That code expired. Request a new one." |
 | `NETWORK` | No connectivity to Firebase | "No connection. Check your network and try again." |
 | `UNKNOWN` | Anything else | "Couldn't sign in. Try again." |
+
+`REGION_NOT_ALLOWED` is normatively distinct from `UNKNOWN` because family mode (§6.3) is the launch
+default: for a number outside the allowlist the failure is **permanent**, and `UNKNOWN`'s "Try again."
+invites a retry that can never succeed — on the one screen that gates the entire app. Found while
+reproducing the 2026-08-14 Play review failure: anyone outside BE/NL/HR reaches a silent dead end with
+no explanation. Mapping this case to `UNKNOWN` is a spec violation, not a judgement call.
+
+Platform note: Firebase reports this as `ERROR_OPERATION_NOT_ALLOWED` (status 17006) — the same code it
+raises when the Phone provider itself is disabled. §6.2 makes "Phone enabled" a hard project requirement,
+so in a correctly-provisioned project that code always means the region policy.
 
 ### 4.3 Platform asymmetry (normative)
 
