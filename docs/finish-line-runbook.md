@@ -291,6 +291,37 @@ keys on that page against the four in the B4-B6 table — the *only* symptom is 
 
 Builds 193 and 194 were lost to this; **192 was the last publish before it, and 195 the first after.**
 
+### ✅ RESUBMITTED TO PLAY 2026-08-20 — production release 192 is in review
+
+Done by hand in the Play Console (Chrome), so **git has no trace of it**. Anyone reading only
+the repo will conclude production is still the rejected 183 and that B8 blocks a resubmission.
+It does not — that decision was taken and acted on. Console state as of 2026-08-20:
+
+| Where | Reads |
+|---|---|
+| Production → Track summary | Active · **Release 192 (1.0.0) in review** · 3 countries/regions |
+| Production → Releases → 192 | **In review** |
+| Production → Releases → 183 | **Superseded by another release** (previously "Update rejected") |
+| All apps → Update status | **In review**, 20 Aug 2026 |
+
+**Do not read "App status: Draft" on the all-apps list as "not submitted".** That column is
+the *publication* state and stays `Draft` until a production release actually goes live; the
+adjacent *Update status* column is the one carrying the review state. This cost two separate
+sessions a wrong conclusion.
+
+**13 changes went in together**, not just the release: production 192 + the BE/HR/NL country
+list, the en-GB store listing, content rating, target audience, privacy policy URL, ads
+declaration, data safety, health apps declaration, app category, and a Closed testing Alpha
+track (183, resume, testers by email list) that was pre-existing and knowingly included.
+
+**Submitted with the map fix unverified** — a deliberate, stated trade-off after the day's
+verification attempts were exhausted by PAIRIP, emulator sign-in failures and parental
+controls on the only spare device. All four fingerprints are registered and API 36 was
+confirmed empirically to report `05:C1:03:B4`, but nobody has seen tiles render on a
+Play-installed build. **If this is rejected again on Broken Functionality, check the map
+first** — and it is now a cheap check, since publishing works and any tester's phone gets
+the build through a normal Play update.
+
 ### Verification status of the 2026-08-14 rejection fixes
 
 | Fix | Status |
