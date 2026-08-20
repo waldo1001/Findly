@@ -184,6 +184,13 @@ final class FirebaseAuthProvider: AuthProviding {
             return .tooManyRequests
         case .quotaExceeded:
             return .smsQuotaExceeded
+        // The number's country is outside the §6.3 SMS region allowlist. Firebase reuses
+        // `operationNotAllowed` for "the Phone provider is disabled", but §6.2 makes Phone-enabled a
+        // hard project requirement, so in a correctly-provisioned project it always means the region
+        // policy. Previously fell through to `.unknown` — "Couldn't sign in. Try again." — inviting a
+        // retry that can never succeed, on the one screen gating the whole app (006 §4.2).
+        case .operationNotAllowed:
+            return .regionNotAllowed
         case .appNotVerified, .appNotAuthorized, .missingAppCredential, .invalidAppCredential, .webContextCancelled, .webInternalError:
             return .appVerificationFailed
         case .invalidVerificationCode, .missingVerificationCode:

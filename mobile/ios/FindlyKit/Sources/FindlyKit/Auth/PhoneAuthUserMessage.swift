@@ -12,6 +12,8 @@ extension PhoneAuthError {
             return "Too many attempts. Wait a while and try again."
         case .smsQuotaExceeded:
             return "SMS limit reached for now. Try again later."
+        case .regionNotAllowed:
+            return "Findly can't send a code to that country yet."
         case .appVerificationFailed:
             return "Couldn't verify this device. Update the app and try again."
         case .invalidCode:

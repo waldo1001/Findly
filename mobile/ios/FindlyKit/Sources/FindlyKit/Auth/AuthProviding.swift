@@ -45,6 +45,7 @@ public enum PhoneAuthError: Error, Equatable, CaseIterable {
     case invalidPhoneNumber
     case tooManyRequests
     case smsQuotaExceeded
+    case regionNotAllowed
     case appVerificationFailed
     case invalidCode
     case codeExpired
