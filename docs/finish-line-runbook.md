@@ -243,6 +243,63 @@ why they need a human on a Play-signed build rather than a CI assertion.
 
 ---
 
+### B9 ⚠️ What the 2026-08-19 verification attempt actually found
+
+Three traps, all discovered while trying to prove the B8 map check on a Play-signed build. Each one
+costs hours if rediscovered.
+
+**1. The app signing key is rotated, and the console shows the wrong half.**
+Play Console → App signing displays the *current* classical key, SHA-1 `BC:7F:AA:30:…`. But the APK
+Play distributes carries **two** signature blocks, and the current one is gated at `minSdkVersion=37`:
+
+| Signer | SHA-1 | Applies to |
+|---|---|---|
+| V3.2 Hybrid Classical | `BC:7F:AA:30:EC:18:C7:80:F7:48:CE:80:6E:BA:20:CB:6B:AD:AB:9C` | API 37+ only |
+| V3.0 | `05:C1:03:B4:71:12:AC:F1:2C:1D:42:20:7C:D5:00:E8:F8:3F:B0:7A` | **everything below — i.e. every real device today** |
+
+Verified empirically: on an API 36 emulator, `dumpsys package` reports the V3.0 certificate with
+`past signatures:[]` — the OS sees no lineage at all. **Any API-key restriction, App Check
+registration, or `assetlinks.json` entry must carry the V3.0 fingerprint**, or it fails on every
+shipping device while looking correct in the console. Both are now registered on the Maps key.
+
+**2. A Play-signed APK will not run outside Play.** "Automatic protection" (Protected with Play)
+wraps the app in `com.pairip.licensecheck.LicenseActivity`, which calls the licensing service and
+bounces to the Play Store when no signed-in Play account is present. So the *signed universal APK*
+from App bundle explorer installs via `adb` but cannot launch on a device without a Play account —
+which makes emulator verification of anything behind sign-in impossible unless Play Store is signed in.
+
+**3. Turning Automatic protection off does not help, and publishing is now gated regardless.**
+Builds 193 and 194 both failed at "Committing the Edit" with:
+
+    To proceed with this release, all keys should be registered to meet the Android
+    Developer Verification requirements.
+
+This fired with protection off *and* after turning it back on, so the two are unrelated to each other.
+
+**Cause and fix (2026-08-20): the upload key was not registered.** Play Console →
+**Android developer verification → Package names → `com.findly.android`** listed the package as
+`Registered` with **3 keys, all Verified** — current app signing (classical), the PQC key, and the
+previous app signing key — and the account banner read *"All of your apps have been successfully
+registered"*. The **upload key** (`3B:5C:9A:72:…:C3:18`) was absent. "All keys" includes it, even
+though the upload key never signs anything users receive: Play strips it and re-signs. Adding it via
+**Add key** (SHA-256 only, no proof-of-possession APK — it verified instantly) unblocked publishing
+immediately: build 195 committed its edit on the next run.
+
+**The console gives no hint of this.** It reports the package as fully registered and raises no task
+in Notifications, while every release is refused. If publishing ever fails this way again, count the
+keys on that page against the four in the B4-B6 table — the *only* symptom is a missing row.
+
+Builds 193 and 194 were lost to this; **192 was the last publish before it, and 195 the first after.**
+
+### Verification status of the 2026-08-14 rejection fixes
+
+| Fix | Status |
+|---|---|
+| 006 §4.2 `REGION_NOT_ALLOWED` message | ✅ **Verified** on a real minified release build against the live Firebase project — the region-blocked number reads "Findly can't send a code to that country yet." |
+| Maps key fingerprint | ⚠️ **Not verified end-to-end.** All four certificates (debug, upload, both app signing keys) are registered, and the missing-fingerprint diagnosis is well-evidenced, but no one has yet seen tiles render on a Play-installed build. B8 step 1 remains outstanding. |
+
+---
+
 ## Track C — H9, privacy-page infrastructure 👤 + 🤖
 
 Blocks H8, and without it the `/delete-account` page cannot actually sign anyone in — which matters because
