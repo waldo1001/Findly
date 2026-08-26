@@ -373,6 +373,17 @@ public final class LocationRuntimeContainer {
     /// back by the app target for `PermissionFlowViewModel`), so this step is a real, live-called
     /// step of the same wipe every other local store already goes through.
     ///
+    /// **I34 review-fix addition: also clears `familyContextCache`.** Same I26 pattern as the I31
+    /// addition immediately above, reproduced in this task's own brand-new code: `FamilyContextCache
+    /// .clear()`'s doc said it was "part of the account-deletion/sign-out local wipe" from the
+    /// moment it was written, but nothing on the real wipe path called it — and unlike most local
+    /// state, this cache is a process-lifetime `@StateObject` (`FindlyApp.swift`), so it survives
+    /// an in-app sign-out with no relaunch. Without this step, a different user signing in on the
+    /// same device could see the PREVIOUS caller's family name/display name/role in the drawer
+    /// header for as long as it took some later probe to happen to overwrite it — a real
+    /// cross-account disclosure, not a cosmetic staleness. Injected here (optional) for the same
+    /// "this container owns the one instance" reason as `permissionDisclosureStore`.
+    ///
     /// Idempotent-safe to call more than once (every step it delegates to already is).
     public func wipeLocalState() async {
         // Post-review fix (concurrency re-review): `stateStore.clear()` MUST run FIRST, before
@@ -399,6 +410,10 @@ public final class LocationRuntimeContainer {
         await geofenceEventQueue.clearAll()
         geofenceConfigStore.clear()
         permissionDisclosureStore.clear()
+        // specs/010-app-shell-and-screen-ux.md §1.2 (I34 review fix) — see this property's doc for
+        // why a signed-out-then-different-user-signs-in sequence needed this: the drawer header
+        // must never keep showing the previous caller's family name/display name/role.
+        familyContextCache?.clear()
     }
 
     /// specs/009 §4: "at least every 6 hours" — the ONE explicit cadence number the spec gives for

@@ -61,7 +61,14 @@ struct FindlyApp: App {
     // `AppLaunchResolver` (cold start / interactive sign-in) and refreshed opportunistically by
     // `FamilyMembersViewModel`/bootstrap successes. Built once here, like everything else in this
     // file, and handed down as a plain `@StateObject` in `RootView`.
-    @StateObject private var familyContextCache = FamilyContextCache()
+    //
+    // Assigned via `_familyContextCache = StateObject(wrappedValue:)` from a local `let` in
+    // `init()` below (same pattern as `coordinator`), rather than a bare `= FamilyContextCache()`
+    // default — `LocationRuntimeContainer`'s init (also built inside `init()`, for its
+    // `wipeLocalState()` review fix, specs/010 §1.2) needs the SAME instance, and reading
+    // `self.familyContextCache` this early — before `body`/`WindowGroup` ever runs — is not a
+    // reliable way to reach a `@StateObject`'s real, SwiftUI-installed storage.
+    @StateObject private var familyContextCache: FamilyContextCache
 
     init() {
         // specs/004 §8 — real deployment values come from this target's Info.plist (iOS's
@@ -113,6 +120,12 @@ struct FindlyApp: App {
         // above is fine — it touches `FirebaseApp` only and constructs no `Auth`.
         let coordinator = AppCoordinator(joinLinkHost: config.joinLinkHost)
         _coordinator = StateObject(wrappedValue: coordinator)
+
+        // specs/010-app-shell-and-screen-ux.md §1.2 — declared as a local here (same reasoning as
+        // `coordinator` above) so `LocationRuntimeContainer`'s init below can be handed the SAME
+        // instance for its `wipeLocalState()` review fix.
+        let familyContextCache = FamilyContextCache()
+        _familyContextCache = StateObject(wrappedValue: familyContextCache)
 
         // specs/008-privacy-endpoints.md §3.1 rule 2(b) — the one-shot cold-start cleanup: removes
         // any export artifact left behind by a previous process (e.g. killed mid-export, before
@@ -209,6 +222,11 @@ struct FindlyApp: App {
             // task fixes) — see `LocationRuntimeContainer.wipeLocalState()`'s doc for why sharing
             // one instance is what makes the account-deletion wipe's clear() a live call.
             permissionDisclosureStore: UserDefaultsPermissionDisclosureStore(),
+            // specs/010-app-shell-and-screen-ux.md §1.2 (I34 review fix) — the SAME instance
+            // handed to `RootView`/`LiveMapScreen` below, so `wipeLocalState()` is this cache's
+            // real, live-called `clear()` caller on every sign-out/account-deletion path, exactly
+            // like `permissionDisclosureStore` immediately above (the identical I26/I31 shape).
+            familyContextCache: familyContextCache,
             isPermissionGranted: { [weak locationProvider] in locationProvider?.isAuthorized ?? false },
             // specs/009 §9: 404 DEVICE_NOT_FOUND -> stop the schedule, clear local device state,
             // re-run registration. `onSignedIn` below (I12) now also explicitly registers on first
