@@ -31,9 +31,17 @@ import kotlinx.coroutines.launch
  *   a caller with no profile at all (the A24 rule, carried forward unchanged).
  * - a confirmed `404 FAMILY_NOT_FOUND` → [LaunchUiState.Onboarding] (family-less) — new in 010;
  *   device registration still proceeds (device endpoints work without a family, 001 §1.5.4).
- * - anything else (a genuine `Success`, or an *inconclusive* failure — timeout, 5xx, transient
- *   401) → registers and lands on [LaunchUiState.Ready]. A blip on the probe MUST NOT strand a
- *   valid user in onboarding (010 §1.1) — this is the "fails open" rule.
+ * - a **confirmed** `AUTH_MISSING_TOKEN`/`AUTH_INVALID_TOKEN`/`AUTH_TOKEN_EXPIRED`/`AUTH_FORBIDDEN`
+ *   (010 §1.1, amended by row A37) → wipes local state via [localStateWiper], signs out, and lands
+ *   on [LaunchUiState.SignedOut] — device registration is **never** attempted. This is NOT the
+ *   fails-open case: the backend has confirmed the caller is unauthorized, so rendering the app
+ *   shell would just 401 every screen individually. Distinguishing this from a genuinely
+ *   *inconclusive* 401 (below) is by typed error code, never HTTP status alone — see
+ *   [isConfirmedAuthFailure].
+ * - anything else (a genuine `Success`, or an *inconclusive* failure — timeout, 5xx, or a 401 that
+ *   arrived with no decodable error code at all) → registers and lands on [LaunchUiState.Ready]. A
+ *   blip on the probe MUST NOT strand a valid user in onboarding (010 §1.1) — this is the "fails
+ *   open" rule.
  *
  * A successful probe's family/caller data is cached into [LaunchUiState.FamilyHeader] so the 010
  * §1.2 drawer header never needs a network call of its own.
@@ -76,13 +84,15 @@ class LaunchGateStateHolder(
             return
         }
 
-        // TODO(A37 RED): deliberately wrong stub — proves LaunchGateStateHolderTest's new
-        // confirmed-auth-failure assertions actually fail before the real fix lands (CLAUDE.md
-        // "stub wrong, don't stub absent"). Wipes local state but forgets to sign out and routes
-        // to the wrong destination; both are fixed in the immediately following GREEN commit.
+        // specs/010-app-shell-and-screen-ux.md §1.1 (amended, row A37): a CONFIRMED auth failure
+        // is not an inconclusive probe — it MUST route to Sign-in, clearing the local session, and
+        // MUST NOT fail open to the map. Reuses the exact same wipe-then-sign-out shape every other
+        // session-ending path in this codebase already uses (e.g. `PrivacyStateHolder`'s account
+        // deletion) rather than inventing a second one (I43).
         if (probe is ApiResult.Failure && probe.error.isConfirmedAuthFailure()) {
             localStateWiper.wipeAll(uid)
-            _state.value = LaunchUiState.Onboarding(uid, OnboardingVariant.ProfileLess)
+            authProvider.signOut()
+            _state.value = LaunchUiState.SignedOut
             return
         }
 
