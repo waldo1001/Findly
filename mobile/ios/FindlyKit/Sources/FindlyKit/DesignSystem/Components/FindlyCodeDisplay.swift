@@ -3,6 +3,10 @@ import SwiftUI
 /// specs/010-app-shell-and-screen-ux.md §5.1 item 1 ("titleLarge-class size, tabular figures,
 /// letter-spaced, in hyphenated display form") — a small presentational component so the invite
 /// code's styling lives in `DesignSystem/`, not hand-rolled at `CreateInviteScreen`'s call site.
+/// Named `FindlyCodeDisplay` (review fix, I37 round 2), matching Android's independently-chosen
+/// name for its own twin — every 010-batch component is `Findly*` on both platforms
+/// (`FindlyNavDrawer`, `FindlyBottomSheet`, `FindlyDropdownField`); iOS's unprefixed components
+/// (`StatusChip`, `MapMarkerBubble`, `EmptyStateView`) all predate this batch.
 ///
 /// 004 §2.3's "zero styling outside DesignSystem/" rule scopes to `Screens/`, view models,
 /// navigation, and networking — NOT to design-system components themselves, which are exactly
@@ -15,7 +19,7 @@ import SwiftUI
 /// letter-spacing beyond what `titleLarge.tracking` alone provides (that token's own -0.2 is a
 /// headline *tightening*, correct for a title, wrong for a code meant to read as visually
 /// separated characters).
-public struct InviteCodeDisplay: View {
+public struct FindlyCodeDisplay: View {
     @Environment(\.theme) private var theme
     private let displayForm: String
 
@@ -36,15 +40,15 @@ public struct InviteCodeDisplay: View {
     }
 }
 
-#Preview("InviteCodeDisplay — light") {
-    InviteCodeDisplay("7F3K-9QRZ")
+#Preview("FindlyCodeDisplay — light") {
+    FindlyCodeDisplay("7F3K-9QRZ")
         .padding()
         .background(Theme.light.colors.surface)
         .environment(\.theme, .light)
 }
 
-#Preview("InviteCodeDisplay — dark") {
-    InviteCodeDisplay("7F3K-9QRZ")
+#Preview("FindlyCodeDisplay — dark") {
+    FindlyCodeDisplay("7F3K-9QRZ")
         .padding()
         .background(Theme.dark.colors.surface)
         .environment(\.theme, .dark)

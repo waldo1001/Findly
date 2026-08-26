@@ -85,9 +85,9 @@ public struct CreateInviteScreen: View {
                     VStack(spacing: theme.spacing.sm) {
                         StatusChip(role == "parent" ? "Parent invite" : "Member invite", kind: .online)
                         // §5.1 item 1: "titleLarge-class size, tabular figures, letter-spaced, in
-                        // hyphenated display form" — styling lives in the InviteCodeDisplay
+                        // hyphenated display form" — styling lives in the FindlyCodeDisplay
                         // design-system component, not here.
-                        InviteCodeDisplay(CreateInviteViewModel.displayForm(for: code))
+                        FindlyCodeDisplay(CreateInviteViewModel.displayForm(for: code))
                         FindlyButton(didCopyCode ? "Copied" : "Copy code", style: .secondary) {
                             copyCodeToClipboard(CreateInviteViewModel.displayForm(for: code))
                         }
