@@ -49,9 +49,11 @@ public struct InvitePasteControl: UIViewRepresentable {
     /// `UIPasteControl.target` must be a `UIResponder` implementing
     /// `UIResponderStandardEditActions.paste(itemProviders:)` — that override is the ONLY place in
     /// this type that ever touches pasteboard contents, and it runs only when the system control
-    /// itself is tapped.
-    public final class Coordinator: UIResponder, UIPasteConfigurationSupporting {
-        public var pasteConfiguration: UIPasteConfiguration?
+    /// itself is tapped. `UIResponder` already conforms to `UIPasteConfigurationSupporting` (its
+    /// `pasteConfiguration` is already a stored property there) — redeclaring the conformance/
+    /// property here is a compile error ("cannot override with a stored property"), so this type
+    /// only ever ASSIGNS the inherited property, never redeclares it.
+    public final class Coordinator: UIResponder {
         private let onPaste: (String) -> Void
 
         init(onPaste: @escaping (String) -> Void) {
