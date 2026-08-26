@@ -30,11 +30,13 @@ public final class AcceptInviteViewModel: ObservableObject {
     /// endpoint exists, so this is the wire shape that actually carries it. Callers (the screen)
     /// only invoke this when there's no Onboarding-typed name already to prefill from.
     ///
-    /// RED stub (I37 review fix): always `nil`, ignoring whatever `listDevices()` actually
-    /// returns — deliberately wrong-but-type-correct so the new test fails on content, not a
-    /// compile error. Real implementation lands in the next commit.
     public func resolveExistingDisplayName() async {
-        resolvedDisplayName = nil
+        do {
+            let envelope = try await apiClient.listDevices()
+            resolvedDisplayName = envelope.data.devices.first?.ownerDisplayName
+        } catch {
+            resolvedDisplayName = nil
+        }
     }
 
     /// `rawInviteCode` may be a pasted code OR a full deep link (`findly://invite/<code>`).

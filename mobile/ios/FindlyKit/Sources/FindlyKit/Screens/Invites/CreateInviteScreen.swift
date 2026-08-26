@@ -85,12 +85,9 @@ public struct CreateInviteScreen: View {
                     VStack(spacing: theme.spacing.sm) {
                         StatusChip(role == "parent" ? "Parent invite" : "Member invite", kind: .online)
                         // §5.1 item 1: "titleLarge-class size, tabular figures, letter-spaced, in
-                        // hyphenated display form".
-                        Text(CreateInviteViewModel.displayForm(for: code))
-                            .font(theme.typography.titleLarge.font)
-                            .tracking(theme.typography.titleLarge.tracking)
-                            .monospacedDigit()
-                            .foregroundColor(theme.colors.onSurface)
+                        // hyphenated display form" — styling lives in the InviteCodeDisplay
+                        // design-system component, not here.
+                        InviteCodeDisplay(CreateInviteViewModel.displayForm(for: code))
                         FindlyButton(didCopyCode ? "Copied" : "Copy code", style: .secondary) {
                             copyCodeToClipboard(CreateInviteViewModel.displayForm(for: code))
                         }

@@ -47,6 +47,21 @@ public struct AcceptInviteScreen: View {
             Spacer()
         }
         .background(theme.colors.surfaceVariant)
+        .task {
+            // specs/010-app-shell-and-screen-ux.md §5.2 — only resolve when there's no
+            // Onboarding-typed name already to prefill from (a profile-less caller's own
+            // resolveExistingDisplayName() call degrades to nil anyway, since their profile
+            // doesn't exist yet — see that method's doc — but skipping it here also skips a
+            // pointless network call on that path).
+            if displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                await viewModel.resolveExistingDisplayName()
+            }
+        }
+        .onChange(of: viewModel.resolvedDisplayName) { resolved in
+            if displayName.isEmpty, let resolved, !resolved.isEmpty {
+                displayName = resolved
+            }
+        }
         .onChange(of: didJoin) { joined in
             if joined { onAccepted() }
         }
