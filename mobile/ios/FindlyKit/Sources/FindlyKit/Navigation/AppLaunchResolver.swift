@@ -27,9 +27,9 @@ public enum AppLaunchResolver {
     ) async -> LaunchDestination {
         guard isSignedIn else { return .signIn }
         let probe = await probeProfile(apiClient: apiClient, cache: cache)
-        // TODO(A37 RED): deliberately wrong — never invokes the closure, so
-        // AppLaunchResolverTests' new assertion (the closure DID run) fails on a value mismatch
-        // rather than a missing symbol. Fixed in the immediately following GREEN commit.
+        if probe == .confirmedAuthFailure {
+            await onConfirmedAuthFailure()
+        }
         return LaunchGate.resolve(isSignedIn: true, probe: probe)
     }
 

@@ -52,16 +52,17 @@ public enum LaunchGate {
     public static func resolve(isSignedIn: Bool, probe: ProfileProbeOutcome) -> LaunchDestination {
         guard isSignedIn else { return .signIn }
         switch probe {
-        // TODO(A37 RED): deliberately wrong — `.confirmedAuthFailure` MUST route to `.signIn`
-        // (010 §1.1, amended). Grouped with the fail-open cases on purpose so LaunchGateTests'
-        // new assertion fails on a value mismatch, not a missing case (CLAUDE.md "stub wrong,
-        // don't stub absent"); fixed in the immediately following GREEN commit.
-        case .confirmed, .inconclusive, .confirmedAuthFailure:
+        case .confirmed, .inconclusive:
             return .familyMap
         case .confirmedNoProfile:
             return .onboarding(.profileLess)
         case .confirmedNoFamily:
             return .onboarding(.familyLess)
+        // specs/010-app-shell-and-screen-ux.md §1.1 (amended, row A37): a CONFIRMED auth failure
+        // is not an inconclusive probe — it MUST route to Sign-in, never fail open to the map.
+        // `AppLaunchResolver` clears the session before this destination is applied.
+        case .confirmedAuthFailure:
+            return .signIn
         }
     }
 }
