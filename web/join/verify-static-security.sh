@@ -10,8 +10,12 @@
 # Flags (all opt-IN, none change the default zero-tolerance behavior above):
 #   --allow-external-prefix=<prefix>   May repeat. Whitelists exactly one external URL
 #                                      prefix (e.g. a pinned CDN import) that would
-#                                      otherwise fail check 1. Every other scheme:// URL
-#                                      (other than findly://) still fails.
+#                                      otherwise fail check 1 OR check 8 (an ES-module
+#                                      import of that same prefix) — one list, read by
+#                                      both checks, so there is exactly one allowlist to
+#                                      review rather than two that can drift apart. Every
+#                                      other scheme:// URL / module import (other than
+#                                      findly://) still fails.
 #   --allow-fetch                      Allows `fetch(` in check 3. XMLHttpRequest,
 #                                      WebSocket, sendBeacon and EventSource remain
 #                                      banned regardless — no page in this app needs them.
@@ -59,6 +63,18 @@ FILE="${FILE:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/index.html}"
 
 if [[ ! -f "$FILE" ]]; then
   echo "verify-static-security: file not found: $FILE" >&2
+  exit 2
+fi
+
+# W4 (docs/implementation-handoff.md): checks 3-7 below shell out to `node` (a real
+# static-analysis pass, not shell grep, per the round-3 W3 hardening). Without this guard,
+# a missing `node` on PATH made `set -euo pipefail` kill the script with an unguarded
+# "command not found" and a bare non-zero exit — safe (still non-zero, CI still red) but
+# ugly and confusing to read. Fail the same way a missing file does: one clean message,
+# exit 2 (a setup/environment problem, distinct from exit 1's "the page violates the
+# invariants").
+if ! command -v node >/dev/null 2>&1; then
+  echo "verify-static-security: node is required but was not found on PATH" >&2
   exit 2
 fi
 
@@ -201,6 +217,36 @@ fi
 #     unrelated attribute's quoted VALUE, not a live attribute name) tripped it. The scan
 #     below tracks quote state per tag and only evaluates the "on...=" pattern when
 #     genuinely outside any quoted value, at an actual attribute-name boundary.
+#
+# 7. (docs/implementation-handoff.md row W4; specs/007 §2/§7) No `<script src="...">` of
+#    ANY kind, on ANY page, unconditionally — never opt-outable, like checks 2 and 6. The
+#    gap this closes: check 1 only bans a `scheme://` URL, so a same-origin RELATIVE
+#    `<script src="leak.js">` sailed through it, and the referenced sibling .js file was
+#    then never read by checks 3-6 (which scan only inline <script> BODIES) — every
+#    no-oracle / zero-external-resource guarantee this script enforces was therefore only
+#    ever enforced for inline script. The decision (W4, made explicitly rather than
+#    defaulting) is option (a) — ban the attribute outright — not option (b) — teach every
+#    check to resolve and recursively scan same-origin `src` targets — because these pages
+#    are deliberately zero-dependency, so the ban is cheap and total, and (b) would turn
+#    four shell scripts into a small static-analysis tool. This bans the ATTRIBUTE on a
+#    <script> tag specifically: an inline <script> with no src, the word "src" inside an
+#    unrelated attribute's quoted value or inside comment prose (stripped above), and
+#    `<img src=...>`/`<link href=...>` are all untouched. Reuses the same tag-boundary +
+#    quote-tracking scan as findInlineHandlers (same idiom, same file, per the task's
+#    instruction not to add a second, fragile shell grep for this).
+#
+# 8. (docs/implementation-handoff.md row W4, coordinator follow-up) Check 7 banned the
+#    ATTRIBUTE (`<script src=...>`) but a sibling .js file that no gate ever reads can
+#    also be pulled in as an ES module, which check 7 has no opinion on at all:
+#    `import x from "./evil.js"`, a bare `import "./evil.js"`, or a dynamic
+#    `import("./evil.js")` / `await import("./evil.js")` all load exactly the thing this
+#    row exists to stop, via syntax with no `src` attribute anywhere. Banned the same way
+#    as check 7 — unconditionally — with ONE exception routed through the SAME
+#    --allow-external-prefix allowlist check 1 already uses (not a filename special-case,
+#    not a blanket https:// exemption): delete-account.html's
+#    `import { initializeApp } from "https://www.gstatic.com/firebasejs/.../firebase-app.js"`
+#    is already let through check 1 by that exact mechanism, so this check reads the same
+#    list rather than inventing a second allowlist with its own drift risk.
 NODE_INLINE_CHECK="$(mktemp)"
 cat > "$NODE_INLINE_CHECK" <<'NODEEOF'
 "use strict";
@@ -211,6 +257,9 @@ const fs = require("fs");
 // IS the target (no script-file slot to shift it). Using argv[1] here would silently
 // read this checker's own source instead of the page under test, passing unconditionally.
 const html = fs.readFileSync(process.argv[2], "utf8");
+// Check 8's allowlist: same --allow-external-prefix values check 1 already validated
+// against (argv[3] onward — see the bash invocation below). Empty when none were passed.
+const allowedPrefixes = process.argv.slice(3);
 
 // FIX 2 — stop at the first of "-->" or "--!>" (WHATWG comment-end-bang state), not only
 // "-->". A comment OUTSIDE a <script> tag terminating early means the markup after it is
@@ -253,15 +302,146 @@ function findInlineHandlers(s) {
   return found;
 }
 
+// Check 7 — scans each raw "<script ...>" opening-tag region (same lightweight tag
+// boundary as findInlineHandlers above, not a full parser) for a `src` attribute NAME,
+// tracking quote state so "src" appearing inside a quoted attribute VALUE (e.g.
+// `<script data-note="src=fake">`) is never mistaken for the attribute itself. Matches
+// `<SCRIPT ...>` case-insensitively and tolerates a newline between the tag name and the
+// attribute (`<script\n  src=...>`, valid HTML — \s covers it, same as findInlineHandlers).
+// One report per offending tag is enough (`break` after the first match).
+function findScriptSrc(s) {
+  const tagRe = /<script\b[^<>]*>/gi;
+  const found = [];
+  let m;
+  while ((m = tagRe.exec(s)) !== null) {
+    const tagText = m[0];
+    let quote = null;
+    for (let i = 1; i < tagText.length - 1; i++) {
+      const ch = tagText[i];
+      if (quote) {
+        if (ch === quote) quote = null;
+        continue;
+      }
+      if (ch === '"' || ch === "'") {
+        quote = ch;
+        continue;
+      }
+      const prev = tagText[i - 1];
+      const atBoundary = /\s/.test(prev);
+      if (!atBoundary) continue;
+      const attrMatch = /^src\s*=/i.exec(tagText.slice(i));
+      if (attrMatch) {
+        found.push(tagText.replace(/\s+/g, " ").trim());
+        break;
+      }
+    }
+  }
+  return found;
+}
+
+// Check 8 helpers. Restricting the scan to <script>...</script> BODY content (same
+// extraction shape as the separate `script_body` node -e call above, redone here so this
+// one node invocation is self-contained) is what keeps this false-positive-safe: the word
+// "import" in ordinary page prose (outside any <script> tag) or inside an unrelated
+// attribute's quoted value never enters this scan at all, because it is never inside a
+// <script> body to begin with.
+function extractScriptBodies(s) {
+  const re = /<script[^>]*>([\s\S]*?)<\/script>/gi;
+  const bodies = [];
+  let m;
+  while ((m = re.exec(s)) !== null) {
+    bodies.push(m[1]);
+  }
+  return bodies.join("\n");
+}
+
+// Drops whole-line `//` JS comments, same rule and same reasoning as the `script_body`
+// extraction above (checks 3-5): a comment that merely NAMES "import" while documenting
+// that the code deliberately does not do one static-analysis this crude cannot reliably
+// tell from an inline trailing `// comment`, so — like checks 3-5 — this is a known,
+// deliberate scope limit (whole-line comments only), not a claim of full JS-comment
+// awareness.
+function stripLineComments(s) {
+  return s
+    .split("\n")
+    .filter((line) => !/^\s*\/\//.test(line))
+    .join("\n");
+}
+
+// Check 8 — bans every ES-module import of anything but an allowlisted prefix:
+//   - static, named/default/namespace, with "from": import x from "./y.js";
+//     import { a } from "y.js"; import * as ns from "../y.js";
+//   - static, bare side-effect, no "from": import "./y.js";
+//   - dynamic: import("./y.js")  /  await import("./y.js")  /  import("./y.js").then(...)
+// All three regexes use \s (matches newlines too, so `import\n  from "..."` and
+// `import\n("...")` are covered) and the /i flag (defense in depth, matching this file's
+// existing convention of matching case-insensitively even where the real grammar is
+// case-sensitive — see FIX 1 above). The "from" variant's `[^'"();]*?` gap deliberately
+// excludes quotes/parens/semicolons between "import" and "from" so it can never bridge
+// across an unrelated statement (a real import clause — identifiers, `{`, `}`, `,`, `*`,
+// `as` — never itself contains any of those four characters).
+function findModuleImports(s, allowed) {
+  const scanText = stripLineComments(extractScriptBodies(s));
+  const found = [];
+  function isAllowed(spec) {
+    return allowed.some((p) => p.length > 0 && spec.indexOf(p) === 0);
+  }
+  function scan(re) {
+    let m;
+    while ((m = re.exec(scanText)) !== null) {
+      const spec = m[2];
+      if (!isAllowed(spec)) {
+        found.push(m[0].replace(/\s+/g, " ").trim());
+      }
+    }
+  }
+  scan(/\bimport\b[^'"();]*?\bfrom\s*(['"])((?:\\.|(?!\1)[^\\])*)\1/gi);
+  scan(/\bimport\s*(['"])((?:\\.|(?!\1)[^\\])*)\1/gi);
+  scan(/\bimport\s*\(\s*(['"])((?:\\.|(?!\1)[^\\])*)\1/gi);
+  return found;
+}
+
 const handlers = findInlineHandlers(stripped);
-handlers.forEach((h) => console.log("FOUND:" + h));
-process.exit(handlers.length > 0 ? 1 : 0);
+handlers.forEach((h) => console.log("HANDLER:" + h));
+
+const scriptSrcs = findScriptSrc(stripped);
+scriptSrcs.forEach((t) => console.log("SCRIPTSRC:" + t));
+
+const moduleImports = findModuleImports(stripped, allowedPrefixes);
+moduleImports.forEach((t) => console.log("MODULEIMPORT:" + t));
+
+process.exit(
+  handlers.length > 0 || scriptSrcs.length > 0 || moduleImports.length > 0 ? 1 : 0
+);
 NODEEOF
-inline_handlers=$(node "$NODE_INLINE_CHECK" "$FILE" || true)
+# Check 8 reads the SAME --allow-external-prefix list check 1 uses (see the "8." comment
+# above) — passed as extra argv entries. Guarded so an empty ALLOWED_PREFIXES array is
+# never expanded via "${ALLOWED_PREFIXES[@]}" under `set -u`: older bash (macOS's stock
+# 3.2, which this repo elsewhere goes out of its way to stay compatible with — see
+# verify-delete-account.sh's plain-array comment) raises "unbound variable" for that
+# expansion specifically when the array is empty, even though the array itself is declared.
+if [[ ${#ALLOWED_PREFIXES[@]} -gt 0 ]]; then
+  node_check_output=$(node "$NODE_INLINE_CHECK" "$FILE" "${ALLOWED_PREFIXES[@]}" || true)
+else
+  node_check_output=$(node "$NODE_INLINE_CHECK" "$FILE" || true)
+fi
 rm -f "$NODE_INLINE_CHECK"
+inline_handlers=$(printf '%s\n' "$node_check_output" | grep '^HANDLER:' | sed 's/^HANDLER://' || true)
+script_srcs=$(printf '%s\n' "$node_check_output" | grep '^SCRIPTSRC:' | sed 's/^SCRIPTSRC://' || true)
+module_imports=$(printf '%s\n' "$node_check_output" | grep '^MODULEIMPORT:' | sed 's/^MODULEIMPORT://' || true)
 if [[ -n "$inline_handlers" ]]; then
   echo "FAIL: inline event-handler attribute(s) found:" >&2
   echo "$inline_handlers" >&2
+  fail=1
+fi
+if [[ -n "$script_srcs" ]]; then
+  echo "FAIL: <script src=...> found — external/sibling .js files are banned on these pages (docs/implementation-handoff.md row W4; specs/007 §2/§7 — no gate reads the referenced file, so the attribute is banned outright rather than resolved and scanned):" >&2
+  echo "$script_srcs" >&2
+  fail=1
+fi
+if [[ -n "$module_imports" ]]; then
+  echo "FAIL: ES-module import of a non-allowlisted specifier found — external/sibling .js files are banned on these pages the same way <script src> is (docs/implementation-handoff.md row W4 follow-up; specs/007 §2/§7). Use --allow-external-prefix if this import is a legitimate, reviewed exception (like /delete-account's Firebase SDK import):" >&2
+  echo "$module_imports" >&2
   fail=1
 fi
 
@@ -270,4 +450,4 @@ if [[ "$fail" -ne 0 ]]; then
   exit 1
 fi
 
-echo "== RESULT: OK — no unlisted external resources, no banned network calls, no cookies/storage, no analytics =="
+echo "== RESULT: OK — no unlisted external resources, no banned network calls, no cookies/storage, no analytics, no <script src>, no unlisted module import =="

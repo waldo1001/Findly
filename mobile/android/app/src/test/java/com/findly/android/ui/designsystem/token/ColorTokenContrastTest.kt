@@ -19,6 +19,16 @@ import kotlin.math.round
  */
 class ColorTokenContrastTest {
 
+    // A31 addendum: the floor-only check right below (`every declared pairing clears its WCAG
+    // threshold`) is necessary but not sufficient on its own — it cannot distinguish a pairing
+    // that quietly drifted (while still clearing AA) from one that never moved, which is exactly
+    // how A30 shipped: light `subtleText` measured 6.56:1, cleared the 4.5:1 floor, and was
+    // therefore structurally invisible to this file until A30 pinned that one value exactly.
+    // `every declared pairing matches its A31 exact-ratio pin` further down extends that same
+    // treatment (assertEquals, +/-0.02, the form already used for `subtleText`/the disabled and
+    // secondary exemptions below) to the entire declared set, not just the one token a real user
+    // happened to report.
+
     @Test
     fun `every declared pairing clears its WCAG threshold`() {
         val failures = declaredColorPairings.mapNotNull { pairing ->
@@ -41,6 +51,99 @@ class ColorTokenContrastTest {
                 "value here without the orchestrator's sign-off:\n" +
                 failures.joinToString("\n"),
             failures.isEmpty(),
+        )
+    }
+
+    // --- A31 (specs/003-android-client.md §4.1–§4.2, general form of A30): every declared pairing
+    // now gets an exact-ratio pin too, not just the floor check above. Values below are computed
+    // straight from LightFindlyColors/DarkFindlyColors via this file's own contrastRatio()/
+    // compositeOver() (the same formula ContrastRatioReferenceTest pins against the published
+    // #767676-on-#FFFFFF = 4.54:1 reference), never transcribed from HANDOFF.md or memory — that
+    // transcription trap is exactly what produced A26's seven wrong numbers. Deliberately changing
+    // a token now means updating its pin here in the same commit; that per-pin edit cost is the
+    // point of A31, not a side effect to engineer around. ---
+
+    @Test
+    fun `every declared pairing matches its A31 exact-ratio pin, not just its WCAG floor`() {
+        val expected: Map<String, Map<String, Double>> = mapOf(
+            "onPrimary on primary" to mapOf("light" to 7.27, "dark" to 6.30),
+            "onSurface on surface" to mapOf("light" to 16.54, "dark" to 16.17),
+            "onSurface on surfaceVariant" to mapOf("light" to 14.60, "dark" to 14.13),
+            "onDanger on danger" to mapOf("light" to 6.54, "dark" to 6.68),
+            "subtleText on surface" to mapOf("light" to 9.08, "dark" to 7.43),
+            "subtleText on surfaceVariant" to mapOf("light" to 8.01, "dark" to 6.49),
+            "success used as text on surface" to mapOf("light" to 5.49, "dark" to 11.66),
+            "warning used as text on surface (FindlyMapMarkerBubble stale age label)" to
+                mapOf("light" to 5.39, "dark" to 12.06),
+            "danger used as text on surface" to mapOf("light" to 5.95, "dark" to 6.88),
+            "FindlyErrorState title (warning) on surfaceVariant" to mapOf("light" to 4.76, "dark" to 10.54),
+            "FindlyPermissionBanner dismiss glyph (subtleText) on surfaceVariant" to
+                mapOf("light" to 8.01, "dark" to 6.49),
+            // NOTE: these two alpha-composited entries are NOT 7.19/8.45 despite that being what a
+            // hand/idealized-double-precision calculation of "onSurface at 75% over surfaceVariant"
+            // gives (and what this file's own pre-A31 doc comment claimed) — actually running it
+            // through compositeOver()/Color(red:green:blue:) round-trips each channel through an
+            // 8-bit sRGB pack, which visibly rounds 68.5/72.5/92.75-out-of-255 up to 69/73/93 before
+            // the ratio is computed. Verified by printing compositeOver()'s actual output during
+            // A31: this is the value the suite (and the app) really computes, so it is what gets
+            // pinned — see the corrected comment on this pairing's declaration in
+            // ColorTokenPairings.kt for the same fix applied to its doc comment.
+            "FindlyPermissionBanner message (onSurface at 75%) on surfaceVariant" to
+                mapOf("light" to 7.14, "dark" to 8.44),
+            "PermissionDisclosureScreen closing text (onSurface at 75%) on surfaceVariant" to
+                mapOf("light" to 7.14, "dark" to 8.44),
+            "FindlyStatusChip Neutral (paused) label (onSurface) on surface" to
+                mapOf("light" to 16.54, "dark" to 16.17),
+            "outlineStrong vs surface" to mapOf("light" to 4.21, "dark" to 4.13),
+            "outlineStrong vs surfaceVariant" to mapOf("light" to 3.71, "dark" to 3.61),
+            "marker pill fill (markerOnlineDot) against primary" to mapOf("light" to 4.44, "dark" to 4.19),
+            "paused-chip (FindlyStatusChip Neutral) border vs surface" to mapOf("light" to 4.21, "dark" to 4.13),
+            "FindlyTopBar back chevron (primary) on surface" to mapOf("light" to 6.61, "dark" to 6.36),
+            "FindlyTextField focused border (primary) vs surfaceVariant" to mapOf("light" to 5.84, "dark" to 5.56),
+            "FindlyTextField error border (danger) vs surfaceVariant" to mapOf("light" to 5.25, "dark" to 6.02),
+            "FindlyTextField error supporting text (danger) on surfaceVariant" to
+                mapOf("light" to 5.25, "dark" to 6.02),
+            "FindlyPermissionBanner severity stripe (danger) vs surfaceVariant" to
+                mapOf("light" to 5.25, "dark" to 6.02),
+            "FindlyPermissionBanner severity stripe (primary) vs surfaceVariant" to
+                mapOf("light" to 5.84, "dark" to 5.56),
+            "FindlyStatusChip Success label (onDanger) on fill (success)" to mapOf("light" to 6.03, "dark" to 11.32),
+            "FindlyStatusChip Warning label (onDanger) on fill (warning)" to mapOf("light" to 5.93, "dark" to 11.71),
+            "FindlyStatusChip Danger label (onDanger) on fill (danger)" to mapOf("light" to 6.54, "dark" to 6.68),
+            "marker pill label (markerOnlineDotOn) on pill fill (markerOnlineDot)" to
+                mapOf("light" to 10.07, "dark" to 7.69),
+            "buttonPrimaryPressedFill vs onPrimary" to mapOf("light" to 9.80, "dark" to 4.96),
+        )
+
+        // Item 1 of A31's task description: an entry silently missing a pin is exactly the hole
+        // this task exists to close, so it is asserted on explicitly rather than only surfacing as
+        // "expected null" noise inside the mismatch loop below.
+        val unpinned = declaredColorPairings.filter { expected[it.name] == null }
+        assertTrue(
+            "The following declared pairings have no A31 exact-ratio pin registered at all — add " +
+                "one to `expected` above, it is not optional:\n" +
+                unpinned.joinToString("\n") { "  [${it.theme}] ${it.name}" },
+            unpinned.isEmpty(),
+        )
+
+        val mismatches = declaredColorPairings.mapNotNull { pairing ->
+            val ratio = round2(contrastRatio(pairing.effectiveForeground, pairing.background))
+            val expectedRatio = expected[pairing.name]?.get(pairing.theme)
+            if (expectedRatio == null || Math.abs(ratio - expectedRatio) > 0.02) {
+                "  [${pairing.theme}] ${pairing.name}: measured $ratio:1, pinned expectation $expectedRatio:1"
+            } else {
+                null
+            }
+        }
+
+        assertTrue(
+            "A declared pairing's contrast ratio drifted from its A31 exact pin " +
+                "(specs/003-android-client.md §4.1–§4.2). Clearing the WCAG floor (the test above) is " +
+                "not sufficient evidence a change was intentional or correct — that is the exact gap " +
+                "that let A30 ship silently. If this is a deliberate token change, update the pinned " +
+                "value here in the same commit; if it is not, this is a real regression:\n" +
+                mismatches.joinToString("\n"),
+            mismatches.isEmpty(),
         )
     }
 

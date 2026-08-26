@@ -18,9 +18,19 @@ public enum ProfileProbeOutcome: Equatable, Sendable {
     case confirmedNoProfile
     /// A CONFIRMED `404 FAMILY_NOT_FOUND` (001 §1.5.4) — profile exists, `familyId` is null.
     case confirmedNoFamily
-    /// Anything else at all: a timeout, a 5xx, a transient 401, a decode failure, an unrecognized
-    /// error code. **MUST fail open to the Family Map** (010 §1.1) — a blip must never strand a
-    /// valid user in onboarding, since retrying a GET can never fix what stranded them there.
+    /// A CONFIRMED `AUTH_MISSING_TOKEN`/`AUTH_INVALID_TOKEN`/`AUTH_TOKEN_EXPIRED`/`AUTH_FORBIDDEN`
+    /// (001 §10; specs/010-app-shell-and-screen-ux.md §1.1, amended by row A37) — the backend has
+    /// told us the caller is unauthorized. **MUST NOT fail open** — rendering the app shell for a
+    /// confirmed-unauthorized caller would just 401 every screen individually, a working-looking
+    /// app that fetches nothing. `AppLaunchResolver` clears the local session before this reaches
+    /// `LaunchGate`; the table below only decides where it routes.
+    case confirmedAuthFailure
+    /// Anything else at all: a timeout, a 5xx, or a 401/403 that arrived with **no decodable error
+    /// code at all** (a decode failure, an unrecognized code). **MUST fail open to the Family
+    /// Map** (010 §1.1) — a blip must never strand a valid user in onboarding, since retrying a GET
+    /// can never fix what stranded them there. Distinguishing this from [confirmedAuthFailure] is
+    /// by typed error code, never HTTP status alone (010 §1.1's amendment) — see
+    /// `AppLaunchResolver.classify`.
     case inconclusive
 }
 
@@ -48,6 +58,11 @@ public enum LaunchGate {
             return .onboarding(.profileLess)
         case .confirmedNoFamily:
             return .onboarding(.familyLess)
+        // specs/010-app-shell-and-screen-ux.md §1.1 (amended, row A37): a CONFIRMED auth failure
+        // is not an inconclusive probe — it MUST route to Sign-in, never fail open to the map.
+        // `AppLaunchResolver` clears the session before this destination is applied.
+        case .confirmedAuthFailure:
+            return .signIn
         }
     }
 }
