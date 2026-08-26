@@ -17,6 +17,16 @@ class MapViewModel(locationsApi: LocationsApi) : ViewModel() {
     fun refresh() {
         viewModelScope.launch { stateHolder.refresh() }
     }
+
+    /** specs/010 §3.5 — select/deselect a member (toggling), zooming to their freshest located
+     * device when one exists. */
+    fun selectMember(userId: String) = stateHolder.selectMember(userId)
+
+    /** specs/010 §3.5 — tapping the map background deselects. */
+    fun deselect() = stateHolder.deselect()
+
+    /** specs/010 §3.4's explicit fit-all action. */
+    fun fitAll() = stateHolder.fitAll()
 }
 
 class MapViewModelFactory(private val locationsApi: LocationsApi) : ViewModelProvider.Factory {

@@ -38,6 +38,10 @@ private val ListRowSubtitleStyle = TextStyle(fontSize = 13.sp, fontWeight = Font
  * 45% opacity". [minHeight] defaults to the 60dp `FindlyListRow` value but is overridable — used
  * by `FindlySwitchRow` to hit its own, smaller HANDOFF.md-specified 56dp minimum without
  * duplicating this component's layout.
+ *
+ * [selected] (specs/010-app-shell-and-screen-ux.md §3.5, additive) tints the row's background
+ * `surfaceVariant` instead of `surface` — the same value-level pattern `FindlyNavDrawer`'s own
+ * selected-row treatment already uses, no new token name.
  */
 @Composable
 fun FindlyListRow(
@@ -49,6 +53,7 @@ fun FindlyListRow(
     onClick: (() -> Unit)? = null,
     enabled: Boolean = true,
     minHeight: Dp = 60.dp,
+    selected: Boolean = false,
 ) {
     var rowModifier = modifier
         .fillMaxWidth()
@@ -63,7 +68,7 @@ fun FindlyListRow(
 
     Row(
         modifier = rowModifier
-            .background(FindlyTheme.colors.surface)
+            .background(if (selected) FindlyTheme.colors.surfaceVariant else FindlyTheme.colors.surface)
             // HANDOFF.md: "padding 12/14" (vertical/horizontal) — 14dp horizontal doesn't land on
             // a spacing step, so it's `md` (12dp, the vertical value) + a 2dp literal rather than
             // a second hardcoded constant.

@@ -19,15 +19,32 @@ sealed class MapCameraTarget {
 
     /** Two or more distinct marker positions — fit them all with padding. Only the geographic
      * corners are decided here; the actual zoom level is computed by the Maps SDK's own
-     * `CameraUpdateFactory.newLatLngBounds`, which needs the real view's pixel size. */
+     * `CameraUpdateFactory.newLatLngBounds`, which needs the real view's pixel size.
+     *
+     * [paddingDp] (specs/010-app-shell-and-screen-ux.md §3.4, normative) is density-aware —
+     * `GoogleMapRenderer` converts it to px via the real view's [androidx.compose.ui.unit.Density]
+     * immediately before calling `CameraUpdateFactory.newLatLngBounds`, since that's the only
+     * place a real pixel density exists; this pure module stays SDK/density-agnostic. Replaces
+     * the previous raw `paddingPx = 128`, which rendered a different physical inset per device. */
     data class Bounds(
         val southLat: Double,
         val northLat: Double,
         val westLon: Double,
         val eastLon: Double,
-        val paddingPx: Int,
+        val paddingDp: Float,
     ) : MapCameraTarget()
 }
+
+/**
+ * A "consume-once" wrapper around a decided [MapCameraTarget] (specs/010-app-shell-and-screen-ux.md
+ * §3.4). [seq] is a monotonically increasing sequence number minted by whichever `StateHolder`
+ * decided a run should happen ([MapStateHolder]/[com.findly.android.ui.groups.GroupMapStateHolder]).
+ * The Compose renderer layer keys its `LaunchedEffect` on [seq] alone (not on the marker list/
+ * points) — a refresh that changes markers but does **not** mint a new [CameraCommand] therefore
+ * produces no new [seq] and the effect simply does not re-run, which is the actual fix for "every
+ * marker-set change yanks the camera".
+ */
+data class CameraCommand(val seq: Long, val target: MapCameraTarget)
 
 object MapCamera {
     /** Ghent, Belgium — the same sample coordinate used throughout specs/001 and the Compose
@@ -37,7 +54,8 @@ object MapCamera {
     const val DEFAULT_LON = 3.7174
     const val DEFAULT_ZOOM = 4f
     const val SINGLE_POINT_ZOOM = 15f
-    const val BOUNDS_PADDING_PX = 128
+
+    const val BOUNDS_PADDING_DP = 64f
 
     /**
      * [points] are `lat to lon` pairs for every device/member with a known position — callers
@@ -57,7 +75,7 @@ object MapCamera {
                     northLat = lats.max(),
                     westLon = lons.min(),
                     eastLon = lons.max(),
-                    paddingPx = BOUNDS_PADDING_PX,
+                    paddingDp = BOUNDS_PADDING_DP,
                 )
             }
         }

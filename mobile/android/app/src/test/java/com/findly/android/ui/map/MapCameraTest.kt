@@ -40,7 +40,16 @@ class MapCameraTest {
         assertEquals(51.20, target.northLat, 0.0)
         assertEquals(3.20, target.westLon, 0.0)
         assertEquals(3.90, target.eastLon, 0.0)
-        assertEquals(MapCamera.BOUNDS_PADDING_PX, target.paddingPx)
+        assertEquals(MapCamera.BOUNDS_PADDING_DP, target.paddingDp)
+    }
+
+    @Test
+    fun `bounds padding is the spec's density-aware 64 dp, not a raw pixel count`() {
+        // specs/010-app-shell-and-screen-ux.md §3.4: "bounds padding becomes density-aware 64
+        // dp/pt (density-aware — replaces Android's raw 128px, which renders differently per
+        // device)". The actual dp->px conversion needs a real Density and only happens in
+        // GoogleMapRenderer; this pins the dp value this pure module hands it.
+        assertEquals(64f, MapCamera.BOUNDS_PADDING_DP)
     }
 
     @Test

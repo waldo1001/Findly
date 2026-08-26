@@ -1,5 +1,7 @@
 package com.findly.android.ui.groups
 
+import com.findly.android.ui.map.CameraCommand
+
 /** One group member's live-map entry (001-api-contract.md §12.10). **Position-only** (specs/005-
  * temporary-groups.md §3): deliberately no `deviceId`/`deviceName`/`batteryPct`/`source`/altitude/
  * speed/bearing anywhere in this type — unlike [com.findly.android.ui.map.RosterDeviceUi],
@@ -28,5 +30,14 @@ sealed class GroupMapUiState {
      * the groups list with a notice, same treatment as [GroupDetailUiState.Expired]. */
     data class Expired(val message: String = "This group has ended.") : GroupMapUiState()
 
-    data class Content(val members: List<GroupMapMemberUi>, val isRefreshing: Boolean = false) : GroupMapUiState()
+    /** [selectedUserId]/[cameraCommand] mirror [com.findly.android.ui.map.MapUiState.Content]'s
+     * fields exactly (specs/010-app-shell-and-screen-ux.md §3.2's "same camera policy through the
+     * same renderer seam") — position-only, so selection targets the member's own single point
+     * directly rather than resolving a freshest device first. */
+    data class Content(
+        val members: List<GroupMapMemberUi>,
+        val isRefreshing: Boolean = false,
+        val selectedUserId: String? = null,
+        val cameraCommand: CameraCommand? = null,
+    ) : GroupMapUiState()
 }

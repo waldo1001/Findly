@@ -16,6 +16,16 @@ class GroupMapViewModel(groupId: String, groupsApi: GroupsApi) : ViewModel() {
     fun refresh() {
         viewModelScope.launch { stateHolder.refresh() }
     }
+
+    /** specs/010 §3.5 — select/deselect a member (toggling); position-only, so a located member's
+     * own point is the zoom target directly. */
+    fun selectMember(userId: String) = stateHolder.selectMember(userId)
+
+    /** specs/010 §3.5 — tapping the map background deselects. */
+    fun deselect() = stateHolder.deselect()
+
+    /** specs/010 §3.4's explicit fit-all action. */
+    fun fitAll() = stateHolder.fitAll()
 }
 
 class GroupMapViewModelFactory(

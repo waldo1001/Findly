@@ -306,12 +306,18 @@ fun FindlyNavHost(
                         MapRoute(
                             viewModel = mapViewModel,
                             mapRenderer = container.mapRenderer,
-                            onSelectMember = { userId, displayName ->
+                            familyName = header?.familyName ?: "Findly",
+                            onOpenDrawer = { drawerScope.launch { drawerState.open() } },
+                            onRouteToOnboarding = navigateToOnboarding,
+                            // specs/010-app-shell-and-screen-ux.md §3.5: tapping a member now
+                            // selects (MapRoute's own onSelectMember, wired straight to
+                            // MapViewModel.selectMember) — Locate is one deliberate tap further,
+                            // behind the selection's own "Locate now" action, which is what lands
+                            // here. Replaces the old direct row-tap-navigates-to-Locate behavior.
+                            onLocateNow = { userId, displayName ->
                                 pendingLocateTarget = userId to displayName
                                 navController.navigate(Destinations.Locate.route)
                             },
-                            onOpenDrawer = { drawerScope.launch { drawerState.open() } },
-                            onRouteToOnboarding = navigateToOnboarding,
                         )
                     }
                 }

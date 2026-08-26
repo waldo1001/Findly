@@ -57,6 +57,12 @@ private val StaleAgeStyle = TextStyle(fontSize = 10.sp, fontWeight = FontWeight.
  * [staleAgeText] is the HANDOFF.md "▲ 24m" trailing metadata on a [FindlyMapMarkerState.Stale]
  * bubble — optional (`null` omits the trailing pill) since computing "how long ago" from a
  * `lastFixAt` timestamp is a screen/state-holder concern (A27), not this component's.
+ *
+ * [selected] (specs/010-app-shell-and-screen-ux.md §3.3/§3.5, additive) renders the selected
+ * member's marker in a visually distinct state — a **value-level** change only, no new token
+ * names: an extra solid ring in [FindlyTheme.colors.primary] (the same color every other
+ * "selected/current" affordance in this design system already uses, e.g. `FindlyNavDrawer`'s
+ * selected row label) drawn just outside the existing bubble/circle shape.
  */
 @Composable
 fun FindlyMapMarkerBubble(
@@ -64,11 +70,13 @@ fun FindlyMapMarkerBubble(
     state: FindlyMapMarkerState,
     modifier: Modifier = Modifier,
     staleAgeText: String? = null,
+    selected: Boolean = false,
 ) {
+    val ringModifier = if (selected) modifier.selectionRing(FindlyTheme.colors.primary) else modifier
     when (state) {
-        FindlyMapMarkerState.NoLocation -> NoLocationCircle(modifier = modifier)
-        FindlyMapMarkerState.Online -> OnlineBubble(label = label, modifier = modifier)
-        FindlyMapMarkerState.Stale -> StaleBubble(label = label, ageText = staleAgeText, modifier = modifier)
+        FindlyMapMarkerState.NoLocation -> NoLocationCircle(modifier = ringModifier)
+        FindlyMapMarkerState.Online -> OnlineBubble(label = label, modifier = ringModifier)
+        FindlyMapMarkerState.Stale -> StaleBubble(label = label, ageText = staleAgeText, modifier = ringModifier)
     }
 }
 
@@ -196,5 +204,20 @@ private fun Modifier.dashedRing(color: Color, strokeWidth: Dp): Modifier =
                 width = strokeWidthPx,
                 pathEffect = PathEffect.dashPathEffect(floatArrayOf(6f, 4f), 0f),
             ),
+        )
+    }
+
+/** specs/010-app-shell-and-screen-ux.md §3.3/§3.5's `selected` state: an extra solid ring drawn
+ * around the marker's own footprint (padding reserves the room it needs so it isn't clipped),
+ * distinct from [dashedRing]'s dashed "no fix"/"stale" strokes so selection never reads as either
+ * of those two meanings. */
+private fun Modifier.selectionRing(color: Color, strokeWidth: Dp = 3.dp): Modifier =
+    this.padding(strokeWidth).drawBehind {
+        val strokeWidthPx = strokeWidth.toPx()
+        val cornerRadiusPx = size.minDimension / 2f
+        drawRoundRect(
+            color = color,
+            cornerRadius = CornerRadius(cornerRadiusPx, cornerRadiusPx),
+            style = Stroke(width = strokeWidthPx),
         )
     }

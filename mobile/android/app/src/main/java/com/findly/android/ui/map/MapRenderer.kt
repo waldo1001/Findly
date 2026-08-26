@@ -31,11 +31,35 @@ import com.findly.android.ui.groups.GroupMapMemberUi
  * platform declaration clash, not a valid overload.
  */
 interface MapRenderer {
+    /**
+     * [selectedUserId] (specs/010-app-shell-and-screen-ux.md §3.5) highlights that member's
+     * marker ([com.findly.android.ui.designsystem.components.FindlyMapMarkerBubble]'s `selected`
+     * flag); [cameraCommand] (§3.4) is the consume-once camera signal — implementations MUST key
+     * their camera-animation effect on `cameraCommand?.seq` alone (never on the marker/points
+     * list), which is what stops an ordinary refresh from moving the camera. [onMemberSelected]
+     * fires when a marker (or, on the roster side, a row — wired by the screen, not here) is
+     * tapped; [onBackgroundTap] fires on a tap that hits the map surface itself, deselecting.
+     */
     @Composable
-    fun Render(members: List<RosterMemberUi>, modifier: Modifier)
+    fun Render(
+        members: List<RosterMemberUi>,
+        selectedUserId: String?,
+        cameraCommand: CameraCommand?,
+        onMemberSelected: (userId: String) -> Unit,
+        onBackgroundTap: () -> Unit,
+        modifier: Modifier,
+    )
 
     /** specs/005-temporary-groups.md §3 — position-only: no device/battery fields anywhere in
-     * [GroupMapMemberUi], unlike [RosterMemberUi]'s [RosterDeviceUi] children. */
+     * [GroupMapMemberUi], unlike [RosterMemberUi]'s [RosterDeviceUi] children. Same
+     * selection/camera contract as [Render]. */
     @Composable
-    fun RenderGroup(members: List<GroupMapMemberUi>, modifier: Modifier)
+    fun RenderGroup(
+        members: List<GroupMapMemberUi>,
+        selectedUserId: String?,
+        cameraCommand: CameraCommand?,
+        onMemberSelected: (userId: String) -> Unit,
+        onBackgroundTap: () -> Unit,
+        modifier: Modifier,
+    )
 }
