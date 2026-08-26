@@ -63,4 +63,27 @@ struct SyncIntervalDropdownPlanTests {
             #expect(option.title == SyncIntervalDropdownPlan.label(for: option.value))
         }
     }
+
+    // MARK: - review fix (I36 round 2) — a nil floor (features not yet loaded) MUST fail
+    // CLOSED: every option disabled, never `?? 0`, which fails OPEN and makes every interval
+    // selectable regardless of plan. Mirrors Android's `SyncIntervalOptions.buildForLimits`
+    // (commits `3fd05c9` RED -> `c7b7a9b` GREEN).
+
+    @Test func aNilFloor_disablesEveryOption_withACouldNotConfirmReason() {
+        let options = SyncIntervalDropdownPlan.options(minSyncIntervalMinutes: nil)
+
+        #expect(options.map(\.value) == SyncIntervalDropdownPlan.allowedMinutes)
+        #expect(options.allSatisfy { $0.isEnabled == false }, "a nil floor must fail CLOSED, never fail open")
+        #expect(options.allSatisfy { $0.disabledReason == "We couldn't confirm your plan's limits." })
+    }
+
+    @Test func aNilFloor_neverBehavesLikeAZeroFloor() {
+        // Pins the exact bug the `?? 0` call site had: a floor of 0 disables nothing (every
+        // value is >= 0) — the fail-OPEN shape this test rules out for `nil`.
+        let zeroFloorOptions = SyncIntervalDropdownPlan.options(minSyncIntervalMinutes: 0)
+        #expect(zeroFloorOptions.allSatisfy { $0.isEnabled }, "sanity check: a real 0 floor does enable everything")
+
+        let nilFloorOptions = SyncIntervalDropdownPlan.options(minSyncIntervalMinutes: nil)
+        #expect(nilFloorOptions.allSatisfy { $0.isEnabled == false }, "nil must not be treated as 0")
+    }
 }

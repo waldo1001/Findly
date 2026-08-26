@@ -36,4 +36,11 @@ public enum SyncIntervalDropdownPlan {
             )
         }
     }
+
+    // RED stub (review fix, I36 round 2) — deliberately reproduces the exact `?? 0` fail-OPEN
+    // bug the review flagged (a nil floor silently treated as "no floor", enabling everything)
+    // so the new tests fail on that wrong behavior, not on a compile error.
+    public static func options(minSyncIntervalMinutes floor: Int?) -> [FindlyDropdownOption<Int>] {
+        options(minSyncIntervalMinutes: floor ?? 0)
+    }
 }
