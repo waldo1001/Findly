@@ -24,7 +24,7 @@
       "route": "/delete-account",
       "rewrite": "/delete-account.html",
       "headers": {
-        "Content-Security-Policy": "default-src 'none'; script-src 'unsafe-inline' https://www.gstatic.com/firebasejs/12.16.0/ https://www.gstatic.com/recaptcha/ https://www.google.com/recaptcha/; style-src 'unsafe-inline'; img-src 'none'; connect-src https://func-findly.azurewebsites.net https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://www.google.com/recaptcha/; frame-src https://www.google.com/recaptcha/ https://recaptcha.google.com/recaptcha/; worker-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+        "Content-Security-Policy": "default-src 'none'; script-src 'unsafe-inline' https://www.gstatic.com/firebasejs/12.16.0/ https://www.gstatic.com/recaptcha/ https://www.google.com/recaptcha/; style-src 'unsafe-inline'; img-src https://www.gstatic.com/recaptcha/; connect-src https://func-findly.azurewebsites.net https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://www.google.com/recaptcha/; frame-src https://www.google.com/recaptcha/ https://recaptcha.google.com/recaptcha/; worker-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
       }
     },
     {

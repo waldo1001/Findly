@@ -51,10 +51,17 @@
 # iframe and talks to Identity Toolkit directly), and calls DELETE against this app's own
 # backend. Its route-level `Content-Security-Policy` override REPLACES (not merges with)
 # the global one for that route per the platform doc quoted above — so it must and does
-# restate every directive, widening only script-src/connect-src/frame-src to the specific
-# origins that flow needs and no wider:
+# restate every directive, widening only script-src/img-src/connect-src/frame-src to the
+# specific origins that flow needs and no wider:
 #   - script-src: the pinned gstatic firebasejs prefix (same one check 1/8's
 #     --allow-external-prefix already allowlists) + the reCAPTCHA widget script origins.
+#   - img-src: exactly https://www.gstatic.com/recaptcha/ (post-merge-review addition) —
+#     the reCAPTCHA visual-challenge widget's images, per Google's own reference CSP
+#     (github.com/google/recaptcha, examples/recaptcha-content-security-policy.php), which
+#     sets img-src to precisely this origin on the embedding page. Cost-asymmetry call:
+#     omitting it silently breaks account deletion for any user escalated to a visual
+#     challenge, with no distinguishing Firebase error code to explain why — worse than
+#     allowing images from one origin that this same route already trusts to run scripts.
 #   - connect-src: this app's own backend origin (the DELETE call) + Identity
 #     Toolkit/Secure Token (Firebase Auth's REST endpoints for phone verification/token
 #     refresh) + reCAPTCHA's own verification origin.
@@ -63,8 +70,9 @@
 # message / PR description for citations) — NOT empirically verified against a live
 # browser console in this sandboxed environment (no deployed preview exists yet and no
 # headless browser is available here). Flagged as an explicit residual risk: a manual
-# smoke test of /delete-account's phone-auth flow against a real deployment, watching for
-# CSP violation console errors, is recommended before this ships.
+# smoke test of /delete-account's phone-auth flow against a real deployment — forcing a
+# visual challenge with Google's test keys and watching the console for CSP violations —
+# is required before this ships; no amount of static verification substitutes for it.
 #
 # Usage: web/join/verify-security-headers.sh [path/to/staticwebapp.config.json]
 set -euo pipefail
@@ -215,7 +223,16 @@ const DELETE_ACCOUNT_CSP = {
     "https://www.google.com/recaptcha/",
   ],
   "style-src": ["'unsafe-inline'"],
-  "img-src": ["'none'"],
+  // img-src widened from 'none' (coordinator-directed, post-merge-review finding): the
+  // reCAPTCHA visual challenge (triggered when Google's risk engine escalates a phone-auth
+  // attempt) renders images from this exact origin. Google's own reference CSP
+  // (github.com/google/recaptcha, examples/recaptcha-content-security-policy.php) sets
+  // img-src to precisely this on the embedding page, so treat that as authoritative rather
+  // than guess. Deliberately the narrowest possible allowance: the one gstatic path
+  // reCAPTCHA needs, not a wildcard, not extended to any other image source — and only on
+  // this route; the four zero-dependency pages keep img-src 'none' (none of them reference
+  // an image at all).
+  "img-src": ["https://www.gstatic.com/recaptcha/"],
   "connect-src": [
     "https://func-findly.azurewebsites.net",
     "https://identitytoolkit.googleapis.com",
