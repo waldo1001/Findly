@@ -35,6 +35,17 @@ sealed class MapCameraTarget {
     ) : MapCameraTarget()
 }
 
+/**
+ * A "consume-once" wrapper around a decided [MapCameraTarget] (specs/010-app-shell-and-screen-ux.md
+ * §3.4). [seq] is a monotonically increasing sequence number minted by whichever `StateHolder`
+ * decided a run should happen ([MapStateHolder]/[com.findly.android.ui.groups.GroupMapStateHolder]).
+ * The Compose renderer layer keys its `LaunchedEffect` on [seq] alone (not on the marker list/
+ * points) — a refresh that changes markers but does **not** mint a new [CameraCommand] therefore
+ * produces no new [seq] and the effect simply does not re-run, which is the actual fix for "every
+ * marker-set change yanks the camera".
+ */
+data class CameraCommand(val seq: Long, val target: MapCameraTarget)
+
 object MapCamera {
     /** Ghent, Belgium — the same sample coordinate used throughout specs/001 and the Compose
      * previews; matches iOS's `MapRegion.findlyDefault` (specs/004-ios-client.md) so both apps

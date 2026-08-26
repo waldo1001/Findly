@@ -24,6 +24,12 @@ class MapStateHolder(
     private val _state = MutableStateFlow<MapUiState>(MapUiState.Loading)
     val state: StateFlow<MapUiState> = _state.asStateFlow()
 
+    // specs/010-app-shell-and-screen-ux.md §3.4: WHEN the camera re-runs, tracked as pure state
+    // across this holder's lifetime (see MapCameraPolicy's doc) — never on an ordinary refresh,
+    // except the one carve-out the spec grants (a zero-point open's first-ever point arrival).
+    private var cameraPolicyState = CameraPolicyState.INITIAL
+    private var cameraSeq = 0L
+
     init {
         scope.launch { refresh() }
     }
@@ -37,7 +43,16 @@ class MapStateHolder(
         }
         when (val result = locationsApi.getLatestLocations()) {
             is ApiResult.Success -> {
-                _state.value = MapUiState.Content(result.data.members.map { it.toUi() })
+                val members = result.data.members.map { it.toUi() }
+                // RED-before-GREEN placeholder (devloop/A34): never mints a camera command yet.
+                val previousCommand = (current as? MapUiState.Content)?.cameraCommand
+                val previousSelected = (current as? MapUiState.Content)?.selectedUserId
+                    ?.takeIf { id -> members.any { it.userId == id } }
+                _state.value = MapUiState.Content(
+                    members = members,
+                    selectedUserId = previousSelected,
+                    cameraCommand = previousCommand,
+                )
             }
             is ApiResult.Failure -> {
                 // specs/010-app-shell-and-screen-ux.md §2.1: GET /locations/latest is family-scoped
@@ -51,6 +66,21 @@ class MapStateHolder(
                 }
             }
         }
+    }
+
+    /** specs/010 §3.5: selects/deselects [userId], zooming to their freshest located device at
+     * [MapCamera.SINGLE_POINT_ZOOM] when one exists; a member with no located device can still be
+     * selected (row/marker highlight) but the camera MUST NOT move. Tapping the already-selected
+     * member deselects. RED-before-GREEN placeholder: always selects, never moves the camera. */
+    fun selectMember(userId: String) {
+        val current = _state.value as? MapUiState.Content ?: return
+        _state.value = current.copy(selectedUserId = userId)
+    }
+
+    /** specs/010 §3.4's explicit fit-all action: re-runs [MapCamera.target] over the currently
+     * loaded points unconditionally. RED-before-GREEN placeholder: no-op. */
+    fun fitAll() {
+        // TODO
     }
 }
 

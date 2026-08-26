@@ -11,6 +11,8 @@ import com.findly.android.ui.onboarding.OnboardingVariant
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -177,4 +179,171 @@ class MapStateHolderTest {
         assertEquals(2, api.getLatestLocationsCallCount)
         assertTrue(holder.state.value is MapUiState.Content)
     }
+
+    // specs/010-app-shell-and-screen-ux.md §3.4/§3.5 — the camera policy: WHEN it re-runs (never
+    // on an ordinary refresh) and the freshest-device selection target.
+
+    @Test
+    fun `the first load with a located point emits a camera command`() = runTest {
+        val api = FakeLocationsApi().apply {
+            getLatestLocationsResult = ApiResult.Success(
+                LatestLocationsResponseDto(members = listOf(memberWithOneDevice("u1", "Eric", "d1", 51.0543, 3.7174, "2026-08-26T10:00:00Z"))),
+                features = defaultFeatures(),
+            )
+        }
+
+        val holder = MapStateHolder(api, backgroundScope)
+        runCurrent()
+
+        val state = holder.state.value as MapUiState.Content
+        assertEquals(
+            MapCameraTarget.Center(51.0543, 3.7174, MapCamera.SINGLE_POINT_ZOOM),
+            state.cameraCommand?.target,
+        )
+    }
+
+    @Test
+    fun `a refresh that changes the marker set never moves the camera again — the 010 §3_4 regression this task fixes`() = runTest {
+        val api = FakeLocationsApi().apply {
+            getLatestLocationsResult = ApiResult.Success(
+                LatestLocationsResponseDto(members = listOf(memberWithOneDevice("u1", "Eric", "d1", 51.0, 3.0, "2026-08-26T10:00:00Z"))),
+                features = defaultFeatures(),
+            )
+        }
+        val holder = MapStateHolder(api, backgroundScope)
+        runCurrent()
+        val firstCommand = (holder.state.value as MapUiState.Content).cameraCommand
+        assertEquals(MapCameraTarget.Center(51.0, 3.0, MapCamera.SINGLE_POINT_ZOOM), firstCommand?.target)
+
+        // A refresh with a materially different point set — exactly the case that used to yank
+        // the camera on both platforms every time.
+        api.getLatestLocationsResult = ApiResult.Success(
+            LatestLocationsResponseDto(members = listOf(memberWithOneDevice("u1", "Eric", "d1", 60.0, 20.0, "2026-08-26T10:05:00Z"))),
+            features = defaultFeatures(),
+        )
+        holder.refresh()
+
+        val secondCommand = (holder.state.value as MapUiState.Content).cameraCommand
+        assertEquals("no NEW camera command is minted on refresh", firstCommand, secondCommand)
+    }
+
+    @Test
+    fun `selecting a member zooms to their freshest located device at SINGLE_POINT_ZOOM`() = runTest {
+        val api = FakeLocationsApi().apply {
+            getLatestLocationsResult = ApiResult.Success(
+                LatestLocationsResponseDto(
+                    members = listOf(
+                        LatestMemberDto(
+                            userId = "u1",
+                            displayName = "Eric",
+                            devices = listOf(
+                                device("d1", 51.0, 3.0, "2026-08-26T09:00:00Z"),
+                                device("d2", 52.0, 4.0, "2026-08-26T10:00:00Z"), // freshest
+                            ),
+                        ),
+                    ),
+                ),
+                features = defaultFeatures(),
+            )
+        }
+        val holder = MapStateHolder(api, backgroundScope)
+        runCurrent()
+        val beforeSeq = (holder.state.value as MapUiState.Content).cameraCommand?.seq
+
+        holder.selectMember("u1")
+
+        val state = holder.state.value as MapUiState.Content
+        assertEquals("u1", state.selectedUserId)
+        assertEquals(MapCameraTarget.Center(52.0, 4.0, MapCamera.SINGLE_POINT_ZOOM), state.cameraCommand?.target)
+        assertNotEquals(beforeSeq, state.cameraCommand?.seq)
+    }
+
+    @Test
+    fun `selecting a member with no located device highlights them without moving the camera`() = runTest {
+        val api = FakeLocationsApi().apply {
+            getLatestLocationsResult = ApiResult.Success(
+                LatestLocationsResponseDto(
+                    members = listOf(
+                        LatestMemberDto(
+                            userId = "u9",
+                            displayName = "Noor",
+                            devices = listOf(LatestDeviceDto(deviceId = "d9", deviceName = "Phone", trackingEnabled = true, syncIntervalMinutes = 15)),
+                        ),
+                    ),
+                ),
+                features = defaultFeatures(),
+            )
+        }
+        val holder = MapStateHolder(api, backgroundScope)
+        runCurrent()
+        val before = holder.state.value as MapUiState.Content
+
+        holder.selectMember("u9")
+
+        val after = holder.state.value as MapUiState.Content
+        assertEquals("u9", after.selectedUserId)
+        assertEquals("no fix to target — the camera MUST NOT move (010 §3.5)", before.cameraCommand, after.cameraCommand)
+    }
+
+    @Test
+    fun `selecting the already-selected member deselects it`() = runTest {
+        val api = FakeLocationsApi().apply {
+            getLatestLocationsResult = ApiResult.Success(
+                LatestLocationsResponseDto(members = listOf(memberWithOneDevice("u1", "Eric", "d1", 51.0, 3.0, "2026-08-26T10:00:00Z"))),
+                features = defaultFeatures(),
+            )
+        }
+        val holder = MapStateHolder(api, backgroundScope)
+        runCurrent()
+        holder.selectMember("u1")
+        assertEquals("u1", (holder.state.value as MapUiState.Content).selectedUserId)
+
+        holder.selectMember("u1")
+
+        assertNull((holder.state.value as MapUiState.Content).selectedUserId)
+    }
+
+    @Test
+    fun `fitAll re-runs the policy over current points on an explicit action`() = runTest {
+        val api = FakeLocationsApi().apply {
+            getLatestLocationsResult = ApiResult.Success(
+                LatestLocationsResponseDto(
+                    members = listOf(
+                        memberWithOneDevice("u1", "Eric", "d1", 51.0, 3.0, "2026-08-26T10:00:00Z"),
+                        memberWithOneDevice("u2", "Noor", "d2", 60.0, 20.0, "2026-08-26T10:00:00Z"),
+                    ),
+                ),
+                features = defaultFeatures(),
+            )
+        }
+        val holder = MapStateHolder(api, backgroundScope)
+        runCurrent()
+        val before = (holder.state.value as MapUiState.Content).cameraCommand
+
+        holder.fitAll()
+
+        val after = (holder.state.value as MapUiState.Content).cameraCommand
+        assertNotEquals(before?.seq, after?.seq)
+        assertTrue(after?.target is MapCameraTarget.Bounds)
+    }
+
+    private fun memberWithOneDevice(
+        userId: String,
+        displayName: String,
+        deviceId: String,
+        lat: Double,
+        lon: Double,
+        recordedAt: String,
+    ): LatestMemberDto = LatestMemberDto(userId = userId, displayName = displayName, devices = listOf(device(deviceId, lat, lon, recordedAt)))
+
+    private fun device(deviceId: String, lat: Double, lon: Double, recordedAt: String): LatestDeviceDto = LatestDeviceDto(
+        deviceId = deviceId,
+        deviceName = "Device $deviceId",
+        lat = lat,
+        lon = lon,
+        recordedAt = recordedAt,
+        trackingEnabled = true,
+        syncIntervalMinutes = 15,
+        isStale = false,
+    )
 }

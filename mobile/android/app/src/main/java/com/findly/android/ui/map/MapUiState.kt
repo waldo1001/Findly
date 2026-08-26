@@ -32,7 +32,18 @@ data class RosterMemberUi(
 sealed class MapUiState {
     data object Loading : MapUiState()
     data class Error(val message: String) : MapUiState()
-    data class Content(val members: List<RosterMemberUi>, val isRefreshing: Boolean = false) : MapUiState()
+    /** [selectedUserId] (specs/010-app-shell-and-screen-ux.md §3.5) is the currently-highlighted
+     * roster member/marker, or `null` when nothing is selected. [cameraCommand] (§3.4) is a
+     * consume-once signal — present only on the exact emission that decided to move the camera
+     * (first load, an explicit fit-all, or a selection with a resolvable location); an ordinary
+     * refresh that only updates [members] carries the previous, already-consumed value forward
+     * unchanged so the renderer's `LaunchedEffect(cameraCommand?.seq)` never re-fires for it. */
+    data class Content(
+        val members: List<RosterMemberUi>,
+        val isRefreshing: Boolean = false,
+        val selectedUserId: String? = null,
+        val cameraCommand: CameraCommand? = null,
+    ) : MapUiState()
 
     /** specs/010-app-shell-and-screen-ux.md §2.1: a confirmed `PROFILE_NOT_FOUND`/`FAMILY_NOT_FOUND`
      * on this load routes to Onboarding instead of rendering a retryable [Error] card. Map is the
