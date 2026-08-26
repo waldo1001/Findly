@@ -58,6 +58,16 @@ public final class LocationRuntimeContainer {
     /// on the account-deletion path, instead of a documented-but-uncalled promise.
     public let permissionDisclosureStore: PermissionDisclosureStateStoring
 
+    /// specs/010-app-shell-and-screen-ux.md §1.2 (I34 review fix) — the SAME shared instance
+    /// `RootView`/`LiveMapScreen` read for the drawer header, injected here for exactly the I31/
+    /// I26 reason above: a documented `FamilyContextCache.clear()` that nothing on the real
+    /// sign-out/account-deletion path called was a live cross-account data-leak risk (a
+    /// process-lifetime `@StateObject`, so it survives an in-app sign-out with no relaunch — the
+    /// next signed-in user's Family Map could render the PREVIOUS caller's family name/display
+    /// name until some later probe happened to overwrite it). `nil`-able: most existing tests of
+    /// this container have no reason to construct one just to ignore it.
+    private let familyContextCache: FamilyContextCache?
+
     /// Consecutive-transient-failure counter for `BackoffPolicy` (specs/009 §9) — reset to 0 on
     /// any non-retry outcome. In-memory only: a process restart naturally resets backoff, which is
     /// fine (spec is silent on this surviving restart, unlike the batch identity in `FixStoring`).
@@ -126,6 +136,7 @@ public final class LocationRuntimeContainer {
         geofenceEventStore: GeofenceEventQueueStoring = InMemoryGeofenceEventQueueStore(),
         lastQueuedFixAtStore: LastQueuedFixAtStoring = InMemoryLastQueuedFixAtStore(),
         permissionDisclosureStore: PermissionDisclosureStateStoring = InMemoryPermissionDisclosureStore(),
+        familyContextCache: FamilyContextCache? = nil,
         isPermissionGranted: @escaping () -> Bool = { false },
         batteryLevelProvider: @escaping () -> Int = { 100 },
         onReRegisterDevice: @escaping () async -> Void = {},
@@ -137,6 +148,7 @@ public final class LocationRuntimeContainer {
         self.geofenceConfigStore = geofenceConfigStore
         self.geofenceRegistrar = geofenceRegistrar
         self.permissionDisclosureStore = permissionDisclosureStore
+        self.familyContextCache = familyContextCache
 
         let queue = FixQueue(store: fixStore)
         self.fixQueue = queue

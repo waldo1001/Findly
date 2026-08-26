@@ -448,6 +448,31 @@ struct LocationRuntimeContainerTests {
         #expect(store.isDeclined(.background) == false, "the decline is consent, not a device-level preference — it must not survive account deletion either")
     }
 
+    /// specs/010-app-shell-and-screen-ux.md §1.2 (I34 review fix — High: a real cross-account data
+    /// leak). `FamilyContextCache.clear()`'s own doc said it existed "as part of the account-
+    /// deletion/sign-out local wipe" — I26's exact pattern (a documented `clear()` nothing calls),
+    /// reproduced in brand-new code. `familyContextCache` is a process-lifetime `@StateObject`, so
+    /// without this a signed-out user's family name/display name/role would keep rendering in the
+    /// NEXT signed-in user's drawer header on the same device until some later probe happened to
+    /// overwrite it. Proving it here (against the container's own `wipeLocalState()`, the method
+    /// every real sign-out/account-deletion path funnels through) is what makes this a live
+    /// caller, not a promise — same rationale as `wipeLocalState_clearsThePermissionDisclosureState`
+    /// immediately above.
+    @Test func wipeLocalState_clearsTheFamilyContextCache() async {
+        let cache = FamilyContextCache()
+        cache.update(familyName: "Wauters", myDisplayName: "Eric", isParent: true)
+        let container = LocationRuntimeContainer(
+            apiClient: FakeAPIClient(), deviceId: { "device-1" },
+            familyContextCache: cache
+        )
+
+        await container.wipeLocalState()
+
+        #expect(cache.familyName == nil, "a different signed-in user on this device must never see the previous caller's family name")
+        #expect(cache.myDisplayName == nil, "nor their display name")
+        #expect(cache.isParent == nil, "nor their role")
+    }
+
     @Test func wipeLocalState_calledTwice_isIdempotentSafe() async {
         let registrar = FakeGeofenceRegistering()
         let container = LocationRuntimeContainer(apiClient: FakeAPIClient(), deviceId: { "device-1" }, geofenceRegistrar: registrar)
