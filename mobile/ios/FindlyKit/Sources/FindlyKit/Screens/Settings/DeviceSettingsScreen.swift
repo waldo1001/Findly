@@ -3,11 +3,12 @@ import SwiftUI
 /// specs/004-ios-client.md I2 (001 §4.2–4.3), specs/010-app-shell-and-screen-ux.md §4.2 (I36) —
 /// composes ONLY design-system components. Sync-interval selection is a `FindlyDropdownField`
 /// over the 001 §1.4 values (replacing the pre-010 horizontally-scrolling `FindlyButton` chip
-/// row); pause is a `FindlyToggleRow`; rename is a single aligned field+Save row (replacing the
-/// pre-010 layout, where `FindlyTextField`'s own stacked label sat beside a bare button and threw
-/// the pair's vertical centers out of alignment — §4.2's defect this task exists to fix). All
-/// three are hidden (read-only) for a non-parent viewer, matching §4.3's parent-vs-owner
-/// permission split. Each card's own mutation errors render on that card via
+/// row); pause is a `FindlyToggleRow`; rename is a single aligned field+Save row using
+/// `FindlyTextField(nil, ...)` (review fix, I36 round 2 — `label` is now optional on the shared
+/// component itself, so the stacked label row that used to sit beside a bare button and throw
+/// the pair's vertical centers out of alignment is simply omitted, rather than duplicated in a
+/// screen-local type). All three are hidden (read-only) for a non-parent viewer, matching §4.3's
+/// parent-vs-owner permission split. Each card's own mutation errors render on that card via
 /// `viewModel.error(forDeviceId:)` — the pre-010 shared top-of-list `lastActionError` banner is
 /// retired, not left alongside this.
 public struct DeviceSettingsScreen: View {
@@ -146,19 +147,20 @@ private struct DeviceCardView: View {
 
     /// specs/010-app-shell-and-screen-ux.md §4.2 — "one horizontal row containing the
     /// device-name input and a Save button, both the same control height (52 pt), vertically
-    /// centered on each other." Deliberately NOT `FindlyTextField` here: that component's own
-    /// stacked label-above-field layout is exactly what threw the pair's vertical centers out of
-    /// alignment before this task — see `DeviceRenameField`'s doc for why a screen-local,
-    /// label-less input (placeholder + accessibility label only, per this same bullet) is used
-    /// instead of changing the shared component's contract for every other call site.
+    /// centered on each other." Uses the shared `FindlyTextField` with `label: nil` (review fix,
+    /// I36 round 2) — its stacked label row is what threw this pair's vertical centers out of
+    /// alignment before this task, and a `nil` label omits that row entirely rather than
+    /// duplicating the component's box geometry in a screen-local type. The static "Device name"
+    /// placeholder doubles as the field's accessibility label (§4.2's "placeholder + accessibility
+    /// label" wording) via `FindlyTextField`'s own `label ?? placeholder` fallback.
     private var renameRow: some View {
         HStack(alignment: .center, spacing: theme.spacing.sm) {
-            DeviceRenameField(placeholder: device.deviceName, text: $renameDraft)
+            FindlyTextField(nil, text: $renameDraft, placeholder: "Device name")
             FindlyButton("Save", style: .secondary) {
                 let trimmed = renameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
                 Task { await viewModel.rename(deviceId: device.deviceId, name: trimmed) }
             }
-            .frame(width: 96)
+            .frame(width: 96) // fixed so it doesn't split the row 50/50 with the equally-greedy text field
             .disabled(!DeviceRenamePlan.isSaveEnabled(draft: renameDraft, currentName: device.deviceName))
         }
     }
@@ -170,47 +172,5 @@ private struct DeviceCardView: View {
         }
         .font(theme.typography.bodyMedium.font)
         .foregroundColor(theme.colors.danger)
-    }
-}
-
-/// specs/010-app-shell-and-screen-ux.md §4.2 — the rename row's input: same box geometry as
-/// `FindlyTextField` (52pt height, `surfaceVariant` fill, `outlineStrong`/`primary` border,
-/// `corner.md` radius) but WITHOUT that component's stacked label-above-field row, which is what
-/// misaligns the row against a same-height Save button. Not promoted to a `FindlyTextField`
-/// variant/parameter because no other of `FindlyTextField`'s dozen-plus call sites want this
-/// layout — §4.2 asks for one specific row, not a new general-purpose design-system option — so
-/// this stays screen-local, reading `@Environment(\.theme)` the same way every other
-/// `Screens/`-level view in this codebase already does (e.g. this file's own card text above).
-private struct DeviceRenameField: View {
-    @Environment(\.theme) private var theme
-    @Environment(\.isEnabled) private var isEnabled
-    @FocusState private var isFocused: Bool
-    let placeholder: String
-    @Binding var text: String
-
-    var body: some View {
-        TextField(placeholder, text: $text)
-            .disabled(!isEnabled)
-            .focused($isFocused)
-            .font(theme.typography.bodyLarge.font)
-            .foregroundColor(isEnabled ? theme.colors.onSurface : .findlyTextFieldDisabledText)
-            .padding(.horizontal, theme.spacing.sm)
-            .frame(height: 52)
-            .frame(maxWidth: .infinity)
-            .background(isEnabled ? theme.colors.surfaceVariant : .findlyTextFieldDisabledFill)
-            .clipShape(RoundedRectangle(cornerRadius: theme.corner.md))
-            .overlay(
-                RoundedRectangle(cornerRadius: theme.corner.md)
-                    .strokeBorder(borderColor, lineWidth: 1.5)
-            )
-            // The label lives here, not in a stacked `Text` above the field (§4.2's explicit
-            // instruction) — VoiceOver still announces "Device name" regardless of the current
-            // draft, matching how every other labeled control in this codebase names itself.
-            .accessibilityLabel("Device name")
-    }
-
-    private var borderColor: Color {
-        guard isEnabled else { return .findlyTextFieldDisabledBorder }
-        return isFocused ? theme.colors.primary : theme.outlineStrong
     }
 }
