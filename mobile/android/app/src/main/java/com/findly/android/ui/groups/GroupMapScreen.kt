@@ -44,6 +44,7 @@ import com.findly.android.ui.designsystem.components.FindlyStatusTone
 import com.findly.android.ui.designsystem.components.rememberFindlyBottomSheetState
 import com.findly.android.ui.map.MapRenderer
 import com.findly.android.ui.map.RelativeTimeFormatter
+import com.findly.android.ui.map.RosterAvatarStack
 import kotlinx.coroutines.delay
 import java.time.Instant
 
@@ -205,6 +206,11 @@ private fun GroupRosterHeader(state: GroupMapUiState.Content) {
             color = FindlyTheme.colors.subtleText,
             style = FindlyTheme.typography.bodyMedium,
         )
+
+        // specs/010 §3.1/§3.2 (normative — the family map's minimized-detent avatar stack
+        // applies here too, "same components, same fix"; position-only initials from
+        // displayName is no violation of 005 §3, no device/battery data involved).
+        RosterAvatarStack(displayNames = state.members.map { it.displayName })
     }
 }
 

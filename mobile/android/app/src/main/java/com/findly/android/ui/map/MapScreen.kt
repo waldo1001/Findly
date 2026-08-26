@@ -1,6 +1,7 @@
 package com.findly.android.ui.map
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -9,6 +10,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -255,6 +257,57 @@ private fun RosterHeader(
                 onClick = { onLocateNow(selected.userId, selected.displayName) },
                 style = FindlyButtonStyle.Primary,
             )
+        }
+
+        // specs/010 §3.1 (normative — HANDOFF.md:151's minimized-detent content list keeps this
+        // on equal footing with grabber/title/summary/Locate-now; 010 deliberately dropped only
+        // the handoff's "Drag up for details" hint, not this).
+        RosterAvatarStack(displayNames = state.members.map { it.displayName })
+    }
+}
+
+/**
+ * specs/010 §3.1's roster-header avatar stack — shared by [RosterHeader] and
+ * [com.findly.android.ui.groups.GroupMapScreen]'s `GroupRosterHeader` (`internal` so the groups
+ * package can reuse it without a new design-system component). No new data: both roster types
+ * already carry `displayName`. Renders [RosterAvatarStackPlan]'s decision with existing
+ * [FindlyTheme] tokens only — `primary`/`onPrimary` for a member's initials circle (the same pair
+ * [com.findly.android.ui.designsystem.components.FindlyMapMarkerBubble]'s online-marker avatar
+ * circle uses), `surfaceVariant`/`onSurface` for the overflow "+N" circle, `surface` as the
+ * separating border between overlapping circles (the sheet's own background) — no new token
+ * names.
+ */
+@Composable
+internal fun RosterAvatarStack(displayNames: List<String>, modifier: Modifier = Modifier) {
+    if (displayNames.isEmpty()) return
+    val plan = RosterAvatarStackPlan.compute(displayNames)
+
+    Row(modifier = modifier) {
+        plan.visibleInitials.forEachIndexed { index, initials ->
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier
+                    .offset(x = (-8).dp * index)
+                    .size(32.dp)
+                    .clip(CircleShape)
+                    .background(FindlyTheme.colors.primary)
+                    .border(width = 2.dp, color = FindlyTheme.colors.surface, shape = CircleShape),
+            ) {
+                Text(text = initials, color = FindlyTheme.colors.onPrimary, style = FindlyTheme.typography.labelSmall)
+            }
+        }
+        if (plan.overflowCount > 0) {
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier
+                    .offset(x = (-8).dp * plan.visibleInitials.size)
+                    .size(32.dp)
+                    .clip(CircleShape)
+                    .background(FindlyTheme.colors.surfaceVariant)
+                    .border(width = 2.dp, color = FindlyTheme.colors.surface, shape = CircleShape),
+            ) {
+                Text(text = "+${plan.overflowCount}", color = FindlyTheme.colors.onSurface, style = FindlyTheme.typography.labelSmall)
+            }
         }
     }
 }
