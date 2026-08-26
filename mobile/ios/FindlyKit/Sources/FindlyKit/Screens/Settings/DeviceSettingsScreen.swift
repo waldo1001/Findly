@@ -126,19 +126,22 @@ private struct DeviceCardView: View {
         }
     }
 
+    /// specs/010-app-shell-and-screen-ux.md §4.2/§9 (review fix, I36 round 2) — passes the floor
+    /// straight through as `Int?`, no `?? 0`: a `nil` floor now fails CLOSED inside
+    /// `SyncIntervalDropdownPlan.options` (every option individually disabled), and the whole
+    /// field is ALSO disabled here as a second, belt-and-braces gate — mirroring Android's
+    /// `SyncIntervalOptions`, which disables both the per-option state and the dropdown's own
+    /// `enabled` flag. `?? 0` was wrong: a floor of 0 disables nothing, failing OPEN.
     private var intervalDropdown: some View {
         FindlyDropdownField(
             label: "Sync interval",
-            // `?? 0` is a neutral (nothing disabled), not invented, fallback for a branch that is
-            // unreachable by construction: this card only renders once `state` is `.loaded`, and
-            // `viewModel.minSyncIntervalMinutes` is set from the SAME envelope, in the SAME method,
-            // before `state` becomes `.loaded` (specs/001 §9 — never a plan-specific literal here).
-            options: SyncIntervalDropdownPlan.options(minSyncIntervalMinutes: viewModel.minSyncIntervalMinutes ?? 0),
+            options: SyncIntervalDropdownPlan.options(minSyncIntervalMinutes: viewModel.minSyncIntervalMinutes),
             selection: device.syncIntervalMinutes,
             onSelect: { minutes in
                 Task { await viewModel.setSyncInterval(deviceId: device.deviceId, minutes: minutes) }
             }
         )
+        .disabled(viewModel.minSyncIntervalMinutes == nil)
     }
 
     /// specs/010-app-shell-and-screen-ux.md §4.2 — "one horizontal row containing the

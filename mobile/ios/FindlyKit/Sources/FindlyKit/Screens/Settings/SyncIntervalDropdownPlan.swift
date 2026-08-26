@@ -37,10 +37,24 @@ public enum SyncIntervalDropdownPlan {
         }
     }
 
-    // RED stub (review fix, I36 round 2) — deliberately reproduces the exact `?? 0` fail-OPEN
-    // bug the review flagged (a nil floor silently treated as "no floor", enabling everything)
-    // so the new tests fail on that wrong behavior, not on a compile error.
+    /// specs/010-app-shell-and-screen-ux.md §4.2, §9 (review fix, I36 round 2) — a `nil` floor
+    /// (`features` hasn't loaded yet, or a future refactor reorders the two assignments that
+    /// currently keep `state`/`minSyncIntervalMinutes` in lockstep) MUST fail CLOSED: every
+    /// option disabled. `?? 0` was the earlier, wrong shape here — a floor of 0 disables
+    /// nothing, since every allowed value is `>= 0`, so it fails OPEN and would let a user pick
+    /// any interval with no plan check at all. Mirrors Android's
+    /// `SyncIntervalOptions.buildForLimits`.
     public static func options(minSyncIntervalMinutes floor: Int?) -> [FindlyDropdownOption<Int>] {
-        options(minSyncIntervalMinutes: floor ?? 0)
+        guard let floor else {
+            return allowedMinutes.map { minutes in
+                FindlyDropdownOption(
+                    value: minutes,
+                    title: label(for: minutes),
+                    isEnabled: false,
+                    disabledReason: "We couldn't confirm your plan's limits."
+                )
+            }
+        }
+        return options(minSyncIntervalMinutes: floor)
     }
 }
