@@ -113,14 +113,24 @@ public struct LiveMapScreen: View {
     /// specs/010 §3.1 — full-bleed map (edge-to-edge behind system bars) with the ☰ button + family
     /// pill floating above it, and the roster sheet on top of everything. The map renders
     /// unconditionally; only the sheet's content switches on `viewModel.state` (§9).
+    ///
+    /// specs/010 §3.4 (amended 2026-08-26, row I39) — the `GeometryReader` is the render boundary
+    /// that resolves `viewModel.mapViewportSizePt`: `MapCameraPolicy`/`MapRegion(fitting:)` stay
+    /// pure and have no live view size of their own, so this is the one place (mirroring Android's
+    /// `GoogleMapRenderer` resolving `LocalDensity`) that can hand the real point size down before
+    /// the next camera command is translated into a region.
     private var mapWithChromeAndSheet: some View {
-        ZStack(alignment: .top) {
-            renderer.makeMapView(region: $viewModel.region, annotations: viewModel.annotations)
-                .ignoresSafeArea()
+        GeometryReader { geometry in
+            ZStack(alignment: .top) {
+                renderer.makeMapView(region: $viewModel.region, annotations: viewModel.annotations)
+                    .ignoresSafeArea()
 
-            topChrome
-                .padding(.horizontal, theme.spacing.md)
-                .padding(.top, theme.spacing.sm)
+                topChrome
+                    .padding(.horizontal, theme.spacing.md)
+                    .padding(.top, theme.spacing.sm)
+            }
+            .onAppear { viewModel.mapViewportSizePt = geometry.size }
+            .onChange(of: geometry.size) { viewModel.mapViewportSizePt = $0 }
         }
         .findlyBottomSheet(selection: $sheetDetent) { detent in
             rosterSheetContent(detent: detent)

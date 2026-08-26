@@ -47,14 +47,21 @@ public struct GroupMapScreen: View {
         .onReceive(Self.ticker) { date in now = date }
     }
 
+    /// specs/010 §3.2/§3.4 (amended 2026-08-26, row I39) — mirrors `LiveMapScreen`'s
+    /// `mapWithChromeAndSheet` exactly: the `GeometryReader` is the render boundary that resolves
+    /// `viewModel.mapViewportSizePt` for the pure `MapRegion(fitting:viewSizePt:)` translation.
     private var mapWithChromeAndSheet: some View {
-        ZStack(alignment: .top) {
-            renderer.makeMapView(region: $viewModel.region, annotations: viewModel.annotations)
-                .ignoresSafeArea()
+        GeometryReader { geometry in
+            ZStack(alignment: .top) {
+                renderer.makeMapView(region: $viewModel.region, annotations: viewModel.annotations)
+                    .ignoresSafeArea()
 
-            topChrome
-                .padding(.horizontal, theme.spacing.md)
-                .padding(.top, theme.spacing.sm)
+                topChrome
+                    .padding(.horizontal, theme.spacing.md)
+                    .padding(.top, theme.spacing.sm)
+            }
+            .onAppear { viewModel.mapViewportSizePt = geometry.size }
+            .onChange(of: geometry.size) { viewModel.mapViewportSizePt = $0 }
         }
         .findlyBottomSheet(selection: $sheetDetent) { detent in
             rosterSheetContent(detent: detent)
