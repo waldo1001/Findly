@@ -1,5 +1,7 @@
 package com.findly.android.ui.groups
 
+import com.findly.android.joincode.JoinCodeAlphabet
+
 /**
  * Pure group-join-code normalizer/validator (001-api-contract.md §1.4), applied to **every**
  * incoming code before it is used — both the manual entry field on [GroupJoinScreen] and, more
@@ -11,15 +13,16 @@ package com.findly.android.ui.groups
  *
  * Wire format (001 §1.4): 8 characters of Crockford base32 (digits `0-9` plus `A-Z` **minus**
  * `I`/`L`/`O`/`U`, to avoid visual ambiguity). Canonical form is uppercase, no hyphen; clients MAY
- * display/accept the `XXXX-XXXX` grouping and the server ignores case/hyphens — so this sanitizer
- * strips whitespace and hyphens and upper-cases before validating, exactly mirroring the server's
- * own acceptance rule, then rejects anything that still isn't exactly 8 valid characters.
+ * display/accept the `XXXX-XXXX` grouping and the server ignores case/hyphens.
+ *
+ * **A36 (specs/010-app-shell-and-screen-ux.md §5) refactor:** the actual strip/uppercase/validate
+ * logic now lives once, in [JoinCodeAlphabet], shared with family invite codes'
+ * [com.findly.android.ui.invites.FamilyInviteCodeSanitizer] twin — both wire formats are the
+ * identical 001 §1.4 rule, so this object is now a thin, behavior-preserving alias rather than a
+ * second copy of the regex/strip/uppercase logic (verified unchanged against
+ * `GroupJoinCodeSanitizerTest`, written before this class existed).
  */
 object GroupJoinCodeSanitizer {
-
-    /** Crockford base32 alphabet, excluding I/L/O/U (001 §1.4). Spelled out explicitly (not as
-     * regex character-class ranges) so the excluded letters are unambiguous at a glance. */
-    private val VALID_CODE = Regex("^[0123456789ABCDEFGHJKMNPQRSTVWXYZ]{8}$")
 
     /**
      * Strips surrounding whitespace and the display hyphen, upper-cases, then validates against
@@ -29,8 +32,5 @@ object GroupJoinCodeSanitizer {
      * strings, path traversal, …): none of those can ever produce a non-null result here, since
      * the output alphabet is a strict whitelist, not a blacklist of "bad" characters.
      */
-    fun sanitize(input: String): String? {
-        val stripped = input.trim().replace("-", "").uppercase()
-        return if (VALID_CODE.matches(stripped)) stripped else null
-    }
+    fun sanitize(input: String): String? = JoinCodeAlphabet.sanitize(input)
 }
