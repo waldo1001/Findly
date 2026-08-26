@@ -1,5 +1,7 @@
 package com.findly.android.ui.history
 
+import com.findly.android.ui.onboarding.OnboardingVariant
+
 /** A single stored history point (001-api-contract.md §5.3) — unlike the live-map's
  * [com.findly.android.ui.map.RosterDeviceUi], every field is guaranteed non-null at write
  * time. */
@@ -26,4 +28,8 @@ sealed class HistoryUiState {
         val nextCursor: String?,
         val isLoadingMore: Boolean = false,
     ) : HistoryUiState()
+
+    /** specs/010-app-shell-and-screen-ux.md §2.1: a confirmed `PROFILE_NOT_FOUND`/`FAMILY_NOT_FOUND`
+     * on a query routes to Onboarding instead of the dead-end retryable [Error] card. */
+    data class RouteToOnboarding(val variant: OnboardingVariant) : HistoryUiState()
 }

@@ -1,6 +1,7 @@
 package com.findly.android.ui.settings
 
 import com.findly.android.network.ExportResult
+import com.findly.android.ui.onboarding.OnboardingVariant
 
 /** A family member the caller (if parent) may export on their behalf (specs/008-privacy-
  * endpoints.md §3 — "a parent may export any current member of their family"). */
@@ -87,4 +88,10 @@ data class PrivacyUiState(
     val exportFlow: ExportFlow = ExportFlow.Idle,
     val deleteAccountFlow: DeleteAccountFlow = DeleteAccountFlow.Idle,
     val deleteFamilyFlow: DeleteFamilyFlow = DeleteFamilyFlow.Idle,
+    /** specs/010-app-shell-and-screen-ux.md §2.1: a confirmed `PROFILE_NOT_FOUND` on
+     * [PrivacyStateHolder.exportSelf]/[PrivacyStateHolder.exportMember] (`GET /export` needs only
+     * a profile, 001 §13.1 — never family-scoped) routes to Onboarding instead of the dead-end
+     * retryable [ExportFlow.Failed] card. Kept as its own field rather than folded into
+     * [exportFlow], mirroring this state's existing "multiple independent sub-flow" shape. */
+    val exportRouteToOnboarding: OnboardingVariant? = null,
 )

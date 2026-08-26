@@ -20,7 +20,8 @@ import kotlinx.coroutines.flow.asStateFlow
  * Reachable both from a signed-in user with a family already (rare — the server rejects with
  * `409 FAMILY_ALREADY_MEMBER`, surfaced as an ordinary [CreateFamilyUiState.submitError]) and,
  * more importantly, from the profile-less first-run flow
- * ([com.findly.android.ui.groups.GroupsListUiState.ProfileNeeded]) where this is one of the four
+ * ([com.findly.android.ui.onboarding.OnboardingScreen], specs/010-app-shell-and-screen-ux.md §2.2
+ * — the retired `GroupsListUiState.ProfileNeeded`'s replacement) where this is one of the four
  * 001 §1.5.3 bootstrap paths.
  */
 class CreateFamilyStateHolder(private val familyApi: FamilyApi) {

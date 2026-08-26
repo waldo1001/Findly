@@ -6,6 +6,7 @@ import com.findly.android.network.ApiError
 import com.findly.android.network.ApiResult
 import com.findly.android.network.dto.AcceptInviteResponseDto
 import com.findly.android.network.dto.CreateInviteResponseDto
+import com.findly.android.ui.onboarding.OnboardingVariant
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -48,6 +49,37 @@ class InvitesStateHolderTest {
         assertEquals("You don't have permission to do that.", state.createInviteError)
         assertNull(state.createdInvite)
         assertEquals(false, state.isCreatingInvite)
+    }
+
+    // specs/010-app-shell-and-screen-ux.md §2.1's routing rule — POST /families/me/invites is
+    // parent-only, family-scoped (001 §3.3/§1.6); createInvite is this screen's load path.
+
+    @Test
+    fun `createInvite PROFILE_NOT_FOUND routes to Onboarding profile-less instead of an inline error`() = runTest {
+        val api = FakeFamilyApi().apply {
+            createInviteResult = ApiResult.Failure(ApiError.ProfileNotFound("no profile", "r_10"))
+        }
+        val holder = InvitesStateHolder(api)
+
+        holder.createInvite(role = "member")
+
+        val state = holder.state.value
+        assertEquals(OnboardingVariant.ProfileLess, state.createInviteRouteToOnboarding)
+        assertNull(state.createInviteError)
+    }
+
+    @Test
+    fun `createInvite FAMILY_NOT_FOUND routes to Onboarding family-less instead of an inline error`() = runTest {
+        val api = FakeFamilyApi().apply {
+            createInviteResult = ApiResult.Failure(ApiError.FamilyNotFound("no family", "r_11"))
+        }
+        val holder = InvitesStateHolder(api)
+
+        holder.createInvite(role = "member")
+
+        val state = holder.state.value
+        assertEquals(OnboardingVariant.FamilyLess, state.createInviteRouteToOnboarding)
+        assertNull(state.createInviteError)
     }
 
     @Test

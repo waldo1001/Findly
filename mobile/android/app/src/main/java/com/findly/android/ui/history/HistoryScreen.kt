@@ -13,6 +13,7 @@ import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -29,6 +30,7 @@ import com.findly.android.ui.designsystem.components.FindlyListRow
 import com.findly.android.ui.designsystem.components.FindlyLoadingState
 import com.findly.android.ui.designsystem.components.FindlyTextField
 import com.findly.android.ui.designsystem.components.FindlyTopBar
+import com.findly.android.ui.onboarding.OnboardingVariant
 import java.time.Instant
 import java.time.ZoneOffset
 
@@ -44,12 +46,14 @@ import java.time.ZoneOffset
 fun HistoryRoute(
     viewModel: HistoryViewModel,
     modifier: Modifier = Modifier,
+    onRouteToOnboarding: (OnboardingVariant) -> Unit = {},
 ) {
     val state by viewModel.state.collectAsState()
     HistoryScreen(
         state = state,
         onQuery = viewModel::load,
         onLoadMore = viewModel::loadMore,
+        onRouteToOnboarding = onRouteToOnboarding,
         modifier = modifier,
     )
 }
@@ -61,7 +65,13 @@ fun HistoryScreen(
     modifier: Modifier = Modifier,
     onQuery: (userId: String, from: String, to: String, deviceId: String?) -> Unit = { _, _, _, _ -> },
     onLoadMore: () -> Unit = {},
+    onRouteToOnboarding: (OnboardingVariant) -> Unit = {},
 ) {
+    // specs/010-app-shell-and-screen-ux.md §2.1's routing rule.
+    LaunchedEffect(state) {
+        if (state is HistoryUiState.RouteToOnboarding) onRouteToOnboarding(state.variant)
+    }
+
     var userId by remember { mutableStateOf("") }
     var deviceId by remember { mutableStateOf("") }
     var fromDate by remember { mutableStateOf<String?>(null) }
@@ -118,6 +128,8 @@ fun HistoryScreen(
             is HistoryUiState.Loading -> FindlyLoadingState(message = "Loading history…")
 
             is HistoryUiState.Error -> FindlyErrorState(title = "Couldn't load history", message = state.message)
+
+            is HistoryUiState.RouteToOnboarding -> FindlyLoadingState(message = "Loading history…")
 
             is HistoryUiState.Content -> {
                 if (state.points.isEmpty()) {

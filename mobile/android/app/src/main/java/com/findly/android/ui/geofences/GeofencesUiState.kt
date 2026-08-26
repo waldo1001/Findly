@@ -1,5 +1,7 @@
 package com.findly.android.ui.geofences
 
+import com.findly.android.ui.onboarding.OnboardingVariant
+
 /** A circular geofence (001-api-contract.md §7.1/§7.2). Used both for the read-only list entries
  * and as the add/edit form's draft shape — the two are identical on the wire. */
 data class GeofenceUi(
@@ -35,4 +37,9 @@ sealed class GeofencesUiState {
         val conflict: Boolean = false,
         val saveError: String? = null,
     ) : GeofencesUiState()
+
+    /** specs/010-app-shell-and-screen-ux.md §2.1: a confirmed `PROFILE_NOT_FOUND`/`FAMILY_NOT_FOUND`
+     * on [GeofencesStateHolder.load] routes to Onboarding instead of the dead-end retryable
+     * [Error] card — this was the field-reported screen (2026-08-26). */
+    data class RouteToOnboarding(val variant: OnboardingVariant) : GeofencesUiState()
 }

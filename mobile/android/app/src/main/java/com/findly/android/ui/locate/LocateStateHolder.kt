@@ -1,11 +1,13 @@
 package com.findly.android.ui.locate
 
+import com.findly.android.network.ApiError
 import com.findly.android.network.ApiResult
 import com.findly.android.network.dto.LastKnownDto
 import com.findly.android.network.dto.LocateFixDto
 import com.findly.android.network.dto.LocateRequestDto
 import com.findly.android.network.ports.LocateApi
 import com.findly.android.network.userMessage
+import com.findly.android.ui.onboarding.ProfileDeadEndRouting
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -45,7 +47,7 @@ class LocateStateHolder(
         pollJob = scope.launch {
             when (val result = locateApi.createLocateRequest(targetUserId, targetDeviceId)) {
                 is ApiResult.Success -> onCreated(result.data)
-                is ApiResult.Failure -> _state.value = LocateUiState.Error(result.error.userMessage())
+                is ApiResult.Failure -> _state.value = routeOrError(result.error)
             }
         }
     }
@@ -79,11 +81,19 @@ class LocateStateHolder(
                     _state.value = LocateUiState.Polling(dto.requestId, previous?.lastKnown, dto.expiresAt)
                 }
                 is ApiResult.Failure -> {
-                    _state.value = LocateUiState.Error(result.error.userMessage())
+                    _state.value = routeOrError(result.error)
                     return
                 }
             }
         }
+    }
+
+    /** specs/010-app-shell-and-screen-ux.md §2.1: `POST /locate-requests`/`GET /locate-requests/{id}`
+     * are family-scoped (001 §1.6 — "member") — Locate has no separate eager load, so this create/
+     * poll call *is* its load path for the purposes of the routing rule. */
+    private fun routeOrError(error: ApiError): LocateUiState {
+        val variant = ProfileDeadEndRouting.classify(error, familyScoped = true)
+        return if (variant != null) LocateUiState.RouteToOnboarding(variant) else LocateUiState.Error(error.userMessage())
     }
 }
 

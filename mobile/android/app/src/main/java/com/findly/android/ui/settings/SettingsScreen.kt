@@ -26,6 +26,7 @@ import com.findly.android.ui.designsystem.components.FindlyStatusTone
 import com.findly.android.ui.designsystem.components.FindlySwitchRow
 import com.findly.android.ui.designsystem.components.FindlyTextField
 import com.findly.android.ui.designsystem.components.FindlyTopBar
+import com.findly.android.ui.onboarding.OnboardingVariant
 
 /**
  * The A2 device/family-settings screen (001-api-contract.md §3.5/§3.6/§4.2/§4.3, specs/003-
@@ -45,6 +46,7 @@ fun SettingsRoute(
     viewModel: SettingsViewModel,
     privacyViewModel: PrivacyViewModel,
     modifier: Modifier = Modifier,
+    onRouteToOnboarding: (OnboardingVariant) -> Unit = {},
 ) {
     val state by viewModel.state.collectAsState()
     val privacyState by privacyViewModel.state.collectAsState()
@@ -64,6 +66,17 @@ fun SettingsRoute(
         val intent = ExportFileWriter.buildShareIntent(context, ready.result)
         context.startActivity(intent)
         privacyViewModel.dismissExportResult()
+    }
+
+    // specs/010-app-shell-and-screen-ux.md §2.1's routing rule — Settings' own load (Devices +
+    // Family) and the Privacy section's export action each carry their own routing outcome; both
+    // funnel into the one callback the caller supplied.
+    LaunchedEffect(state) {
+        val current = state
+        if (current is SettingsUiState.RouteToOnboarding) onRouteToOnboarding(current.variant)
+    }
+    LaunchedEffect(privacyState.exportRouteToOnboarding) {
+        privacyState.exportRouteToOnboarding?.let(onRouteToOnboarding)
     }
 
     SettingsScreen(
@@ -124,6 +137,8 @@ fun SettingsScreen(
                 message = state.message,
                 onRetry = onRetry,
             )
+
+            is SettingsUiState.RouteToOnboarding -> FindlyLoadingState(message = "Loading…")
 
             is SettingsUiState.Content -> {
                 val isParent = state.myRole == "parent"

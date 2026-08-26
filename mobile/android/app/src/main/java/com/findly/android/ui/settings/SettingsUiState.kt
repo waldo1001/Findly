@@ -1,5 +1,7 @@
 package com.findly.android.ui.settings
 
+import com.findly.android.ui.onboarding.OnboardingVariant
+
 /** A family roster entry (001-api-contract.md §3.2/§3.5). */
 data class MemberUi(
     val userId: String,
@@ -41,4 +43,10 @@ sealed class SettingsUiState {
         val isMutating: Boolean = false,
         val mutationError: String? = null,
     ) : SettingsUiState()
+
+    /** specs/010-app-shell-and-screen-ux.md §2.1: a confirmed `PROFILE_NOT_FOUND`/`FAMILY_NOT_FOUND`
+     * on [SettingsStateHolder.load] (which serves both the Devices and Family drawer destinations,
+     * pending their A35 split out of this monolith) routes to Onboarding instead of the dead-end
+     * retryable [Error] card. */
+    data class RouteToOnboarding(val variant: OnboardingVariant) : SettingsUiState()
 }

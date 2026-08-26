@@ -21,7 +21,12 @@ fun ApiError.userMessage(): String = when (this) {
 
     is ApiError.TrackingPaused -> "Location tracking is paused for this device."
 
-    is ApiError.ProfileNotFound -> "We couldn't find your profile. Please try again."
+    // specs/010-app-shell-and-screen-ux.md §2.1: this is now only the *residual fallback* string
+    // (a mutation-time PROFILE_NOT_FOUND) — every screen *load* path routes to Onboarding instead
+    // of rendering this in a retryable error card (§2.1's routing rule), so "Please try again."
+    // (which advised precisely the action that can never work — retrying a GET/PATCH cannot
+    // create a profile) is dropped.
+    is ApiError.ProfileNotFound -> "We couldn't find your profile."
 
     is ApiError.FamilyNotFound -> "We couldn't find your family. Please try again."
 

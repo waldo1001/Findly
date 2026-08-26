@@ -5,6 +5,7 @@ import com.findly.android.network.dto.LatestDeviceDto
 import com.findly.android.network.dto.LatestMemberDto
 import com.findly.android.network.ports.LocationsApi
 import com.findly.android.network.userMessage
+import com.findly.android.ui.onboarding.ProfileDeadEndRouting
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -39,7 +40,15 @@ class MapStateHolder(
                 _state.value = MapUiState.Content(result.data.members.map { it.toUi() })
             }
             is ApiResult.Failure -> {
-                _state.value = MapUiState.Error(result.error.userMessage())
+                // specs/010-app-shell-and-screen-ux.md §2.1: GET /locations/latest is family-scoped
+                // (001 §1.6 — "member") — a confirmed PROFILE_NOT_FOUND/FAMILY_NOT_FOUND routes to
+                // Onboarding instead of the dead-end retryable card.
+                val variant = ProfileDeadEndRouting.classify(result.error, familyScoped = true)
+                _state.value = if (variant != null) {
+                    MapUiState.RouteToOnboarding(variant)
+                } else {
+                    MapUiState.Error(result.error.userMessage())
+                }
             }
         }
     }

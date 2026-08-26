@@ -1,5 +1,7 @@
 package com.findly.android.ui.invites
 
+import com.findly.android.ui.onboarding.OnboardingVariant
+
 /** The result of a successful `POST /families/me/invites` (001-api-contract.md §3.3). */
 data class CreatedInviteUi(val inviteCode: String, val role: String, val expiresAt: String)
 
@@ -18,4 +20,11 @@ data class InvitesUiState(
     val isAcceptingInvite: Boolean = false,
     val acceptedFamily: AcceptedFamilyUi? = null,
     val acceptInviteError: String? = null,
+    /** specs/010-app-shell-and-screen-ux.md §2.1: a confirmed `PROFILE_NOT_FOUND`/`FAMILY_NOT_FOUND`
+     * on [InvitesStateHolder.createInvite] (parent-only, family-scoped, 001 §3.3) routes to
+     * Onboarding instead of the dead-end retryable [createInviteError] chip. `acceptInvite` is
+     * exempt — it is itself one of the four 001 §1.5.3 bootstrap endpoints and creates the
+     * profile, so `PROFILE_NOT_FOUND` can never occur there, and it explicitly requires the
+     * caller NOT already belong to a family, so `FAMILY_NOT_FOUND` is not a relevant outcome. */
+    val createInviteRouteToOnboarding: OnboardingVariant? = null,
 )

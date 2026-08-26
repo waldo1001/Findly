@@ -12,9 +12,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
 import com.findly.android.ui.designsystem.FindlyTheme
@@ -26,21 +23,20 @@ import com.findly.android.ui.designsystem.components.FindlyErrorState
 import com.findly.android.ui.designsystem.components.FindlyLoadingState
 import com.findly.android.ui.designsystem.components.FindlyStatusChip
 import com.findly.android.ui.designsystem.components.FindlyStatusTone
-import com.findly.android.ui.designsystem.components.FindlyTextField
 import com.findly.android.ui.designsystem.components.FindlyTopBar
+import com.findly.android.ui.onboarding.OnboardingVariant
 import java.time.Instant
 
 /**
  * The A5 groups list screen (001-api-contract.md §12.2, specs/003-android-client.md §12.2):
- * every group the caller belongs to, plus entry points to create/join one. Doubles as both the
+ * every group the caller belongs to, plus entry points to create/join one. Doubles as the
  * **family-less home** (`Content.hasFamily == false`) — a signed-in user with no family (§1.5.4)
  * is no longer a dead end here, unlike every family-scoped A2 screen; [onManageFamily] routes to
- * the existing `Invites` screen (§3.4's join-a-family flow) — and, as of **A21**, the
- * **profile-less first-run home** (`GroupsListUiState.ProfileNeeded`): a signed-in user with no
- * `Users` profile row at all (001 §1.5.3) offers the four bootstrap paths ([onCreateFamily]/
- * [onAcceptInvite]/[onCreateGroup]/[onJoinGroup]) instead of a doomed `GET /groups` call — see
- * [GroupsListUiState]'s doc for why these are distinct states, not one conflated "family-less"
- * state as before.
+ * the existing `Invites` screen (§3.4's join-a-family flow). The former **A21 profile-less
+ * first-run home** (`GroupsListUiState.ProfileNeeded`) is retired by specs/010-app-shell-and-
+ * screen-ux.md §2.1/§6: a signed-in user with no `Users` profile row at all now gets
+ * [GroupsListUiState.RouteToOnboarding] here instead, routing to the new Onboarding screen (010
+ * §2.2), which offers the four bootstrap paths this screen used to render inline.
  *
  * The `LaunchedEffect(Unit) { viewModel.refresh() }` re-fetches every time this composable
  * re-enters composition (returning from `GroupCreate`/`GroupJoin`/`GroupDetail`/`GroupMap`, all of
@@ -57,8 +53,7 @@ fun GroupsListRoute(
     onJoinGroup: (GroupsListUiState.CreateJoinContext) -> Unit = {},
     onOpenGroup: (groupId: String) -> Unit = {},
     onManageFamily: () -> Unit = {},
-    onCreateFamily: (displayName: String) -> Unit = {},
-    onAcceptInvite: (displayName: String) -> Unit = {},
+    onRouteToOnboarding: (OnboardingVariant) -> Unit = {},
 ) {
     val state by viewModel.state.collectAsState()
     LaunchedEffect(Unit) { viewModel.refresh() }
@@ -69,8 +64,7 @@ fun GroupsListRoute(
         onJoinGroup = onJoinGroup,
         onOpenGroup = onOpenGroup,
         onManageFamily = onManageFamily,
-        onCreateFamily = onCreateFamily,
-        onAcceptInvite = onAcceptInvite,
+        onRouteToOnboarding = onRouteToOnboarding,
         modifier = modifier,
     )
 }
@@ -84,9 +78,14 @@ fun GroupsListScreen(
     onJoinGroup: (GroupsListUiState.CreateJoinContext) -> Unit = {},
     onOpenGroup: (groupId: String) -> Unit = {},
     onManageFamily: () -> Unit = {},
-    onCreateFamily: (displayName: String) -> Unit = {},
-    onAcceptInvite: (displayName: String) -> Unit = {},
+    onRouteToOnboarding: (OnboardingVariant) -> Unit = {},
 ) {
+    // specs/010-app-shell-and-screen-ux.md §2.1's routing rule (the retired ProfileNeeded
+    // first-run state's replacement — 010 §6).
+    LaunchedEffect(state) {
+        if (state is GroupsListUiState.RouteToOnboarding) onRouteToOnboarding(state.variant)
+    }
+
     Column(modifier = modifier.fillMaxSize()) {
         FindlyTopBar(
             title = "Groups",
@@ -104,57 +103,7 @@ fun GroupsListScreen(
                 onRetry = onRefresh,
             )
 
-            is GroupsListUiState.ProfileNeeded -> {
-                var displayName by remember { mutableStateOf("") }
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(FindlyTheme.spacing.md),
-                    verticalArrangement = Arrangement.spacedBy(FindlyTheme.spacing.sm),
-                ) {
-                    FindlyEmptyState(
-                        title = "Welcome to Findly",
-                        message = "Create or join a family, or start a temporary group — pick how you'd like to get started.",
-                    )
-                    // A21 (001 §1.5.3): every one of the four bootstrap paths below creates the
-                    // profile from this one display-name entry — the user types it once here,
-                    // not once per path.
-                    FindlyTextField(value = displayName, onValueChange = { displayName = it }, label = "Your display name")
-
-                    FindlyButton(text = "Create a family", onClick = { onCreateFamily(displayName) })
-                    FindlyButton(
-                        text = "I have an invite code",
-                        onClick = { onAcceptInvite(displayName) },
-                        style = FindlyButtonStyle.Secondary,
-                    )
-                    FindlyButton(
-                        text = "Create a group",
-                        onClick = {
-                            onCreateGroup(
-                                GroupsListUiState.CreateJoinContext(
-                                    limits = null,
-                                    needsDisplayName = true,
-                                    prefillDisplayName = displayName,
-                                ),
-                            )
-                        },
-                        style = FindlyButtonStyle.Secondary,
-                    )
-                    FindlyButton(
-                        text = "Join a group",
-                        onClick = {
-                            onJoinGroup(
-                                GroupsListUiState.CreateJoinContext(
-                                    limits = null,
-                                    needsDisplayName = true,
-                                    prefillDisplayName = displayName,
-                                ),
-                            )
-                        },
-                        style = FindlyButtonStyle.Secondary,
-                    )
-                }
-            }
+            is GroupsListUiState.RouteToOnboarding -> FindlyLoadingState(message = "Loading groups…")
 
             is GroupsListUiState.Content -> {
                 val createJoinContext = GroupsListUiState.CreateJoinContext(limits = state.limits, needsDisplayName = false)
@@ -267,10 +216,10 @@ private fun GroupsListScreenDarkPreview() {
     }
 }
 
-@Preview(name = "Groups — profile-less first-run", showBackground = true)
+@Preview(name = "Groups — loading (transient, routing to Onboarding)", showBackground = true)
 @Composable
-private fun GroupsListScreenProfileNeededPreview() {
+private fun GroupsListScreenRouteToOnboardingPreview() {
     FindlyTheme(darkTheme = false) {
-        GroupsListScreen(state = GroupsListUiState.ProfileNeeded)
+        GroupsListScreen(state = GroupsListUiState.RouteToOnboarding(OnboardingVariant.ProfileLess))
     }
 }

@@ -5,6 +5,7 @@ import com.findly.android.network.ApiResult
 import com.findly.android.network.dto.GeofenceDto
 import com.findly.android.network.ports.GeofenceApi
 import com.findly.android.network.userMessage
+import com.findly.android.ui.onboarding.ProfileDeadEndRouting
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -42,7 +43,16 @@ class GeofencesStateHolder(
                     )
                 }
             }
-            is ApiResult.Failure -> _state.value = GeofencesUiState.Error(result.error.userMessage())
+            is ApiResult.Failure -> {
+                // specs/010-app-shell-and-screen-ux.md §2.1: GET /geofences is family-scoped
+                // (001 §1.6 — "member") — this was the field-reported dead-end screen (2026-08-26).
+                val variant = ProfileDeadEndRouting.classify(result.error, familyScoped = true)
+                _state.value = if (variant != null) {
+                    GeofencesUiState.RouteToOnboarding(variant)
+                } else {
+                    GeofencesUiState.Error(result.error.userMessage())
+                }
+            }
         }
     }
 
