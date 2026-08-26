@@ -201,6 +201,23 @@ fi
 #     unrelated attribute's quoted VALUE, not a live attribute name) tripped it. The scan
 #     below tracks quote state per tag and only evaluates the "on...=" pattern when
 #     genuinely outside any quoted value, at an actual attribute-name boundary.
+#
+# 7. (docs/implementation-handoff.md row W4; specs/007 §2/§7) No `<script src="...">` of
+#    ANY kind, on ANY page, unconditionally — never opt-outable, like checks 2 and 6. The
+#    gap this closes: check 1 only bans a `scheme://` URL, so a same-origin RELATIVE
+#    `<script src="leak.js">` sailed through it, and the referenced sibling .js file was
+#    then never read by checks 3-6 (which scan only inline <script> BODIES) — every
+#    no-oracle / zero-external-resource guarantee this script enforces was therefore only
+#    ever enforced for inline script. The decision (W4, made explicitly rather than
+#    defaulting) is option (a) — ban the attribute outright — not option (b) — teach every
+#    check to resolve and recursively scan same-origin `src` targets — because these pages
+#    are deliberately zero-dependency, so the ban is cheap and total, and (b) would turn
+#    four shell scripts into a small static-analysis tool. This bans the ATTRIBUTE on a
+#    <script> tag specifically: an inline <script> with no src, the word "src" inside an
+#    unrelated attribute's quoted value or inside comment prose (stripped above), and
+#    `<img src=...>`/`<link href=...>` are all untouched. Reuses the same tag-boundary +
+#    quote-tracking scan as findInlineHandlers (same idiom, same file, per the task's
+#    instruction not to add a second, fragile shell grep for this).
 NODE_INLINE_CHECK="$(mktemp)"
 cat > "$NODE_INLINE_CHECK" <<'NODEEOF'
 "use strict";
@@ -253,15 +270,63 @@ function findInlineHandlers(s) {
   return found;
 }
 
+// Check 7 — scans each raw "<script ...>" opening-tag region (same lightweight tag
+// boundary as findInlineHandlers above, not a full parser) for a `src` attribute NAME,
+// tracking quote state so "src" appearing inside a quoted attribute VALUE (e.g.
+// `<script data-note="src=fake">`) is never mistaken for the attribute itself. Matches
+// `<SCRIPT ...>` case-insensitively and tolerates a newline between the tag name and the
+// attribute (`<script\n  src=...>`, valid HTML — \s covers it, same as findInlineHandlers).
+// One report per offending tag is enough (`break` after the first match).
+function findScriptSrc(s) {
+  const tagRe = /<script\b[^<>]*>/gi;
+  const found = [];
+  let m;
+  while ((m = tagRe.exec(s)) !== null) {
+    const tagText = m[0];
+    let quote = null;
+    for (let i = 1; i < tagText.length - 1; i++) {
+      const ch = tagText[i];
+      if (quote) {
+        if (ch === quote) quote = null;
+        continue;
+      }
+      if (ch === '"' || ch === "'") {
+        quote = ch;
+        continue;
+      }
+      const prev = tagText[i - 1];
+      const atBoundary = /\s/.test(prev);
+      if (!atBoundary) continue;
+      const attrMatch = /^src\s*=/i.exec(tagText.slice(i));
+      if (attrMatch) {
+        found.push(tagText.replace(/\s+/g, " ").trim());
+        break;
+      }
+    }
+  }
+  return found;
+}
+
 const handlers = findInlineHandlers(stripped);
-handlers.forEach((h) => console.log("FOUND:" + h));
-process.exit(handlers.length > 0 ? 1 : 0);
+handlers.forEach((h) => console.log("HANDLER:" + h));
+
+const scriptSrcs = findScriptSrc(stripped);
+scriptSrcs.forEach((t) => console.log("SCRIPTSRC:" + t));
+
+process.exit(handlers.length > 0 || scriptSrcs.length > 0 ? 1 : 0);
 NODEEOF
-inline_handlers=$(node "$NODE_INLINE_CHECK" "$FILE" || true)
+node_check_output=$(node "$NODE_INLINE_CHECK" "$FILE" || true)
 rm -f "$NODE_INLINE_CHECK"
+inline_handlers=$(printf '%s\n' "$node_check_output" | grep '^HANDLER:' | sed 's/^HANDLER://' || true)
+script_srcs=$(printf '%s\n' "$node_check_output" | grep '^SCRIPTSRC:' | sed 's/^SCRIPTSRC://' || true)
 if [[ -n "$inline_handlers" ]]; then
   echo "FAIL: inline event-handler attribute(s) found:" >&2
   echo "$inline_handlers" >&2
+  fail=1
+fi
+if [[ -n "$script_srcs" ]]; then
+  echo "FAIL: <script src=...> found — external/sibling .js files are banned on these pages (docs/implementation-handoff.md row W4; specs/007 §2/§7 — no gate reads the referenced file, so the attribute is banned outright rather than resolved and scanned):" >&2
+  echo "$script_srcs" >&2
   fail=1
 fi
 
@@ -270,4 +335,4 @@ if [[ "$fail" -ne 0 ]]; then
   exit 1
 fi
 
-echo "== RESULT: OK — no unlisted external resources, no banned network calls, no cookies/storage, no analytics =="
+echo "== RESULT: OK — no unlisted external resources, no banned network calls, no cookies/storage, no analytics, no <script src> =="
