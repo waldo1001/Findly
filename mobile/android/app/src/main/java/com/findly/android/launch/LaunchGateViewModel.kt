@@ -7,6 +7,7 @@ import com.findly.android.auth.AuthProvider
 import com.findly.android.device.DeviceRegistrar
 import com.findly.android.network.ports.FamilyApi
 import com.findly.android.push.PushTokenProvider
+import com.findly.android.ui.settings.LocalStateWiper
 import kotlinx.coroutines.flow.StateFlow
 
 /**
@@ -24,22 +25,27 @@ class LaunchGateViewModel(
     deviceRegistrar: DeviceRegistrar,
     pushTokenProvider: PushTokenProvider,
     familyApi: FamilyApi,
+    localStateWiper: LocalStateWiper,
 ) : ViewModel() {
-    private val stateHolder = LaunchGateStateHolder(authProvider, deviceRegistrar, pushTokenProvider, familyApi, viewModelScope)
+    private val stateHolder =
+        LaunchGateStateHolder(authProvider, deviceRegistrar, pushTokenProvider, familyApi, localStateWiper, viewModelScope)
     val state: StateFlow<LaunchUiState> = stateHolder.state
 
     fun retryRegistration() = stateHolder.retryRegistration()
 }
 
 /** No DI framework (specs/003 §3) — a plain [ViewModelProvider.Factory] constructs
- * [LaunchGateViewModel] with its four dependencies. */
+ * [LaunchGateViewModel] with its five dependencies — [localStateWiper] added by 010 §1.1's A37
+ * amendment, so a confirmed auth failure on the launch probe can clear local state the same way
+ * every other session-ending path already does ([LocalStateWiper]'s doc). */
 class LaunchGateViewModelFactory(
     private val authProvider: AuthProvider,
     private val deviceRegistrar: DeviceRegistrar,
     private val pushTokenProvider: PushTokenProvider,
     private val familyApi: FamilyApi,
+    private val localStateWiper: LocalStateWiper,
 ) : ViewModelProvider.Factory {
     @Suppress("UNCHECKED_CAST")
     override fun <T : ViewModel> create(modelClass: Class<T>): T =
-        LaunchGateViewModel(authProvider, deviceRegistrar, pushTokenProvider, familyApi) as T
+        LaunchGateViewModel(authProvider, deviceRegistrar, pushTokenProvider, familyApi, localStateWiper) as T
 }
