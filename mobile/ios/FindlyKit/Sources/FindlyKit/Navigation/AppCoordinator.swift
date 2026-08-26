@@ -35,25 +35,36 @@ public final class AppCoordinator: ObservableObject {
         self.joinLinkHost = joinLinkHost
     }
 
-    /// specs/004 §2.6 — called once by `RootView` on first appear, when `UIApplication.shared`
-    /// genuinely exists and reading the auth session is therefore safe.
+    /// specs/004 §2.6, specs/010 §1.1 — called once by `RootView` on first appear, when
+    /// `UIApplication.shared` genuinely exists and reading the auth session is therefore safe. The
+    /// caller (`RootView`) resolves the actual `LaunchDestination` via `AppLaunchResolver` (the
+    /// `GET /families/me` probe, run BEFORE any device registration) — this method only applies
+    /// the result to the stack.
     ///
     /// **Idempotent by design.** SwiftUI's `.task` can re-run (view identity changes, scene
     /// reattachment), and re-resolving would yank a user who has since navigated elsewhere back to
     /// a root. It therefore only acts while the stack is still exactly `[.launching]`.
-    public func resolveLaunch(isSignedIn: Bool) {
+    public func resolveLaunch(destination: LaunchDestination) {
         guard stack == [.launching] else { return }
-        stack = [Self.launchRoute(isSignedIn: isSignedIn)]
+        stack = [Self.route(for: destination)]
     }
 
-    /// specs/004 §2.6 — the launch route derives from the persisted auth session, never a
-    /// hardcoded `.signIn`. Firebase restores `currentUser` from its keychain across process
-    /// death; the app used to simply never ask, forcing a full SMS re-verification every cold
-    /// start. A pure function (rather than reading `AuthProviding` in here) keeps `FindlyKit`'s
-    /// navigation layer free of an auth dependency and makes both branches trivially testable —
-    /// the app target supplies `isSignedIn` from `authProvider.currentUserId != nil`.
-    public static func launchRoute(isSignedIn: Bool) -> AppRoute {
-        isSignedIn ? .home : .signIn
+    /// specs/010 §1.1 — an interactive sign-in resolves through the exact SAME launch-resolution
+    /// table `resolveLaunch` uses (unlike the pre-010 code, which went straight to the retired
+    /// `.home` unconditionally regardless of profile state — a brand-new phone-auth signup used to
+    /// land on Home's own internal `.profileless` branch instead of anywhere the router knew
+    /// about). NOT gated on `stack == [.launching]`: sign-in is reached from `.signIn`, never
+    /// `.launching`, so `resolveLaunch`'s idempotency guard doesn't apply here.
+    public func showPostSignIn(_ destination: LaunchDestination) {
+        stack = [Self.route(for: destination)]
+    }
+
+    private static func route(for destination: LaunchDestination) -> AppRoute {
+        switch destination {
+        case .signIn: return .signIn
+        case .familyMap: return .liveMap
+        case .onboarding(let variant): return .onboarding(variant)
+        }
     }
 
     // MARK: - Stack primitives (specs/004 §2.5)
@@ -92,32 +103,39 @@ public final class AppCoordinator: ObservableObject {
     public func popTo(_ route: AppRoute) {
         if let index = stack.lastIndex(of: route) {
             stack.removeSubrange((index + 1)...)
-        } else if route == .home {
-            stack = [.home]
+        } else if route == .liveMap {
+            stack = [.liveMap]
         } else {
-            stack = [.home, route]
+            stack = [.liveMap, route]
         }
     }
 
-    // MARK: - Navigation roots (specs/004 §2.5)
+    // MARK: - Navigation roots (specs/004 §2.5, specs/010 §1.1/§2.2)
     //
-    // These two RESET the stack rather than pushing. You can never go "back" into a sign-in
-    // screen, and Home is the top of the app. The reset is also what guarantees no authenticated
-    // screen stays reachable behind sign-in after a sign-out / account deletion (specs/008 §4.4).
+    // These RESET the stack rather than pushing. You can never go "back" into a sign-in screen or
+    // an Onboarding screen, and the Family Map is the top of the app. The reset is also what
+    // guarantees no authenticated screen stays reachable behind sign-in after a sign-out / account
+    // deletion (specs/008 §4.4).
 
     public func showSignIn() {
         stack = [.signIn]
     }
 
-    public func showHome() {
-        stack = [.home]
+    /// specs/010 §1.1 — the renamed `showHome()`; the reset-the-stack semantics are unchanged, only
+    /// the target changed (the retired `.home` hub -> the Family Map, now the app's root screen).
+    public func showRoot() {
+        stack = [.liveMap]
+    }
+
+    /// specs/010 §2.2 — Onboarding is a root: no back affordance, no drawer. Reached from the
+    /// launch/sign-in resolution (§1.1) or from a feature screen's load path hitting a confirmed
+    /// `PROFILE_NOT_FOUND`/`FAMILY_NOT_FOUND` (§2.1) — either way there is nothing behind it worth
+    /// going back to, since every family screen would fail the same way.
+    public func showOnboarding(_ variant: OnboardingVariant) {
+        stack = [.onboarding(variant)]
     }
 
     // MARK: - I2 feature-screen routes
-
-    public func showLiveMap() {
-        push(.liveMap)
-    }
 
     public func showHistory(userId: String, deviceId: String? = nil) {
         push(.history(userId: userId, deviceId: deviceId))

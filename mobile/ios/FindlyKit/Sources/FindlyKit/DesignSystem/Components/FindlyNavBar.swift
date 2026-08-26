@@ -36,20 +36,31 @@ public struct FindlyNavBar: View {
     /// Explicit override, for the rare bar that is not the screen's navigation root (and for
     /// previews/tests). When nil — the normal case — the environment action is used.
     private let onBack: (() -> Void)?
+    /// specs/010-app-shell-and-screen-ux.md §1.2/§3.1 (I34) — the ☰ button that opens
+    /// `FindlyNavDrawer`. Only the Family Map root supplies this; every other screen leaves it
+    /// `nil`, matching §1.2's "the Family Map — and only the root screen — renders a ☰ menu
+    /// button." Mutually exclusive with the back chevron in practice (the root never has a back
+    /// action), but if both were ever supplied, back wins — a back affordance is the more urgent
+    /// signal to preserve.
+    private let menuAction: (() -> Void)?
     private let trailingActionTitle: String?
     private let trailingAction: (() -> Void)?
 
     public init(
         _ title: String,
         onBack: (() -> Void)? = nil,
+        menuAction: (() -> Void)? = nil,
         trailingActionTitle: String? = nil,
         trailingAction: (() -> Void)? = nil
     ) {
         self.title = title
         self.onBack = onBack
+        self.menuAction = menuAction
         self.trailingActionTitle = trailingActionTitle
         self.trailingAction = trailingAction
     }
+
+    private var leadingAction: (() -> Void)? { onBack ?? environmentBackAction ?? menuAction }
 
     public var body: some View {
         HStack(spacing: 0) {
@@ -64,6 +75,15 @@ public struct FindlyNavBar: View {
                         .contentShape(Rectangle())
                 }
                 .accessibilityLabel("Back")
+            } else if let menuAction {
+                Button(action: menuAction) {
+                    Image(systemName: "line.3.horizontal")
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundColor(theme.colors.onSurface)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
+                }
+                .accessibilityLabel("Menu")
             }
 
             Text(title)
@@ -71,8 +91,8 @@ public struct FindlyNavBar: View {
                 .tracking(-0.2)
                 .foregroundColor(theme.colors.onSurface)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                // Keep the title visually aligned even when there's no back button.
-                .padding(.leading, (onBack ?? environmentBackAction) == nil ? theme.spacing.md : 0)
+                // Keep the title visually aligned even when there's no leading button.
+                .padding(.leading, leadingAction == nil ? theme.spacing.md : 0)
 
             if let trailingActionTitle, let trailingAction {
                 Button(trailingActionTitle, action: trailingAction)

@@ -11,11 +11,20 @@ public struct LocateScreen: View {
     @StateObject private var viewModel: LocateViewModel
     private let target: LocateTarget
     private let targetDisplayName: String
+    /// specs/010-app-shell-and-screen-ux.md §2.1 (I34) — fires once `viewModel.status` reaches
+    /// `.routeToOnboarding`.
+    private let onProfileDeadEnd: (OnboardingVariant) -> Void
 
-    public init(viewModel: @autoclosure @escaping () -> LocateViewModel, target: LocateTarget, targetDisplayName: String) {
+    public init(
+        viewModel: @autoclosure @escaping () -> LocateViewModel,
+        target: LocateTarget,
+        targetDisplayName: String,
+        onProfileDeadEnd: @escaping (OnboardingVariant) -> Void = { _ in }
+    ) {
         _viewModel = StateObject(wrappedValue: viewModel())
         self.target = target
         self.targetDisplayName = targetDisplayName
+        self.onProfileDeadEnd = onProfileDeadEnd
     }
 
     public var body: some View {
@@ -27,6 +36,14 @@ public struct LocateScreen: View {
         .background(theme.colors.surfaceVariant)
         .task { await viewModel.requestLocate(target: target) }
         .onDisappear { viewModel.cancel() }
+        .onChange(of: routingVariant) { variant in
+            if let variant { onProfileDeadEnd(variant) }
+        }
+    }
+
+    private var routingVariant: OnboardingVariant? {
+        if case .routeToOnboarding(let variant) = viewModel.status { return variant }
+        return nil
     }
 
     private var content: some View {
@@ -57,7 +74,7 @@ public struct LocateScreen: View {
     @ViewBuilder
     private var statusView: some View {
         switch viewModel.status {
-        case .requesting:
+        case .requesting, .routeToOnboarding:
             LoadingStateView(message: "Requesting location…")
         case .pending:
             LoadingStateView(message: "Last known, updating…")

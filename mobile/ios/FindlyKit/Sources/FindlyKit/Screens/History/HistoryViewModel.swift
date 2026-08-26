@@ -10,6 +10,11 @@ public final class HistoryViewModel: ObservableObject {
         case loading
         case loaded(points: [HistoryPoint], hasMore: Bool)
         case error(String)
+        /// specs/010-app-shell-and-screen-ux.md §2.1 — a confirmed `PROFILE_NOT_FOUND`/
+        /// `FAMILY_NOT_FOUND` on this load (`GET /locations/history` is family-scoped, 001 §5.3/
+        /// §1.5.4). Applies to both a fresh `load()` and pagination's `loadMore()`, since both
+        /// funnel through `fetchNextPage()` below.
+        case routeToOnboarding(OnboardingVariant)
     }
 
     @Published public private(set) var state: State = .idle
@@ -88,7 +93,11 @@ public final class HistoryViewModel: ObservableObject {
             nextCursor = envelope.data.nextCursor
             state = .loaded(points: loadedPoints, hasMore: nextCursor != nil)
         } catch {
-            state = .error(userFacingMessage(for: error))
+            if let variant = onboardingRoutingOutcome(for: error) {
+                state = .routeToOnboarding(variant)
+            } else {
+                state = .error(userFacingMessage(for: error))
+            }
         }
     }
 }

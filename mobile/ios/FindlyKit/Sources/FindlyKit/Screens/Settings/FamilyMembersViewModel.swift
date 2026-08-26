@@ -10,15 +10,24 @@ public final class FamilyMembersViewModel: ObservableObject {
         case loading
         case loaded(familyName: String, me: MeSummary, members: [FamilyMember])
         case error(String)
+        /// specs/010-app-shell-and-screen-ux.md §2.1 — a confirmed `PROFILE_NOT_FOUND`/
+        /// `FAMILY_NOT_FOUND` on this load (`GET /families/me` is family-scoped, 001 §3.2/§1.5.4).
+        case routeToOnboarding(OnboardingVariant)
     }
 
     @Published public private(set) var state: State = .loading
     @Published public private(set) var lastActionError: String?
 
     private let apiClient: FindlyAPIClient
+    /// specs/010-app-shell-and-screen-ux.md §1.2 — this screen already fetches everything the
+    /// drawer header needs, so a successful load opportunistically refreshes the cache rather than
+    /// leaving it stale until the next cold start. `nil` (the default) is a legitimate choice for
+    /// any caller that doesn't wire the drawer through this screen (e.g. existing tests).
+    private let familyContextCache: FamilyContextCache?
 
-    public init(apiClient: FindlyAPIClient) {
+    public init(apiClient: FindlyAPIClient, familyContextCache: FamilyContextCache? = nil) {
         self.apiClient = apiClient
+        self.familyContextCache = familyContextCache
     }
 
     public var isParent: Bool {
@@ -31,8 +40,16 @@ public final class FamilyMembersViewModel: ObservableObject {
         do {
             let envelope = try await apiClient.getMyFamily()
             state = .loaded(familyName: envelope.data.familyName, me: envelope.data.me, members: envelope.data.members)
+            let myDisplayName = envelope.data.members.first(where: { $0.userId == envelope.data.me.userId })?.displayName ?? ""
+            familyContextCache?.update(
+                familyName: envelope.data.familyName, myDisplayName: myDisplayName, isParent: envelope.data.me.role == "parent"
+            )
         } catch {
-            state = .error(userFacingMessage(for: error))
+            if let variant = onboardingRoutingOutcome(for: error) {
+                state = .routeToOnboarding(variant)
+            } else {
+                state = .error(userFacingMessage(for: error))
+            }
         }
     }
 

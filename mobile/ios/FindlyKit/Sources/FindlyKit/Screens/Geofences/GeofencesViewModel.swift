@@ -11,6 +11,11 @@ public final class GeofencesViewModel: ObservableObject {
         case loading
         case loaded(geofences: [Geofence], version: Int)
         case error(String)
+        /// specs/010-app-shell-and-screen-ux.md §2.1 — a confirmed `PROFILE_NOT_FOUND`/
+        /// `FAMILY_NOT_FOUND` from `load()` specifically (the field-reported bug this section
+        /// exists to fix). `save`/`refetchAfterConflict` are mutation paths and keep the existing
+        /// inline `.error` rendering regardless of code (§2.1's third rule).
+        case routeToOnboarding(OnboardingVariant)
     }
 
     public enum ConflictState: Equatable {
@@ -40,7 +45,11 @@ public final class GeofencesViewModel: ObservableObject {
             let result = try await apiClient.getGeofences(ifNoneMatch: cachedETag)
             apply(result)
         } catch {
-            state = .error(userFacingMessage(for: error))
+            if let variant = onboardingRoutingOutcome(for: error) {
+                state = .routeToOnboarding(variant)
+            } else {
+                state = .error(userFacingMessage(for: error))
+            }
         }
     }
 

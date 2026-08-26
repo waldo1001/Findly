@@ -10,6 +10,12 @@ public final class ExportViewModel: ObservableObject {
         case loading
         case loaded(isParent: Bool, members: [FamilyMember])
         case error(String)
+        /// specs/010-app-shell-and-screen-ux.md §2.1 — a confirmed `PROFILE_NOT_FOUND` on this
+        /// load. Deliberately narrower than every other screen's routing: `GET /export` (001
+        /// §13.1) needs only a profile, never a family, so `FAMILY_NOT_FOUND` from the
+        /// `getMyFamily()` roster fetch below stays the existing self-export-only `.loaded`
+        /// fallback rather than routing (a family-less caller can still export themselves).
+        case routeToOnboarding(OnboardingVariant)
     }
 
     @Published public private(set) var state: State = .loading
@@ -49,8 +55,12 @@ public final class ExportViewModel: ObservableObject {
             let otherMembers = envelope.data.members.filter { $0.userId != me.userId }
             state = .loaded(isParent: me.role == "parent", members: otherMembers)
         } catch {
-            if let code = (error as? APIError)?.serverCode, code == .familyNotFound || code == .profileNotFound {
+            if (error as? APIError)?.serverCode == .familyNotFound {
+                // Family-less, but export itself needs no family (001 §13.1) — self-export stays
+                // available, unlike every other family-scoped screen's §2.1 routing.
                 state = .loaded(isParent: false, members: [])
+            } else if (error as? APIError)?.serverCode == .profileNotFound {
+                state = .routeToOnboarding(.profileLess)
             } else {
                 state = .error(userFacingMessage(for: error))
             }

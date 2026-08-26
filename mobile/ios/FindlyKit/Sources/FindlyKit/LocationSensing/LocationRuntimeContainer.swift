@@ -58,6 +58,16 @@ public final class LocationRuntimeContainer {
     /// on the account-deletion path, instead of a documented-but-uncalled promise.
     public let permissionDisclosureStore: PermissionDisclosureStateStoring
 
+    /// specs/010-app-shell-and-screen-ux.md §1.2 (I34 review fix) — the SAME shared instance
+    /// `RootView`/`LiveMapScreen` read for the drawer header, injected here for exactly the I31/
+    /// I26 reason above: a documented `FamilyContextCache.clear()` that nothing on the real
+    /// sign-out/account-deletion path called was a live cross-account data-leak risk (a
+    /// process-lifetime `@StateObject`, so it survives an in-app sign-out with no relaunch — the
+    /// next signed-in user's Family Map could render the PREVIOUS caller's family name/display
+    /// name until some later probe happened to overwrite it). `nil`-able: most existing tests of
+    /// this container have no reason to construct one just to ignore it.
+    private let familyContextCache: FamilyContextCache?
+
     /// Consecutive-transient-failure counter for `BackoffPolicy` (specs/009 §9) — reset to 0 on
     /// any non-retry outcome. In-memory only: a process restart naturally resets backoff, which is
     /// fine (spec is silent on this surviving restart, unlike the batch identity in `FixStoring`).
@@ -126,6 +136,7 @@ public final class LocationRuntimeContainer {
         geofenceEventStore: GeofenceEventQueueStoring = InMemoryGeofenceEventQueueStore(),
         lastQueuedFixAtStore: LastQueuedFixAtStoring = InMemoryLastQueuedFixAtStore(),
         permissionDisclosureStore: PermissionDisclosureStateStoring = InMemoryPermissionDisclosureStore(),
+        familyContextCache: FamilyContextCache? = nil,
         isPermissionGranted: @escaping () -> Bool = { false },
         batteryLevelProvider: @escaping () -> Int = { 100 },
         onReRegisterDevice: @escaping () async -> Void = {},
@@ -137,6 +148,7 @@ public final class LocationRuntimeContainer {
         self.geofenceConfigStore = geofenceConfigStore
         self.geofenceRegistrar = geofenceRegistrar
         self.permissionDisclosureStore = permissionDisclosureStore
+        self.familyContextCache = familyContextCache
 
         let queue = FixQueue(store: fixStore)
         self.fixQueue = queue
@@ -361,6 +373,17 @@ public final class LocationRuntimeContainer {
     /// back by the app target for `PermissionFlowViewModel`), so this step is a real, live-called
     /// step of the same wipe every other local store already goes through.
     ///
+    /// **I34 review-fix addition: also clears `familyContextCache`.** Same I26 pattern as the I31
+    /// addition immediately above, reproduced in this task's own brand-new code: `FamilyContextCache
+    /// .clear()`'s doc said it was "part of the account-deletion/sign-out local wipe" from the
+    /// moment it was written, but nothing on the real wipe path called it — and unlike most local
+    /// state, this cache is a process-lifetime `@StateObject` (`FindlyApp.swift`), so it survives
+    /// an in-app sign-out with no relaunch. Without this step, a different user signing in on the
+    /// same device could see the PREVIOUS caller's family name/display name/role in the drawer
+    /// header for as long as it took some later probe to happen to overwrite it — a real
+    /// cross-account disclosure, not a cosmetic staleness. Injected here (optional) for the same
+    /// "this container owns the one instance" reason as `permissionDisclosureStore`.
+    ///
     /// Idempotent-safe to call more than once (every step it delegates to already is).
     public func wipeLocalState() async {
         // Post-review fix (concurrency re-review): `stateStore.clear()` MUST run FIRST, before
@@ -387,6 +410,10 @@ public final class LocationRuntimeContainer {
         await geofenceEventQueue.clearAll()
         geofenceConfigStore.clear()
         permissionDisclosureStore.clear()
+        // specs/010-app-shell-and-screen-ux.md §1.2 (I34 review fix) — see this property's doc for
+        // why a signed-out-then-different-user-signs-in sequence needed this: the drawer header
+        // must never keep showing the previous caller's family name/display name/role.
+        familyContextCache?.clear()
     }
 
     /// specs/009 §4: "at least every 6 hours" — the ONE explicit cadence number the spec gives for

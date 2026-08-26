@@ -12,6 +12,10 @@ public final class DeviceSettingsViewModel: ObservableObject {
         case loading
         case loaded([DeviceListItem])
         case error(String)
+        /// specs/010-app-shell-and-screen-ux.md §2.1 — a confirmed `PROFILE_NOT_FOUND` on this
+        /// load. `GET /devices` works without a family (001 §1.5.4/§4), so `FAMILY_NOT_FOUND` is
+        /// not actually reachable here, but the shared classifier handles it identically anyway.
+        case routeToOnboarding(OnboardingVariant)
     }
 
     /// Allowed `syncIntervalMinutes` values (specs/001 §1.4) — presented as picker options; the
@@ -35,7 +39,11 @@ public final class DeviceSettingsViewModel: ObservableObject {
             let envelope = try await apiClient.listDevices()
             state = .loaded(envelope.data.devices)
         } catch {
-            state = .error(userFacingMessage(for: error))
+            if let variant = onboardingRoutingOutcome(for: error) {
+                state = .routeToOnboarding(variant)
+            } else {
+                state = .error(userFacingMessage(for: error))
+            }
         }
     }
 

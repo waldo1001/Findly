@@ -20,9 +20,17 @@ public struct GeofencesScreen: View {
     @State private var drafts: [Geofence] = []
     @State private var editing: Geofence?
     @State private var isAddingNew = false
+    /// specs/010-app-shell-and-screen-ux.md §2.1 (I34) — fires once `viewModel.state` reaches
+    /// `.routeToOnboarding`, so `RootView` can reset the stack to the corresponding Onboarding
+    /// variant instead of showing a dead-end error card.
+    private let onProfileDeadEnd: (OnboardingVariant) -> Void
 
-    public init(viewModel: @autoclosure @escaping () -> GeofencesViewModel) {
+    public init(
+        viewModel: @autoclosure @escaping () -> GeofencesViewModel,
+        onProfileDeadEnd: @escaping (OnboardingVariant) -> Void = { _ in }
+    ) {
         _viewModel = StateObject(wrappedValue: viewModel())
+        self.onProfileDeadEnd = onProfileDeadEnd
     }
 
     public var body: some View {
@@ -33,6 +41,9 @@ public struct GeofencesScreen: View {
         .background(theme.colors.surfaceVariant)
         .task { await viewModel.load() }
         .onChange(of: loadedGeofences) { drafts = $0 }
+        .onChange(of: routingVariant) { variant in
+            if let variant { onProfileDeadEnd(variant) }
+        }
         .sheet(item: $editing) { geofence in
             GeofenceEditorView(
                 geofence: geofence, existingIds: Set(drafts.map(\.geofenceId)),
@@ -54,10 +65,17 @@ public struct GeofencesScreen: View {
         return []
     }
 
+    private var routingVariant: OnboardingVariant? {
+        if case .routeToOnboarding(let variant) = viewModel.state { return variant }
+        return nil
+    }
+
     @ViewBuilder
     private var content: some View {
         switch viewModel.state {
-        case .loading:
+        case .loading, .routeToOnboarding:
+            // specs/010 §2.1 — MUST NOT render a retryable error card; `onProfileDeadEnd` above
+            // navigates away the instant `.routeToOnboarding` is reached, so this is transient.
             LoadingStateView(message: "Loading geofences…")
         case .error(let message):
             ErrorStateView(message: message) {

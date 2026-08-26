@@ -159,4 +159,46 @@ struct FamilyMembersViewModelTests {
         }
         #expect(members.map(\.userId) == ["u2"])
     }
+
+    // MARK: - specs/010-app-shell-and-screen-ux.md §2.1 (I34) — the profile-dead-end routing rule.
+    // `GET /families/me` is family-scoped (001 §3.2/§1.5.4).
+
+    @Test func load_profileNotFound_routesToOnboardingProfileLess() async {
+        let api = FakeAPIClient()
+        api.getMyFamilyHandler = {
+            throw APIError.server(APIErrorBody(code: .profileNotFound, message: "x", details: nil, requestId: "r1"), httpStatus: 404)
+        }
+        let viewModel = FamilyMembersViewModel(apiClient: api)
+
+        await viewModel.load()
+
+        #expect(viewModel.state == .routeToOnboarding(.profileLess))
+    }
+
+    @Test func load_familyNotFound_routesToOnboardingFamilyLess() async {
+        let api = FakeAPIClient()
+        api.getMyFamilyHandler = {
+            throw APIError.server(APIErrorBody(code: .familyNotFound, message: "x", details: nil, requestId: "r1"), httpStatus: 404)
+        }
+        let viewModel = FamilyMembersViewModel(apiClient: api)
+
+        await viewModel.load()
+
+        #expect(viewModel.state == .routeToOnboarding(.familyLess))
+    }
+
+    // MARK: - specs/010 §1.2 — opportunistically refreshes the drawer's FamilyContextCache
+
+    @Test func load_success_refreshesTheFamilyContextCache() async {
+        let api = FakeAPIClient()
+        api.getMyFamilyHandler = { self.makeFamilyEnvelope(myRole: "parent") }
+        let cache = FamilyContextCache()
+        let viewModel = FamilyMembersViewModel(apiClient: api, familyContextCache: cache)
+
+        await viewModel.load()
+
+        #expect(cache.familyName == "Wauters")
+        #expect(cache.myDisplayName == "Eric")
+        #expect(cache.isParent == true)
+    }
 }

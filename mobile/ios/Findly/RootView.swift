@@ -63,8 +63,13 @@ struct RootView: View {
     // again here once `SignInViewModel` reports a fresh interactive sign-in (a session that starts
     // at the sign-in screen never got the cold-launch call, since nobody was signed in yet then).
     private let onSignedIn: () async -> Void
-    // I17 (001 §1.5.3) — the display name typed once on `HomeScreen`'s `.profileless` branch,
-    // carried (still editable at the destination) to whichever of the four bootstrap paths the
+    // specs/010-app-shell-and-screen-ux.md §1.2 — the shared drawer-header cache, built once in
+    // `FindlyApp.init()` (same pattern as every other object above). `@ObservedObject`, not
+    // `@StateObject`: this is one long-lived instance handed in from outside, never constructed by
+    // this view itself.
+    @ObservedObject private var familyContextCache: FamilyContextCache
+    // I17 (001 §1.5.3) — the display name typed once on the Onboarding screen's profile-less
+    // variant, carried (still editable at the destination) to whichever of the four bootstrap paths the
     // user picks — same "remembered local state instead of a nav-graph argument" pattern Android's
     // `FindlyNavHost` uses for its `pendingOnboardingDisplayName`/`pendingCreateContext`/
     // `pendingJoinContext` (specs/003 §12.2/A21), chosen here too so `AppRoute`'s existing,
@@ -77,6 +82,13 @@ struct RootView: View {
     // all, e.g. a `findly://group-join` deep link).
     @State private var pendingOnboardingDisplayName = ""
     @State private var pendingGroupBootstrapDisplayName = ""
+    // specs/010-app-shell-and-screen-ux.md §2.2/§6 (I34) — `.createGroup`/`.groupJoin` are shared
+    // between two entry points: the ORDINARY one (`GroupsListScreen`'s own buttons, an unchanged
+    // flow per 010 §6's inventory delta) and the Onboarding screen's profile-less bootstrap
+    // buttons. Only the latter's success should reset to the Family Map root (010 §2.2's "on any
+    // bootstrap success" rule); the ordinary path keeps its existing "go to the new group's detail"
+    // behavior. Same "remembered local state" pattern as `pendingGroupBootstrapDisplayName` above.
+    @State private var groupBootstrapReturnsToOnboarding = false
 
     /// specs/009-device-runtime.md §7 — owns the disclosure/prompt/banner ordering. `@StateObject`,
     /// not `@ObservedObject`: this view is reconstructed on every navigation (see this type's top
@@ -94,7 +106,8 @@ struct RootView: View {
         exportArtifactStore: ExportArtifactStoring,
         appVersionTracker: AppVersionRegistrationTracking,
         locationRuntimeContainer: LocationRuntimeContainer,
-        onSignedIn: @escaping () async -> Void
+        onSignedIn: @escaping () async -> Void,
+        familyContextCache: FamilyContextCache
     ) {
         self.coordinator = coordinator
         self.joinLinkHost = config.joinLinkHost
@@ -105,6 +118,7 @@ struct RootView: View {
         self.appVersionTracker = appVersionTracker
         self.locationRuntimeContainer = locationRuntimeContainer
         self.onSignedIn = onSignedIn
+        self.familyContextCache = familyContextCache
         // specs/009 §7. Built from the container's read-only seams rather than a second
         // CLLocationManager, so the authorization this reports is the one the capture stack uses.
         //
@@ -187,7 +201,16 @@ struct RootView: View {
             case .signIn:
                 SignInScreen(
                     viewModel: SignInViewModel(authProvider: authProvider, onSignedIn: {
-                        coordinator.showHome()
+                        // specs/010-app-shell-and-screen-ux.md §1.1 — an interactive sign-in
+                        // resolves through the EXACT SAME launch-resolution table a cold start
+                        // does (below), rather than the pre-010 unconditional `.home`: a
+                        // brand-new phone-auth signup has no profile yet.
+                        Task {
+                            let destination = await AppLaunchResolver.resolve(
+                                apiClient: apiClient, isSignedIn: true, cache: familyContextCache
+                            )
+                            coordinator.showPostSignIn(destination)
+                        }
                         // specs/009-device-runtime.md §5 (I12) — device re-registration +
                         // push-notification registration on first launch after sign-in.
                         Task { await onSignedIn() }
@@ -198,21 +221,37 @@ struct RootView: View {
                         Task { await locationRuntimeContainer.onSignedIn() }
                     })
                 )
-            case .home:
-                HomeScreen(
-                    viewModel: HomeViewModel(apiClient: apiClient),
-                    onSelectMap: { coordinator.showLiveMap() },
-                    onSelectHistory: { userId in coordinator.showHistory(userId: userId) },
+
+            // MARK: - specs/010-app-shell-and-screen-ux.md §1/§6 (I34) — the Family Map is the
+            // app's root; the retired Home hub's `.home` case is gone.
+
+            case .liveMap:
+                LiveMapScreen(
+                    viewModel: LiveMapViewModel(apiClient: apiClient),
+                    renderer: defaultMapRenderer,
+                    familyContext: familyContextCache,
+                    onSelectHistory: {
+                        // 010 §1.2: History from the drawer targets the caller's OWN history —
+                        // per-member history stays reachable only via map member selection (§3.5,
+                        // I35), which this task does not implement.
+                        coordinator.showHistory(userId: authProvider.currentUserId ?? "")
+                    },
                     onSelectGeofences: { coordinator.showGeofences() },
-                    onSelectLocate: { target, name in coordinator.showLocate(target: target, targetDisplayName: name) },
-                    onSelectDevices: { isParent in coordinator.showDeviceSettings(isParent: isParent) },
+                    onSelectDevices: { coordinator.showDeviceSettings(isParent: familyContextCache.isParent ?? false) },
                     onSelectFamily: { coordinator.showFamilyMembers() },
-                    onSelectInvite: { coordinator.showCreateInvite() },
+                    onSelectInviteSomeone: { coordinator.showCreateInvite() },
                     onSelectGroups: { coordinator.showGroupsList() },
                     onSelectPrivacySettings: { coordinator.showPrivacySettings() },
-                    // I17 (001 §1.5.3): the four profile-bootstrap paths off `.profileless` — stash
-                    // the once-entered display name the same way `onCreateGroup`/`onJoinGroup`
-                    // below stash `pendingGroupBootstrapDisplayName`.
+                    onProfileDeadEnd: { variant in coordinator.showOnboarding(variant) }
+                )
+
+            // MARK: - specs/010-app-shell-and-screen-ux.md §2.2 (I34) — replaces the retired Home
+            // hub's `.profileless`/`.familyless` branches. A root: no back, no drawer.
+
+            case .onboarding(let variant):
+                OnboardingScreen(
+                    variant: variant,
+                    prefillDisplayName: pendingOnboardingDisplayName,
                     onSelectCreateFamily: { name in
                         pendingOnboardingDisplayName = name
                         coordinator.showCreateFamily()
@@ -223,28 +262,45 @@ struct RootView: View {
                     },
                     onSelectCreateGroup: { name in
                         pendingGroupBootstrapDisplayName = name
+                        groupBootstrapReturnsToOnboarding = true
                         coordinator.showCreateGroup()
                     },
                     onSelectJoinGroup: { name in
                         pendingGroupBootstrapDisplayName = name
+                        groupBootstrapReturnsToOnboarding = true
                         coordinator.showGroupJoin()
-                    }
+                    },
+                    onSelectGroups: { coordinator.showGroupsList() },
+                    onSelectPrivacySettings: { coordinator.showPrivacySettings() }
                 )
-            case .liveMap:
-                LiveMapScreen(viewModel: LiveMapViewModel(apiClient: apiClient), renderer: defaultMapRenderer)
             case .history(let userId, let deviceId):
-                HistoryScreen(viewModel: HistoryViewModel(
-                    apiClient: apiClient, userId: userId, deviceId: deviceId,
-                    fromDate: Self.defaultFromDate(), toDate: Self.defaultToDate()
-                ))
+                HistoryScreen(
+                    viewModel: HistoryViewModel(
+                        apiClient: apiClient, userId: userId, deviceId: deviceId,
+                        fromDate: Self.defaultFromDate(), toDate: Self.defaultToDate()
+                    ),
+                    onProfileDeadEnd: { variant in coordinator.showOnboarding(variant) }
+                )
             case .geofences:
-                GeofencesScreen(viewModel: GeofencesViewModel(apiClient: apiClient))
+                GeofencesScreen(
+                    viewModel: GeofencesViewModel(apiClient: apiClient),
+                    onProfileDeadEnd: { variant in coordinator.showOnboarding(variant) }
+                )
             case .locate(let target, let targetDisplayName):
-                LocateScreen(viewModel: LocateViewModel(apiClient: apiClient), target: target, targetDisplayName: targetDisplayName)
+                LocateScreen(
+                    viewModel: LocateViewModel(apiClient: apiClient), target: target, targetDisplayName: targetDisplayName,
+                    onProfileDeadEnd: { variant in coordinator.showOnboarding(variant) }
+                )
             case .deviceSettings(let isParent):
-                DeviceSettingsScreen(viewModel: DeviceSettingsViewModel(apiClient: apiClient, isParent: isParent))
+                DeviceSettingsScreen(
+                    viewModel: DeviceSettingsViewModel(apiClient: apiClient, isParent: isParent),
+                    onProfileDeadEnd: { variant in coordinator.showOnboarding(variant) }
+                )
             case .familyMembers:
-                FamilyMembersScreen(viewModel: FamilyMembersViewModel(apiClient: apiClient))
+                FamilyMembersScreen(
+                    viewModel: FamilyMembersViewModel(apiClient: apiClient, familyContextCache: familyContextCache),
+                    onProfileDeadEnd: { variant in coordinator.showOnboarding(variant) }
+                )
             case .createInvite:
                 CreateInviteScreen(viewModel: CreateInviteViewModel(apiClient: apiClient))
             case .acceptInvite(let prefillCode):
@@ -252,13 +308,18 @@ struct RootView: View {
                     viewModel: AcceptInviteViewModel(apiClient: apiClient),
                     prefillInviteCode: prefillCode,
                     prefillDisplayName: pendingOnboardingDisplayName,
-                    // I24 (001 §1.5.3, §4.1) — accept-invite is one of the four profile-bootstrap
-                    // endpoints, so any device registration attempted before this point (e.g. at
-                    // sign-in) hit `DeviceRegistrationError.profileNotYetBootstrapped` and was
-                    // skipped. Retry the SAME `onSignedIn` closure now that a profile exists,
-                    // rather than waiting for the next cold start — it's idempotent (harmless if
-                    // already registered for this app version).
-                    onAccepted: { Task { await onSignedIn() } }
+                    // specs/010-app-shell-and-screen-ux.md §2.2/§5.2 — accept-invite is one of the
+                    // four Onboarding bootstrap paths: on success, reset to the Family Map root
+                    // (§1.1's post-bootstrap rule) rather than leaving the terminal "Welcome!"
+                    // state on screen (§5.2's own retirement of that dead end — the invite
+                    // create/accept UI polish itself stays I37's job; this is only the routing).
+                    // I24 (001 §1.5.3, §4.1): also retries `onSignedIn` now that a profile exists —
+                    // any device registration attempted before this point (e.g. at sign-in) hit
+                    // `DeviceRegistrationError.profileNotYetBootstrapped` and was skipped.
+                    onAccepted: {
+                        coordinator.showRoot()
+                        Task { await onSignedIn() }
+                    }
                 )
 
             // MARK: - I17 profile-bootstrap route (001 §1.5.3, §3.1) — see `CreateFamilyViewModel`'s
@@ -269,13 +330,16 @@ struct RootView: View {
                     viewModel: CreateFamilyViewModel(apiClient: apiClient),
                     prefillDisplayName: pendingOnboardingDisplayName,
                     onCreated: { _ in
-                        coordinator.showHome()
+                        // specs/010 §2.2 — reset to the Family Map root (was `showHome()`).
+                        coordinator.showRoot()
                         // I24 — same re-registration retry as `.acceptInvite`'s `onAccepted` above.
                         Task { await onSignedIn() }
                     }
                 )
 
-            // MARK: - I5 groups routes (specs/004 §3.4)
+            // MARK: - I5 groups routes (specs/004 §3.4) — unchanged flows (010 §6), except the
+            // post-success destination when reached from Onboarding (010 §2.2) rather than the
+            // ordinary `GroupsListScreen` entry point (`groupBootstrapReturnsToOnboarding` below).
 
             case .groupsList:
                 GroupsListScreen(
@@ -283,14 +347,16 @@ struct RootView: View {
                     onSelectGroup: { groupId in coordinator.showGroupDetail(groupId: groupId) },
                     onCreateGroup: {
                         // The ordinary (already-has-a-profile) entry point — never leak a stale
-                        // prefill name from an earlier profile-less visit. (Whether `displayName`
-                        // is actually required is no longer decided here at all — see
-                        // `CreateGroupViewModel.createGroup`'s doc, I17 review.)
+                        // prefill name/origin from an earlier onboarding visit. (Whether
+                        // `displayName` is actually required is no longer decided here at all —
+                        // see `CreateGroupViewModel.createGroup`'s doc, I17 review.)
                         pendingGroupBootstrapDisplayName = ""
+                        groupBootstrapReturnsToOnboarding = false
                         coordinator.showCreateGroup()
                     },
                     onJoinGroup: {
                         pendingGroupBootstrapDisplayName = ""
+                        groupBootstrapReturnsToOnboarding = false
                         coordinator.showGroupJoin()
                     }
                 )
@@ -298,12 +364,22 @@ struct RootView: View {
                 CreateGroupScreen(
                     viewModel: CreateGroupViewModel(apiClient: apiClient),
                     prefillDisplayName: pendingGroupBootstrapDisplayName,
-                    // specs/004 §2.5: unwind the finished form OUT of the stack before pushing the
-                    // new group's detail — otherwise back lands on a create-group form for a group
-                    // that already exists, and submitting it again would create a duplicate.
                     onCreated: { group in
-                        coordinator.popTo(.groupsList)
-                        coordinator.showGroupDetail(groupId: group.groupId)
+                        if groupBootstrapReturnsToOnboarding {
+                            // specs/010 §2.2 — reached from Onboarding: reset to the Family Map
+                            // root instead of the group's own detail screen. If this caller is
+                            // STILL family-less (a groups-only user — creating a group never
+                            // creates a family), the map's own 010 §2.1 routing rule bounces them
+                            // straight back to Onboarding(family-less), which is the correct
+                            // outcome, not a bug.
+                            coordinator.showRoot()
+                        } else {
+                            // specs/004 §2.5: unwind the finished form OUT of the stack before
+                            // pushing the new group's detail — otherwise back lands on a
+                            // create-group form for a group that already exists.
+                            coordinator.popTo(.groupsList)
+                            coordinator.showGroupDetail(groupId: group.groupId)
+                        }
                         // I24 — same re-registration retry as `.createFamily`'s `onCreated` above
                         // (create-group is also a 001 §1.5.3 profile-bootstrap path).
                         Task { await onSignedIn() }
@@ -324,13 +400,18 @@ struct RootView: View {
                     viewModel: GroupJoinViewModel(apiClient: apiClient),
                     prefillCode: prefillCode,
                     prefillDisplayName: pendingGroupBootstrapDisplayName,
-                    // Same unwind rationale as `CreateGroupScreen`'s `onCreated` above. This also
-                    // covers the cold-start deep-link arrival, where `.groupsList` was never
-                    // visited: `popTo` rebuilds a minimal stack under it rather than leaving the
-                    // user on a spent join form with nowhere to go.
                     onJoined: { group in
-                        coordinator.popTo(.groupsList)
-                        coordinator.showGroupDetail(groupId: group.groupId)
+                        if groupBootstrapReturnsToOnboarding {
+                            // specs/010 §2.2 — same rationale as `.createGroup`'s `onCreated` above.
+                            coordinator.showRoot()
+                        } else {
+                            // Same unwind rationale as `CreateGroupScreen`'s `onCreated` above.
+                            // This also covers the cold-start deep-link arrival, where
+                            // `.groupsList` was never visited: `popTo` rebuilds a minimal stack
+                            // under it rather than leaving the user on a spent join form.
+                            coordinator.popTo(.groupsList)
+                            coordinator.showGroupDetail(groupId: group.groupId)
+                        }
                         // I24 — same re-registration retry (join-group is also a 001 §1.5.3
                         // profile-bootstrap path).
                         Task { await onSignedIn() }
@@ -356,7 +437,8 @@ struct RootView: View {
                 )
             case .exportData:
                 ExportScreen(
-                    viewModel: ExportViewModel(apiClient: apiClient, exportArtifactStore: exportArtifactStore)
+                    viewModel: ExportViewModel(apiClient: apiClient, exportArtifactStore: exportArtifactStore),
+                    onProfileDeadEnd: { variant in coordinator.showOnboarding(variant) }
                 )
             case .deleteAccount:
                 DeleteAccountScreen(
@@ -382,7 +464,12 @@ struct RootView: View {
             case .deleteFamily:
                 DeleteFamilyScreen(
                     viewModel: DeleteFamilyViewModel(apiClient: apiClient),
-                    onCompleted: { coordinator.showHome() }
+                    // specs/010-app-shell-and-screen-ux.md §1.1/§2.1 — deleting the family leaves
+                    // the caller with a profile but no family (001 §13.3: role/familyId become
+                    // null), i.e. exactly the family-less state — route straight to Onboarding's
+                    // family-less variant rather than the Family Map root (which would 404
+                    // FAMILY_NOT_FOUND on its very next load and bounce right back here anyway).
+                    onCompleted: { coordinator.showOnboarding(.familyLess) }
                 )
             }
         }
@@ -396,8 +483,16 @@ struct RootView: View {
         //
         // The device/push registration below reads `currentUserId` too, so it moved here for the
         // same reason — it used to be a `Task` fired from `App.init()`.
+        //
+        // specs/010-app-shell-and-screen-ux.md §1.1 — the destination is no longer just
+        // `isSignedIn`; `AppLaunchResolver` runs the `GET /families/me` probe (before any device
+        // registration, and never for a signed-out caller) and resolves through the full
+        // launch-resolution table, failing open to the Family Map on anything inconclusive.
         .task {
-            coordinator.resolveLaunch(isSignedIn: authProvider.currentUserId != nil)
+            let destination = await AppLaunchResolver.resolve(
+                apiClient: apiClient, isSignedIn: authProvider.currentUserId != nil, cache: familyContextCache
+            )
+            coordinator.resolveLaunch(destination: destination)
             // specs/009 §7 — first evaluation of the disclosure/prompt/banner state. Deliberately
             // after the launch route resolves, so a signed-out user is asked to sign in before
             // being asked for their location: explaining family location-sharing to someone who has

@@ -130,4 +130,53 @@ struct GeofencesViewModelTests {
         }
         #expect(viewModel.conflict == .none)
     }
+
+    // MARK: - specs/010-app-shell-and-screen-ux.md §2.1 (I34) — the profile-dead-end routing rule.
+    // `GET /geofences` is family-scoped (001 §7.1/§1.5.4): the reported field bug (010's own
+    // motivating example) was exactly this screen showing a Retry-that-can-never-work card.
+
+    @Test func load_profileNotFound_routesToOnboardingProfileLess() async {
+        let api = FakeAPIClient()
+        api.getGeofencesHandler = { _ in
+            throw APIError.server(APIErrorBody(code: .profileNotFound, message: "x", details: nil, requestId: "r1"), httpStatus: 404)
+        }
+        let viewModel = GeofencesViewModel(apiClient: api)
+
+        await viewModel.load()
+
+        #expect(viewModel.state == .routeToOnboarding(.profileLess))
+    }
+
+    @Test func load_familyNotFound_routesToOnboardingFamilyLess() async {
+        let api = FakeAPIClient()
+        api.getGeofencesHandler = { _ in
+            throw APIError.server(APIErrorBody(code: .familyNotFound, message: "x", details: nil, requestId: "r1"), httpStatus: 404)
+        }
+        let viewModel = GeofencesViewModel(apiClient: api)
+
+        await viewModel.load()
+
+        #expect(viewModel.state == .routeToOnboarding(.familyLess))
+    }
+
+    /// Mutation-path failures keep the existing inline error rendering (010 §2.1's third rule) —
+    /// `save_nonConflictError_setsErrorState` above already covers a mutation error generically;
+    /// this pins that a profile-dead-end code specifically, arriving from `save` rather than
+    /// `load`, still renders inline rather than routing.
+    @Test func save_profileNotFound_staysInlineRatherThanRouting() async {
+        let api = FakeAPIClient()
+        api.getGeofencesHandler = { _ in .ok(GeofenceConfig(version: 1, geofences: []), etag: "\"0\"", features: TestFeatures.free) }
+        let viewModel = GeofencesViewModel(apiClient: api)
+        await viewModel.load()
+
+        api.replaceGeofencesHandler = { _, _ in
+            throw APIError.server(APIErrorBody(code: .profileNotFound, message: "x", details: nil, requestId: "r1"), httpStatus: 404)
+        }
+        await viewModel.save([makeGeofence()])
+
+        guard case .error = viewModel.state else {
+            Issue.record("expected .error state (mutation paths are unaffected by 010 §2.1), got \(viewModel.state)")
+            return
+        }
+    }
 }
