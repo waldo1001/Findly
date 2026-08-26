@@ -17,9 +17,6 @@ import Foundation
 /// `joinLinkHost` and is handled by the separate `matchHttpsJoinLink(_:joinLinkHost:)` below rather
 /// than folded into `normalize(_:)`, which has no way to receive an expected host.
 public enum GroupCodeParsing {
-    /// Crockford base32 alphabet (specs/001 §1.4): digits + uppercase letters minus I, L, O, U.
-    private static let allowedCharacters = CharacterSet(charactersIn: "ABCDEFGHJKMNPQRSTVWXYZ0123456789")
-
     /// Returns the normalized 8-character uppercase code, or `nil` if `raw` doesn't resolve to a
     /// well-formed group code — malformed/oversized/injection-shaped input is rejected here, never
     /// forwarded to `joinGroup`.
@@ -27,26 +24,15 @@ public enum GroupCodeParsing {
         var candidate = raw.trimmingCharacters(in: .whitespacesAndNewlines)
 
         if let url = URL(string: candidate), let scheme = url.scheme, !scheme.isEmpty {
-            guard scheme == "findly", url.host == "group-join" else {
+            guard let code = CodeLinkParsing.extractQueryCode(from: url, expectedHost: "group-join") else {
                 // Either a wholly unrelated URL, or a different `findly://` deep link (e.g. the
                 // invite one) — never cross-parse another feature's link as a group code.
-                return nil
-            }
-            guard
-                let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
-                let code = components.queryItems?.first(where: { $0.name == "code" })?.value,
-                !code.isEmpty
-            else {
                 return nil
             }
             candidate = code
         }
 
-        let stripped = candidate.replacingOccurrences(of: "-", with: "").uppercased()
-        guard stripped.count == 8, stripped.unicodeScalars.allSatisfy({ allowedCharacters.contains($0) }) else {
-            return nil
-        }
-        return stripped
+        return CodeLinkParsing.normalizeCode(candidate)
     }
 
     /// specs/007-public-join-links.md §1/§4 — the result of matching an incoming URL against the
@@ -74,17 +60,9 @@ public enum GroupCodeParsing {
     /// `URLComponents.path` preserves it exactly as written, so `/g/` is correctly `.notRecognized`
     /// ("wrong path (must be exactly /g) MUST be rejected", 007 §1).
     public static func matchHttpsJoinLink(_ url: URL, joinLinkHost: String) -> HttpsLinkMatch {
-        guard
-            let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
-            components.scheme == "https",
-            components.host == joinLinkHost,
-            components.path == "/g"
-        else {
-            return .notRecognized
+        switch CodeLinkParsing.matchHttpsLink(url, joinLinkHost: joinLinkHost, path: "/g") {
+        case .notRecognized: return .notRecognized
+        case .recognized(let code): return .recognized(code: code)
         }
-        guard let fragment = components.fragment, let code = normalize(fragment) else {
-            return .recognized(code: nil)
-        }
-        return .recognized(code: code)
     }
 }

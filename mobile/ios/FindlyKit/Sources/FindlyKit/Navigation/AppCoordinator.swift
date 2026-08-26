@@ -211,25 +211,42 @@ public final class AppCoordinator: ObservableObject {
         push(.deleteFamily)
     }
 
-    /// The app target's `onOpenURL` forwards here (specs/004 §3.4/§3.5) — `GroupCodeParsing` (pure,
-    /// FindlyKit) validates/normalizes the incoming link BEFORE any route change. Two forms are
-    /// recognized: the legacy `findly://group-join?code=…` scheme (unchanged behavior — an
-    /// unrecognized/codeless link is silently ignored, no route change, no crash) and, since 007,
-    /// the `https://{joinLinkHost}/g#CODE` universal link, where a recognized host+path with no
-    /// usable fragment DOES route to the join screen with an empty prefill (007 §4 / 003 §12.3) —
-    /// a deliberate difference from the `findly://` case, since only the https form's contract
-    /// specifies that behavior. A URL matching neither form is silently ignored either way, rather
-    /// than surfacing a raw error for what may be an unrelated/malformed external URL.
+    /// The app target's `onOpenURL` forwards here (specs/004 §3.4/§3.5, specs/007 §4) —
+    /// `GroupCodeParsing`/`InviteCodeParsing` (pure, FindlyKit) validate/normalize the incoming
+    /// link BEFORE any route change. Four forms are recognized, each routing to its own screen and
+    /// never the other's (007 §7: "`/f` never routes to the group-join screen, nor `/g` to the
+    /// family one"): the legacy `findly://group-join?code=…` / `findly://family-join?code=…`
+    /// schemes (unchanged behavior — an unrecognized/codeless link is silently ignored, no route
+    /// change, no crash) and, since 007, the `https://{joinLinkHost}/g#CODE` /
+    /// `https://{joinLinkHost}/f#CODE` universal links, where a recognized host+path with no
+    /// usable fragment DOES route with an empty prefill (007 §4 / 003 §12.3) — a deliberate
+    /// difference from the `findly://` case, since only the https form's contract specifies that
+    /// behavior. A URL matching none of the four forms is silently ignored, rather than surfacing
+    /// a raw error for what may be an unrelated/malformed external URL.
     /// specs/004 §2.5: a link arriving while the app is already running **pushes**, so dismissing
-    /// the join screen returns the user wherever they were rather than dropping them at a root.
-    /// An unrecognized link still changes nothing at all — it must not grow the stack either.
+    /// the destination screen returns the user wherever they were rather than dropping them at a
+    /// root. An unrecognized link still changes nothing at all — it must not grow the stack either.
     public func handleDeepLink(_ url: URL) {
         if let code = GroupCodeParsing.normalize(url.absoluteString) {
             push(.groupJoin(prefillCode: code))
             return
         }
+        // The family-invite deep link only, NOT `InviteCodeParsing.normalize(_:)`'s full breadth
+        // — that broader function also accepts the legacy `findly://invite/<code>` PATH form
+        // (kept for `AcceptInviteViewModel`'s own paste handling, specs/004 I2), which
+        // `handleDeepLink` has never routed and must keep NOT routing here
+        // (`handleDeepLink_inviteDeepLink_isIgnoredNotMisroutedToGroupJoin`'s existing contract).
+        if let rawCode = CodeLinkParsing.extractQueryCode(from: url, expectedHost: "family-join"),
+           let code = CodeLinkParsing.normalizeCode(rawCode) {
+            push(.acceptInvite(prefillCode: code))
+            return
+        }
         if case .recognized(let code) = GroupCodeParsing.matchHttpsJoinLink(url, joinLinkHost: joinLinkHost) {
             push(.groupJoin(prefillCode: code ?? ""))
+            return
+        }
+        if case .recognized(let code) = InviteCodeParsing.matchHttpsInviteLink(url, joinLinkHost: joinLinkHost) {
+            push(.acceptInvite(prefillCode: code ?? ""))
         }
     }
 }

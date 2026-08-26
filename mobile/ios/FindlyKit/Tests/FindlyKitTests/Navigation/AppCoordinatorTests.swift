@@ -86,6 +86,78 @@ struct AppCoordinatorTests {
         #expect(coordinator.route == .groupJoin(prefillCode: ""))
     }
 
+    // MARK: - I37 family-invite deep links (specs/007 §1/§4, 010 §5.2) — the exact mirror of the
+    // I6 group-link block above, routing to `.acceptInvite` instead of `.groupJoin`.
+
+    @Test func handleDeepLink_validFamilyJoinLink_routesToAcceptInviteWithNormalizedCode() {
+        let coordinator = AppCoordinator(route: .liveMap)
+
+        coordinator.handleDeepLink(URL(string: "findly://family-join?code=7f3k-9qrz")!)
+
+        #expect(coordinator.route == .acceptInvite(prefillCode: "7F3K9QRZ"))
+    }
+
+    @Test func handleDeepLink_validHttpsInviteLink_routesToAcceptInviteWithNormalizedCode() {
+        let coordinator = AppCoordinator(route: .liveMap, joinLinkHost: "join.example.test")
+
+        coordinator.handleDeepLink(URL(string: "https://join.example.test/f#7f3k-9qrz")!)
+
+        #expect(coordinator.route == .acceptInvite(prefillCode: "7F3K9QRZ"))
+    }
+
+    @Test func handleDeepLink_httpsInviteLinkWrongHost_leavesRouteUnchanged() {
+        let coordinator = AppCoordinator(route: .liveMap, joinLinkHost: "join.example.test")
+
+        coordinator.handleDeepLink(URL(string: "https://evil.example/f#7F3K9QRZ")!)
+
+        #expect(coordinator.route == .liveMap)
+    }
+
+    @Test func handleDeepLink_httpsInviteLinkWrongPath_leavesRouteUnchanged() {
+        let coordinator = AppCoordinator(route: .liveMap, joinLinkHost: "join.example.test")
+
+        coordinator.handleDeepLink(URL(string: "https://join.example.test/other#7F3K9QRZ")!)
+
+        #expect(coordinator.route == .liveMap)
+    }
+
+    @Test func handleDeepLink_httpsInviteLinkNoUsableFragment_routesToAcceptInviteWithEmptyPrefill() {
+        let coordinator = AppCoordinator(route: .liveMap, joinLinkHost: "join.example.test")
+
+        coordinator.handleDeepLink(URL(string: "https://join.example.test/f")!)
+
+        #expect(coordinator.route == .acceptInvite(prefillCode: ""))
+    }
+
+    @Test func handleDeepLink_httpsInviteLinkGarbageFragment_routesToAcceptInviteWithEmptyPrefill() {
+        let coordinator = AppCoordinator(route: .liveMap, joinLinkHost: "join.example.test")
+
+        coordinator.handleDeepLink(URL(string: "https://join.example.test/f#garbage!!")!)
+
+        #expect(coordinator.route == .acceptInvite(prefillCode: ""))
+    }
+
+    @Test func handleDeepLink_familyInviteLink_neverMisroutesToGroupJoin() {
+        // 007 §7: "/f never routes to the group-join screen (nor /g to the family one)".
+        let coordinator = AppCoordinator(route: .liveMap, joinLinkHost: "join.example.test")
+
+        coordinator.handleDeepLink(URL(string: "https://join.example.test/f#7f3k-9qrz")!)
+
+        if case .groupJoin = coordinator.route {
+            Issue.record("a family-invite link must never route to the group-join screen")
+        }
+    }
+
+    @Test func handleDeepLink_groupJoinLink_neverMisroutesToAcceptInvite() {
+        let coordinator = AppCoordinator(route: .liveMap, joinLinkHost: "join.example.test")
+
+        coordinator.handleDeepLink(URL(string: "https://join.example.test/g#7f3k-9qrz")!)
+
+        if case .acceptInvite = coordinator.route {
+            Issue.record("a group-join link must never route to the accept-invite screen")
+        }
+    }
+
     // MARK: - Back stack (specs/004 §2.5)
     //
     // The regression these cover: `route` used to be a single value with no history, so on a
