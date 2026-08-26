@@ -116,7 +116,25 @@ fi
 # calling getAnalytics()") is not executable code and must not trip the check — only
 # live code should. This does not weaken detection of a real violation: an actual
 # fetch()/localStorage/etc. call is never itself a comment.
-script_body=$(awk '/<script[ >]/{flag=1; next} /<\/script>/{flag=0} flag' "$FILE" | grep -vE '^[[:space:]]*//' || true)
+#
+# Code-review finding (2026-08-26): the previous extraction here was a line-based awk
+# state machine (`/<script[ >]/{flag=1; next} /<\/script>/{flag=0} flag`) that mis-handles
+# a single-line `<script>...</script>` tag — the line matches the open pattern, sets the
+# flag, and immediately `next`s past that same line, so the closing pattern on it never
+# fires; its content is skipped entirely rather than extracted, silently hiding whatever
+# it contains from checks 3-5 below. Replaced with a regex-based extraction (dotall,
+# global) that captures every <script>...</script> body correctly regardless of whether
+# the tag is single- or multi-line, or how many such tags the file has.
+script_body=$(node -e '
+  const fs = require("fs");
+  const html = fs.readFileSync(process.argv[1], "utf8");
+  const re = /<script[^>]*>([\s\S]*?)<\/script>/gi;
+  let m, out = [];
+  while ((m = re.exec(html)) !== null) {
+    out.push(m[1]);
+  }
+  process.stdout.write(out.join("\n"));
+' "$FILE" | grep -vE '^[[:space:]]*//' || true)
 
 # 3. No network-call primitive of any kind, except `fetch(` when --allow-fetch is passed
 #    (delete-account.html's one legitimate call to DELETE /users/me). XMLHttpRequest,
@@ -152,6 +170,98 @@ analytics_calls=$(printf '%s\n' "$script_body" | grep -noE '\bgetAnalytics[[:spa
 if [[ -n "$analytics_calls" ]]; then
   echo "FAIL: analytics/telemetry usage found in <script>:" >&2
   echo "$analytics_calls" >&2
+  fail=1
+fi
+
+# 6. No inline event-handler attribute (onload=, onclick=, onerror=, ...) anywhere, on ANY
+#    page, unconditionally — never opt-outable, like check 2. An inline handler executes
+#    JS entirely outside any <script> tag, so no script-body extraction — however correct
+#    — can ever see a leak hidden behind one (e.g. `onload="window.__x = location.search"`
+#    on <body>). No page in this app needs one: every page's interactivity is wired with
+#    addEventListener from inside a real <script> block, which checks 3-5 already cover.
+#
+# Round-3 code-review findings on the round-2 version of this check, all fixed together
+# below by moving the whole check into node instead of patching the shell grep further
+# (a line-based grep cannot be made to handle all of these at once without becoming as
+# complex as the node version, and less legible):
+#   - FIX 1: the grep had no -i, so `<body ONLOAD=...>` / `OnLoad=` — fully live in every
+#     browser — passed. This check now matches case-insensitively.
+#   - FIX 2: comment-stripping here (and in verify-family-invite.sh, fixed there too)
+#     stopped only at "-->". Per the WHATWG tokenizer's comment-end-bang state, a browser
+#     also ends a comment at "--!>" — so `<!--x--!><body onload=...>y-->` was stripped as
+#     ONE comment (the real terminator ">" is only found at the trailing "y-->"), deleting
+#     the live onload attribute along with it and hiding it from this check entirely. The
+#     stripper below now terminates at the first of "-->" or "--!>", matching the browser.
+#   - FIX 3: the grep was line-based, so `onload\n="alert(1)"` (a newline between the
+#     attribute name and "=", valid HTML) was invisible to it. The node scan below walks
+#     the tag character-by-character and uses \s (which matches newlines), not a per-line
+#     regex, so this no longer matters.
+#   - FIX 4: the grep matched raw text position, not attribute-name boundaries, so
+#     `<p data-example=" onload=triggered">` (the string "onload=" sitting inside an
+#     unrelated attribute's quoted VALUE, not a live attribute name) tripped it. The scan
+#     below tracks quote state per tag and only evaluates the "on...=" pattern when
+#     genuinely outside any quoted value, at an actual attribute-name boundary.
+NODE_INLINE_CHECK="$(mktemp)"
+cat > "$NODE_INLINE_CHECK" <<'NODEEOF'
+"use strict";
+const fs = require("fs");
+// NOTE: this file is invoked as `node "$NODE_INLINE_CHECK" "$FILE"` (a real script file,
+// not `node -e`), so argv[0]=node, argv[1]=this script's own path, argv[2]=the target
+// file — unlike the `node -e '...' "$FILE"` calls elsewhere in this file, where argv[1]
+// IS the target (no script-file slot to shift it). Using argv[1] here would silently
+// read this checker's own source instead of the page under test, passing unconditionally.
+const html = fs.readFileSync(process.argv[2], "utf8");
+
+// FIX 2 — stop at the first of "-->" or "--!>" (WHATWG comment-end-bang state), not only
+// "-->". A comment OUTSIDE a <script> tag terminating early means the markup after it is
+// live, not commented; treating only "-->" as terminal hid that markup from this check.
+const stripped = html.replace(/<!--[\s\S]*?(?:-->|--!>)/g, "");
+
+// Scans each raw "<...>" tag region (a lightweight tag boundary, not a full parser — good
+// enough here: we only need to find attribute NAME occurrences, and even a mis-scoped
+// region still gets scanned in full, so this stays fail-safe rather than fail-open).
+// Tracks simple quote state character-by-character so text inside a quoted attribute
+// VALUE is never mistaken for an attribute NAME (FIX 4), matches "on<letters>" followed
+// by optional whitespace (: includes newlines, so a newline before "=" is covered — FIX 3)
+// then "=", case-insensitively (FIX 1).
+function findInlineHandlers(s) {
+  const tagRe = /<[^<>]*>/g;
+  const found = [];
+  let m;
+  while ((m = tagRe.exec(s)) !== null) {
+    const tagText = m[0];
+    let quote = null;
+    for (let i = 1; i < tagText.length - 1; i++) {
+      const ch = tagText[i];
+      if (quote) {
+        if (ch === quote) quote = null;
+        continue;
+      }
+      if (ch === '"' || ch === "'") {
+        quote = ch;
+        continue;
+      }
+      const prev = tagText[i - 1];
+      const atBoundary = i === 1 || /\s/.test(prev);
+      if (!atBoundary) continue;
+      const attrMatch = /^on[a-zA-Z]+\s*=/i.exec(tagText.slice(i));
+      if (attrMatch) {
+        found.push(attrMatch[0].replace(/\s*=$/, ""));
+      }
+    }
+  }
+  return found;
+}
+
+const handlers = findInlineHandlers(stripped);
+handlers.forEach((h) => console.log("FOUND:" + h));
+process.exit(handlers.length > 0 ? 1 : 0);
+NODEEOF
+inline_handlers=$(node "$NODE_INLINE_CHECK" "$FILE" || true)
+rm -f "$NODE_INLINE_CHECK"
+if [[ -n "$inline_handlers" ]]; then
+  echo "FAIL: inline event-handler attribute(s) found:" >&2
+  echo "$inline_handlers" >&2
   fail=1
 fi
 

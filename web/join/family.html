@@ -1,0 +1,303 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Join a family on Findly</title>
+<!--
+  specs/007-public-join-links.md §2 (amended 2026-08-26) — the family-invite landing page
+  (`GET /f`), the same static pattern as index.html's `/g` group-join page.
+
+  HARD SECURITY INVARIANTS (do not violate when editing this file):
+  - No fetch/XHR/WebSocket or any other network call, ever.
+  - No external resource of any kind (no CDN script/style/font, no external image,
+    no analytics/telemetry). Everything below is inline.
+  - No cookies, no localStorage/sessionStorage.
+  - The page must render IDENTICALLY regardless of whether the code in the URL
+    fragment is real, used, expired, or garbage — there is no server round-trip, so this
+    is automatic as long as the rule above holds. The invite code is never validated,
+    resolved, or logged anywhere by this page. Unlike the multi-use group code, a family
+    invite code is SINGLE-USE (001 §3.3) — a logged copy of it is a logged one-shot
+    credential into a family's live locations, so this rule is even more load-bearing
+    here than on /g.
+  - The invite code lives only in location.hash (the URL fragment), which browsers
+    never send to the server — do not read it from anywhere else (never
+    location.search), and do not copy it into the query string or path (e.g. via a
+    redirect). The only query-string-shaped appearance of the code anywhere in this file
+    is inside the findly://family-join?code= custom-scheme deep link, which the OS hands
+    to the app locally and which is never transmitted over the network.
+  - This page routes ONLY to the family-join affordance (findly://family-join). It MUST
+    NOT offer or fall back to findly://group-join — /f and /g are distinct kinds
+    (specs/007 §1) and must never cross-route.
+-->
+<style>
+  :root {
+    --primary: #00696e;
+    --on-primary: #ffffff;
+    --bg: #ffffff;
+    --fg: #1a1a1a;
+    --muted: #5f6b6c;
+    --card-bg: #f2f6f6;
+    --border: #d8e2e2;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --primary: #4cd4d9;
+      --on-primary: #00312f;
+      --bg: #121717;
+      --fg: #eef2f2;
+      --muted: #a7b4b4;
+      --card-bg: #1b2222;
+      --border: #2a3333;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    padding: 0;
+  }
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.45;
+    display: flex;
+    justify-content: center;
+    padding: 2rem 1rem 3rem;
+  }
+  main {
+    width: 100%;
+    max-width: 28rem;
+  }
+  h1 {
+    font-size: 1.4rem;
+    margin: 0 0 0.25rem;
+  }
+  .tagline {
+    color: var(--muted);
+    margin: 0 0 1.5rem;
+    font-size: 0.95rem;
+  }
+  section {
+    margin-bottom: 1.5rem;
+  }
+  .card {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 0.75rem;
+    padding: 1.25rem;
+  }
+  .code-label {
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+    margin: 0 0 0.4rem;
+  }
+  .code-display {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 1.8rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    margin: 0 0 1rem;
+    word-break: break-all;
+  }
+  button, .btn {
+    display: inline-block;
+    font: inherit;
+    font-weight: 600;
+    font-size: 0.95rem;
+    border-radius: 0.5rem;
+    border: none;
+    padding: 0.65rem 1.1rem;
+    cursor: pointer;
+    text-decoration: none;
+    text-align: center;
+  }
+  .btn-primary {
+    background: var(--primary);
+    color: var(--on-primary);
+  }
+  .btn-primary:active {
+    opacity: 0.85;
+  }
+  .btn-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.6rem;
+  }
+  .copy-feedback {
+    font-size: 0.85rem;
+    color: var(--muted);
+    margin-left: 0.6rem;
+    align-self: center;
+  }
+  .badges {
+    display: flex;
+    gap: 0.6rem;
+    flex-wrap: wrap;
+    margin-top: 0.75rem;
+  }
+  .badge {
+    border: 1px dashed var(--border);
+    border-radius: 0.5rem;
+    padding: 0.5rem 0.85rem;
+    color: var(--muted);
+    font-size: 0.85rem;
+    user-select: none;
+  }
+  .badge strong {
+    display: block;
+    color: var(--fg);
+    font-size: 0.9rem;
+  }
+  ol {
+    padding-left: 1.2rem;
+    color: var(--muted);
+    font-size: 0.92rem;
+  }
+  ol li {
+    margin-bottom: 0.35rem;
+  }
+  .no-code p {
+    color: var(--muted);
+  }
+  footer {
+    font-size: 0.78rem;
+    color: var(--muted);
+    margin-top: 2rem;
+  }
+</style>
+</head>
+<body>
+<main>
+  <h1>Join a family on Findly</h1>
+  <p class="tagline">You've been invited to a family on Findly — a private way to share your location with the people who matter most.</p>
+
+  <section id="code-section" hidden>
+    <div class="card">
+      <p class="code-label">Your family invite code</p>
+      <p class="code-display" id="code-display"></p>
+      <div class="btn-row">
+        <button type="button" class="btn btn-primary" id="copy-button">Copy code</button>
+        <span class="copy-feedback" id="copy-feedback" aria-live="polite"></span>
+      </div>
+    </div>
+  </section>
+
+  <section id="no-code-section" hidden>
+    <div class="card no-code">
+      <p>Scan the invite's QR code, or ask the person who invited you, to see the code here.</p>
+    </div>
+  </section>
+
+  <section>
+    <a class="btn btn-primary" id="open-app-link" href="findly://family-join?code=">Open in the app</a>
+  </section>
+
+  <section>
+    <p class="code-label">Get the app</p>
+    <div class="badges">
+      <span class="badge" aria-disabled="true"><strong>Google Play</strong>Coming soon</span>
+      <span class="badge" aria-disabled="true"><strong>App Store</strong>Coming soon</span>
+    </div>
+  </section>
+
+  <section>
+    <p class="code-label">Don't have the app yet?</p>
+    <ol>
+      <li>Install Findly once it's available on your app store.</li>
+      <li>Open the app and re-scan the invite's QR code, or enter the code shown above.</li>
+    </ol>
+  </section>
+
+  <footer>This page shows only what's in the link you followed. It does not check or contact
+    anything — the app verifies the invite code when you join, and the code can only be used once.</footer>
+</main>
+
+<script>
+(function () {
+  "use strict";
+
+  // Crockford base32 (specs/001-api-contract.md §1.4): digits + A-Z minus I, L, O, U.
+  // Same format as the group join code (specs/007 §1: family invite codes use the same
+  // 001 §1.4 format). Mirrors mobile/android and mobile/ios family-invite parsing.
+  var ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+  var CODE_RE = new RegExp("^[" + ALPHABET + "]{8}$");
+
+  // Reads location.hash ONLY (never search/pathname) and normalizes it exactly like the
+  // mobile clients: strip leading '#', strip hyphens, uppercase. Returns the canonical
+  // 8-char form, or null if the fragment isn't a plausible code — this function makes no
+  // network call and never will (see the security-invariant comment at the top of <head>).
+  function normalize(rawHash) {
+    var stripped = String(rawHash || "").replace(/^#/, "").replace(/-/g, "").toUpperCase();
+    return CODE_RE.test(stripped) ? stripped : null;
+  }
+
+  function toDisplayForm(code) {
+    return code.slice(0, 4) + "-" + code.slice(4);
+  }
+
+  function copyToClipboard(text) {
+    if (window.navigator.clipboard && window.navigator.clipboard.writeText) {
+      return window.navigator.clipboard.writeText(text);
+    }
+    // Fallback for browsers without the async Clipboard API. Still 100% local: a
+    // throwaway off-screen textarea + the synchronous copy command, nothing else.
+    return new Promise(function (resolve) {
+      var textarea = document.createElement("textarea");
+      textarea.value = text;
+      textarea.setAttribute("readonly", "");
+      textarea.style.position = "fixed";
+      textarea.style.left = "-9999px";
+      document.body.appendChild(textarea);
+      textarea.select();
+      try {
+        document.execCommand("copy");
+      } catch (err) {
+        // Best-effort only; nothing to report anywhere (no logging, no network).
+      }
+      document.body.removeChild(textarea);
+      resolve();
+    });
+  }
+
+  function render() {
+    var code = normalize(window.location.hash);
+    var codeSection = document.getElementById("code-section");
+    var noCodeSection = document.getElementById("no-code-section");
+    var openAppLink = document.getElementById("open-app-link");
+
+    if (!code) {
+      codeSection.hidden = true;
+      noCodeSection.hidden = false;
+      openAppLink.setAttribute("href", "findly://family-join?code=");
+      return;
+    }
+
+    noCodeSection.hidden = true;
+    codeSection.hidden = false;
+    document.getElementById("code-display").textContent = toDisplayForm(code);
+    openAppLink.setAttribute("href", "findly://family-join?code=" + code);
+  }
+
+  document.getElementById("copy-button").addEventListener("click", function () {
+    var code = normalize(window.location.hash);
+    if (!code) {
+      return;
+    }
+    var feedback = document.getElementById("copy-feedback");
+    copyToClipboard(toDisplayForm(code)).then(function () {
+      feedback.textContent = "Copied";
+      window.setTimeout(function () {
+        feedback.textContent = "";
+      }, 1500);
+    });
+  });
+
+  window.addEventListener("hashchange", render);
+  render();
+})();
+</script>
+</body>
+</html>

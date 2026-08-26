@@ -9,6 +9,10 @@
       "rewrite": "/index.html"
     },
     {
+      "route": "/f",
+      "rewrite": "/family.html"
+    },
+    {
       "route": "/privacy",
       "rewrite": "/privacy.html"
     },
