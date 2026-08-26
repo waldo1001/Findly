@@ -52,9 +52,9 @@ public final class GroupMapViewModel: ObservableObject {
 
             let points = Self.locatedPoints(in: members)
             let hasPoints = !points.isEmpty
-            // Deliberately wrong-on-purpose right now (assertion-level red): always emits,
-            // ignoring MapCameraPolicy.shouldRunOnLoadOrRefresh. The next commit gates this.
-            emitCameraCommand(MapCameraPolicy.target(points: points))
+            if MapCameraPolicy.shouldRunOnLoadOrRefresh(state: cameraPolicyState, hasPoints: hasPoints) {
+                emitCameraCommand(MapCameraPolicy.target(points: points))
+            }
             cameraPolicyState = MapCameraPolicy.nextState(state: cameraPolicyState, hasPoints: hasPoints)
         } catch {
             if (error as? APIError)?.serverCode == .groupExpired {
@@ -68,14 +68,24 @@ public final class GroupMapViewModel: ObservableObject {
     /// specs/010 §3.5, position-only mirror of `LiveMapViewModel.selectMember` — there is exactly
     /// one point per member here, so selection targets it directly rather than resolving a
     /// freshest device first.
-    ///
-    /// Deliberately a no-op right now (assertion-level red) — the next commit implements it.
-    public func selectMember(_ userId: String) {}
+    public func selectMember(_ userId: String) {
+        guard case .loaded(let members) = state else { return }
+        if selectedUserId == userId {
+            selectedUserId = nil
+            return
+        }
+        guard let member = members.first(where: { $0.userId == userId }) else { return }
+        selectedUserId = userId
+        if let location = member.location {
+            emitCameraCommand(.center(lat: location.lat, lon: location.lon, zoom: MapCameraPolicy.singlePointZoom))
+        }
+    }
 
     /// specs/010 §3.4's explicit fit-all action — mirrors `LiveMapViewModel.fitAll`.
-    ///
-    /// Deliberately a no-op right now (assertion-level red) — the next commit implements it.
-    public func fitAll() {}
+    public func fitAll() {
+        guard case .loaded(let members) = state else { return }
+        emitCameraCommand(MapCameraPolicy.target(points: Self.locatedPoints(in: members)))
+    }
 
     private static func locatedPoints(in members: [GroupMemberLocation]) -> [MapGeoPoint] {
         members.compactMap { member in
