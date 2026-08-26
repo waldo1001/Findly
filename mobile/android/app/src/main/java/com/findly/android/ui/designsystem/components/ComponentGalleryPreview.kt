@@ -96,6 +96,9 @@ private fun ComponentGallery(modifier: Modifier = Modifier) {
         FindlySwitchRow(title = "Notify on enter", checked = false, onCheckedChange = {}, subtitle = "Geofence: Home")
         FindlySwitchRow(title = "Disabled", checked = true, onCheckedChange = {}, enabled = false)
 
+        FindlySectionHeader(title = "Nav drawer (010 §1.2)")
+        FindlyNavDrawerMenuButton(onClick = {})
+
         FindlySectionHeader(title = "Empty / loading / error states")
         FindlyEmptyState(
             title = "No devices yet",
