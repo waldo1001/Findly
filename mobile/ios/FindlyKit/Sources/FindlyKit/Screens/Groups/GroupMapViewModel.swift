@@ -112,7 +112,8 @@ public final class GroupMapViewModel: ObservableObject {
             guard let location = member.location else { return nil }
             return MapAnnotationItem(
                 id: member.userId, lat: location.lat, lon: location.lon,
-                initials: Self.initials(for: member.displayName), isStale: location.isStale
+                initials: Self.initials(for: member.displayName), isStale: location.isStale,
+                isSelected: member.userId == selectedUserId
             )
         }
     }

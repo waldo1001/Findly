@@ -74,12 +74,16 @@ public struct MapAnnotationItem: Identifiable, Equatable {
     public let lon: Double
     public let initials: String
     public let isStale: Bool
+    /// specs/010-app-shell-and-screen-ux.md §3.3/§3.5 (I35) — true for every device belonging to
+    /// the currently-selected member, so `MapMarkerBubble(selected:)` renders its distinct state.
+    public let isSelected: Bool
 
-    public init(id: String, lat: Double, lon: Double, initials: String, isStale: Bool) {
+    public init(id: String, lat: Double, lon: Double, initials: String, isStale: Bool, isSelected: Bool = false) {
         self.id = id
         self.lat = lat
         self.lon = lon
         self.initials = initials
         self.isStale = isStale
+        self.isSelected = isSelected
     }
 }

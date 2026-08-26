@@ -36,7 +36,7 @@ public struct MapKitRendering: MapRendering {
         return AnyView(
             Map(coordinateRegion: mkRegion, annotationItems: annotations) { item in
                 MapAnnotation(coordinate: CLLocationCoordinate2D(latitude: item.lat, longitude: item.lon)) {
-                    MapMarkerBubble(initials: item.initials, isStale: item.isStale)
+                    MapMarkerBubble(initials: item.initials, state: item.isStale ? .stale : .normal, selected: item.isSelected)
                 }
             }
         )
@@ -54,7 +54,7 @@ public struct ListMapRendering: MapRendering {
         AnyView(
             VStack {
                 ForEach(annotations) { item in
-                    MapMarkerBubble(initials: item.initials, isStale: item.isStale)
+                    MapMarkerBubble(initials: item.initials, state: item.isStale ? .stale : .normal, selected: item.isSelected)
                 }
             }
         )

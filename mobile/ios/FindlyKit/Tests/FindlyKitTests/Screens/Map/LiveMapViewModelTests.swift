@@ -302,4 +302,21 @@ struct LiveMapViewModelCameraTests {
 
         #expect(viewModel.selectedUserId == nil)
     }
+
+    @Test func selectingAMember_marksOnlyTheirOwnAnnotationsSelected() async {
+        let api = FakeAPIClient()
+        api.getLatestLocationsHandler = {
+            TestFeatures.envelope(LatestLocationsResponse(members: [
+                self.member("u1", "Eric", devices: [self.device("d1", lat: 51.0, lon: 3.7)]),
+                self.member("u2", "Noor", devices: [self.device("d2", lat: 48.0, lon: 2.3)]),
+            ]))
+        }
+        let viewModel = LiveMapViewModel(apiClient: api)
+        await viewModel.load()
+
+        viewModel.selectMember("u1")
+
+        #expect(viewModel.annotations.first { $0.id == "d1" }?.isSelected == true)
+        #expect(viewModel.annotations.first { $0.id == "d2" }?.isSelected == false)
+    }
 }

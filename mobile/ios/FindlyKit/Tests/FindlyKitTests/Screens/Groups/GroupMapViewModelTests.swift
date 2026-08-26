@@ -185,4 +185,21 @@ struct GroupMapViewModelCameraTests {
 
         #expect(viewModel.cameraCommand?.sequence != steadySequence)
     }
+
+    @Test func selectingAMember_marksOnlyTheirOwnAnnotationSelected() async {
+        let api = FakeAPIClient()
+        api.getGroupLatestLocationsHandler = { _ in
+            TestFeatures.envelope(GroupLatestLocationsResponse(members: [
+                self.member("u1", "Eric", lat: 51.0, lon: 3.7),
+                self.member("u2", "Noor", lat: 48.0, lon: 2.3),
+            ]))
+        }
+        let viewModel = GroupMapViewModel(apiClient: api, groupId: "grp_1")
+        await viewModel.load()
+
+        viewModel.selectMember("u1")
+
+        #expect(viewModel.annotations.first { $0.id == "u1" }?.isSelected == true)
+        #expect(viewModel.annotations.first { $0.id == "u2" }?.isSelected == false)
+    }
 }

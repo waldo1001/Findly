@@ -118,7 +118,8 @@ public final class LiveMapViewModel: ObservableObject {
                 guard let lat = device.lat, let lon = device.lon else { return nil }
                 return MapAnnotationItem(
                     id: device.deviceId, lat: lat, lon: lon,
-                    initials: Self.initials(for: member.displayName), isStale: device.isStale ?? true
+                    initials: Self.initials(for: member.displayName), isStale: device.isStale ?? true,
+                    isSelected: member.userId == selectedUserId
                 )
             }
         }
