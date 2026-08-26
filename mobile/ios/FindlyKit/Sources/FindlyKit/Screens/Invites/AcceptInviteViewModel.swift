@@ -50,15 +50,24 @@ public final class AcceptInviteViewModel: ObservableObject {
     ///    exactly the fail-open defect 000/A37 tracks elsewhere in this codebase. Never a hard
     ///    error either way: this is a convenience prefill, not on the join's critical path.
     ///
-    /// RED stub (I37 review fix, round 2): reproduces the ORIGINAL bug verbatim — calls
-    /// `listDevices()` unconditionally, ignoring family state entirely — so the new tests fail on
-    /// the wrong behavior itself, not a compile error.
     public func loadDisplayNameFallback() async {
         do {
-            let envelope = try await apiClient.listDevices()
-            resolvedDisplayName = envelope.data.devices.first?.ownerDisplayName
+            let envelope = try await apiClient.getMyFamily()
+            let myUserId = envelope.data.me.userId
+            resolvedDisplayName = envelope.data.members.first(where: { $0.userId == myUserId })?.displayName
         } catch {
-            resolvedDisplayName = nil
+            guard (error as? APIError)?.serverCode == .familyNotFound else {
+                // Ambiguous/transient (or any error code other than a CONFIRMED family-less
+                // state) — never guess, never fall back to listDevices() here.
+                resolvedDisplayName = nil
+                return
+            }
+            do {
+                let envelope = try await apiClient.listDevices()
+                resolvedDisplayName = envelope.data.devices.first?.ownerDisplayName
+            } catch {
+                resolvedDisplayName = nil
+            }
         }
     }
 
