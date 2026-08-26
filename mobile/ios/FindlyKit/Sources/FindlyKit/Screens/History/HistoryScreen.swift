@@ -13,9 +13,16 @@ public struct HistoryScreen: View {
     // in-app navigation; `@StateObject` + `@autoclosure` keeps the first instance for this view's
     // lifetime instead of silently discarding the one `.task` observes.
     @StateObject private var viewModel: HistoryViewModel
+    /// specs/010-app-shell-and-screen-ux.md §2.1 (I34) — fires once `viewModel.state` reaches
+    /// `.routeToOnboarding`.
+    private let onProfileDeadEnd: (OnboardingVariant) -> Void
 
-    public init(viewModel: @autoclosure @escaping () -> HistoryViewModel) {
+    public init(
+        viewModel: @autoclosure @escaping () -> HistoryViewModel,
+        onProfileDeadEnd: @escaping (OnboardingVariant) -> Void = { _ in }
+    ) {
         _viewModel = StateObject(wrappedValue: viewModel())
+        self.onProfileDeadEnd = onProfileDeadEnd
     }
 
     public var body: some View {
@@ -26,6 +33,14 @@ public struct HistoryScreen: View {
         }
         .background(theme.colors.surfaceVariant)
         .task { await viewModel.load() }
+        .onChange(of: routingVariant) { variant in
+            if let variant { onProfileDeadEnd(variant) }
+        }
+    }
+
+    private var routingVariant: OnboardingVariant? {
+        if case .routeToOnboarding(let variant) = viewModel.state { return variant }
+        return nil
     }
 
     /// specs/001 §5.3 — `from`/`to` date-range selection. Changing either date reloads (resetting
@@ -80,7 +95,7 @@ public struct HistoryScreen: View {
     @ViewBuilder
     private var content: some View {
         switch viewModel.state {
-        case .idle, .loading:
+        case .idle, .loading, .routeToOnboarding:
             LoadingStateView(message: "Loading history…")
         case .error(let message):
             ErrorStateView(message: message) {
