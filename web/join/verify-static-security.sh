@@ -174,21 +174,91 @@ if [[ -n "$analytics_calls" ]]; then
 fi
 
 # 6. No inline event-handler attribute (onload=, onclick=, onerror=, ...) anywhere, on ANY
-#    page, unconditionally — never opt-outable, like check 2. Code-review finding
-#    (2026-08-26): an inline handler executes JS entirely outside any <script> tag, so no
-#    script-body extraction — however correct after the check-3/4/5 fix above — can ever
-#    see a leak hidden behind one (e.g. `onload="window.__x = location.search"` on
-#    <body>). No page in this app needs one: every page's interactivity is wired with
+#    page, unconditionally — never opt-outable, like check 2. An inline handler executes
+#    JS entirely outside any <script> tag, so no script-body extraction — however correct
+#    — can ever see a leak hidden behind one (e.g. `onload="window.__x = location.search"`
+#    on <body>). No page in this app needs one: every page's interactivity is wired with
 #    addEventListener from inside a real <script> block, which checks 3-5 already cover.
-#    Scans the whole file with HTML comments stripped first, for the same reason as
-#    everywhere else in this script: documentation prose that legitimately *names* an
-#    event-handler attribute must not trip this check.
-html_no_comments=$(node -e '
-  const fs = require("fs");
-  const html = fs.readFileSync(process.argv[1], "utf8");
-  process.stdout.write(html.replace(/<!--[\s\S]*?-->/g, ""));
-' "$FILE")
-inline_handlers=$(printf '%s' "$html_no_comments" | grep -noE '<[^>]*[[:space:]]on[a-zA-Z]+[[:space:]]*=' || true)
+#
+# Round-3 code-review findings on the round-2 version of this check, all fixed together
+# below by moving the whole check into node instead of patching the shell grep further
+# (a line-based grep cannot be made to handle all of these at once without becoming as
+# complex as the node version, and less legible):
+#   - FIX 1: the grep had no -i, so `<body ONLOAD=...>` / `OnLoad=` — fully live in every
+#     browser — passed. This check now matches case-insensitively.
+#   - FIX 2: comment-stripping here (and in verify-family-invite.sh, fixed there too)
+#     stopped only at "-->". Per the WHATWG tokenizer's comment-end-bang state, a browser
+#     also ends a comment at "--!>" — so `<!--x--!><body onload=...>y-->` was stripped as
+#     ONE comment (the real terminator ">" is only found at the trailing "y-->"), deleting
+#     the live onload attribute along with it and hiding it from this check entirely. The
+#     stripper below now terminates at the first of "-->" or "--!>", matching the browser.
+#   - FIX 3: the grep was line-based, so `onload\n="alert(1)"` (a newline between the
+#     attribute name and "=", valid HTML) was invisible to it. The node scan below walks
+#     the tag character-by-character and uses \s (which matches newlines), not a per-line
+#     regex, so this no longer matters.
+#   - FIX 4: the grep matched raw text position, not attribute-name boundaries, so
+#     `<p data-example=" onload=triggered">` (the string "onload=" sitting inside an
+#     unrelated attribute's quoted VALUE, not a live attribute name) tripped it. The scan
+#     below tracks quote state per tag and only evaluates the "on...=" pattern when
+#     genuinely outside any quoted value, at an actual attribute-name boundary.
+NODE_INLINE_CHECK="$(mktemp)"
+cat > "$NODE_INLINE_CHECK" <<'NODEEOF'
+"use strict";
+const fs = require("fs");
+// NOTE: this file is invoked as `node "$NODE_INLINE_CHECK" "$FILE"` (a real script file,
+// not `node -e`), so argv[0]=node, argv[1]=this script's own path, argv[2]=the target
+// file — unlike the `node -e '...' "$FILE"` calls elsewhere in this file, where argv[1]
+// IS the target (no script-file slot to shift it). Using argv[1] here would silently
+// read this checker's own source instead of the page under test, passing unconditionally.
+const html = fs.readFileSync(process.argv[2], "utf8");
+
+// FIX 2 — stop at the first of "-->" or "--!>" (WHATWG comment-end-bang state), not only
+// "-->". A comment OUTSIDE a <script> tag terminating early means the markup after it is
+// live, not commented; treating only "-->" as terminal hid that markup from this check.
+const stripped = html.replace(/<!--[\s\S]*?(?:-->|--!>)/g, "");
+
+// Scans each raw "<...>" tag region (a lightweight tag boundary, not a full parser — good
+// enough here: we only need to find attribute NAME occurrences, and even a mis-scoped
+// region still gets scanned in full, so this stays fail-safe rather than fail-open).
+// Tracks simple quote state character-by-character so text inside a quoted attribute
+// VALUE is never mistaken for an attribute NAME (FIX 4), matches "on<letters>" followed
+// by optional whitespace (: includes newlines, so a newline before "=" is covered — FIX 3)
+// then "=", case-insensitively (FIX 1).
+function findInlineHandlers(s) {
+  const tagRe = /<[^<>]*>/g;
+  const found = [];
+  let m;
+  while ((m = tagRe.exec(s)) !== null) {
+    const tagText = m[0];
+    let quote = null;
+    for (let i = 1; i < tagText.length - 1; i++) {
+      const ch = tagText[i];
+      if (quote) {
+        if (ch === quote) quote = null;
+        continue;
+      }
+      if (ch === '"' || ch === "'") {
+        quote = ch;
+        continue;
+      }
+      const prev = tagText[i - 1];
+      const atBoundary = i === 1 || /\s/.test(prev);
+      if (!atBoundary) continue;
+      const attrMatch = /^on[a-zA-Z]+\s*=/i.exec(tagText.slice(i));
+      if (attrMatch) {
+        found.push(attrMatch[0].replace(/\s*=$/, ""));
+      }
+    }
+  }
+  return found;
+}
+
+const handlers = findInlineHandlers(stripped);
+handlers.forEach((h) => console.log("FOUND:" + h));
+process.exit(handlers.length > 0 ? 1 : 0);
+NODEEOF
+inline_handlers=$(node "$NODE_INLINE_CHECK" "$FILE" || true)
+rm -f "$NODE_INLINE_CHECK"
 if [[ -n "$inline_handlers" ]]; then
   echo "FAIL: inline event-handler attribute(s) found:" >&2
   echo "$inline_handlers" >&2
