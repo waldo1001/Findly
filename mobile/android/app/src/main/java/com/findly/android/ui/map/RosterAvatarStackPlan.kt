@@ -16,10 +16,17 @@ object RosterAvatarStackPlan {
 
     data class Plan(val visibleInitials: List<String>, val overflowCount: Int)
 
-    // RED-before-GREEN placeholder (devloop/A34 review fix): deliberately wrong — always empty,
-    // no overflow — so RosterAvatarStackPlanTest fails for a real assertion reason before the
-    // real logic lands.
-    fun compute(displayNames: List<String>, maxVisible: Int = MAX_VISIBLE): Plan = Plan(emptyList(), 0)
+    fun compute(displayNames: List<String>, maxVisible: Int = MAX_VISIBLE): Plan {
+        val visible = displayNames.take(maxVisible).map(::initialsFor)
+        val overflow = (displayNames.size - visible.size).coerceAtLeast(0)
+        return Plan(visible, overflow)
+    }
 
-    fun initialsFor(displayName: String): String = "XX"
+    /** Same short-label convention as `GoogleMapRenderer.kt`'s marker-bubble `initialsFor` and
+     * iOS's `LiveMapViewModel.initials(for:)` (specs/004-ios-client.md). */
+    fun initialsFor(displayName: String): String {
+        val trimmed = displayName.trim()
+        if (trimmed.isEmpty()) return "?"
+        return trimmed.take(2).uppercase()
+    }
 }
