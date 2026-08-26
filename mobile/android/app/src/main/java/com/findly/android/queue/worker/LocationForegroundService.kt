@@ -88,7 +88,9 @@ class LocationForegroundService : Service() {
     private fun buildNotification(): Notification {
         // 009 §3.2: "a tap action opening the app's device-settings screen" - MainActivity reads
         // this extra (gated to a fresh launch, same idiom as the https-join-link intent handling,
-        // MainActivity.kt's doc) and navigates FindlyNavHost to Destinations.Settings once.
+        // MainActivity.kt's doc) and navigates FindlyNavHost to Destinations.Devices once
+        // (specs/010-app-shell-and-screen-ux.md sec4.1 -- the retired Settings monolith's
+        // replacement).
         val settingsIntent = Intent(this, MainActivity::class.java)
             .putExtra(EXTRA_OPEN_SETTINGS, true)
         val contentIntent = PendingIntent.getActivity(

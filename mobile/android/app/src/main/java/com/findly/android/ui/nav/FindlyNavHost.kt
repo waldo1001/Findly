@@ -29,9 +29,15 @@ import com.findly.android.auth.AuthState
 import com.findly.android.launch.LaunchGateViewModel
 import com.findly.android.launch.LaunchUiState
 import com.findly.android.network.PlanLimits
+import com.findly.android.ui.devices.DevicesRoute
+import com.findly.android.ui.devices.DevicesViewModel
+import com.findly.android.ui.devices.DevicesViewModelFactory
 import com.findly.android.ui.family.CreateFamilyRoute
 import com.findly.android.ui.family.CreateFamilyViewModel
 import com.findly.android.ui.family.CreateFamilyViewModelFactory
+import com.findly.android.ui.family.FamilyMembersRoute
+import com.findly.android.ui.family.FamilyMembersViewModel
+import com.findly.android.ui.family.FamilyMembersViewModelFactory
 import com.findly.android.ui.geofences.GeofencesRoute
 import com.findly.android.ui.geofences.GeofencesViewModel
 import com.findly.android.ui.geofences.GeofencesViewModelFactory
@@ -67,11 +73,9 @@ import com.findly.android.ui.map.MapViewModel
 import com.findly.android.ui.map.MapViewModelFactory
 import com.findly.android.ui.onboarding.OnboardingScreen
 import com.findly.android.ui.onboarding.OnboardingVariant
+import com.findly.android.ui.settings.PrivacyRoute
 import com.findly.android.ui.settings.PrivacyViewModel
 import com.findly.android.ui.settings.PrivacyViewModelFactory
-import com.findly.android.ui.settings.SettingsRoute
-import com.findly.android.ui.settings.SettingsViewModel
-import com.findly.android.ui.settings.SettingsViewModelFactory
 import com.findly.android.ui.signin.SignInRoute
 import com.findly.android.ui.signin.SignInViewModel
 import com.findly.android.ui.signin.SignInViewModelFactory
@@ -81,9 +85,11 @@ import kotlinx.coroutines.launch
  * Navigation scaffold (specs/003-android-client.md §12; §12's amendment, specs/010-app-shell-and-
  * screen-ux.md §6). A1 shipped only `Destinations.Home`; A2 wired the rest —
  * [Destinations.Map]/[Destinations.History]/[Destinations.Geofences]/[Destinations.Locate]/
- * [Destinations.Settings]/[Destinations.Invites] — each screen's `ViewModel` built from
+ * `Destinations.Settings`/[Destinations.Invites] — each screen's `ViewModel` built from
  * [container]'s single [com.findly.android.network.FindlyApiClient] (it implements all five
- * 001 §3–§7 port interfaces, so every factory here just narrows it to the one it needs).
+ * 001 §3–§7 port interfaces, so every factory here just narrows it to the one it needs). A35
+ * (specs/010 §4.1) retires `Destinations.Settings` in favor of [Destinations.Devices]/
+ * [Destinations.Family]/[Destinations.Privacy] below.
  * [Destinations.SignIn] (§7) hosts the phone sign-in screen regardless of `container`'s
  * `authProvider` implementation; a [LaunchedEffect] on `authState` pops this screen once sign-in
  * succeeds, since that's when `authState` flips to `SignedIn`.
@@ -147,8 +153,11 @@ fun FindlyNavHost(
     /** A10 (specs/009-device-runtime.md §3.2): true when this composition was launched by tapping
      * the foreground-service's persistent notification — [com.findly.android.MainActivity] already
      * gates this to a fresh launch (same idiom as [httpsJoinLinkResult]'s own freshness guard, its
-     * doc above), so the one-time navigation below never re-fires on rotation/recreation. */
-    openSettingsOnLaunch: Boolean = false,
+     * doc above), so the one-time navigation below never re-fires on rotation/recreation. A35
+     * (specs/010 §4.1) repoints this from the retired `Destinations.Settings` to
+     * [Destinations.Devices] — the notification's tap action opens "the app's device-settings
+     * screen" (009 §3.2), which is exactly the new Devices screen, not Family/Privacy. */
+    openDevicesOnLaunch: Boolean = false,
 ) {
     var pendingLocateTarget by remember { mutableStateOf<Pair<String, String>?>(null) }
     var pendingCreateContext by remember { mutableStateOf<GroupsListUiState.CreateJoinContext?>(null) }
@@ -222,8 +231,8 @@ fun FindlyNavHost(
     // tapping the foreground-service notification — same "fire once per fresh composition" idiom
     // as the https-join-link effect above.
     LaunchedEffect(Unit) {
-        if (!openSettingsOnLaunch) return@LaunchedEffect
-        navController.navigate(Destinations.Settings.route) {
+        if (!openDevicesOnLaunch) return@LaunchedEffect
+        navController.navigate(Destinations.Devices.route) {
             popUpTo(Destinations.Map.route)
             launchSingleTop = true
         }
@@ -287,13 +296,11 @@ fun FindlyNavHost(
                                 FindlyNavDrawerDestination.FamilyMap -> Unit // already here
                                 FindlyNavDrawerDestination.History -> navController.navigate(Destinations.History.route)
                                 FindlyNavDrawerDestination.Geofences -> navController.navigate(Destinations.Geofences.route)
-                                // Devices/Family/Privacy & data all route at today's single
-                                // Settings monolith pending its A35 decomposition into three
-                                // routes (010 §4.1) — out of this task's scope (010 batch note).
-                                FindlyNavDrawerDestination.Devices,
-                                FindlyNavDrawerDestination.Family,
-                                FindlyNavDrawerDestination.PrivacyAndData,
-                                -> navController.navigate(Destinations.Settings.route)
+                                // A35 (specs/010 §4.1): the Settings monolith is retired — each
+                                // drawer item now reaches its own real route.
+                                FindlyNavDrawerDestination.Devices -> navController.navigate(Destinations.Devices.route)
+                                FindlyNavDrawerDestination.Family -> navController.navigate(Destinations.Family.route)
+                                FindlyNavDrawerDestination.PrivacyAndData -> navController.navigate(Destinations.Privacy.route)
                                 // "Invite someone" routes at today's combined Invites screen
                                 // pending its A36 split into Create invite + Join a family (010
                                 // §5.1) — also out of this task's scope.
@@ -363,7 +370,7 @@ fun FindlyNavHost(
                     navController.navigate(Destinations.GroupJoin.route)
                 },
                 onOpenGroups = { navController.navigate(Destinations.Groups.route) },
-                onOpenPrivacy = { navController.navigate(Destinations.Settings.route) },
+                onOpenPrivacy = { navController.navigate(Destinations.Privacy.route) },
             )
         }
 
@@ -389,13 +396,32 @@ fun FindlyNavHost(
             )
         }
 
-        composable(Destinations.Settings.route) {
-            val settingsViewModel: SettingsViewModel = viewModel(
-                factory = SettingsViewModelFactory(container.findlyApiClient, container.findlyApiClient),
+        // A35 (specs/010 §4.1): the Settings monolith is retired in favor of these three routes
+        // — the same split iOS already had.
+        composable(Destinations.Devices.route) {
+            // GET /devices works without a family (001 §1.5.4/§4), so this doesn't probe
+            // getMyFamily itself — isParent comes straight from the cached launch-probe header,
+            // the same value the drawer above already reads (see DevicesStateHolder's doc for
+            // why this mirrors iOS's DeviceSettingsViewModel(apiClient:isParent:) rather than
+            // the retired SettingsStateHolder's own family probe).
+            val launchState by launchGateViewModel.state.collectAsState()
+            val isParent = (launchState as? LaunchUiState.Ready)?.familyHeader?.isParent ?: false
+            val devicesViewModel: DevicesViewModel = viewModel(
+                factory = DevicesViewModelFactory(container.findlyApiClient, isParent),
             )
-            // A8 (specs/008-privacy-endpoints.md; specs/003 §12.4): a separate ViewModel/
-            // StateHolder, deliberately decoupled from settingsViewModel's family/device load —
-            // see SettingsScreen.kt's doc for why.
+            DevicesRoute(viewModel = devicesViewModel, onRouteToOnboarding = navigateToOnboarding)
+        }
+
+        composable(Destinations.Family.route) {
+            val familyMembersViewModel: FamilyMembersViewModel = viewModel(
+                factory = FamilyMembersViewModelFactory(container.findlyApiClient),
+            )
+            FamilyMembersRoute(viewModel = familyMembersViewModel, onRouteToOnboarding = navigateToOnboarding)
+        }
+
+        composable(Destinations.Privacy.route) {
+            // A8 (specs/008-privacy-endpoints.md; specs/003 §12.4): PrivacyStateHolder is
+            // deliberately decoupled from the family/device load — see its own doc for why.
             val privacyViewModel: PrivacyViewModel = viewModel(
                 factory = PrivacyViewModelFactory(
                     privacyApi = container.findlyApiClient,
@@ -404,11 +430,7 @@ fun FindlyNavHost(
                     localStateWiper = container.localStateWiper,
                 ),
             )
-            SettingsRoute(
-                viewModel = settingsViewModel,
-                privacyViewModel = privacyViewModel,
-                onRouteToOnboarding = navigateToOnboarding,
-            )
+            PrivacyRoute(viewModel = privacyViewModel, onRouteToOnboarding = navigateToOnboarding)
         }
 
         composable(Destinations.Invites.route) {

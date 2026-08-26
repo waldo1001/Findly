@@ -131,9 +131,11 @@ class MainActivity : ComponentActivity() {
             joinLinkHost = container.appConfig.joinLinkHost,
         )
         // specs/009-device-runtime.md §3.2: the foreground-service notification's tap action
-        // opens the device-settings screen. Same freshness guard as httpsJoinLinkResult above
-        // (savedInstanceState == null) so a rotation/recreation doesn't re-fire the navigation.
-        val openSettingsOnLaunch = savedInstanceState == null &&
+        // opens the device-settings screen -- specs/010-app-shell-and-screen-ux.md §4.1's new
+        // Devices route (the retired Settings monolith's replacement). Same freshness guard as
+        // httpsJoinLinkResult above (savedInstanceState == null) so a rotation/recreation doesn't
+        // re-fire the navigation.
+        val openDevicesOnLaunch = savedInstanceState == null &&
             intent?.getBooleanExtra(LocationForegroundService.EXTRA_OPEN_SETTINGS, false) == true
 
         setContent {
@@ -259,7 +261,7 @@ class MainActivity : ComponentActivity() {
                     container = container,
                     launchGateViewModel = launchGateViewModel,
                     httpsJoinLinkResult = httpsJoinLinkResult,
-                    openSettingsOnLaunch = openSettingsOnLaunch,
+                    openDevicesOnLaunch = openDevicesOnLaunch,
                 )
                 }
                 }

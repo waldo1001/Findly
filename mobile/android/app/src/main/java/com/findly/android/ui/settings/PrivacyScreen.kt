@@ -17,102 +17,69 @@ import androidx.compose.ui.tooling.preview.Preview
 import com.findly.android.ui.designsystem.FindlyTheme
 import com.findly.android.ui.designsystem.components.FindlyButton
 import com.findly.android.ui.designsystem.components.FindlyButtonStyle
-import com.findly.android.ui.designsystem.components.FindlyErrorState
 import com.findly.android.ui.designsystem.components.FindlyListRow
-import com.findly.android.ui.designsystem.components.FindlyLoadingState
 import com.findly.android.ui.designsystem.components.FindlySectionHeader
 import com.findly.android.ui.designsystem.components.FindlyStatusChip
 import com.findly.android.ui.designsystem.components.FindlyStatusTone
-import com.findly.android.ui.designsystem.components.FindlySwitchRow
 import com.findly.android.ui.designsystem.components.FindlyTextField
 import com.findly.android.ui.designsystem.components.FindlyTopBar
 import com.findly.android.ui.onboarding.OnboardingVariant
 
 /**
- * The A2 device/family-settings screen (001-api-contract.md §3.5/§3.6/§4.2/§4.3, specs/003-
- * android-client.md §12's `Settings` destination): device list with pause/sync-interval controls
- * and member roster with role/remove controls, gated on [SettingsUiState.Content.myRole] — a
- * non-parent sees everything read-only.
- *
- * **A8 addition** (001 §13; specs/008-privacy-endpoints.md; specs/003 §12.4): the privacy section
- * (export / delete account / delete family) is driven by an entirely separate [PrivacyViewModel]/
- * [PrivacyStateHolder] and is rendered unconditionally below the devices/members content — even
- * when [SettingsUiState] itself is [SettingsUiState.Error] (e.g. a family-less or profile-less
- * caller gets `FAMILY_NOT_FOUND`/`PROFILE_NOT_FOUND` from `GET /families/me`). This is what makes
- * "delete account" reachable without contacting support (008 §4.4) regardless of family state.
+ * The Privacy & data screen (specs/010-app-shell-and-screen-ux.md §4.1's `Privacy & data` drawer
+ * destination), extracted from the retired `ui/settings/SettingsScreen.kt` monolith — this is
+ * exactly that file's former `PrivacySection`/dialogs, now its own route rather than an
+ * unconditional block rendered below the Devices/Family content (which is also what produced
+ * that file's own off-screen-content layout bug: two sibling `fillMaxSize()` `Column`s starving
+ * each other, the same shape as `MapScreen.kt`'s pre-010 roster bug). [PrivacyStateHolder]/
+ * [PrivacyUiState]/[PrivacyViewModel] are unchanged — export/delete-account/delete-family were
+ * already independent of the family/device load (see [PrivacyStateHolder]'s doc), so nothing
+ * about their logic needed to move, only where the screen renders them.
  */
 @Composable
-fun SettingsRoute(
-    viewModel: SettingsViewModel,
-    privacyViewModel: PrivacyViewModel,
+fun PrivacyRoute(
+    viewModel: PrivacyViewModel,
     modifier: Modifier = Modifier,
     onRouteToOnboarding: (OnboardingVariant) -> Unit = {},
 ) {
     val state by viewModel.state.collectAsState()
-    val privacyState by privacyViewModel.state.collectAsState()
     val context = LocalContext.current
 
     // 001 §13.1 / specs/003 §12.4: the export body is handed to the OS share/save sheet unparsed,
     // exactly once per successful export — ExportFileWriter is the one place it touches disk.
-    // 008 §3.1 rule 2 (amended): the artifact is deliberately NOT cleared on the chooser's return,
-    // dismissal, or this screen's teardown — an implicit ACTION_SEND chooser's activity-result
-    // callback fires as soon as the target activity is *launched*, not once it has finished
-    // reading the content:// bytes, so clearing on that signal would race and silently corrupt
-    // lazily-reading share targets ("Save to Files"/"Save to Drive"). Cleanup instead happens
-    // before the next write (ExportArtifactStore.write, below), on the next cold start
-    // (AppContainer's startup wipe), and via the account-deletion local wipe.
-    LaunchedEffect(privacyState.exportFlow) {
-        val ready = privacyState.exportFlow as? ExportFlow.Ready ?: return@LaunchedEffect
+    LaunchedEffect(state.exportFlow) {
+        val ready = state.exportFlow as? ExportFlow.Ready ?: return@LaunchedEffect
         val intent = ExportFileWriter.buildShareIntent(context, ready.result)
         context.startActivity(intent)
-        privacyViewModel.dismissExportResult()
+        viewModel.dismissExportResult()
     }
 
-    // specs/010-app-shell-and-screen-ux.md §2.1's routing rule — Settings' own load (Devices +
-    // Family) and the Privacy section's export action each carry their own routing outcome; both
-    // funnel into the one callback the caller supplied.
-    LaunchedEffect(state) {
-        val current = state
-        if (current is SettingsUiState.RouteToOnboarding) onRouteToOnboarding(current.variant)
-    }
-    LaunchedEffect(privacyState.exportRouteToOnboarding) {
-        privacyState.exportRouteToOnboarding?.let(onRouteToOnboarding)
+    LaunchedEffect(state.exportRouteToOnboarding) {
+        state.exportRouteToOnboarding?.let(onRouteToOnboarding)
     }
 
-    SettingsScreen(
+    PrivacyScreen(
         state = state,
-        privacyState = privacyState,
-        onTogglePause = { deviceId, enabled -> viewModel.updateDeviceSettings(deviceId, trackingEnabled = enabled) },
-        onPromote = { userId -> viewModel.updateMemberRole(userId, role = "parent") },
-        onDemote = { userId -> viewModel.updateMemberRole(userId, role = "member") },
-        onRemoveMember = viewModel::removeMember,
-        onRetry = viewModel::reload,
-        onExportSelf = privacyViewModel::exportSelf,
-        onExportMember = privacyViewModel::exportMember,
-        onDismissExportError = privacyViewModel::dismissExportResult,
-        onStartDeleteAccount = privacyViewModel::startDeleteAccount,
-        onAdvanceDeleteAccountConfirmation = privacyViewModel::advanceDeleteAccountConfirmation,
-        onCancelDeleteAccount = privacyViewModel::cancelDeleteAccount,
-        onConfirmDeleteAccount = privacyViewModel::confirmDeleteAccount,
-        onSignOutAfterFirebaseFailure = privacyViewModel::signOutAfterFirebaseFailure,
-        onStartDeleteFamily = privacyViewModel::startDeleteFamily,
-        onUpdateDeleteFamilyTypedName = privacyViewModel::updateDeleteFamilyTypedName,
-        onCancelDeleteFamily = privacyViewModel::cancelDeleteFamily,
-        onConfirmDeleteFamily = privacyViewModel::confirmDeleteFamily,
+        onExportSelf = viewModel::exportSelf,
+        onExportMember = viewModel::exportMember,
+        onDismissExportError = viewModel::dismissExportResult,
+        onStartDeleteAccount = viewModel::startDeleteAccount,
+        onAdvanceDeleteAccountConfirmation = viewModel::advanceDeleteAccountConfirmation,
+        onCancelDeleteAccount = viewModel::cancelDeleteAccount,
+        onConfirmDeleteAccount = viewModel::confirmDeleteAccount,
+        onSignOutAfterFirebaseFailure = viewModel::signOutAfterFirebaseFailure,
+        onStartDeleteFamily = viewModel::startDeleteFamily,
+        onUpdateDeleteFamilyTypedName = viewModel::updateDeleteFamilyTypedName,
+        onCancelDeleteFamily = viewModel::cancelDeleteFamily,
+        onConfirmDeleteFamily = viewModel::confirmDeleteFamily,
         modifier = modifier,
     )
 }
 
 @Composable
-fun SettingsScreen(
-    state: SettingsUiState,
+fun PrivacyScreen(
+    state: PrivacyUiState,
     modifier: Modifier = Modifier,
-    privacyState: PrivacyUiState = PrivacyUiState(),
-    onTogglePause: (deviceId: String, trackingEnabled: Boolean) -> Unit = { _, _ -> },
-    onPromote: (userId: String) -> Unit = {},
-    onDemote: (userId: String) -> Unit = {},
-    onRemoveMember: (userId: String) -> Unit = {},
-    onRetry: () -> Unit = {},
     onExportSelf: () -> Unit = {},
     onExportMember: (userId: String) -> Unit = {},
     onDismissExportError: () -> Unit = {},
@@ -127,81 +94,8 @@ fun SettingsScreen(
     onConfirmDeleteFamily: () -> Unit = {},
 ) {
     Column(modifier = modifier.fillMaxSize()) {
-        FindlyTopBar(title = "Settings")
+        FindlyTopBar(title = "Privacy & data")
 
-        when (state) {
-            is SettingsUiState.Loading -> FindlyLoadingState(message = "Loading…")
-
-            is SettingsUiState.Error -> FindlyErrorState(
-                title = "Couldn't load settings",
-                message = state.message,
-                onRetry = onRetry,
-            )
-
-            is SettingsUiState.RouteToOnboarding -> FindlyLoadingState(message = "Loading…")
-
-            is SettingsUiState.Content -> {
-                val isParent = state.myRole == "parent"
-
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(FindlyTheme.spacing.md),
-                    verticalArrangement = Arrangement.spacedBy(FindlyTheme.spacing.md),
-                ) {
-                    if (state.mutationError != null) {
-                        FindlyStatusChip(label = state.mutationError, tone = FindlyStatusTone.Danger)
-                    }
-
-                    FindlySectionHeader(title = "Devices")
-                    state.devices.forEach { device ->
-                        FindlySwitchRow(
-                            title = "${device.ownerDisplayName} · ${device.deviceName}",
-                            subtitle = "Every ${device.syncIntervalMinutes} min" +
-                                if (device.pushInvalid) " · push token invalid" else "",
-                            checked = device.trackingEnabled,
-                            enabled = isParent && !state.isMutating,
-                            onCheckedChange = { onTogglePause(device.deviceId, it) },
-                        )
-                    }
-
-                    FindlySectionHeader(title = "Members")
-                    state.members.forEach { member ->
-                        FindlyListRow(
-                            title = member.displayName,
-                            subtitle = member.role,
-                            trailing = {
-                                if (isParent) {
-                                    if (member.role == "parent") {
-                                        FindlyButton(
-                                            text = "Demote",
-                                            onClick = { onDemote(member.userId) },
-                                            enabled = !state.isMutating,
-                                            style = FindlyButtonStyle.Secondary,
-                                        )
-                                    } else {
-                                        FindlyButton(
-                                            text = "Promote",
-                                            onClick = { onPromote(member.userId) },
-                                            enabled = !state.isMutating,
-                                            style = FindlyButtonStyle.Secondary,
-                                        )
-                                    }
-                                    FindlyButton(
-                                        text = "Remove",
-                                        onClick = { onRemoveMember(member.userId) },
-                                        enabled = !state.isMutating,
-                                        style = FindlyButtonStyle.Secondary,
-                                    )
-                                }
-                            },
-                        )
-                    }
-                }
-            }
-        }
-
-        // A8: unconditional — see this file's top doc for why this never sits behind `state`.
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -209,7 +103,7 @@ fun SettingsScreen(
             verticalArrangement = Arrangement.spacedBy(FindlyTheme.spacing.md),
         ) {
             PrivacySection(
-                state = privacyState,
+                state = state,
                 onExportSelf = onExportSelf,
                 onExportMember = onExportMember,
                 onDismissExportError = onDismissExportError,
@@ -228,11 +122,11 @@ fun SettingsScreen(
 }
 
 /**
- * Export / delete-account / delete-family (001 §13; specs/008-privacy-endpoints.md;
- * specs/003-android-client.md §12.4). Confirm dialogs use Material3's [AlertDialog] directly —
- * the same documented exception `GroupDetailScreen`'s owner-action confirms use (specs/003 §4.3
- * exception 2) — since the actual two-step **gating** (no network call before the final confirm)
- * is already enforced by [PrivacyStateHolder]'s state machine, not by anything in this Composable.
+ * Export / delete-account / delete-family (001 §13; specs/008-privacy-endpoints.md; specs/003-
+ * android-client.md §12.4). Confirm dialogs use Material3's [AlertDialog] directly — the same
+ * documented exception `GroupDetailScreen`'s owner-action confirms use (specs/003 §4.3 exception
+ * 2) — since the actual two-step **gating** (no network call before the final confirm) is already
+ * enforced by [PrivacyStateHolder]'s state machine, not by anything in this Composable.
  */
 @Composable
 private fun PrivacySection(
@@ -327,7 +221,7 @@ private fun PrivacySection(
  * itself is what prevents a network call before the second dialog's confirm button. The
  * [DeleteAccountFlow.FirebaseRetryNeeded] dialog offers sign-out, never a bare retry (008 §1.3 —
  * a retry is a trap: `requires-recent-login` never clears on its own; signing out and back in,
- * then re-running delete-account from Settings, is the only real recovery). */
+ * then re-running delete-account from Privacy & data, is the only real recovery). */
 @Composable
 private fun DeleteAccountDialogs(
     flow: DeleteAccountFlow,
@@ -448,22 +342,12 @@ private fun DeleteFamilyDialog(
     }
 }
 
-@Preview(name = "Settings — light", showBackground = true)
+@Preview(name = "Privacy — light", showBackground = true)
 @Composable
-private fun SettingsScreenLightPreview() {
+private fun PrivacyScreenLightPreview() {
     FindlyTheme(darkTheme = false) {
-        SettingsScreen(
-            state = SettingsUiState.Content(
-                myRole = "parent",
-                members = listOf(
-                    MemberUi("u1", "parent", "Eric", "2026-07-01T00:00:00Z"),
-                    MemberUi("u2", "member", "Noor", "2026-07-02T00:00:00Z"),
-                ),
-                devices = listOf(
-                    DeviceUi("d1", "Pixel 8", "Pixel 8", "android", 15, true, false, "Eric", "2026-07-19T09:05:14Z"),
-                ),
-            ),
-            privacyState = PrivacyUiState(
+        PrivacyScreen(
+            state = PrivacyUiState(
                 isLoadingFamily = false,
                 isParent = true,
                 isSoleParent = true,
@@ -474,10 +358,10 @@ private fun SettingsScreenLightPreview() {
     }
 }
 
-@Preview(name = "Settings — dark", showBackground = true)
+@Preview(name = "Privacy — dark", showBackground = true)
 @Composable
-private fun SettingsScreenDarkPreview() {
+private fun PrivacyScreenDarkPreview() {
     FindlyTheme(darkTheme = true) {
-        SettingsScreen(state = SettingsUiState.Loading)
+        PrivacyScreen(state = PrivacyUiState())
     }
 }

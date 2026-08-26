@@ -5,10 +5,12 @@ import com.findly.android.ui.onboarding.OnboardingVariant
 /**
  * Route string constants (specs/003-android-client.md §12; §12's amendment, specs/010-app-shell-
  * and-screen-ux.md §6: `Home` is deleted — the NavHost start destination is now [Map]). [Map]/
- * [History]/[Geofences]/[Locate]/[Settings] were reserved in A1 and are wired to real screens in
- * A2; [Invites] is a new A2 addition (§3.3/§3.4) — additive, same convention as the rest. A5
+ * [History]/[Geofences]/[Locate] were reserved in A1 and are wired to real screens in A2;
+ * [Invites] is a new A2 addition (§3.3/§3.4) — additive, same convention as the rest. A5
  * additively adds the groups destinations below (specs/005-temporary-groups.md). [Onboarding] is
  * the 010 §2.2 addition replacing the retired `Home`/`GroupsListScreen.ProfileNeeded` first-run UI.
+ * A35 (specs/010 §4.1) retires the old `Settings` constant in favor of [Devices]/[Family]/
+ * [Privacy] — the same three-route split iOS already had.
  *
  * [Locate] carries no path argument: the target member is passed via [FindlyNavHost]'s own
  * `remember`-held selection state (set by [com.findly.android.ui.map.MapScreen]'s
@@ -27,7 +29,17 @@ sealed class Destinations(val route: String) {
     data object History : Destinations("history")
     data object Geofences : Destinations("geofences")
     data object Locate : Destinations("locate")
-    data object Settings : Destinations("settings")
+
+    /** specs/010-app-shell-and-screen-ux.md §4.1: the monolithic `Settings` destination is
+     * retired (`ui/settings/SettingsScreen.kt` is deleted) in favor of the three routes below —
+     * the same decomposition iOS already had (`DeviceSettingsScreen`/`FamilyMembersScreen`/its
+     * privacy screen). [Devices]/[Family] are new; [Privacy] replaces `Settings` at the same
+     * `PrivacyStateHolder`/`PrivacyUiState`/`PrivacyViewModel` (unchanged — only where they
+     * render moved, see `PrivacyScreen.kt`'s doc). */
+    data object Devices : Destinations("devices")
+    data object Family : Destinations("family")
+    data object Privacy : Destinations("privacy")
+
     data object Invites : Destinations("invites")
     data object SignIn : Destinations("sign-in")
 

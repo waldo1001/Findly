@@ -62,7 +62,7 @@ class CreateGroupStateHolder(
     }
 
     /** Validates, then — only if valid — calls `POST /groups` (§12.1). A validation failure never
-     * reaches the network, mirroring [com.findly.android.ui.settings.SettingsStateHolder]'s
+     * reaches the network, mirroring [com.findly.android.ui.family.FamilyMembersStateHolder]'s
      * "gate before any network call" convention. */
     suspend fun createGroup(name: String, endsAtMillis: Long?, expiryPolicy: String, displayName: String?) {
         val problem = validate(name, endsAtMillis, expiryPolicy, displayName)

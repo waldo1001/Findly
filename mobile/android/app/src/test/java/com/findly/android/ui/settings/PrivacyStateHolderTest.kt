@@ -23,9 +23,10 @@ import org.junit.Test
 /**
  * [PrivacyStateHolder] is pure Kotlin — tested with fakes (specs/003-android-client.md §12.4,
  * §16's test-checklist additions; wire shapes 001-api-contract.md §13; concepts specs/008-privacy-
- * endpoints.md). Deliberately decoupled from [SettingsStateHolder]'s family/device load: export-
- * self and delete-account MUST be reachable even when the family load fails (008 §4.4 "reachable
- * without contacting support").
+ * endpoints.md). Deliberately decoupled from
+ * [com.findly.android.ui.family.FamilyMembersStateHolder]'s family/device load: export-self and
+ * delete-account MUST be reachable even when the family load fails (008 §4.4 "reachable without
+ * contacting support").
  */
 class PrivacyStateHolderTest {
 
@@ -50,7 +51,7 @@ class PrivacyStateHolderTest {
     ) = PrivacyStateHolder(privacyApi, familyApi, authProvider, localStateWiper, scope)
 
     // ------------------------------------------------------------------
-    // Family-context load (decoupled from SettingsStateHolder)
+    // Family-context load (decoupled from FamilyMembersStateHolder)
     // ------------------------------------------------------------------
 
     @Test

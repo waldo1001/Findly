@@ -15,7 +15,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /** [GroupDetailStateHolder] is pure Kotlin — mirrors
- * [com.findly.android.ui.settings.SettingsStateHolder]'s "gated mutation" shape: every
+ * [com.findly.android.ui.family.FamilyMembersStateHolder]'s "gated mutation" shape: every
  * owner-only action is checked client-side before any network call (001-api-contract.md §12.4/
  * §12.5/§12.7/§12.9's role requirement is server-enforced regardless — defense in depth). */
 class GroupDetailStateHolderTest {
