@@ -5,6 +5,11 @@ import com.findly.android.network.ApiResult
 import com.findly.android.network.dto.GroupMemberLocationDto
 import com.findly.android.network.ports.GroupsApi
 import com.findly.android.network.userMessage
+import com.findly.android.ui.map.CameraCommand
+import com.findly.android.ui.map.CameraPolicyState
+import com.findly.android.ui.map.MapCamera
+import com.findly.android.ui.map.MapCameraPolicy
+import com.findly.android.ui.map.MapCameraTarget
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -26,6 +31,11 @@ class GroupMapStateHolder(
     private val _state = MutableStateFlow<GroupMapUiState>(GroupMapUiState.Loading)
     val state: StateFlow<GroupMapUiState> = _state.asStateFlow()
 
+    // specs/010-app-shell-and-screen-ux.md §3.2/§3.4: the same camera policy state the family map
+    // keeps, through the same renderer seam.
+    private var cameraPolicyState = CameraPolicyState.INITIAL
+    private var cameraSeq = 0L
+
     init {
         scope.launch { refresh() }
     }
@@ -36,11 +46,34 @@ class GroupMapStateHolder(
             _state.value = current.copy(isRefreshing = true)
         }
         when (val result = groupsApi.getGroupLatestLocations(groupId)) {
-            is ApiResult.Success -> _state.value = GroupMapUiState.Content(result.data.members.map { it.toUi() })
+            is ApiResult.Success -> {
+                val members = result.data.members.map { it.toUi() }
+                // RED-before-GREEN placeholder (devloop/A34): never mints a camera command yet.
+                _state.value = GroupMapUiState.Content(members = members)
+            }
             is ApiResult.Failure -> _state.value = result.error.toMapState()
         }
     }
+
+    /** specs/010 §3.5, position-only mirror of [com.findly.android.ui.map.MapStateHolder.selectMember]. */
+    fun selectMember(userId: String) {
+        val current = _state.value as? GroupMapUiState.Content ?: return
+        _state.value = current.copy(selectedUserId = userId)
+    }
+
+    /** specs/010 §3.4's explicit fit-all action. */
+    fun fitAll() {
+        // TODO
+    }
+
+    private fun nextCameraCommand(target: MapCameraTarget): CameraCommand {
+        cameraSeq += 1
+        return CameraCommand(cameraSeq, target)
+    }
 }
+
+private fun List<GroupMapMemberUi>.locatedPoints(): List<Pair<Double, Double>> =
+    filter { it.hasLocation }.map { it.lat!! to it.lon!! }
 
 private fun GroupMemberLocationDto.toUi(): GroupMapMemberUi = GroupMapMemberUi(
     userId = userId,

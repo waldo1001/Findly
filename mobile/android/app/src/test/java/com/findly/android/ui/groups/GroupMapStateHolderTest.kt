@@ -7,9 +7,13 @@ import com.findly.android.network.ApiResult
 import com.findly.android.network.dto.GroupLatestLocationsResponseDto
 import com.findly.android.network.dto.GroupMemberLocationDto
 import com.findly.android.network.dto.GroupPositionDto
+import com.findly.android.ui.map.MapCamera
+import com.findly.android.ui.map.MapCameraTarget
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -101,4 +105,137 @@ class GroupMapStateHolderTest {
         assertEquals(2, api.getGroupLatestLocationsCalls.size)
         assertTrue(holder.state.value is GroupMapUiState.Content)
     }
+
+    // specs/010-app-shell-and-screen-ux.md §3.2/§3.4/§3.5 — the group map shares the family map's
+    // camera policy through the same renderer seam; position-only, so selection targets a
+    // member's own point directly (no per-device freshest resolution needed).
+
+    @Test
+    fun `the first load with a located member emits a camera command`() = runTest {
+        val api = FakeGroupsApi().apply {
+            getGroupLatestLocationsResult = ApiResult.Success(
+                GroupLatestLocationsResponseDto(members = listOf(memberAt("u1", "Eric", 51.0543, 3.7174))),
+                features = groupsFeatures(),
+            )
+        }
+        val holder = GroupMapStateHolder(groupId, api, backgroundScope)
+        runCurrent()
+
+        val state = holder.state.value as GroupMapUiState.Content
+        assertEquals(MapCameraTarget.Center(51.0543, 3.7174, MapCamera.SINGLE_POINT_ZOOM), state.cameraCommand?.target)
+    }
+
+    @Test
+    fun `a refresh that changes the point set never moves the camera again`() = runTest {
+        val api = FakeGroupsApi().apply {
+            getGroupLatestLocationsResult = ApiResult.Success(
+                GroupLatestLocationsResponseDto(members = listOf(memberAt("u1", "Eric", 51.0, 3.0))),
+                features = groupsFeatures(),
+            )
+        }
+        val holder = GroupMapStateHolder(groupId, api, backgroundScope)
+        runCurrent()
+        val firstCommand = (holder.state.value as GroupMapUiState.Content).cameraCommand
+
+        api.getGroupLatestLocationsResult = ApiResult.Success(
+            GroupLatestLocationsResponseDto(members = listOf(memberAt("u1", "Eric", 60.0, 20.0))),
+            features = groupsFeatures(),
+        )
+        holder.refresh()
+
+        val secondCommand = (holder.state.value as GroupMapUiState.Content).cameraCommand
+        assertEquals(firstCommand, secondCommand)
+    }
+
+    @Test
+    fun `selecting a located member zooms to their point at SINGLE_POINT_ZOOM`() = runTest {
+        val api = FakeGroupsApi().apply {
+            getGroupLatestLocationsResult = ApiResult.Success(
+                GroupLatestLocationsResponseDto(members = listOf(memberAt("u1", "Eric", 51.0, 3.0))),
+                features = groupsFeatures(),
+            )
+        }
+        val holder = GroupMapStateHolder(groupId, api, backgroundScope)
+        runCurrent()
+        val beforeSeq = (holder.state.value as GroupMapUiState.Content).cameraCommand?.seq
+
+        holder.selectMember("u1")
+
+        val state = holder.state.value as GroupMapUiState.Content
+        assertEquals("u1", state.selectedUserId)
+        assertEquals(MapCameraTarget.Center(51.0, 3.0, MapCamera.SINGLE_POINT_ZOOM), state.cameraCommand?.target)
+        assertNotEquals(beforeSeq, state.cameraCommand?.seq)
+    }
+
+    @Test
+    fun `selecting a member with no location highlights without moving the camera`() = runTest {
+        val api = FakeGroupsApi().apply {
+            getGroupLatestLocationsResult = ApiResult.Success(
+                GroupLatestLocationsResponseDto(
+                    members = listOf(GroupMemberLocationDto(userId = "u9", displayName = "Noor", role = "member", location = null)),
+                ),
+                features = groupsFeatures(),
+            )
+        }
+        val holder = GroupMapStateHolder(groupId, api, backgroundScope)
+        runCurrent()
+        val before = holder.state.value as GroupMapUiState.Content
+
+        holder.selectMember("u9")
+
+        val after = holder.state.value as GroupMapUiState.Content
+        assertEquals("u9", after.selectedUserId)
+        assertEquals(before.cameraCommand, after.cameraCommand)
+    }
+
+    @Test
+    fun `selecting the already-selected member deselects it`() = runTest {
+        val api = FakeGroupsApi().apply {
+            getGroupLatestLocationsResult = ApiResult.Success(
+                GroupLatestLocationsResponseDto(members = listOf(memberAt("u1", "Eric", 51.0, 3.0))),
+                features = groupsFeatures(),
+            )
+        }
+        val holder = GroupMapStateHolder(groupId, api, backgroundScope)
+        runCurrent()
+        holder.selectMember("u1")
+        assertEquals("u1", (holder.state.value as GroupMapUiState.Content).selectedUserId)
+
+        holder.selectMember("u1")
+
+        assertNull((holder.state.value as GroupMapUiState.Content).selectedUserId)
+    }
+
+    @Test
+    fun `fitAll re-runs the policy over current points on an explicit action`() = runTest {
+        val api = FakeGroupsApi().apply {
+            getGroupLatestLocationsResult = ApiResult.Success(
+                GroupLatestLocationsResponseDto(members = listOf(memberAt("u1", "Eric", 51.0, 3.0), memberAt("u2", "Noor", 60.0, 20.0))),
+                features = groupsFeatures(),
+            )
+        }
+        val holder = GroupMapStateHolder(groupId, api, backgroundScope)
+        runCurrent()
+        val before = (holder.state.value as GroupMapUiState.Content).cameraCommand
+
+        holder.fitAll()
+
+        val after = (holder.state.value as GroupMapUiState.Content).cameraCommand
+        assertNotEquals(before?.seq, after?.seq)
+        assertTrue(after?.target is MapCameraTarget.Bounds)
+    }
+
+    private fun memberAt(userId: String, displayName: String, lat: Double, lon: Double): GroupMemberLocationDto = GroupMemberLocationDto(
+        userId = userId,
+        displayName = displayName,
+        role = "member",
+        location = GroupPositionDto(
+            lat = lat,
+            lon = lon,
+            accuracyM = 10.0,
+            recordedAt = "2026-08-26T10:00:00Z",
+            receivedAt = "2026-08-26T10:00:02Z",
+            isStale = false,
+        ),
+    )
 }
