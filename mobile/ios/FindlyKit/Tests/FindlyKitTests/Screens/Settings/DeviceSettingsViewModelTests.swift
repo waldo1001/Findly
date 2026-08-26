@@ -2,7 +2,12 @@ import Testing
 @testable import FindlyKit
 
 /// specs/004-ios-client.md I2 (001 §4.2–4.3) — device list + settings, parent-vs-owner permission
-/// gating.
+/// gating. specs/010-app-shell-and-screen-ux.md §4.2 (I36): errors from a card's own mutation
+/// render on that card, not pooled into one shared `lastActionError` — `error(forDeviceId:)`
+/// replaces it, keyed per device so one device's failure can never bleed onto another's card.
+/// `minSyncIntervalMinutes` mirrors `features.limits.minSyncIntervalMinutes` (001 §9) for the
+/// sync-interval `FindlyDropdownField`'s floor — CLAUDE.md: limits always come from `features`,
+/// never a call-site literal.
 @MainActor
 struct DeviceSettingsViewModelTests {
 
@@ -54,7 +59,7 @@ struct DeviceSettingsViewModelTests {
         await viewModel.setTrackingEnabled(deviceId: "d1", false)
 
         #expect(viewModel.state == .loaded([makeDevice(trackingEnabled: false)]))
-        #expect(viewModel.lastActionError == nil)
+        #expect(viewModel.error(forDeviceId: "d1") == nil)
         #expect(api.updateDeviceCalls.count == 1)
     }
 
@@ -67,11 +72,11 @@ struct DeviceSettingsViewModelTests {
         await viewModel.setSyncInterval(deviceId: "d1", minutes: 30)
 
         #expect(api.updateDeviceCalls.isEmpty)
-        #expect(viewModel.lastActionError != nil)
+        #expect(viewModel.error(forDeviceId: "d1") != nil)
         #expect(viewModel.state == .loaded([makeDevice()]), "a rejected update must not mutate the loaded list")
     }
 
-    @Test func update_serverError_setsLastActionError_withoutDiscardingTheLoadedList() async {
+    @Test func update_serverError_setsThatDevicesCardError_withoutDiscardingTheLoadedList() async {
         let api = FakeAPIClient()
         api.listDevicesHandler = { TestFeatures.envelope(ListDevicesResponse(devices: [self.makeDevice()])) }
         api.updateDeviceHandler = { _, _ in
@@ -82,8 +87,57 @@ struct DeviceSettingsViewModelTests {
 
         await viewModel.setSyncInterval(deviceId: "d1", minutes: 5)
 
-        #expect(viewModel.lastActionError != nil)
+        #expect(viewModel.error(forDeviceId: "d1") != nil)
         #expect(viewModel.state == .loaded([makeDevice()]))
+    }
+
+    // MARK: - specs/010-app-shell-and-screen-ux.md §4.2 (I36) — per-card error isolation. The
+    // shared top-of-list `lastActionError` this replaces could not express this: a second
+    // device's card must never show a first device's failure, and a later success on the first
+    // device must clear only that device's own error.
+
+    @Test func aFailureOnOneDevice_neverSurfacesOnAnotherDevicesCard() async {
+        let api = FakeAPIClient()
+        api.listDevicesHandler = {
+            TestFeatures.envelope(ListDevicesResponse(devices: [self.makeDevice("d1"), self.makeDevice("d2")]))
+        }
+        api.updateDeviceHandler = { deviceId, _ in
+            throw APIError.server(APIErrorBody(code: .limitExceeded, message: "floor", details: nil, requestId: "r1"), httpStatus: 402)
+        }
+        let viewModel = DeviceSettingsViewModel(apiClient: api, isParent: true)
+        await viewModel.load()
+
+        await viewModel.setSyncInterval(deviceId: "d1", minutes: 5)
+
+        #expect(viewModel.error(forDeviceId: "d1") != nil)
+        #expect(viewModel.error(forDeviceId: "d2") == nil, "device d2 never mutated — it must not inherit d1's error")
+    }
+
+    @Test func aSuccessOnOneDevice_clearsOnlyThatDevicesCardError_leavingAnotherDevicesErrorIntact() async {
+        let api = FakeAPIClient()
+        api.listDevicesHandler = {
+            TestFeatures.envelope(ListDevicesResponse(devices: [self.makeDevice("d1"), self.makeDevice("d2")]))
+        }
+        var callCount = 0
+        api.updateDeviceHandler = { deviceId, request in
+            callCount += 1
+            if deviceId == "d1" {
+                throw APIError.server(APIErrorBody(code: .limitExceeded, message: "floor", details: nil, requestId: "r1"), httpStatus: 402)
+            }
+            return TestFeatures.envelope(DeviceResponse(
+                deviceId: "d2", ownerUserId: "u1", platform: "ios", deviceName: "Eric's phone", model: "iPhone 15",
+                appVersion: "1.0.0", syncIntervalMinutes: 30, trackingEnabled: true, pushInvalid: false
+            ))
+        }
+        let viewModel = DeviceSettingsViewModel(apiClient: api, isParent: true)
+        await viewModel.load()
+        await viewModel.setSyncInterval(deviceId: "d1", minutes: 5)
+        #expect(viewModel.error(forDeviceId: "d1") != nil)
+
+        await viewModel.setSyncInterval(deviceId: "d2", minutes: 30)
+
+        #expect(viewModel.error(forDeviceId: "d2") == nil)
+        #expect(viewModel.error(forDeviceId: "d1") != nil, "d1's own error is untouched by d2's unrelated success")
     }
 
     // MARK: - rename (review-gate finding #4 — previously dead code, now wired into DeviceSettingsScreen)
@@ -109,7 +163,7 @@ struct DeviceSettingsViewModelTests {
             return
         }
         #expect(devices.first?.deviceName == "Noor's tablet")
-        #expect(viewModel.lastActionError == nil)
+        #expect(viewModel.error(forDeviceId: "d1") == nil)
         #expect(api.updateDeviceCalls.count == 1)
     }
 
@@ -122,8 +176,46 @@ struct DeviceSettingsViewModelTests {
         await viewModel.rename(deviceId: "d1", name: "New name")
 
         #expect(api.updateDeviceCalls.isEmpty)
-        #expect(viewModel.lastActionError != nil)
+        #expect(viewModel.error(forDeviceId: "d1") != nil)
         #expect(viewModel.state == .loaded([makeDevice()]))
+    }
+
+    // MARK: - specs/010-app-shell-and-screen-ux.md §4.2/§9 (I36) — the sync-interval floor comes
+    // from `features.limits.minSyncIntervalMinutes`, never a hardcoded value.
+
+    @Test func load_capturesTheSyncIntervalFloor_fromFeatures_notALiteral() async {
+        let api = FakeAPIClient()
+        api.listDevicesHandler = {
+            TestFeatures.envelope(ListDevicesResponse(devices: [self.makeDevice()]), minSyncIntervalMinutes: 30)
+        }
+        let viewModel = DeviceSettingsViewModel(apiClient: api, isParent: true)
+
+        await viewModel.load()
+
+        #expect(viewModel.minSyncIntervalMinutes == 30)
+    }
+
+    @Test func update_refreshesTheSyncIntervalFloor_fromTheMutationResponsesFeatures() async {
+        let api = FakeAPIClient()
+        api.listDevicesHandler = {
+            TestFeatures.envelope(ListDevicesResponse(devices: [self.makeDevice()]), minSyncIntervalMinutes: 5)
+        }
+        api.updateDeviceHandler = { deviceId, _ in
+            TestFeatures.envelope(
+                DeviceResponse(
+                    deviceId: "d1", ownerUserId: "u1", platform: "ios", deviceName: "Eric's phone", model: "iPhone 15",
+                    appVersion: "1.0.0", syncIntervalMinutes: 60, trackingEnabled: true, pushInvalid: false
+                ),
+                minSyncIntervalMinutes: 60
+            )
+        }
+        let viewModel = DeviceSettingsViewModel(apiClient: api, isParent: true)
+        await viewModel.load()
+        #expect(viewModel.minSyncIntervalMinutes == 5)
+
+        await viewModel.setSyncInterval(deviceId: "d1", minutes: 60)
+
+        #expect(viewModel.minSyncIntervalMinutes == 60)
     }
 
     // MARK: - specs/010-app-shell-and-screen-ux.md §2.1 (I34) — the profile-dead-end routing rule.

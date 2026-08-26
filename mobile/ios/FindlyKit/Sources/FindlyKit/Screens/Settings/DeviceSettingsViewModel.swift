@@ -4,8 +4,9 @@ import Foundation
 /// every mutation client-side (matching the server's own §4.3 rule: only a parent may change
 /// `syncIntervalMinutes`/`trackingEnabled`/`deviceName`; a non-parent owner may only ever change
 /// `pushToken`, which isn't user-editable here — it's set automatically by the push-registration
-/// path). A single row's failed update surfaces via `lastActionError` without discarding the
-/// already-loaded list.
+/// path). specs/010-app-shell-and-screen-ux.md §4.2 (I36): a row's failed update surfaces via
+/// `error(forDeviceId:)`, scoped to that device's own card, without discarding the already-loaded
+/// list or any other card's error.
 @MainActor
 public final class DeviceSettingsViewModel: ObservableObject {
     public enum State: Equatable {
@@ -18,12 +19,21 @@ public final class DeviceSettingsViewModel: ObservableObject {
         case routeToOnboarding(OnboardingVariant)
     }
 
-    /// Allowed `syncIntervalMinutes` values (specs/001 §1.4) — presented as picker options; the
-    /// server remains the sole source of truth for validation.
-    public static let allowedSyncIntervals = [5, 10, 15, 30, 60, 120, 1440]
-
     @Published public private(set) var state: State = .loading
-    @Published public private(set) var lastActionError: String?
+    /// specs/010-app-shell-and-screen-ux.md §4.2 (I36) — one entry per device with an in-flight
+    /// or most-recent mutation failure; rendered on that device's own card. Replaces the retired
+    /// shared `lastActionError`, which could not express "this error belongs to device X" and so
+    /// pooled every card's failures into one top-of-list banner.
+    @Published private(set) var cardErrors: [String: String] = [:]
+    /// specs/001-api-contract.md §9 — mirrors the caller's `features.limits.minSyncIntervalMinutes`
+    /// from the most recent envelope (`load()` or any successful `update()`, both of which carry a
+    /// fresh `features`). Feeds the sync-interval `FindlyDropdownField`'s pre-disable floor.
+    /// CLAUDE.md: limits are always read from `features`, never hardcoded at a call site —
+    /// `nil` until the first envelope arrives is the honest representation of that; no numeric
+    /// default is declared here for a real decision to accidentally key off of, and no card
+    /// renders before `state` reaches `.loaded` (which happens in the same envelope handler that
+    /// sets this), so a caller can never observe a stale or invented floor.
+    @Published public private(set) var minSyncIntervalMinutes: Int?
 
     public let isParent: Bool
     private let apiClient: FindlyAPIClient
@@ -33,10 +43,17 @@ public final class DeviceSettingsViewModel: ObservableObject {
         self.isParent = isParent
     }
 
+    /// specs/010-app-shell-and-screen-ux.md §4.2 (I36) — one device's mutation error, rendered on
+    /// that device's own card. Replaces the retired shared `lastActionError`.
+    public func error(forDeviceId deviceId: String) -> String? {
+        cardErrors[deviceId]
+    }
+
     public func load() async {
         state = .loading
         do {
             let envelope = try await apiClient.listDevices()
+            minSyncIntervalMinutes = envelope.features.limits.minSyncIntervalMinutes
             state = .loaded(envelope.data.devices)
         } catch {
             if let variant = onboardingRoutingOutcome(for: error) {
@@ -62,19 +79,20 @@ public final class DeviceSettingsViewModel: ObservableObject {
 
     private func update(deviceId: String, _ request: UpdateDeviceRequest) async {
         guard isParent else {
-            lastActionError = "Only a parent can change device settings."
+            cardErrors[deviceId] = "Only a parent can change device settings."
             return
         }
         guard case .loaded(var devices) = state else { return }
         do {
             let envelope = try await apiClient.updateDevice(deviceId: deviceId, request)
+            minSyncIntervalMinutes = envelope.features.limits.minSyncIntervalMinutes
             if let index = devices.firstIndex(where: { $0.deviceId == deviceId }) {
                 devices[index] = Self.merge(devices[index], with: envelope.data)
                 state = .loaded(devices)
             }
-            lastActionError = nil
+            cardErrors[deviceId] = nil
         } catch {
-            lastActionError = userFacingMessage(for: error)
+            cardErrors[deviceId] = userFacingMessage(for: error)
         }
     }
 

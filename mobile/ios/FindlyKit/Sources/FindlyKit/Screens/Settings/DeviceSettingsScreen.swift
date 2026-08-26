@@ -1,9 +1,16 @@
 import SwiftUI
 
-/// specs/004-ios-client.md I2 (001 §4.2–4.3) — composes ONLY design-system components. Sync-
-/// interval selection is a row of `FindlyButton` toggles (the allowed §1.4 values); pause is a
-/// `FindlyToggleRow`; rename is a `FindlyTextField` + "Save name" button. All three are hidden
-/// (read-only) for a non-parent viewer, matching §4.3's parent-vs-owner permission split.
+/// specs/004-ios-client.md I2 (001 §4.2–4.3), specs/010-app-shell-and-screen-ux.md §4.2 (I36) —
+/// composes ONLY design-system components. Sync-interval selection is a `FindlyDropdownField`
+/// over the 001 §1.4 values (replacing the pre-010 horizontally-scrolling `FindlyButton` chip
+/// row); pause is a `FindlyToggleRow`; rename is a single aligned field+Save row using
+/// `FindlyTextField(nil, ...)` (review fix, I36 round 2 — `label` is now optional on the shared
+/// component itself, so the stacked label row that used to sit beside a bare button and throw
+/// the pair's vertical centers out of alignment is simply omitted, rather than duplicated in a
+/// screen-local type). All three are hidden (read-only) for a non-parent viewer, matching §4.3's
+/// parent-vs-owner permission split. Each card's own mutation errors render on that card via
+/// `viewModel.error(forDeviceId:)` — the pre-010 shared top-of-list `lastActionError` banner is
+/// retired, not left alongside this.
 public struct DeviceSettingsScreen: View {
     @Environment(\.theme) private var theme
     // `@StateObject`, NOT `@ObservedObject` — see `HomeScreen`'s doc for the full failure mode
@@ -57,9 +64,6 @@ public struct DeviceSettingsScreen: View {
     private func list(_ devices: [DeviceListItem]) -> some View {
         ScrollView {
             VStack(spacing: theme.spacing.md) {
-                if let lastActionError = viewModel.lastActionError {
-                    ErrorStateView(message: lastActionError)
-                }
                 if devices.isEmpty {
                     EmptyStateView(title: "No devices yet", message: "Devices register automatically after sign-in.")
                 } else {
@@ -108,43 +112,65 @@ private struct DeviceCardView: View {
                             set: { newValue in Task { await viewModel.setTrackingEnabled(deviceId: device.deviceId, newValue) } }
                         )
                     )
-                    intervalPicker
+                    intervalDropdown
                     renameRow
                 }
-            }
-        }
-    }
-
-    private var renameRow: some View {
-        HStack(spacing: theme.spacing.sm) {
-            FindlyTextField("Device name", text: $renameDraft, placeholder: device.deviceName)
-            FindlyButton("Save name", style: .secondary) {
-                Task { await viewModel.rename(deviceId: device.deviceId, name: renameDraft) }
-            }
-            .disabled(renameDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-        }
-    }
-
-    private var intervalPicker: some View {
-        VStack(alignment: .leading, spacing: theme.spacing.xs) {
-            Text("Sync interval")
-                .font(theme.typography.labelSmall.font)
-                .foregroundColor(theme.colors.onSurface.opacity(0.7))
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: theme.spacing.sm) {
-                    ForEach(DeviceSettingsViewModel.allowedSyncIntervals, id: \.self) { minutes in
-                        FindlyButton(label(for: minutes), style: minutes == device.syncIntervalMinutes ? .primary : .secondary) {
-                            Task { await viewModel.setSyncInterval(deviceId: device.deviceId, minutes: minutes) }
-                        }
-                    }
+                // specs/010-app-shell-and-screen-ux.md §4.2 (I36): "Errors from this card's
+                // mutations render on this card, not pooled at the top of the list" — the retired
+                // shared `lastActionError` banner used to sit above the whole list in
+                // `DeviceSettingsScreen.list(_:)`; this is its sole replacement, scoped to this
+                // device's own card only.
+                if let cardError = viewModel.error(forDeviceId: device.deviceId) {
+                    cardErrorText(cardError)
                 }
             }
         }
     }
 
-    private func label(for minutes: Int) -> String {
-        if minutes < 60 { return "\(minutes)m" }
-        if minutes < 1440 { return "\(minutes / 60)h" }
-        return "1d"
+    /// specs/010-app-shell-and-screen-ux.md §4.2/§9 (review fix, I36 round 2) — passes the floor
+    /// straight through as `Int?`, no `?? 0`: a `nil` floor now fails CLOSED inside
+    /// `SyncIntervalDropdownPlan.options` (every option individually disabled), and the whole
+    /// field is ALSO disabled here as a second, belt-and-braces gate — mirroring Android's
+    /// `SyncIntervalOptions`, which disables both the per-option state and the dropdown's own
+    /// `enabled` flag. `?? 0` was wrong: a floor of 0 disables nothing, failing OPEN.
+    private var intervalDropdown: some View {
+        FindlyDropdownField(
+            label: "Sync interval",
+            options: SyncIntervalDropdownPlan.options(minSyncIntervalMinutes: viewModel.minSyncIntervalMinutes),
+            selection: device.syncIntervalMinutes,
+            onSelect: { minutes in
+                Task { await viewModel.setSyncInterval(deviceId: device.deviceId, minutes: minutes) }
+            }
+        )
+        .disabled(viewModel.minSyncIntervalMinutes == nil)
+    }
+
+    /// specs/010-app-shell-and-screen-ux.md §4.2 — "one horizontal row containing the
+    /// device-name input and a Save button, both the same control height (52 pt), vertically
+    /// centered on each other." Uses the shared `FindlyTextField` with `label: nil` (review fix,
+    /// I36 round 2) — its stacked label row is what threw this pair's vertical centers out of
+    /// alignment before this task, and a `nil` label omits that row entirely rather than
+    /// duplicating the component's box geometry in a screen-local type. The static "Device name"
+    /// placeholder doubles as the field's accessibility label (§4.2's "placeholder + accessibility
+    /// label" wording) via `FindlyTextField`'s own `label ?? placeholder` fallback.
+    private var renameRow: some View {
+        HStack(alignment: .center, spacing: theme.spacing.sm) {
+            FindlyTextField(nil, text: $renameDraft, placeholder: "Device name")
+            FindlyButton("Save", style: .secondary) {
+                let trimmed = renameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+                Task { await viewModel.rename(deviceId: device.deviceId, name: trimmed) }
+            }
+            .frame(width: 96) // fixed so it doesn't split the row 50/50 with the equally-greedy text field
+            .disabled(!DeviceRenamePlan.isSaveEnabled(draft: renameDraft, currentName: device.deviceName))
+        }
+    }
+
+    private func cardErrorText(_ message: String) -> some View {
+        HStack(alignment: .top, spacing: theme.spacing.xs) {
+            Text("✕")
+            Text(message)
+        }
+        .font(theme.typography.bodyMedium.font)
+        .foregroundColor(theme.colors.danger)
     }
 }

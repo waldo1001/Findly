@@ -10,16 +10,25 @@ import SwiftUI
 /// `danger` with an inline `✕` message when there's an error, and — added post-review, the field
 /// previously never read `isEnabled` at all — `findlyTextFieldDisabledFill`/`Border`/`Text` when
 /// disabled, taking priority over focus/error styling).
+///
+/// specs/010-app-shell-and-screen-ux.md §4.2 (review fix, I36 round 2) — `label` is now optional:
+/// a `nil` label omits the stacked label row entirely, for a single aligned field+control row
+/// (e.g. the Devices screen's rename row, next to a same-height Save button) where a
+/// label-above-field stack would misalign the pair. Every existing call site passes `label`
+/// positionally as a non-optional `String` literal, which Swift promotes to `String?`
+/// automatically, so none of them needed to change. Mirrors Android's `FindlyTextField.kt`
+/// (`label: String? = null` since A2) and its merged `DevicesScreen.kt`, which already solves
+/// this identical layout with a `nil`-label call.
 public struct FindlyTextField: View {
     @Environment(\.theme) private var theme
     @Environment(\.isEnabled) private var isEnabled
     @FocusState private var isFocused: Bool
-    private let label: String
+    private let label: String?
     @Binding private var text: String
     private let placeholder: String
     private let errorMessage: String?
 
-    public init(_ label: String, text: Binding<String>, placeholder: String = "", errorMessage: String? = nil) {
+    public init(_ label: String?, text: Binding<String>, placeholder: String = "", errorMessage: String? = nil) {
         self.label = label
         self._text = text
         self.placeholder = placeholder
@@ -28,10 +37,12 @@ public struct FindlyTextField: View {
 
     public var body: some View {
         VStack(alignment: .leading, spacing: theme.spacing.xs) {
-            Text(label)
-                .font(theme.typography.labelSmall.font)
-                .tracking(theme.typography.labelSmall.tracking)
-                .foregroundColor(theme.onSurfaceMuted)
+            if let label {
+                Text(label)
+                    .font(theme.typography.labelSmall.font)
+                    .tracking(theme.typography.labelSmall.tracking)
+                    .foregroundColor(theme.onSurfaceMuted)
+            }
             TextField(placeholder, text: $text)
                 .disabled(!isEnabled)
                 .focused($isFocused)
@@ -46,6 +57,12 @@ public struct FindlyTextField: View {
                         .strokeBorder(borderColor, lineWidth: 1.5)
                 )
                 .overlay(focusRing)
+                // §4.2: "carries its label via placeholder + accessibility label" when there is
+                // no stacked label Text above it — explicit here (rather than relying on
+                // TextField's own default title-as-accessibility-label behavior) so VoiceOver
+                // naming is guaranteed regardless of SwiftUI version. Harmless when `label` is
+                // present: it names the field exactly what the visible label already says.
+                .accessibilityLabel(label ?? placeholder)
             if let errorMessage {
                 Text("✕ \(errorMessage)")
                     .font(.system(size: 13, weight: .regular))
@@ -76,6 +93,9 @@ public struct FindlyTextField: View {
         FindlyTextField("Name", text: .constant(""), placeholder: "Add someone to The Haddads")
         FindlyTextField("Invite code", text: .constant("A1B2C3"), errorMessage: "That code has expired")
         FindlyTextField("Sync interval", text: .constant("15 min")).disabled(true)
+        // specs/010-app-shell-and-screen-ux.md §4.2 — the label-less form (nil label), used
+        // beside a same-height Save button in a single aligned row (Devices screen rename row).
+        FindlyTextField(nil, text: .constant("Eric's phone"), placeholder: "Device name")
     }
     .padding()
     .background(Theme.light.colors.surface)
@@ -87,6 +107,7 @@ public struct FindlyTextField: View {
         FindlyTextField("Name", text: .constant(""), placeholder: "Add someone to The Haddads")
         FindlyTextField("Invite code", text: .constant("A1B2C3"), errorMessage: "That code has expired")
         FindlyTextField("Sync interval", text: .constant("15 min")).disabled(true)
+        FindlyTextField(nil, text: .constant("Eric's phone"), placeholder: "Device name")
     }
     .padding()
     .background(Theme.dark.colors.surface)
