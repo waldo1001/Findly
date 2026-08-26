@@ -106,11 +106,8 @@ public enum MapCameraPolicy {
     /// with zero points still gets its one "settle on the calm default" run), or the first later
     /// refresh that brings the first-ever point in from a zero-point open. False on every refresh
     /// after that, even one whose marker set changed — the 010 §3.4 rule this exists to enforce.
-    ///
-    /// Deliberately returns `true` unconditionally right now — a wrong-on-purpose stub so the
-    /// first test run is an assertion failure, not a compile error (per this task's TDD mandate).
     public static func shouldRunOnLoadOrRefresh(state: MapCameraPolicyState, hasPoints: Bool) -> Bool {
-        true
+        !state.hasRunInitial || (!state.hadAnyPoint && hasPoints)
     }
 
     public static func nextState(state: MapCameraPolicyState, hasPoints: Bool) -> MapCameraPolicyState {
@@ -118,10 +115,25 @@ public enum MapCameraPolicy {
     }
 
     /// specs/010 §3.5 / §10 "Freshest-device resolution": newest `recordedAt` among located
-    /// devices wins; devices without a fix are never chosen.
-    ///
-    /// Deliberately returns `nil` unconditionally right now — the wrong-on-purpose stub.
+    /// devices wins; devices without a fix are never chosen. `recordedAt` is ISO 8601 UTC (001
+    /// §1.4) and assumed parseable for every device that has a fix (`lat`/`lon` both non-nil) —
+    /// the wire contract never emits one without the other.
     public static func freshestLocatedDevice(devices: [DeviceLocation]) -> DeviceLocation? {
-        nil
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let plainFormatter = ISO8601DateFormatter()
+
+        func parsedRecordedAt(_ device: DeviceLocation) -> Date? {
+            guard let recordedAt = device.recordedAt else { return nil }
+            return formatter.date(from: recordedAt) ?? plainFormatter.date(from: recordedAt)
+        }
+
+        return devices
+            .filter { $0.lat != nil && $0.lon != nil }
+            .compactMap { device -> (DeviceLocation, Date)? in
+                guard let date = parsedRecordedAt(device) else { return nil }
+                return (device, date)
+            }
+            .max { $0.1 < $1.1 }?.0
     }
 }
