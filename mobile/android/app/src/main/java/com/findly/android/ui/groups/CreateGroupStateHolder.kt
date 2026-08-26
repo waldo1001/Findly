@@ -13,7 +13,7 @@ import java.time.Instant
 /**
  * The create-group screen's pure state machine (001-api-contract.md §12.1). No constructor
  * [kotlinx.coroutines.CoroutineScope] is needed — like
- * [com.findly.android.ui.invites.InvitesStateHolder] — since there is nothing to eagerly
+ * [com.findly.android.ui.invites.AcceptInviteStateHolder] — since there is nothing to eagerly
  * load, only a user-initiated form submission.
  *
  * [limits] is the caller's own [PlanLimits] (threaded in from [GroupsListStateHolder]'s most

@@ -11,7 +11,7 @@ import kotlinx.coroutines.flow.asStateFlow
 /**
  * The create-family screen's pure state machine (001-api-contract.md §3.1). No constructor
  * [kotlinx.coroutines.CoroutineScope] is needed — same shape as
- * [com.findly.android.ui.groups.CreateGroupStateHolder]/[com.findly.android.ui.invites.InvitesStateHolder]
+ * [com.findly.android.ui.groups.CreateGroupStateHolder]/[com.findly.android.ui.invites.AcceptInviteStateHolder]
  * — a user-initiated form submission only.
  *
  * **A21**: this is the client's *only* entry point for `POST /families` — the endpoint existed

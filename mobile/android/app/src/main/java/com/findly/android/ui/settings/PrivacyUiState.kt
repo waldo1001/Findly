@@ -8,7 +8,7 @@ import com.findly.android.ui.onboarding.OnboardingVariant
 data class ExportableMemberUi(val userId: String, val displayName: String)
 
 /** Export sub-flow (008 §3) — independent of the two delete flows below, the same "multiple
- * independent sub-flows in one plain state" shape as `InvitesUiState`
+ * independent sub-flows in one plain state" shape as `CreateInviteUiState`/`AcceptInviteUiState`
  * (specs/003-android-client.md §12.1). */
 sealed class ExportFlow {
     data object Idle : ExportFlow()

@@ -7,7 +7,7 @@ import com.findly.android.auth.AuthProvider
 import kotlinx.coroutines.flow.StateFlow
 
 /** Thin Android `ViewModel` wrapper — all logic lives in [SignInStateHolder] (specs/003-android-
- * client.md §7, §14; same convention as `InvitesViewModel`). [SignInStateHolder]'s resend-cooldown
+ * client.md §7, §14; same convention as `CreateInviteViewModel`/`AcceptInviteViewModel`). [SignInStateHolder]'s resend-cooldown
  * ticker runs on `viewModelScope`, cancelled automatically when this `ViewModel` is cleared. */
 class SignInViewModel(authProvider: AuthProvider) : ViewModel() {
     private val stateHolder = SignInStateHolder(authProvider, viewModelScope)

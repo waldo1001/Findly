@@ -25,7 +25,7 @@ import com.findly.android.ui.designsystem.components.FindlyTopBar
  * Android's `GroupsListScreen` `ProfileNeeded` state — both retired; the A21/I17 behaviors move
  * here unchanged, including the blank-name guard on all four bootstrap paths, which already lives
  * in [com.findly.android.ui.family.CreateFamilyStateHolder.validate] /
- * [com.findly.android.ui.invites.InvitesStateHolder.acceptInvite] /
+ * [com.findly.android.ui.invites.AcceptInviteStateHolder.acceptInvite] /
  * [com.findly.android.ui.groups.CreateGroupStateHolder.validate] /
  * [com.findly.android.ui.groups.GroupJoinStateHolder.validate] and needs no duplicate here).
  *
