@@ -4,7 +4,7 @@
     "details": [
       {
         "appIDs": ["92A2K3Q7NH.com.findly.ios"],
-        "components": [{ "/": "/g" }]
+        "components": [{ "/": "/g" }, { "/": "/f" }]
       }
     ]
   }
