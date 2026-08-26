@@ -11,6 +11,7 @@ struct LaunchGateTests {
         #expect(LaunchGate.resolve(isSignedIn: false, probe: .confirmed) == .signIn)
         #expect(LaunchGate.resolve(isSignedIn: false, probe: .confirmedNoProfile) == .signIn)
         #expect(LaunchGate.resolve(isSignedIn: false, probe: .confirmedNoFamily) == .signIn)
+        #expect(LaunchGate.resolve(isSignedIn: false, probe: .confirmedAuthFailure) == .signIn)
         #expect(LaunchGate.resolve(isSignedIn: false, probe: .inconclusive) == .signIn)
     }
 
@@ -31,5 +32,12 @@ struct LaunchGateTests {
     /// whatever caused it. Only a CONFIRMED 404 may route away from the map.
     @Test func signedIn_inconclusiveProbe_failsOpenToFamilyMap() {
         #expect(LaunchGate.resolve(isSignedIn: true, probe: .inconclusive) == .familyMap)
+    }
+
+    /// specs/010-app-shell-and-screen-ux.md §1.1 (amended, row A37): a CONFIRMED auth failure is
+    /// NOT an inconclusive probe — it MUST route to Sign-in, never fail open to the map. This is
+    /// the one row the pre-amendment table had no answer for at all.
+    @Test func signedIn_confirmedAuthFailure_routesToSignIn() {
+        #expect(LaunchGate.resolve(isSignedIn: true, probe: .confirmedAuthFailure) == .signIn)
     }
 }

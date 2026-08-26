@@ -12,13 +12,24 @@ import Foundation
 /// protocol, mockable in tests) each time.
 @MainActor
 public enum AppLaunchResolver {
+    /// - Parameter onConfirmedAuthFailure: specs/010-app-shell-and-screen-ux.md §1.1 (amended, row
+    ///   A37) — invoked, before returning, when the probe confirms the caller is unauthorized
+    ///   (`AUTH_MISSING_TOKEN`/`AUTH_INVALID_TOKEN`/`AUTH_TOKEN_EXPIRED`/`AUTH_FORBIDDEN`). Callers
+    ///   wire this to the SAME wipe-then-sign-out shape `FindlyApp.swift`'s forced `onSignedOut`
+    ///   closure already uses (`authProvider.signOut()` + `LocationRuntimeContainer.
+    ///   wipeLocalState()`) — never a second implementation (the I43 lesson). Defaults to a no-op
+    ///   so every existing call site/test that doesn't care is unaffected.
     public static func resolve(
         apiClient: FindlyAPIClient,
         isSignedIn: Bool,
-        cache: FamilyContextCache? = nil
+        cache: FamilyContextCache? = nil,
+        onConfirmedAuthFailure: () async -> Void = {}
     ) async -> LaunchDestination {
         guard isSignedIn else { return .signIn }
         let probe = await probeProfile(apiClient: apiClient, cache: cache)
+        // TODO(A37 RED): deliberately wrong — never invokes the closure, so
+        // AppLaunchResolverTests' new assertion (the closure DID run) fails on a value mismatch
+        // rather than a missing symbol. Fixed in the immediately following GREEN commit.
         return LaunchGate.resolve(isSignedIn: true, probe: probe)
     }
 
@@ -34,12 +45,18 @@ public enum AppLaunchResolver {
         }
     }
 
-    /// specs/010 §1.1 — only a CONFIRMED 404 routes away from the Family Map; everything else
-    /// (timeout, 5xx, a transient 401, a decode failure, an as-yet-unrecognized code) fails open.
+    /// specs/010 §1.1 (amended, row A37) — a CONFIRMED 404 routes to Onboarding, a CONFIRMED auth
+    /// failure routes to Sign-in (clearing the session); everything else (timeout, 5xx, a 401/403
+    /// that arrived with no decodable error code at all, a decode failure, an as-yet-unrecognized
+    /// code) fails open. The branch is on the typed `serverCode`, never the raw HTTP status — a
+    /// `.server` case's code is only ever non-nil when the body actually decoded (`APIError.
+    /// serverCode`'s doc), which is exactly the amendment's "no error code was received" test.
     static func classify(_ error: Error) -> ProfileProbeOutcome {
         switch (error as? APIError)?.serverCode {
         case .profileNotFound: return .confirmedNoProfile
         case .familyNotFound: return .confirmedNoFamily
+        case .authMissingToken, .authInvalidToken, .authTokenExpired, .authForbidden:
+            return .confirmedAuthFailure
         default: return .inconclusive
         }
     }
