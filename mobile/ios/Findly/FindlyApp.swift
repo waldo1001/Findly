@@ -56,6 +56,12 @@ struct FindlyApp: App {
     // to grow by `DeviceRegistrationService` + `AppVersionRegistrationTracking` just to thread this
     // one call through.
     private let onSignedIn: () async -> Void
+    // specs/010-app-shell-and-screen-ux.md §1.2 — the ONE shared instance the drawer header reads
+    // (family name + caller display name, "cached from the launch probe"); populated by
+    // `AppLaunchResolver` (cold start / interactive sign-in) and refreshed opportunistically by
+    // `FamilyMembersViewModel`/bootstrap successes. Built once here, like everything else in this
+    // file, and handed down as a plain `@StateObject` in `RootView`.
+    @StateObject private var familyContextCache = FamilyContextCache()
 
     init() {
         // specs/004 §8 — real deployment values come from this target's Info.plist (iOS's
@@ -353,7 +359,8 @@ struct FindlyApp: App {
                 exportArtifactStore: exportArtifactStore,
                 appVersionTracker: appVersionTracker,
                 locationRuntimeContainer: locationRuntimeContainer,
-                onSignedIn: onSignedIn
+                onSignedIn: onSignedIn,
+                familyContextCache: familyContextCache
             )
                 // specs/004-ios-client.md §3.4/§3.5 — both the `findly://group-join?code=…` deep
                 // link and, since specs/007, the `https://{joinLinkHost}/g#CODE` universal link are
