@@ -32,7 +32,10 @@ public struct AcceptInviteScreen: View {
         onAccepted: @escaping () -> Void = {}
     ) {
         _viewModel = StateObject(wrappedValue: viewModel())
-        self._inviteCode = State(initialValue: prefillInviteCode)
+        // specs/010-app-shell-and-screen-ux.md §5.2 — the smart field's display form, applied to
+        // the deep-link prefill too, so it opens already grouped as `XXXX-XXXX` rather than a
+        // raw 8-char run.
+        self._inviteCode = State(initialValue: InviteCodeParsing.liveFormat(prefillInviteCode))
         self._displayName = State(initialValue: prefillDisplayName)
         self.onAccepted = onAccepted
     }
@@ -54,15 +57,27 @@ public struct AcceptInviteScreen: View {
         return false
     }
 
+    /// specs/010-app-shell-and-screen-ux.md §5.2 — "the join button disables until both fields
+    /// are non-blank" (Android's existing guard, now the rule on both platforms).
+    private var canSubmit: Bool {
+        !inviteCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    /// specs/010-app-shell-and-screen-ux.md §5.2 — success resets to the Family Map root
+    /// (`RootView`'s `.acceptInvite` case calls `onAccepted` -> `coordinator.showRoot()` the
+    /// instant `state` reaches `.joined`); the retired terminal "Welcome!" dead-end is replaced by
+    /// simply staying on `form` for the one frame before that reset actually happens — the exact
+    /// pattern `CreateFamilyScreen`/`CreateGroupScreen` already use for their own `.created`/
+    /// `.joined` success states, rather than a state-specific view nobody stays on long enough to
+    /// read.
     @ViewBuilder
     private var content: some View {
         switch viewModel.state {
-        case .idle, .error:
+        case .idle, .error, .joined:
             form
         case .joining:
             LoadingStateView(message: "Joining…")
-        case .joined(_, let familyName, _):
-            EmptyStateView(title: "Welcome!", message: "You've joined \(familyName).")
         }
     }
 
@@ -71,12 +86,39 @@ public struct AcceptInviteScreen: View {
             if case .error(let message) = viewModel.state {
                 ErrorStateView(message: message)
             }
-            FindlyTextField("Invite code", text: $inviteCode, placeholder: "XXXX-XXXX")
+            // specs/010-app-shell-and-screen-ux.md §5.2 — the smart code field: auto-uppercases,
+            // strips hyphens/spaces, whitelist-filters to the Crockford base32 charset, and
+            // renders as `XXXX-XXXX` while typing (`InviteCodeParsing.liveFormat`, shared pure
+            // logic, unit-tested).
+            FindlyTextField("Invite code", text: codeBinding, placeholder: "XXXX-XXXX")
+            #if os(iOS)
+            InvitePasteControl { pasted in
+                // specs/010-app-shell-and-screen-ux.md §5.2 — "pasting an invite LINK extracts the
+                // fragment code via the same 007 parsing": `InviteCodeParsing.normalize(_:)`
+                // already handles a bare code, the legacy path-form link, AND the new
+                // findly://family-join / https://{host}/f#CODE forms, so whatever the clipboard
+                // held, only the extracted code (never the raw pasteboard text) reaches the field.
+                if let code = InviteCodeParsing.normalize(pasted) {
+                    inviteCode = InviteCodeParsing.liveFormat(code)
+                }
+            }
+            .frame(height: 32)
+            #endif
             FindlyTextField("Your name", text: $displayName, placeholder: "Noor")
             FindlyButton("Join family") {
                 Task { await viewModel.accept(rawInviteCode: inviteCode, displayName: displayName) }
             }
+            .disabled(!canSubmit)
         }
         .padding(.horizontal, theme.spacing.xl)
+    }
+
+    /// Live-formats on every keystroke (010 §5.2) — `InviteCodeParsing.normalize(_:)` still does
+    /// the final hyphen-stripped/8-char normalization at submit time, unchanged.
+    private var codeBinding: Binding<String> {
+        Binding(
+            get: { inviteCode },
+            set: { inviteCode = InviteCodeParsing.liveFormat($0) }
+        )
     }
 }
