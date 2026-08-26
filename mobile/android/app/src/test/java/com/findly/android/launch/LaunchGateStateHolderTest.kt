@@ -191,6 +191,27 @@ class LaunchGateStateHolderTest {
     }
 
     @Test
+    fun `signed-in registration still succeeds when no push token is available yet`() = runTest {
+        // A null push token at first launch is the normal case (FCM often hasn't produced one
+        // yet), not an edge case — 001 §4.1 documents pushToken as OPTIONAL for exactly this
+        // reason. Coverage-gap fix (review finding): every other registration-asserting test in
+        // this suite uses either the default fake or an explicit non-null token, so this path was
+        // exercised implicitly but never actually asserted.
+        val authProvider = FakeAuthProvider(initialState = AuthState.SignedIn("uid-1"))
+        val fakeApi = FakeDevicesApi()
+        val pushTokenProvider = FakePushTokenProvider(tokenToReturn = null)
+        val holder = LaunchGateStateHolder(authProvider, registrar(fakeApi), pushTokenProvider, FakeFamilyApi(), backgroundScope)
+
+        runCurrent()
+
+        assertEquals(1, fakeApi.registerDeviceCalls.size)
+        assertEquals(null, fakeApi.registerDeviceCalls.single().pushToken)
+        val state = holder.state.value
+        assertTrue(state is LaunchUiState.Ready)
+        assertEquals(LaunchUiState.RegistrationStatus.Registered, (state as LaunchUiState.Ready).registration)
+    }
+
+    @Test
     fun `retryRegistration re-probes and registers once a bootstrap path has created the profile`() = runTest {
         val authProvider = FakeAuthProvider(initialState = AuthState.SignedIn("uid-1"))
         val fakeApi = FakeDevicesApi()
