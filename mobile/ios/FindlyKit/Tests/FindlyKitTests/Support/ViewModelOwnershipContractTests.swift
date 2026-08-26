@@ -27,15 +27,6 @@ struct ViewModelOwnershipContractTests {
         init(token: Int) { self.token = token }
     }
 
-    /// Appends, in render order, the `token` of whichever `ProbeModel` a probe view's `body`
-    /// observed. A `@StateObject`-owned probe should record the SAME token on every render no
-    /// matter how many freshly-constructed models its parent hands it; an `@ObservedObject`-owned
-    /// one records a NEW token every time — that difference IS the I16 bug, reproduced under test.
-    final class ObservationLog {
-        private(set) var observedTokens: [Int] = []
-        func record(_ token: Int) { observedTokens.append(token) }
-    }
-
     /// The probe view under test. `@StateObject` fed via `@autoclosure`, mirroring
     /// `HomeScreen.init`'s post-I16 shape verbatim: the factory is invoked by the caller on every
     /// re-render, but `_model = StateObject(wrappedValue: model())` only actually installs that
@@ -43,9 +34,9 @@ struct ViewModelOwnershipContractTests {
     /// discarded, matching real `@StateObject` semantics.
     struct ScreenOwnershipProbe: View {
         @StateObject private var model: ProbeModel
-        private let log: ObservationLog
+        private let log: ObservationLog<Int>
 
-        init(model: @autoclosure @escaping () -> ProbeModel, log: ObservationLog) {
+        init(model: @autoclosure @escaping () -> ProbeModel, log: ObservationLog<Int>) {
             _model = StateObject(wrappedValue: model())
             self.log = log
         }
@@ -61,7 +52,7 @@ struct ViewModelOwnershipContractTests {
     /// the parent constructs becomes the observed one.
     struct BrokenOwnershipProbe: View {
         @ObservedObject var model: ProbeModel
-        let log: ObservationLog
+        let log: ObservationLog<Int>
 
         var body: some View {
             log.record(model.token)
@@ -76,7 +67,7 @@ struct ViewModelOwnershipContractTests {
     /// `RootView` does on navigation. The regression this guards: only the FIRST factory's model
     /// should ever be observed.
     @Test func stateObjectOwnership_survivesSimulatedReRender() {
-        let log = ObservationLog()
+        let log = ObservationLog<Int>()
         var nextToken = 0
         func freshModel() -> ProbeModel {
             nextToken += 1
@@ -88,8 +79,12 @@ struct ViewModelOwnershipContractTests {
             harness.update(ScreenOwnershipProbe(model: freshModel(), log: log))
         }
 
-        #expect(!log.observedTokens.isEmpty)
-        #expect(log.observedTokens.allSatisfy { $0 == 1 })
+        // Independent proof a re-render actually happened (review finding #1): without this, the
+        // test below is trivially satisfied by `observed == [1]`, which is also what a
+        // silently-broken `update()` (e.g. a future no-op, or `layoutIfNeeded()` no longer forcing
+        // synchronous re-evaluation) would produce — this line alone rules that out.
+        #expect(log.observed.count > 1)
+        #expect(log.observed.allSatisfy { $0 == 1 })
     }
 
     /// The contrast case, kept permanently green: proves the harness is not vacuous by showing it
@@ -99,7 +94,7 @@ struct ViewModelOwnershipContractTests {
     /// "identity preserved" no matter which ownership pattern it hosted would be worthless; this
     /// test is the proof that it does not.
     @Test func observedObjectOwnership_doesNotSurviveSimulatedReRender() {
-        let log = ObservationLog()
+        let log = ObservationLog<Int>()
         var nextToken = 0
         func freshModel() -> ProbeModel {
             nextToken += 1
@@ -111,8 +106,8 @@ struct ViewModelOwnershipContractTests {
             harness.update(BrokenOwnershipProbe(model: freshModel(), log: log))
         }
 
-        #expect(log.observedTokens.count > 1)
-        #expect(log.observedTokens.last == 5)
-        #expect(Set(log.observedTokens).count > 1)
+        #expect(log.observed.count > 1)
+        #expect(log.observed.last == 5)
+        #expect(Set(log.observed).count > 1)
     }
 }
