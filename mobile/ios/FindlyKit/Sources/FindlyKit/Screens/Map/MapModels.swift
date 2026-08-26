@@ -36,10 +36,21 @@ extension MapRegion {
     /// standard slippy-map convention that zoom level *n* covers `360 / 2^n` degrees at the equator
     /// (zoom 0 = the whole world) — a deterministic, pure mapping with no dependency on a live map
     /// view's pixel size.
-    // Deliberately wrong-on-purpose stub (assertion-level red, not compile-level) — always
-    // `.findlyDefault` regardless of `target`. The next commit implements this for real.
     public init(fitting target: MapCameraTarget) {
-        self = MapRegion.findlyDefault
+        switch target {
+        case .defaultRegion(let lat, let lon, let zoom):
+            let span = Self.spanDegrees(forZoom: zoom)
+            self = MapRegion(centerLat: lat, centerLon: lon, spanLatDelta: span, spanLonDelta: span)
+        case .center(let lat, let lon, let zoom):
+            let span = Self.spanDegrees(forZoom: zoom)
+            self = MapRegion(centerLat: lat, centerLon: lon, spanLatDelta: span, spanLonDelta: span)
+        case .bounds(let southLat, let northLat, let westLon, let eastLon, _):
+            let centerLat = (southLat + northLat) / 2
+            let centerLon = (westLon + eastLon) / 2
+            let latSpan = max(northLat - southLat, Self.minimumBoundsSpan) * Self.boundsInflationFactor
+            let lonSpan = max(eastLon - westLon, Self.minimumBoundsSpan) * Self.boundsInflationFactor
+            self = MapRegion(centerLat: centerLat, centerLon: centerLon, spanLatDelta: latSpan, spanLonDelta: lonSpan)
+        }
     }
 
     /// A generous safety margin so points at the very edge of a `.bounds` fit are never rendered
