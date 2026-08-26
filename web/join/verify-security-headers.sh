@@ -28,6 +28,15 @@ if [[ ! -f "$CONFIG_FILE" ]]; then
   exit 2
 fi
 
+# W4 (docs/implementation-handoff.md) — guard before the node invocation below. Without
+# this, a missing `node` on PATH made `set -euo pipefail` kill the script with an
+# unguarded "command not found" instead of a clean, guarded failure. Exit 2
+# (setup/environment problem), matching a missing file.
+if ! command -v node >/dev/null 2>&1; then
+  echo "verify-security-headers: node is required but was not found on PATH" >&2
+  exit 2
+fi
+
 echo "== checking $CONFIG_FILE (site-wide framing headers) =="
 
 NODE_CHECK="$(mktemp)"

@@ -33,6 +33,16 @@ FILE="${1:-$SCRIPT_DIR/family.html}"
 CONFIG_FILE="${2:-$SCRIPT_DIR/staticwebapp.config.json}"
 AASA_FILE="${3:-$SCRIPT_DIR/.well-known/apple-app-site-association.json}"
 
+# W4 (docs/implementation-handoff.md) — guard before any of the node invocations below (the
+# hash/search scan, the route-registration check, the AASA check, plus whatever
+# verify-static-security.sh itself needs). Without this, a missing `node` on PATH made
+# `set -euo pipefail` kill the script with an unguarded "command not found" instead of a
+# clean, guarded failure. Exit 2 (setup/environment problem), matching a missing file.
+if ! command -v node >/dev/null 2>&1; then
+  echo "verify-family-invite: node is required but was not found on PATH" >&2
+  exit 2
+fi
+
 fail=0
 
 echo "== checking $FILE (family-invite landing page, specs/007 §2/§7) =="

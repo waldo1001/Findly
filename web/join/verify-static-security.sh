@@ -62,6 +62,18 @@ if [[ ! -f "$FILE" ]]; then
   exit 2
 fi
 
+# W4 (docs/implementation-handoff.md): checks 3-7 below shell out to `node` (a real
+# static-analysis pass, not shell grep, per the round-3 W3 hardening). Without this guard,
+# a missing `node` on PATH made `set -euo pipefail` kill the script with an unguarded
+# "command not found" and a bare non-zero exit — safe (still non-zero, CI still red) but
+# ugly and confusing to read. Fail the same way a missing file does: one clean message,
+# exit 2 (a setup/environment problem, distinct from exit 1's "the page violates the
+# invariants").
+if ! command -v node >/dev/null 2>&1; then
+  echo "verify-static-security: node is required but was not found on PATH" >&2
+  exit 2
+fi
+
 fail=0
 
 echo "== checking $FILE =="
