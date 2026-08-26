@@ -125,4 +125,20 @@ struct DeviceSettingsViewModelTests {
         #expect(viewModel.lastActionError != nil)
         #expect(viewModel.state == .loaded([makeDevice()]))
     }
+
+    // MARK: - specs/010-app-shell-and-screen-ux.md §2.1 (I34) — the profile-dead-end routing rule.
+    // `GET /devices` works without a family (001 §1.5.4/§4), so only `PROFILE_NOT_FOUND` is
+    // actually reachable here — the classifier is still generic/shared across all seven screens.
+
+    @Test func load_profileNotFound_routesToOnboardingProfileLess() async {
+        let api = FakeAPIClient()
+        api.listDevicesHandler = {
+            throw APIError.server(APIErrorBody(code: .profileNotFound, message: "x", details: nil, requestId: "r1"), httpStatus: 404)
+        }
+        let viewModel = DeviceSettingsViewModel(apiClient: api, isParent: true)
+
+        await viewModel.load()
+
+        #expect(viewModel.state == .routeToOnboarding(.profileLess))
+    }
 }
