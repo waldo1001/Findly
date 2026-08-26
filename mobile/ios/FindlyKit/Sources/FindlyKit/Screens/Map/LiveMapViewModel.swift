@@ -18,24 +18,54 @@ public final class LiveMapViewModel: ObservableObject {
     }
 
     @Published public private(set) var state: State = .loading
-    /// Two-way bound to the map layer (`MapRendering`) so panning/zooming round-trips; recentered
-    /// on the first annotation whenever a fresh `load()` succeeds.
+    /// Two-way bound to the map layer (`MapRendering`) so panning/zooming round-trips. Written ONLY
+    /// when `cameraCommand` changes (see the `onChange` in `LiveMapScreen`) — never rewritten on an
+    /// ordinary refresh, per specs/010-app-shell-and-screen-ux.md §3.4's "never yank the camera"
+    /// rule.
     @Published public var region: MapRegion = .findlyDefault
+    /// specs/010 §3.4 — a "consume-once" signal: present only on the exact call that decided to
+    /// move the camera (first load, an explicit fit-all, or a selection that resolved a location).
+    /// `LiveMapScreen` keys its camera-applying side effect on `cameraCommand?.sequence` alone, so
+    /// an ordinary refresh that doesn't mint a new command never re-triggers it.
+    @Published public private(set) var cameraCommand: MapCameraCommand?
+    /// specs/010 §3.5 — the currently-highlighted roster member/marker, or `nil` when nothing is
+    /// selected.
+    @Published public private(set) var selectedUserId: String?
 
     private let apiClient: FindlyAPIClient
+    private var cameraPolicyState = MapCameraPolicyState.initial
+    private var cameraSequence = 0
 
     public init(apiClient: FindlyAPIClient) {
         self.apiClient = apiClient
     }
 
+    /// The single entry point for both the initial load and the §3.1 Refresh affordance — the
+    /// SAME call, deliberately, so the pure `MapCameraPolicyState` machine (which persists on this
+    /// instance across calls) is what withholds camera movement on a refresh, not a different code
+    /// path. This is what makes "refresh never yanks the camera" true regardless of which caller
+    /// triggers it.
     public func load() async {
         state = .loading
         do {
             let envelope = try await apiClient.getLatestLocations()
-            state = .loaded(envelope.data.members)
-            if let first = annotations(for: envelope.data.members).first {
-                region = MapRegion(centerLat: first.lat, centerLon: first.lon)
+            let members = envelope.data.members
+            state = .loaded(members)
+
+            // specs/010 §3.5 — a selection whose member disappeared from the roster (removed from
+            // the family) no longer has anything to highlight.
+            if let selectedUserId, !members.contains(where: { $0.userId == selectedUserId }) {
+                self.selectedUserId = nil
             }
+
+            let points = Self.locatedPoints(in: members)
+            let hasPoints = !points.isEmpty
+            // specs/010 §3.4 (normative) — decide WHETHER this load/refresh re-runs the camera
+            // policy. Deliberately wrong-on-purpose right now: runs on EVERY successful load,
+            // which is the exact "camera yanking on refresh" bug this task exists to fix. The next
+            // commit gates this on `MapCameraPolicy.shouldRunOnLoadOrRefresh`.
+            emitCameraCommand(MapCameraPolicy.target(points: points))
+            cameraPolicyState = MapCameraPolicy.nextState(state: cameraPolicyState, hasPoints: hasPoints)
         } catch {
             if let variant = onboardingRoutingOutcome(for: error) {
                 state = .routeToOnboarding(variant)
@@ -44,6 +74,21 @@ public final class LiveMapViewModel: ObservableObject {
             }
         }
     }
+
+    /// specs/010 §3.5 (MUST): tapping a member's roster row/marker selects that member and animates
+    /// the camera to their freshest located device at `MapCameraPolicy.singlePointZoom`. A member
+    /// with no located device can still be selected (row/marker highlight) but the camera MUST NOT
+    /// move. Tapping the already-selected member deselects (camera doesn't move either way).
+    ///
+    /// Deliberately a no-op right now (assertion-level red) — the next commit implements it.
+    public func selectMember(_ userId: String) {}
+
+    /// specs/010 §3.4's explicit fit-all action: re-runs `MapCameraPolicy.target` over the
+    /// currently loaded points, unconditionally (the one trigger that always runs regardless of
+    /// policy state).
+    ///
+    /// Deliberately a no-op right now (assertion-level red) — the next commit implements it.
+    public func fitAll() {}
 
     /// Every device with a known position, across every member — `MapMarkerBubble`-ready. Devices
     /// with `lat`/`lon` both `nil` (never reported, §5.2) are excluded here; they still show up in
@@ -63,6 +108,21 @@ public final class LiveMapViewModel: ObservableObject {
                 )
             }
         }
+    }
+
+    private static func locatedPoints(in members: [MemberLocations]) -> [MapGeoPoint] {
+        members.flatMap { member in
+            member.devices.compactMap { device -> MapGeoPoint? in
+                guard let lat = device.lat, let lon = device.lon else { return nil }
+                return MapGeoPoint(lat: lat, lon: lon)
+            }
+        }
+    }
+
+    private func emitCameraCommand(_ target: MapCameraTarget) {
+        cameraSequence += 1
+        cameraCommand = MapCameraCommand(sequence: cameraSequence, target: target)
+        region = MapRegion(fitting: target)
     }
 
     private static func initials(for name: String) -> String {
