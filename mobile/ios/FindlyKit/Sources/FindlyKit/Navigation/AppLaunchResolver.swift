@@ -33,6 +33,43 @@ public enum AppLaunchResolver {
         return LaunchGate.resolve(isSignedIn: true, probe: probe)
     }
 
+    /// specs/010-app-shell-and-screen-ux.md §1.1 (amended, row A37; A37 review, Finding 1) — the
+    /// interactive sign-in path's orchestrator: resolves, then (only if that did NOT confirm the
+    /// caller unauthorized) runs the two existing post-sign-in triggers, sequentially. Replaces
+    /// `RootView`'s previous three independent `Task { }` blocks, which raced: `onSignedIn`'s (now
+    /// `onDeviceRegistration`'s) only guard was a SYNCHRONOUS `authProvider.currentUserId != nil`
+    /// check that could evaluate — and did — while `resolve`'s own `Task` was still suspended on
+    /// its network probe, still signed in because `onConfirmedAuthFailure`'s `signOut()` hadn't
+    /// run yet. A caller the backend had already rejected could still reach `POST /devices`.
+    ///
+    /// `destination == .signIn` is a REAL postcondition here, never a timing coincidence: with
+    /// `isSignedIn: true` fixed, `LaunchGate`'s table answers `.signIn` for exactly one row —
+    /// `.confirmedAuthFailure` — and `onConfirmedAuthFailure` has already been fully `await`ed
+    /// (inside `resolve`, above) by the time this function's `guard` runs. Onboarding destinations
+    /// are NOT gated here — `DeviceRegistrationService`'s own probe already no-ops correctly for a
+    /// profile-less/family-less caller (A24); this gate exists only for the confirmed-unauthorized
+    /// case, which `DeviceRegistrationService` now also fails closed on independently (A37 review,
+    /// Finding 2) — two independent layers, neither relying on the other.
+    public static func resolveAfterSignIn(
+        apiClient: FindlyAPIClient,
+        cache: FamilyContextCache? = nil,
+        onConfirmedAuthFailure: () async -> Void = {},
+        onDeviceRegistration: () async -> Void = {},
+        onGeofenceSync: () async -> Void = {}
+    ) async -> LaunchDestination {
+        let destination = await resolve(
+            apiClient: apiClient, isSignedIn: true, cache: cache, onConfirmedAuthFailure: onConfirmedAuthFailure
+        )
+        // TODO(A37 RED): deliberately wrong — no gate at all, reproducing (deterministically,
+        // without needing to race an actual scheduler) the pre-fix bug this function exists to
+        // close: the post-sign-in triggers fire unconditionally, so
+        // AppLaunchResolverTests' new "never triggers" assertion fails on a genuine count
+        // mismatch, not a missing symbol. Fixed in the immediately following GREEN commit.
+        await onDeviceRegistration()
+        await onGeofenceSync()
+        return destination
+    }
+
     private static func probeProfile(apiClient: FindlyAPIClient, cache: FamilyContextCache?) async -> ProfileProbeOutcome {
         do {
             let envelope = try await apiClient.getMyFamily()
