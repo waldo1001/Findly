@@ -116,7 +116,25 @@ fi
 # calling getAnalytics()") is not executable code and must not trip the check — only
 # live code should. This does not weaken detection of a real violation: an actual
 # fetch()/localStorage/etc. call is never itself a comment.
-script_body=$(awk '/<script[ >]/{flag=1; next} /<\/script>/{flag=0} flag' "$FILE" | grep -vE '^[[:space:]]*//' || true)
+#
+# Code-review finding (2026-08-26): the previous extraction here was a line-based awk
+# state machine (`/<script[ >]/{flag=1; next} /<\/script>/{flag=0} flag`) that mis-handles
+# a single-line `<script>...</script>` tag — the line matches the open pattern, sets the
+# flag, and immediately `next`s past that same line, so the closing pattern on it never
+# fires; its content is skipped entirely rather than extracted, silently hiding whatever
+# it contains from checks 3-5 below. Replaced with a regex-based extraction (dotall,
+# global) that captures every <script>...</script> body correctly regardless of whether
+# the tag is single- or multi-line, or how many such tags the file has.
+script_body=$(node -e '
+  const fs = require("fs");
+  const html = fs.readFileSync(process.argv[1], "utf8");
+  const re = /<script[^>]*>([\s\S]*?)<\/script>/gi;
+  let m, out = [];
+  while ((m = re.exec(html)) !== null) {
+    out.push(m[1]);
+  }
+  process.stdout.write(out.join("\n"));
+' "$FILE" | grep -vE '^[[:space:]]*//' || true)
 
 # 3. No network-call primitive of any kind, except `fetch(` when --allow-fetch is passed
 #    (delete-account.html's one legitimate call to DELETE /users/me). XMLHttpRequest,
@@ -152,6 +170,28 @@ analytics_calls=$(printf '%s\n' "$script_body" | grep -noE '\bgetAnalytics[[:spa
 if [[ -n "$analytics_calls" ]]; then
   echo "FAIL: analytics/telemetry usage found in <script>:" >&2
   echo "$analytics_calls" >&2
+  fail=1
+fi
+
+# 6. No inline event-handler attribute (onload=, onclick=, onerror=, ...) anywhere, on ANY
+#    page, unconditionally — never opt-outable, like check 2. Code-review finding
+#    (2026-08-26): an inline handler executes JS entirely outside any <script> tag, so no
+#    script-body extraction — however correct after the check-3/4/5 fix above — can ever
+#    see a leak hidden behind one (e.g. `onload="window.__x = location.search"` on
+#    <body>). No page in this app needs one: every page's interactivity is wired with
+#    addEventListener from inside a real <script> block, which checks 3-5 already cover.
+#    Scans the whole file with HTML comments stripped first, for the same reason as
+#    everywhere else in this script: documentation prose that legitimately *names* an
+#    event-handler attribute must not trip this check.
+html_no_comments=$(node -e '
+  const fs = require("fs");
+  const html = fs.readFileSync(process.argv[1], "utf8");
+  process.stdout.write(html.replace(/<!--[\s\S]*?-->/g, ""));
+' "$FILE")
+inline_handlers=$(printf '%s' "$html_no_comments" | grep -noE '<[^>]*[[:space:]]on[a-zA-Z]+[[:space:]]*=' || true)
+if [[ -n "$inline_handlers" ]]; then
+  echo "FAIL: inline event-handler attribute(s) found:" >&2
+  echo "$inline_handlers" >&2
   fail=1
 fi
 
