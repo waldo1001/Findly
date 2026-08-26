@@ -97,7 +97,7 @@ android {
         // unchanged, and is intentionally left at the last real shipped value rather than bumped,
         // since a local build is never what gets uploaded to Play.
         versionCode = ciVersionCode ?: 7
-        versionName = "1.0.0"
+        versionName = "1.1.0"
     }
 
     // A7 (docs/store-readiness.md §1): defined unconditionally (Gradle requires the DSL block to
