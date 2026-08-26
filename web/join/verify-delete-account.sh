@@ -34,6 +34,16 @@ if [[ ! -f "$CONFIG_FILE" ]]; then
   exit 2
 fi
 
+# W4 (docs/implementation-handoff.md) — guard before any node invocation below (this
+# script's own two `node -e` checks, plus whatever verify-static-security.sh itself
+# needs). Without this, a missing `node` on PATH made `set -euo pipefail` kill the script
+# with an unguarded "command not found" instead of a clean, guarded failure. Exit 2
+# (setup/environment problem), matching a missing file.
+if ! command -v node >/dev/null 2>&1; then
+  echo "verify-delete-account: node is required but was not found on PATH" >&2
+  exit 2
+fi
+
 FIREBASE_SDK_PREFIX="https://www.gstatic.com/firebasejs/12.16.0/"
 BACKEND_ORIGIN="https://func-findly.azurewebsites.net/"
 
