@@ -6,6 +6,7 @@ import com.findly.android.network.dto.GroupDto
 import com.findly.android.network.ports.FamilyApi
 import com.findly.android.network.ports.GroupsApi
 import com.findly.android.network.userMessage
+import com.findly.android.ui.onboarding.ProfileDeadEndRouting
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -43,17 +44,30 @@ class GroupsListStateHolder(
         }
 
         val profileResult = familyApi.getMyFamily()
-        if (profileResult is ApiResult.Failure && profileResult.error is ApiError.ProfileNotFound) {
+        if (profileResult is ApiResult.Failure) {
             // 001 §1.5.3/§12.2: no profile at all — GET /groups would 404 too, so never attempt
-            // it. This is the fix for the A21 bug: the old code called listGroups() unconditionally
-            // and only classified the caller afterwards, stranding a profile-less user on
-            // GroupsListUiState.Error instead of the four bootstrap paths.
-            _state.value = GroupsListUiState.ProfileNeeded
-            return
+            // it (the A21 bug this fixed). specs/010 §2.1/§6: this is now the shared routing
+            // classifier rather than the retired ProfileNeeded state; Group screens only need a
+            // profile (familyScoped = false), so a FAMILY_NOT_FOUND here is left to fall through
+            // to the ordinary hasFamily = false Content path below, unchanged.
+            val variant = ProfileDeadEndRouting.classify(profileResult.error, familyScoped = false)
+            if (variant != null) {
+                _state.value = GroupsListUiState.RouteToOnboarding(variant)
+                return
+            }
         }
 
         when (val result = groupsApi.listGroups()) {
-            is ApiResult.Failure -> _state.value = GroupsListUiState.Error(result.error.userMessage())
+            is ApiResult.Failure -> {
+                // Defensively: PROFILE_NOT_FOUND could in principle race here too (profile
+                // deleted between the two calls) — same routing rule (010 §2.1).
+                val variant = ProfileDeadEndRouting.classify(result.error, familyScoped = false)
+                _state.value = if (variant != null) {
+                    GroupsListUiState.RouteToOnboarding(variant)
+                } else {
+                    GroupsListUiState.Error(result.error.userMessage())
+                }
+            }
             is ApiResult.Success -> {
                 _state.value = GroupsListUiState.Content(
                     groups = result.data.groups.map { it.toUi() },

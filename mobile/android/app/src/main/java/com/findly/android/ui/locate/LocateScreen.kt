@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
@@ -19,6 +20,7 @@ import com.findly.android.ui.designsystem.components.FindlyLoadingState
 import com.findly.android.ui.designsystem.components.FindlyStatusChip
 import com.findly.android.ui.designsystem.components.FindlyStatusTone
 import com.findly.android.ui.designsystem.components.FindlyTopBar
+import com.findly.android.ui.onboarding.OnboardingVariant
 
 /**
  * The A2 "locate now" screen (001-api-contract.md §6, specs/003-android-client.md §12's `Locate`
@@ -33,12 +35,14 @@ fun LocateRoute(
     targetUserId: String,
     targetDisplayName: String,
     modifier: Modifier = Modifier,
+    onRouteToOnboarding: (OnboardingVariant) -> Unit = {},
 ) {
     val state by viewModel.state.collectAsState()
     LocateScreen(
         state = state,
         targetDisplayName = targetDisplayName,
         onLocateNow = { viewModel.requestLocate(targetUserId = targetUserId) },
+        onRouteToOnboarding = onRouteToOnboarding,
         modifier = modifier,
     )
 }
@@ -49,7 +53,13 @@ fun LocateScreen(
     modifier: Modifier = Modifier,
     targetDisplayName: String = "",
     onLocateNow: () -> Unit = {},
+    onRouteToOnboarding: (OnboardingVariant) -> Unit = {},
 ) {
+    // specs/010-app-shell-and-screen-ux.md §2.1's routing rule.
+    LaunchedEffect(state) {
+        if (state is LocateUiState.RouteToOnboarding) onRouteToOnboarding(state.variant)
+    }
+
     Column(modifier = modifier.fillMaxSize()) {
         FindlyTopBar(title = "Locate $targetDisplayName")
 
@@ -68,6 +78,8 @@ fun LocateScreen(
                     message = state.message,
                     onRetry = onLocateNow,
                 )
+
+                is LocateUiState.RouteToOnboarding -> FindlyLoadingState(message = "Loading…")
 
                 is LocateUiState.Polling -> {
                     FindlyStatusChip(label = "Waiting for a response…", tone = FindlyStatusTone.Neutral)

@@ -7,6 +7,7 @@ import com.findly.android.fakes.sampleGroupDto
 import com.findly.android.network.ApiError
 import com.findly.android.network.ApiResult
 import com.findly.android.network.dto.ListGroupsResponseDto
+import com.findly.android.ui.onboarding.OnboardingVariant
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -56,7 +57,7 @@ class GroupsListStateHolderTest {
     }
 
     @Test
-    fun `PROFILE_NOT_FOUND on the family probe yields ProfileNeeded and never calls the doomed GET groups`() = runTest {
+    fun `PROFILE_NOT_FOUND on the family probe routes to Onboarding and never calls the doomed GET groups`() = runTest {
         val groupsApi = FakeGroupsApi()
         val familyApi = FakeFamilyApi().apply {
             getMyFamilyResult = ApiResult.Failure(ApiError.ProfileNotFound("no profile", "r_1"))
@@ -66,10 +67,12 @@ class GroupsListStateHolderTest {
         runCurrent()
 
         // 001 §12.2: "GET /groups: caller needs a profile" — a profile-less caller's GET /groups
-        // is doomed to 404 PROFILE_NOT_FOUND, so it must never even be attempted (the A21 bug:
-        // the old code called listGroups() first and only then classified the caller, stranding
-        // a profile-less user on GroupsListUiState.Error instead of the four bootstrap paths).
-        assertEquals(GroupsListUiState.ProfileNeeded, holder.state.value)
+        // is doomed to 404 PROFILE_NOT_FOUND, so it must never even be attempted (the A21 bug).
+        // specs/010 §2.1/§6: this now routes to Onboarding (the retired ProfileNeeded state's
+        // replacement) rather than rendering its own first-run UI here.
+        val state = holder.state.value
+        assertTrue(state is GroupsListUiState.RouteToOnboarding)
+        assertEquals(OnboardingVariant.ProfileLess, (state as GroupsListUiState.RouteToOnboarding).variant)
         assertEquals(0, groupsApi.listGroupsCallCount)
     }
 
@@ -90,7 +93,7 @@ class GroupsListStateHolderTest {
     @Test
     fun `a listGroups failure surfaces the user-facing message, never the raw server message`() = runTest {
         val groupsApi = FakeGroupsApi().apply {
-            listGroupsResult = ApiResult.Failure(ApiError.ProfileNotFound("raw debug text", "r_1"))
+            listGroupsResult = ApiResult.Failure(ApiError.InternalError("raw debug text", "r_1"))
         }
         val familyApi = FakeFamilyApi()
 
@@ -99,7 +102,22 @@ class GroupsListStateHolderTest {
 
         val state = holder.state.value
         assertTrue(state is GroupsListUiState.Error)
-        assertEquals("We couldn't find your profile. Please try again.", (state as GroupsListUiState.Error).message)
+        assertEquals("Something went wrong on our end. Please try again.", (state as GroupsListUiState.Error).message)
+    }
+
+    @Test
+    fun `a PROFILE_NOT_FOUND surfaced from listGroups itself also routes to Onboarding (defense in depth)`() = runTest {
+        val groupsApi = FakeGroupsApi().apply {
+            listGroupsResult = ApiResult.Failure(ApiError.ProfileNotFound("raw debug text", "r_1"))
+        }
+        val familyApi = FakeFamilyApi()
+
+        val holder = GroupsListStateHolder(groupsApi, familyApi, backgroundScope)
+        runCurrent()
+
+        val state = holder.state.value
+        assertTrue(state is GroupsListUiState.RouteToOnboarding)
+        assertEquals(OnboardingVariant.ProfileLess, (state as GroupsListUiState.RouteToOnboarding).variant)
     }
 
     @Test

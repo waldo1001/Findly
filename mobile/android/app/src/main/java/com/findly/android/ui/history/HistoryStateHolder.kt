@@ -5,6 +5,7 @@ import com.findly.android.network.dto.HistoryPointDto
 import com.findly.android.network.dto.LocationHistoryResponseDto
 import com.findly.android.network.ports.LocationsApi
 import com.findly.android.network.userMessage
+import com.findly.android.ui.onboarding.ProfileDeadEndRouting
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -59,7 +60,12 @@ class HistoryStateHolder(private val locationsApi: LocationsApi) {
                 points = existing + result.data.points.map { it.toUi() },
                 nextCursor = result.data.nextCursor,
             )
-            is ApiResult.Failure -> HistoryUiState.Error(result.error.userMessage())
+            is ApiResult.Failure -> {
+                // specs/010-app-shell-and-screen-ux.md §2.1: GET /locations/history is
+                // family-scoped (001 §1.6 — "member").
+                val variant = ProfileDeadEndRouting.classify(result.error, familyScoped = true)
+                if (variant != null) HistoryUiState.RouteToOnboarding(variant) else HistoryUiState.Error(result.error.userMessage())
+            }
         }
     }
 }

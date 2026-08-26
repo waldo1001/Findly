@@ -1,5 +1,7 @@
 package com.findly.android.ui.locate
 
+import com.findly.android.ui.onboarding.OnboardingVariant
+
 /** The instant "last known" answer that comes back with the create call (001-api-contract.md
  * §6.1) — `null` if the target has never reported. */
 data class LastKnownUi(
@@ -40,4 +42,9 @@ sealed class LocateUiState {
         val fix: LocateFixUi?,
         val lastKnown: LastKnownUi?,
     ) : LocateUiState()
+
+    /** specs/010-app-shell-and-screen-ux.md §2.1: a confirmed `PROFILE_NOT_FOUND`/`FAMILY_NOT_FOUND`
+     * on the create/poll call (Locate has no separate eager load — this *is* its load path)
+     * routes to Onboarding instead of the dead-end retryable [Error] card. */
+    data class RouteToOnboarding(val variant: OnboardingVariant) : LocateUiState()
 }

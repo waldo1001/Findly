@@ -7,6 +7,7 @@ import com.findly.android.network.ApiResult
 import com.findly.android.network.dto.LatestDeviceDto
 import com.findly.android.network.dto.LatestLocationsResponseDto
 import com.findly.android.network.dto.LatestMemberDto
+import com.findly.android.ui.onboarding.OnboardingVariant
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -116,7 +117,7 @@ class MapStateHolderTest {
     @Test
     fun `a failure surfaces Error with the user-facing message, never the raw server message`() = runTest {
         val api = FakeLocationsApi().apply {
-            getLatestLocationsResult = ApiResult.Failure(ApiError.FamilyNotFound("raw debug text from server", "r_1"))
+            getLatestLocationsResult = ApiResult.Failure(ApiError.InternalError("raw debug text from server", "r_1"))
         }
 
         val holder = MapStateHolder(api, backgroundScope)
@@ -124,7 +125,39 @@ class MapStateHolderTest {
 
         val state = holder.state.value
         assertTrue(state is MapUiState.Error)
-        assertEquals("We couldn't find your family. Please try again.", (state as MapUiState.Error).message)
+        assertEquals("Something went wrong on our end. Please try again.", (state as MapUiState.Error).message)
+    }
+
+    // specs/010-app-shell-and-screen-ux.md §2.1's routing rule — GET /locations/latest is
+    // family-scoped (001 §1.6), so both a confirmed PROFILE_NOT_FOUND and FAMILY_NOT_FOUND route
+    // to Onboarding instead of the dead-end retryable card FamilyNotFound used to produce above.
+
+    @Test
+    fun `PROFILE_NOT_FOUND routes to Onboarding profile-less instead of Error`() = runTest {
+        val api = FakeLocationsApi().apply {
+            getLatestLocationsResult = ApiResult.Failure(ApiError.ProfileNotFound("no profile", "r_2"))
+        }
+
+        val holder = MapStateHolder(api, backgroundScope)
+        runCurrent()
+
+        val state = holder.state.value
+        assertTrue(state is MapUiState.RouteToOnboarding)
+        assertEquals(OnboardingVariant.ProfileLess, (state as MapUiState.RouteToOnboarding).variant)
+    }
+
+    @Test
+    fun `FAMILY_NOT_FOUND routes to Onboarding family-less instead of Error`() = runTest {
+        val api = FakeLocationsApi().apply {
+            getLatestLocationsResult = ApiResult.Failure(ApiError.FamilyNotFound("no family", "r_3"))
+        }
+
+        val holder = MapStateHolder(api, backgroundScope)
+        runCurrent()
+
+        val state = holder.state.value
+        assertTrue(state is MapUiState.RouteToOnboarding)
+        assertEquals(OnboardingVariant.FamilyLess, (state as MapUiState.RouteToOnboarding).variant)
     }
 
     @Test

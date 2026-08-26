@@ -40,8 +40,8 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.findly.android.ui.designsystem.FindlyTheme
 import com.findly.android.queue.worker.LocationForegroundService
 import com.findly.android.ui.groups.GroupJoinHttpsLinkParser
-import com.findly.android.ui.home.HomeViewModel
-import com.findly.android.ui.home.HomeViewModelFactory
+import com.findly.android.launch.LaunchGateViewModel
+import com.findly.android.launch.LaunchGateViewModelFactory
 import com.findly.android.ui.nav.FindlyNavHost
 
 /** The single Activity (Compose Navigation pattern, specs/003-android-client.md §12). Registers
@@ -245,8 +245,8 @@ class MainActivity : ComponentActivity() {
                         },
                         onDismiss = { bannerDismissed = true },
                     )
-                val homeViewModel: HomeViewModel = viewModel(
-                    factory = HomeViewModelFactory(
+                val launchGateViewModel: LaunchGateViewModel = viewModel(
+                    factory = LaunchGateViewModelFactory(
                         container.authProvider,
                         container.deviceRegistrar,
                         container.pushTokenProvider,
@@ -257,7 +257,7 @@ class MainActivity : ComponentActivity() {
                 // owns the NavController the real path needs.
                 FindlyNavHost(
                     container = container,
-                    homeViewModel = homeViewModel,
+                    launchGateViewModel = launchGateViewModel,
                     httpsJoinLinkResult = httpsJoinLinkResult,
                     openSettingsOnLaunch = openSettingsOnLaunch,
                 )

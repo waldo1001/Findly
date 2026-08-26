@@ -1,6 +1,7 @@
 package com.findly.android.ui.groups
 
 import com.findly.android.network.PlanLimits
+import com.findly.android.ui.onboarding.OnboardingVariant
 
 /** The §12.2 list-item shape (001-api-contract.md §12.2). */
 data class GroupSummaryUi(
@@ -16,30 +17,29 @@ data class GroupSummaryUi(
 
 /**
  * State surfaced by [GroupsListStateHolder] (specs/003-android-client.md §12.2). This screen
- * doubles as both the **family-less home** ([Content.hasFamily] `false`) and, as of A21, the
- * **profile-less first-run home** ([ProfileNeeded]) — a signed-in user with no family and/or no
- * profile at all (001-api-contract.md §1.5) is no longer a dead end here, unlike every other
- * family-scoped feature screen.
+ * doubles as the **family-less home** ([Content.hasFamily] `false`) — a signed-in user with no
+ * family (001-api-contract.md §1.5.4) is no longer a dead end here, unlike every other
+ * family-scoped feature screen; Group screens only need a profile (specs/010-app-shell-and-
+ * screen-ux.md §2.1), so `FAMILY_NOT_FOUND` never routes away from this one.
  *
- * **A21 — distinct states, not a conflated one.** `PROFILE_NOT_FOUND` and `FAMILY_NOT_FOUND` used
- * to both collapse into `Content(hasFamily = false, ...)`, but they are materially different: a
- * profile-less caller can't even call `GET /groups` (001 §12.2 — "caller needs a profile"), so
- * that call must never be attempted for them, while a family-less-with-profile caller loads their
- * (possibly empty) group list normally. [ProfileNeeded] is the caller-has-no-profile-at-all state
- * (001 §1.5.3) — its own first-run UI offers the four bootstrap paths, none of which are the
- * doomed `GET /groups`. [Content.hasFamily] remains the family-less-with-profile signal, now
- * always paired with a real (successfully loaded) group list.
+ * **A21 → retired by 010 §2.1/§6.** A profile-less caller can't even call `GET /groups` (001
+ * §12.2 — "caller needs a profile"), so that call must never be attempted for them; this used to
+ * be its own first-run [ProfileNeeded] state with the four bootstrap paths inlined here — 010 §6
+ * retires it in favor of the shared [RouteToOnboarding] outcome (profile-less variant), which
+ * routes to the new Onboarding screen instead. [Content.hasFamily] remains the
+ * family-less-with-profile signal, always paired with a real (successfully loaded) group list.
  */
 sealed class GroupsListUiState {
     data object Loading : GroupsListUiState()
 
-    /** No `Users` profile row exists yet (001 §1.5.3, `404 PROFILE_NOT_FOUND` on the family
-     * probe) — `GET /groups` was never attempted (it would 404 too, §12.2). The four
-     * profile-bootstrapping paths (create family §3.1, accept invite §3.4, create group §12.1,
-     * join group §12.6) are this state's only ways forward. */
-    data object ProfileNeeded : GroupsListUiState()
-
     data class Error(val message: String) : GroupsListUiState()
+
+    /** specs/010-app-shell-and-screen-ux.md §2.1/§6: a confirmed `PROFILE_NOT_FOUND` — on either
+     * the family probe or (defensively) `GET /groups` itself — routes to Onboarding instead of
+     * the retired [ProfileNeeded] first-run state or a dead-end [Error] card. `FAMILY_NOT_FOUND`
+     * never produces this outcome here (Group screens only need a profile, §2.1) — it stays
+     * [Content.hasFamily] `false`, as before. */
+    data class RouteToOnboarding(val variant: OnboardingVariant) : GroupsListUiState()
 
     data class Content(
         val groups: List<GroupSummaryUi>,
@@ -58,10 +58,11 @@ sealed class GroupsListUiState {
 
     /** Threaded into `CreateGroupScreen`/`GroupJoinScreen` regardless of which entry point
      * reached them: [Content]'s ordinary create/join buttons (profile already exists,
-     * [needsDisplayName] always `false`, [limits] from the just-loaded group list) or
-     * [ProfileNeeded]'s first-run paths ([needsDisplayName] `true`, [limits] unavailable since
-     * `GET /groups` was never called, [prefillDisplayName] carrying the name the user already
-     * typed once on the first-run screen — see specs/003 §12.2/A21's "enter it once" flow). */
+     * [needsDisplayName] always `false`, [limits] from the just-loaded group list) or the 010
+     * §2.2 Onboarding (profile-less variant)'s first-run paths ([needsDisplayName] `true`,
+     * [limits] unavailable since `GET /groups` was never called, [prefillDisplayName] carrying
+     * the name the user already typed once on Onboarding — the A21 "enter it once" flow,
+     * unchanged by the 010 move). */
     data class CreateJoinContext(
         val limits: PlanLimits?,
         val needsDisplayName: Boolean,

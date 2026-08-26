@@ -12,6 +12,7 @@ import com.findly.android.network.ExportResult
 import com.findly.android.network.dto.CallerRoleDto
 import com.findly.android.network.dto.FamilyMeResponseDto
 import com.findly.android.network.dto.MemberDto
+import com.findly.android.ui.onboarding.OnboardingVariant
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -159,6 +160,39 @@ class PrivacyStateHolderTest {
         val flow = h.state.value.exportFlow
         assertTrue(flow is ExportFlow.Failed)
         assertEquals("You've reached today's export limit — please try again tomorrow.", (flow as ExportFlow.Failed).message)
+    }
+
+    // specs/010-app-shell-and-screen-ux.md §2.1's routing rule — GET /export needs only a profile
+    // (001 §13.1), never family-scoped, so only a confirmed PROFILE_NOT_FOUND routes.
+
+    @Test
+    fun `export PROFILE_NOT_FOUND routes to Onboarding profile-less instead of Failed`() = runTest {
+        val privacyApi = FakePrivacyApi().apply {
+            exportDataResult = ApiResult.Failure(ApiError.ProfileNotFound("no profile", "r_5"))
+        }
+        val h = holder(privacyApi = privacyApi, scope = backgroundScope)
+        runCurrent()
+
+        h.exportSelf()
+
+        val state = h.state.value
+        assertEquals(OnboardingVariant.ProfileLess, state.exportRouteToOnboarding)
+        assertEquals(ExportFlow.Idle, state.exportFlow)
+    }
+
+    @Test
+    fun `export FAMILY_NOT_FOUND is left as an ordinary Failed card (export is not family-scoped)`() = runTest {
+        val privacyApi = FakePrivacyApi().apply {
+            exportDataResult = ApiResult.Failure(ApiError.FamilyNotFound("no family", "r_6"))
+        }
+        val h = holder(privacyApi = privacyApi, scope = backgroundScope)
+        runCurrent()
+
+        h.exportSelf()
+
+        val state = h.state.value
+        assertEquals(null, state.exportRouteToOnboarding)
+        assertTrue(state.exportFlow is ExportFlow.Failed)
     }
 
     @Test

@@ -8,6 +8,7 @@ import com.findly.android.network.dto.LastKnownDto
 import com.findly.android.network.dto.LocateFixDto
 import com.findly.android.network.dto.LocateRequestDto
 import com.findly.android.network.dto.LocateRequestStatusResponseDto
+import com.findly.android.ui.onboarding.OnboardingVariant
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
@@ -126,6 +127,46 @@ class LocateStateHolderTest {
         assertTrue(state is LocateUiState.Error)
         assertEquals(1, api.getLocateRequestCalls.size)
 
+        advanceTimeBy(10_000); runCurrent()
+        assertEquals(1, api.getLocateRequestCalls.size)
+    }
+
+    // specs/010-app-shell-and-screen-ux.md §2.1's routing rule — Locate has no separate eager
+    // load, so the create/poll call itself is its load path; both are family-scoped (001 §1.6).
+
+    @Test
+    fun `an immediate create PROFILE_NOT_FOUND routes to Onboarding profile-less instead of Error`() = runTest {
+        val api = FakeLocateApi().apply {
+            createLocateRequestResult = ApiResult.Failure(ApiError.ProfileNotFound("no profile", "r_1"))
+        }
+        val holder = LocateStateHolder(api, backgroundScope, pollIntervalMillis = 2000L)
+
+        holder.requestLocate(targetUserId = "u2")
+        runCurrent()
+
+        val state = holder.state.value
+        assertTrue(state is LocateUiState.RouteToOnboarding)
+        assertEquals(OnboardingVariant.ProfileLess, (state as LocateUiState.RouteToOnboarding).variant)
+    }
+
+    @Test
+    fun `a poll FAMILY_NOT_FOUND routes to Onboarding family-less and stops the loop`() = runTest {
+        val api = FakeLocateApi().apply {
+            createLocateRequestResult = ApiResult.Success(
+                LocateRequestDto("lr_1", "pending", "u2", "d2", "2026-07-19T09:06:12Z", lastKnown = null),
+                features = defaultFeatures(),
+            )
+            pollResults.add(ApiResult.Failure(ApiError.FamilyNotFound("no family", "r_2")))
+        }
+        val holder = LocateStateHolder(api, backgroundScope, pollIntervalMillis = 2000L)
+
+        holder.requestLocate(targetUserId = "u2")
+        runCurrent()
+        advanceTimeBy(2000); runCurrent()
+
+        val state = holder.state.value
+        assertTrue(state is LocateUiState.RouteToOnboarding)
+        assertEquals(OnboardingVariant.FamilyLess, (state as LocateUiState.RouteToOnboarding).variant)
         advanceTimeBy(10_000); runCurrent()
         assertEquals(1, api.getLocateRequestCalls.size)
     }

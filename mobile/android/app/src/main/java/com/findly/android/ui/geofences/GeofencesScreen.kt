@@ -10,6 +10,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -31,6 +32,7 @@ import com.findly.android.ui.designsystem.components.FindlyStatusTone
 import com.findly.android.ui.designsystem.components.FindlySwitchRow
 import com.findly.android.ui.designsystem.components.FindlyTextField
 import com.findly.android.ui.designsystem.components.FindlyTopBar
+import com.findly.android.ui.onboarding.OnboardingVariant
 
 /**
  * The A2 geofence editor (001-api-contract.md §7.1/§7.2, specs/003-android-client.md §12's
@@ -39,7 +41,11 @@ import com.findly.android.ui.designsystem.components.FindlyTopBar
  * components.
  */
 @Composable
-fun GeofencesRoute(viewModel: GeofencesViewModel, modifier: Modifier = Modifier) {
+fun GeofencesRoute(
+    viewModel: GeofencesViewModel,
+    modifier: Modifier = Modifier,
+    onRouteToOnboarding: (OnboardingVariant) -> Unit = {},
+) {
     val state by viewModel.state.collectAsState()
     GeofencesScreen(
         state = state,
@@ -48,6 +54,7 @@ fun GeofencesRoute(viewModel: GeofencesViewModel, modifier: Modifier = Modifier)
         onRemove = viewModel::removeGeofence,
         onSave = viewModel::save,
         onRetry = viewModel::reload,
+        onRouteToOnboarding = onRouteToOnboarding,
         modifier = modifier,
     )
 }
@@ -61,9 +68,15 @@ fun GeofencesScreen(
     onRemove: (String) -> Unit = {},
     onSave: () -> Unit = {},
     onRetry: () -> Unit = {},
+    onRouteToOnboarding: (OnboardingVariant) -> Unit = {},
 ) {
     var editingDraft by remember { mutableStateOf<GeofenceUi?>(null) }
     var validationError by remember { mutableStateOf<String?>(null) }
+
+    // specs/010-app-shell-and-screen-ux.md §2.1's routing rule.
+    LaunchedEffect(state) {
+        if (state is GeofencesUiState.RouteToOnboarding) onRouteToOnboarding(state.variant)
+    }
 
     Column(modifier = modifier.fillMaxSize()) {
         FindlyTopBar(
@@ -96,6 +109,8 @@ fun GeofencesScreen(
                 message = state.message,
                 onRetry = onRetry,
             )
+
+            is GeofencesUiState.RouteToOnboarding -> FindlyLoadingState(message = "Loading geofences…")
 
             is GeofencesUiState.Content -> {
                 val draft = editingDraft

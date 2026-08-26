@@ -28,9 +28,10 @@ import com.findly.android.ui.designsystem.components.FindlyTopBar
  * [com.findly.android.ui.groups.GroupJoinScreen].
  *
  * [prefillDisplayName] seeds the display-name field when this screen is reached from the
- * profile-less first-run flow ([com.findly.android.ui.groups.GroupsListScreen]'s `ProfileNeeded`
- * branch), where the user already typed their name once — same "enter it once" intent as
- * [com.findly.android.ui.groups.GroupJoinScreen]'s `prefillCode`, just for a different field.
+ * profile-less first-run flow ([com.findly.android.ui.onboarding.OnboardingScreen], specs/010-
+ * app-shell-and-screen-ux.md §2.2), where the user already typed their name once — same "enter it
+ * once" intent as [com.findly.android.ui.groups.GroupJoinScreen]'s `prefillCode`, just for a
+ * different field.
  */
 @Composable
 fun CreateFamilyRoute(

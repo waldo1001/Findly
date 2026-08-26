@@ -8,6 +8,7 @@ import com.findly.android.network.dto.UpdateMemberRequestDto
 import com.findly.android.network.ports.DevicesApi
 import com.findly.android.network.ports.FamilyApi
 import com.findly.android.network.userMessage
+import com.findly.android.ui.onboarding.ProfileDeadEndRouting
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -41,12 +42,27 @@ class SettingsStateHolder(
         _state.value = SettingsUiState.Loading
         when (val familyResult = familyApi.getMyFamily()) {
             is ApiResult.Failure -> {
-                _state.value = SettingsUiState.Error(familyResult.error.userMessage())
+                // specs/010-app-shell-and-screen-ux.md §2.1: both GET /families/me and
+                // GET /devices are family-scoped (001 §1.6 — "member") for this screen's purposes
+                // (Devices and Family, pending their A35 split out of this monolith).
+                val variant = ProfileDeadEndRouting.classify(familyResult.error, familyScoped = true)
+                _state.value = if (variant != null) {
+                    SettingsUiState.RouteToOnboarding(variant)
+                } else {
+                    SettingsUiState.Error(familyResult.error.userMessage())
+                }
                 return
             }
             is ApiResult.Success -> {
                 when (val devicesResult = devicesApi.listDevices()) {
-                    is ApiResult.Failure -> _state.value = SettingsUiState.Error(devicesResult.error.userMessage())
+                    is ApiResult.Failure -> {
+                        val variant = ProfileDeadEndRouting.classify(devicesResult.error, familyScoped = true)
+                        _state.value = if (variant != null) {
+                            SettingsUiState.RouteToOnboarding(variant)
+                        } else {
+                            SettingsUiState.Error(devicesResult.error.userMessage())
+                        }
+                    }
                     is ApiResult.Success -> {
                         _state.value = SettingsUiState.Content(
                             myRole = familyResult.data.me.role,

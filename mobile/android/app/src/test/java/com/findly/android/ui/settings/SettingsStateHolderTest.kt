@@ -12,6 +12,7 @@ import com.findly.android.network.dto.FamilyMeResponseDto
 import com.findly.android.network.dto.ListDevicesResponseDto
 import com.findly.android.network.dto.MemberDto
 import com.findly.android.network.dto.UpdateMemberRequestDto
+import com.findly.android.ui.onboarding.OnboardingVariant
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -54,9 +55,9 @@ class SettingsStateHolderTest {
     }
 
     @Test
-    fun `getMyFamily failure surfaces Error without calling listDevices`() = runTest {
+    fun `getMyFamily failure (unrelated to profile family) surfaces Error without calling listDevices`() = runTest {
         val familyApi = FakeFamilyApi().apply {
-            getMyFamilyResult = ApiResult.Failure(ApiError.FamilyNotFound("no family", "r_1"))
+            getMyFamilyResult = ApiResult.Failure(ApiError.InternalError("boom", "r_1"))
         }
         val devicesApi = FakeDevicesApi()
         val holder = SettingsStateHolder(familyApi, devicesApi, backgroundScope)
@@ -75,6 +76,52 @@ class SettingsStateHolderTest {
         runCurrent()
 
         assertTrue(holder.state.value is SettingsUiState.Error)
+    }
+
+    // specs/010-app-shell-and-screen-ux.md §2.1's routing rule — GET /families/me and GET /devices
+    // are both family-scoped (001 §1.6) for this screen's purposes.
+
+    @Test
+    fun `PROFILE_NOT_FOUND on the family load routes to Onboarding profile-less, never calling listDevices`() = runTest {
+        val familyApi = FakeFamilyApi().apply {
+            getMyFamilyResult = ApiResult.Failure(ApiError.ProfileNotFound("no profile", "r_2"))
+        }
+        val devicesApi = FakeDevicesApi()
+        val holder = SettingsStateHolder(familyApi, devicesApi, backgroundScope)
+        runCurrent()
+
+        val state = holder.state.value
+        assertTrue(state is SettingsUiState.RouteToOnboarding)
+        assertEquals(OnboardingVariant.ProfileLess, (state as SettingsUiState.RouteToOnboarding).variant)
+        assertEquals(0, devicesApi.listDevicesCallCount)
+    }
+
+    @Test
+    fun `FAMILY_NOT_FOUND on the family load routes to Onboarding family-less, never calling listDevices`() = runTest {
+        val familyApi = FakeFamilyApi().apply {
+            getMyFamilyResult = ApiResult.Failure(ApiError.FamilyNotFound("no family", "r_3"))
+        }
+        val devicesApi = FakeDevicesApi()
+        val holder = SettingsStateHolder(familyApi, devicesApi, backgroundScope)
+        runCurrent()
+
+        val state = holder.state.value
+        assertTrue(state is SettingsUiState.RouteToOnboarding)
+        assertEquals(OnboardingVariant.FamilyLess, (state as SettingsUiState.RouteToOnboarding).variant)
+        assertEquals(0, devicesApi.listDevicesCallCount)
+    }
+
+    @Test
+    fun `FAMILY_NOT_FOUND on the devices load routes to Onboarding family-less`() = runTest {
+        val devicesApi = FakeDevicesApi().apply {
+            listDevicesResult = ApiResult.Failure(ApiError.FamilyNotFound("no family", "r_4"))
+        }
+        val holder = SettingsStateHolder(FakeFamilyApi(), devicesApi, backgroundScope)
+        runCurrent()
+
+        val state = holder.state.value
+        assertTrue(state is SettingsUiState.RouteToOnboarding)
+        assertEquals(OnboardingVariant.FamilyLess, (state as SettingsUiState.RouteToOnboarding).variant)
     }
 
     @Test

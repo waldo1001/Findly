@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
@@ -18,15 +19,21 @@ import com.findly.android.ui.designsystem.components.FindlyEmptyState
 import com.findly.android.ui.designsystem.components.FindlyErrorState
 import com.findly.android.ui.designsystem.components.FindlyListRow
 import com.findly.android.ui.designsystem.components.FindlyLoadingState
+import com.findly.android.ui.designsystem.components.FindlyNavDrawerMenuButton
 import com.findly.android.ui.designsystem.components.FindlyStatusChip
 import com.findly.android.ui.designsystem.components.FindlyStatusTone
 import com.findly.android.ui.designsystem.components.FindlyTopBar
+import com.findly.android.ui.onboarding.OnboardingVariant
 
 /**
  * The A2 live-map screen (001-api-contract.md §5.2, specs/003-android-client.md §12's `Map`
- * destination). Rendered entirely through `ui/designsystem` components plus the swappable
- * [MapRenderer], driven by state hoisted from [MapViewModel]/[MapStateHolder]. No styling
- * constant appears in this file.
+ * destination) — as of specs/010-app-shell-and-screen-ux.md §1.2/§3.1, also the NavHost **root**:
+ * this task (A33) only adds the root's ☰ drawer button ([onOpenDrawer]) and the §2.1 dead-end
+ * routing rule; the full-bleed layout, bottom-sheet roster, and camera policy (010 §3) are A34's
+ * revamp and land in a later task — [FindlyTopBar]'s trailing "Refresh" action and the plain
+ * `LazyColumn` roster below the map are therefore unchanged here on purpose. Rendered entirely
+ * through `ui/designsystem` components plus the swappable [MapRenderer], driven by state hoisted
+ * from [MapViewModel]/[MapStateHolder]. No styling constant appears in this file.
  */
 @Composable
 fun MapRoute(
@@ -34,6 +41,8 @@ fun MapRoute(
     mapRenderer: MapRenderer,
     modifier: Modifier = Modifier,
     onSelectMember: (userId: String, displayName: String) -> Unit = { _, _ -> },
+    onOpenDrawer: () -> Unit = {},
+    onRouteToOnboarding: (OnboardingVariant) -> Unit = {},
 ) {
     val state by viewModel.state.collectAsState()
     MapScreen(
@@ -41,6 +50,8 @@ fun MapRoute(
         mapRenderer = mapRenderer,
         onRefresh = viewModel::refresh,
         onSelectMember = onSelectMember,
+        onOpenDrawer = onOpenDrawer,
+        onRouteToOnboarding = onRouteToOnboarding,
         modifier = modifier,
     )
 }
@@ -52,10 +63,21 @@ fun MapScreen(
     modifier: Modifier = Modifier,
     onRefresh: () -> Unit = {},
     onSelectMember: (userId: String, displayName: String) -> Unit = { _, _ -> },
+    onOpenDrawer: () -> Unit = {},
+    onRouteToOnboarding: (OnboardingVariant) -> Unit = {},
 ) {
+    // specs/010-app-shell-and-screen-ux.md §2.1: PROFILE_NOT_FOUND/FAMILY_NOT_FOUND on this load
+    // routes to Onboarding rather than rendering a retryable error card — this effect is the one
+    // place that reacts to it, mirroring every other LaunchedEffect-driven navigation in this
+    // module (e.g. FindlyNavHost's own authState effect).
+    LaunchedEffect(state) {
+        if (state is MapUiState.RouteToOnboarding) onRouteToOnboarding(state.variant)
+    }
+
     Column(modifier = modifier.fillMaxSize()) {
         FindlyTopBar(
             title = "Family map",
+            navigationIcon = { FindlyNavDrawerMenuButton(onClick = onOpenDrawer) },
             actions = {
                 FindlyButton(text = "Refresh", onClick = onRefresh, style = FindlyButtonStyle.Secondary)
             },
@@ -69,6 +91,8 @@ fun MapScreen(
                 message = state.message,
                 onRetry = onRefresh,
             )
+
+            is MapUiState.RouteToOnboarding -> FindlyLoadingState(message = "Loading family locations…")
 
             is MapUiState.Content -> {
                 if (state.members.isEmpty()) {

@@ -66,7 +66,7 @@ fun InvitesScreen(
     var emailHint by remember { mutableStateOf("") }
     var inviteCode by remember { mutableStateOf("") }
     // A21: seeded from the profile-less first-run screen's shared display-name entry
-    // (GroupsListScreen's ProfileNeeded branch) when reached from "I have an invite code".
+    // (now specs/010's Onboarding screen) when reached from "I have an invite code".
     var displayName by remember { mutableStateOf(prefillDisplayName) }
 
     LaunchedEffect(state.acceptedFamily) {

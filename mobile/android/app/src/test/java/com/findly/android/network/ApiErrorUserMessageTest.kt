@@ -91,8 +91,12 @@ class ApiErrorUserMessageTest {
 
     @Test
     fun `the six group-era codes each get their own friendly message, not the raw server message`() {
+        // specs/010-app-shell-and-screen-ux.md §2.1: "Please try again." is dropped — this is now
+        // only the residual mutation-time fallback string (every *load* path routes to Onboarding
+        // instead, per the §2.1 routing rule), and "try again" advised precisely the action
+        // (retrying a GET/PATCH) that can never create a profile.
         assertEquals(
-            "We couldn't find your profile. Please try again.",
+            "We couldn't find your profile.",
             ApiError.ProfileNotFound(rawServerMessage, "r_g1").userMessage(),
         )
         assertEquals(

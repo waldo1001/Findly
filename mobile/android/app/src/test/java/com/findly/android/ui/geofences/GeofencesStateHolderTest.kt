@@ -7,6 +7,7 @@ import com.findly.android.network.ApiResult
 import com.findly.android.network.ETagged
 import com.findly.android.network.dto.GeofenceConfigResponseDto
 import com.findly.android.network.dto.GeofenceDto
+import com.findly.android.ui.onboarding.OnboardingVariant
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -41,12 +42,41 @@ class GeofencesStateHolderTest {
     @Test
     fun `load failure surfaces Error`() = runTest {
         val api = FakeGeofenceApi().apply {
-            getGeofencesResult = ApiResult.Failure(ApiError.FamilyNotFound("no family", "r_1"))
+            getGeofencesResult = ApiResult.Failure(ApiError.InternalError("boom", "r_1"))
         }
         val holder = GeofencesStateHolder(api, backgroundScope)
         runCurrent()
 
         assertTrue(holder.state.value is GeofencesUiState.Error)
+    }
+
+    // specs/010-app-shell-and-screen-ux.md §2.1's routing rule — GET /geofences is family-scoped
+    // (001 §1.6); this was the field-reported dead-end screen (2026-08-26).
+
+    @Test
+    fun `PROFILE_NOT_FOUND routes to Onboarding profile-less instead of Error`() = runTest {
+        val api = FakeGeofenceApi().apply {
+            getGeofencesResult = ApiResult.Failure(ApiError.ProfileNotFound("no profile", "r_2"))
+        }
+        val holder = GeofencesStateHolder(api, backgroundScope)
+        runCurrent()
+
+        val state = holder.state.value
+        assertTrue(state is GeofencesUiState.RouteToOnboarding)
+        assertEquals(OnboardingVariant.ProfileLess, (state as GeofencesUiState.RouteToOnboarding).variant)
+    }
+
+    @Test
+    fun `FAMILY_NOT_FOUND routes to Onboarding family-less instead of Error`() = runTest {
+        val api = FakeGeofenceApi().apply {
+            getGeofencesResult = ApiResult.Failure(ApiError.FamilyNotFound("no family", "r_1"))
+        }
+        val holder = GeofencesStateHolder(api, backgroundScope)
+        runCurrent()
+
+        val state = holder.state.value
+        assertTrue(state is GeofencesUiState.RouteToOnboarding)
+        assertEquals(OnboardingVariant.FamilyLess, (state as GeofencesUiState.RouteToOnboarding).variant)
     }
 
     @Test

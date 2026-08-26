@@ -6,6 +6,7 @@ import com.findly.android.network.ApiError
 import com.findly.android.network.ApiResult
 import com.findly.android.network.dto.HistoryPointDto
 import com.findly.android.network.dto.LocationHistoryResponseDto
+import com.findly.android.ui.onboarding.OnboardingVariant
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -135,6 +136,37 @@ class HistoryStateHolderTest {
             "That date range is further back than your plan allows.",
             (state as HistoryUiState.Error).message,
         )
+    }
+
+    // specs/010-app-shell-and-screen-ux.md §2.1's routing rule — GET /locations/history is
+    // family-scoped (001 §1.6).
+
+    @Test
+    fun `PROFILE_NOT_FOUND routes to Onboarding profile-less instead of Error`() = runTest {
+        val api = FakeLocationsApi().apply {
+            historyResults.add(ApiResult.Failure(ApiError.ProfileNotFound("no profile", "r_1")))
+        }
+        val holder = HistoryStateHolder(api)
+
+        holder.load(userId = "u1", from = "2026-07-01", to = "2026-07-19")
+
+        val state = holder.state.value
+        assertTrue(state is HistoryUiState.RouteToOnboarding)
+        assertEquals(OnboardingVariant.ProfileLess, (state as HistoryUiState.RouteToOnboarding).variant)
+    }
+
+    @Test
+    fun `FAMILY_NOT_FOUND routes to Onboarding family-less instead of Error`() = runTest {
+        val api = FakeLocationsApi().apply {
+            historyResults.add(ApiResult.Failure(ApiError.FamilyNotFound("no family", "r_1")))
+        }
+        val holder = HistoryStateHolder(api)
+
+        holder.load(userId = "u1", from = "2026-07-01", to = "2026-07-19")
+
+        val state = holder.state.value
+        assertTrue(state is HistoryUiState.RouteToOnboarding)
+        assertEquals(OnboardingVariant.FamilyLess, (state as HistoryUiState.RouteToOnboarding).variant)
     }
 
     @Test

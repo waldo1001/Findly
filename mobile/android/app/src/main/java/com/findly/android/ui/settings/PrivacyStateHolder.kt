@@ -6,6 +6,7 @@ import com.findly.android.network.ApiResult
 import com.findly.android.network.ports.FamilyApi
 import com.findly.android.network.ports.PrivacyApi
 import com.findly.android.network.userMessage
+import com.findly.android.ui.onboarding.ProfileDeadEndRouting
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -76,11 +77,19 @@ class PrivacyStateHolder(
     suspend fun exportMember(userId: String) = export(userId)
 
     private suspend fun export(userId: String?) {
-        _state.value = _state.value.copy(exportFlow = ExportFlow.Exporting)
+        _state.value = _state.value.copy(exportFlow = ExportFlow.Exporting, exportRouteToOnboarding = null)
         when (val result = privacyApi.exportData(userId)) {
             is ApiResult.Success -> _state.value = _state.value.copy(exportFlow = ExportFlow.Ready(result.data))
-            is ApiResult.Failure ->
-                _state.value = _state.value.copy(exportFlow = ExportFlow.Failed(result.error.userMessage()))
+            is ApiResult.Failure -> {
+                // specs/010-app-shell-and-screen-ux.md §2.1: GET /export needs only a profile
+                // (001 §13.1) — never family-scoped.
+                val variant = ProfileDeadEndRouting.classify(result.error, familyScoped = false)
+                _state.value = if (variant != null) {
+                    _state.value.copy(exportFlow = ExportFlow.Idle, exportRouteToOnboarding = variant)
+                } else {
+                    _state.value.copy(exportFlow = ExportFlow.Failed(result.error.userMessage()))
+                }
+            }
         }
     }
 
