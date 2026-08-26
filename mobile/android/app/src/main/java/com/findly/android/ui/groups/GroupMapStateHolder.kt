@@ -48,22 +48,48 @@ class GroupMapStateHolder(
         when (val result = groupsApi.getGroupLatestLocations(groupId)) {
             is ApiResult.Success -> {
                 val members = result.data.members.map { it.toUi() }
-                // RED-before-GREEN placeholder (devloop/A34): never mints a camera command yet.
-                _state.value = GroupMapUiState.Content(members = members)
+                val points = members.locatedPoints()
+
+                val shouldRun = MapCameraPolicy.shouldRunOnLoadOrRefresh(cameraPolicyState, points.isNotEmpty())
+                cameraPolicyState = MapCameraPolicy.nextState(cameraPolicyState, points.isNotEmpty())
+                val previousCommand = (current as? GroupMapUiState.Content)?.cameraCommand
+                val cameraCommand = if (shouldRun) nextCameraCommand(MapCamera.target(points)) else previousCommand
+
+                val previousSelected = (current as? GroupMapUiState.Content)?.selectedUserId
+                    ?.takeIf { id -> members.any { it.userId == id } }
+                _state.value = GroupMapUiState.Content(
+                    members = members,
+                    selectedUserId = previousSelected,
+                    cameraCommand = cameraCommand,
+                )
             }
             is ApiResult.Failure -> _state.value = result.error.toMapState()
         }
     }
 
-    /** specs/010 §3.5, position-only mirror of [com.findly.android.ui.map.MapStateHolder.selectMember]. */
+    /** specs/010 §3.5, position-only mirror of [com.findly.android.ui.map.MapStateHolder.selectMember]
+     * — there is exactly one point per member here, so selection targets it directly rather than
+     * resolving a freshest device first. */
     fun selectMember(userId: String) {
         val current = _state.value as? GroupMapUiState.Content ?: return
-        _state.value = current.copy(selectedUserId = userId)
+        if (current.selectedUserId == userId) {
+            _state.value = current.copy(selectedUserId = null)
+            return
+        }
+        val member = current.members.firstOrNull { it.userId == userId } ?: return
+        val cameraCommand = if (member.hasLocation) {
+            nextCameraCommand(MapCameraTarget.Center(member.lat!!, member.lon!!, MapCamera.SINGLE_POINT_ZOOM))
+        } else {
+            current.cameraCommand
+        }
+        _state.value = current.copy(selectedUserId = userId, cameraCommand = cameraCommand)
     }
 
-    /** specs/010 §3.4's explicit fit-all action. */
+    /** specs/010 §3.4's explicit fit-all action: re-runs [MapCamera.target] over the currently
+     * loaded points, unconditionally. */
     fun fitAll() {
-        // TODO
+        val current = _state.value as? GroupMapUiState.Content ?: return
+        _state.value = current.copy(cameraCommand = nextCameraCommand(MapCamera.target(current.members.locatedPoints())))
     }
 
     private fun nextCameraCommand(target: MapCameraTarget): CameraCommand {
