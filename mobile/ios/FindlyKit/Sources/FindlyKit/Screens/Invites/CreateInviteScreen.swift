@@ -13,9 +13,17 @@ public struct CreateInviteScreen: View {
     @StateObject private var viewModel: CreateInviteViewModel
     @State private var role: String = "member"
     @State private var emailHint: String = ""
+    /// specs/007-public-join-links.md §1, specs/004-ios-client.md §3.5 — the deployment constant
+    /// the share text/QR are built against (`AppConfig.joinLinkHost`), same pattern as
+    /// `GroupDetailScreen`.
+    private let joinLinkHost: String
 
-    public init(viewModel: @autoclosure @escaping () -> CreateInviteViewModel) {
+    public init(
+        viewModel: @autoclosure @escaping () -> CreateInviteViewModel,
+        joinLinkHost: String = AppConfig.defaultJoinLinkHost
+    ) {
         _viewModel = StateObject(wrappedValue: viewModel())
+        self.joinLinkHost = joinLinkHost
     }
 
     public var body: some View {
@@ -60,14 +68,14 @@ public struct CreateInviteScreen: View {
         VStack(spacing: theme.spacing.md) {
             FindlyCard {
                 VStack(spacing: theme.spacing.sm) {
-                    Text(CreateInviteViewModel.shareText(for: code))
+                    Text(CreateInviteViewModel.shareText(for: code, joinLinkHost: joinLinkHost))
                         .font(theme.typography.titleMedium.font)
                         .foregroundColor(theme.colors.onSurface)
                         .multilineTextAlignment(.center)
                     StatusChip(role == "parent" ? "Parent invite" : "Member invite", kind: .online)
                 }
             }
-            ShareLink(item: CreateInviteViewModel.shareText(for: code))
+            ShareLink(item: CreateInviteViewModel.shareText(for: code, joinLinkHost: joinLinkHost))
         }
         .padding(.horizontal, theme.spacing.xl)
     }
