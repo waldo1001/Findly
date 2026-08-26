@@ -138,7 +138,13 @@ struct FindlyApp: App {
         self.apiClient = apiClient
         let deviceIdProvider = UserDefaultsDeviceIdProvider()
         self.deviceIdProvider = deviceIdProvider
-        self.exportArtifactStore = FileManagerExportArtifactStore()
+        // A local `let`, not `self.exportArtifactStore` directly (same reasoning as
+        // `onSignedInClosure`'s doc further below) — `onSignedOut`'s closure (I43 fix, passed into
+        // `LocationRuntimeContainer.init` further down) needs to capture this SAME instance, and
+        // capturing `self` inside a struct's own `init()` before every stored property is
+        // initialized is an escaping-closure-captures-mutating-self error.
+        let exportArtifactStore = FileManagerExportArtifactStore()
+        self.exportArtifactStore = exportArtifactStore
 
         // specs/009-device-runtime.md §2 — the durable, on-disk queue (I10). Falls back to
         // in-memory only if the on-disk file genuinely can't be opened (e.g. a full disk) — a
@@ -275,9 +281,28 @@ struct FindlyApp: App {
             // a real, deterministic cross-account data leak (see `wipeLocalState()`'s doc). Now
             // calls the consolidated `wipeLocalState()` (which itself calls `stop()`), the same
             // method `DeleteAccountViewModel`'s two sign-out-shaped paths use.
+            //
+            // I43 fix: this closure used to call ONLY `authProvider?.signOut()` +
+            // `wipeLocalState()` — a strict SUBSET of what account deletion already cleared
+            // (`deviceIdProvider`/`appVersionTracker`/`exportArtifactStore`/`clearStoredSession()`).
+            // Three of those four were harmless to have missed (the first two are uid-keyed; the
+            // Keychain `verificationID` is an opaque OTP handle `signOut()` already makes moot),
+            // but `exportArtifactStore` was not: it is a PLAINTEXT COPY of the just-signed-out
+            // user's own exported data (008 §3) that nothing else would clear before the next cold
+            // start — a real (if narrow) window for a DIFFERENT user signing in on this device
+            // without a relaunch. Now routes through the one shared `EndOfSessionRoutine` every
+            // other session-ending path calls, with the default `Options()` (no reason for this
+            // path to differ — see that type's doc for the two paths that DO). `currentUserId` is
+            // read here, before the routine's own internal `signOut()` call clears it.
             onSignedOut: { [weak authProvider, weak coordinator] in
-                try? authProvider?.signOut()
-                await LocationRuntimeContainerHolder.shared.container?.wipeLocalState()
+                await EndOfSessionRoutine.run(
+                    currentUserId: authProvider?.currentUserId,
+                    authProvider: authProvider,
+                    deviceIdProvider: deviceIdProvider,
+                    appVersionTracker: appVersionTracker,
+                    exportArtifactStore: exportArtifactStore,
+                    wipeLocalState: { await LocationRuntimeContainerHolder.shared.container?.wipeLocalState() }
+                )
                 await coordinator?.showSignIn()
             }
         )
