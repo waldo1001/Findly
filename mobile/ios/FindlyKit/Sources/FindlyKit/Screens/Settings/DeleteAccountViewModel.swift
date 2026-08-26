@@ -49,6 +49,16 @@ import Foundation
 /// `signOutForRetry()` clears `appVersionTracker` itself, and `wipeLocalStateAndComplete()` also
 /// clears it (harmless double-clear) for the direct-success path that never goes through
 /// `signOutForRetry()` at all.
+///
+/// **(I43) Both paths above now call the single `EndOfSessionRoutine.run` — see that type's doc
+/// for the definitive, canonical call list/order.** This type no longer maintains its own copy of
+/// either list: `signOutForRetry()` passes `Options(clearsDeviceIdentityAndExportArtifact: false)`
+/// for exactly the "leave alone" reasoning above; `wipeLocalStateAndComplete()` passes the
+/// (all-`true`) default. `FindlyApp.swift`'s forced `onSignedOut` closure and
+/// `RootView.clearSessionOnConfirmedAuthFailure()` route through the same routine now too — this
+/// was the architectural fix I43 landed after finding the forced-sign-out path had silently drifted
+/// from this one, missing `exportArtifactStore.removeCurrentArtifact()` in particular (a previous
+/// user's plaintext export could otherwise outlive a forced sign-out).
 @MainActor
 public final class DeleteAccountViewModel: ObservableObject {
     public enum Phase: Equatable {
@@ -175,48 +185,37 @@ public final class DeleteAccountViewModel: ObservableObject {
     /// rather than retrying, since every I24 bootstrap-completion retry goes through that same
     /// gated call.
     public func signOutForRetry() async {
-        if let uid = pendingWipeUserId {
-            appVersionTracker.clearLastRegisteredAppVersion(forUserId: uid)
-        }
-        await wipeLocalState()
-        // clearStoredSession() is unconditional (finding #5) — NOT nested inside the swallowed
-        // signOut() call below, so a signOut() failure can never strand it.
-        authProvider.clearStoredSession()
-        try? authProvider.signOut()
+        // I43 — routes through the one shared `EndOfSessionRoutine`; `clearsDeviceIdentityAndExportArtifact:
+        // false` is this method's one documented divergence (see this type's top doc and
+        // `EndOfSessionRoutine.Options`'s doc for the I25 rationale). `clearStoredSession()` stays
+        // unconditional either way — the routine calls it before the swallowed `signOut()`, so a
+        // `signOut()` failure can never strand it (review finding #5).
+        await EndOfSessionRoutine.run(
+            currentUserId: pendingWipeUserId,
+            authProvider: authProvider,
+            deviceIdProvider: deviceIdProvider,
+            appVersionTracker: appVersionTracker,
+            exportArtifactStore: exportArtifactStore,
+            wipeLocalState: wipeLocalState,
+            options: .init(clearsDeviceIdentityAndExportArtifact: false)
+        )
         phase = .signedOutForRetry
     }
 
     private func wipeLocalStateAndComplete() async {
-        if let uid = pendingWipeUserId {
-            deviceIdProvider.clearDeviceId(forUserId: uid)
-            // I25 (specs/008 §1.3, specs/004 §3.6) — same per-uid identity bit as
-            // `deviceIdProvider` above, cleared alongside it for the same reason: left stale, a
-            // later sign-in on this same uid would carry a false "this device has already
-            // registered" signal into `DeviceRegistrationService.registerOrUpdate()`'s probe-skip
-            // decision (I24), for a user whose profile this call just erased. Harmless today only
-            // because `registerOrUpdate()` separately maps a genuine `PROFILE_NOT_FOUND` from
-            // `POST /devices` to the same typed error every caller already treats as expected — this
-            // clears it at the tracker's own write site instead of relying solely on that.
-            //
-            // A harmless double-clear on the retry path: `signOutForRetry()` already cleared this
-            // for the same uid (I25 review fix — see this type's top doc). Kept here too because
-            // this is also reached DIRECTLY from `confirmDelete()` when the Firebase step succeeds
-            // on the first attempt, which never calls `signOutForRetry()` at all.
-            appVersionTracker.clearLastRegisteredAppVersion(forUserId: uid)
-        }
-        // Post-review change (security review, High finding) — was three separate ad-hoc clear
-        // calls (fixQueue/geofenceEventQueue/geofenceConfigStore) that had already drifted out of
-        // sync with what LocationRuntimeContainer actually needs to clear (geofenceRegistrar/
-        // stateStore were unreachable from here). Now the same single wipe every sign-out path
-        // uses — see `wipeLocalState`'s doc.
-        await wipeLocalState()
-        // specs/008-privacy-endpoints.md §3.1 rule 2 (finding #1) — any export artifact must not
-        // survive the account it belongs to.
-        exportArtifactStore.removeCurrentArtifact()
-        // clearStoredSession() is unconditional (008 §1.3/finding #5) — NOT nested inside the
-        // swallowed signOut() call below, so a signOut() failure can never strand it.
-        authProvider.clearStoredSession()
-        try? authProvider.signOut()
+        // I43 — routes through the one shared `EndOfSessionRoutine` (default `Options()`: every
+        // axis clears). Previously this method held its own copy of the full call list
+        // (deviceIdProvider/appVersionTracker/exportArtifactStore/clearStoredSession, around the
+        // consolidated `wipeLocalState()`) — see `EndOfSessionRoutine`'s doc for why keeping a
+        // second copy anywhere is exactly the drift this task closes.
+        await EndOfSessionRoutine.run(
+            currentUserId: pendingWipeUserId,
+            authProvider: authProvider,
+            deviceIdProvider: deviceIdProvider,
+            appVersionTracker: appVersionTracker,
+            exportArtifactStore: exportArtifactStore,
+            wipeLocalState: wipeLocalState
+        )
         phase = .completed
     }
 
