@@ -112,13 +112,10 @@ public final class DeviceRegistrationService {
             case .missing:
                 throw DeviceRegistrationError.profileNotYetBootstrapped
             case .confirmedUnauthorized:
-                // TODO(A37 RED): deliberately wrong — throws the WRONG typed error, so
-                // DeviceRegistrationServiceTests' new assertion (`catch .callerUnauthorized`)
-                // fails on a value mismatch rather than a missing symbol (CLAUDE.md "stub wrong,
-                // don't stub absent"). `registerDeviceCalls.isEmpty` already passes here, which is
-                // exactly why that assertion alone would NOT have caught this bug — the
-                // reviewer's point. Fixed in the immediately following GREEN commit.
-                throw DeviceRegistrationError.profileNotYetBootstrapped
+                // A37 review, Finding 2: a confirmed auth failure MUST NOT be treated as "profile
+                // exists" — the caller is unauthorized, not merely un-onboarded. Distinct typed
+                // error from .profileNotYetBootstrapped so callers can't conflate the two.
+                throw DeviceRegistrationError.callerUnauthorized
             }
         }
 
