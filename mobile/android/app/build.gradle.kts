@@ -282,7 +282,7 @@ dependencies {
     implementation("com.google.firebase:firebase-messaging")
     // `Task<T>.await()` bridge so FirebaseAuthProvider/RealPushTokenProvider can be plain
     // suspend-based classes.
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.10.1")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.11.0")
 
     // Networking (specs/003 §5): Retrofit + OkHttp + kotlinx.serialization, chosen over Ktor for
     // its mature Android ecosystem, suspend-fun support, and predictable Response<T> based
@@ -292,7 +292,7 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("com.squareup.okhttp3:logging-interceptor:4.12.0")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.0")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.1")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
 
     // A6 (specs/007-public-join-links.md §4/§7, specs/003-android-client.md §12.3): on-device QR
     // generation for the public join link. `core` is ZXing's plain-Java barcode encoder/decoder —
@@ -354,7 +354,7 @@ dependencies {
     debugImplementation("androidx.compose.ui:ui-test-manifest")
 
     testImplementation("junit:junit:4.13.2")
-    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.1")
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.11.0")
     testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
     // A11 code-review fix: real Room.Migration(1, 2) verification (FindlyDatabaseMigrationTest)
     // needs an actual SQLite engine to run against on plain JVM (no Robolectric/instrumentation,
