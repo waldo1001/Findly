@@ -242,6 +242,11 @@ struct RootView: View {
                     onSelectInviteSomeone: { coordinator.showCreateInvite() },
                     onSelectGroups: { coordinator.showGroupsList() },
                     onSelectPrivacySettings: { coordinator.showPrivacySettings() },
+                    onLocateNow: { userId, displayName in
+                        // specs/010-app-shell-and-screen-ux.md §3.5 (I35) — member selection's
+                        // "Locate now" routes into the EXISTING Locate screen (001 §6, unchanged).
+                        coordinator.showLocate(target: .user(userId), targetDisplayName: displayName)
+                    },
                     onProfileDeadEnd: { variant in coordinator.showOnboarding(variant) }
                 )
 
