@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 
 /// specs/004-ios-client.md I2 (001 §5.2) — the family map/roster. One `GET /locations/latest` call
@@ -31,6 +32,14 @@ public final class LiveMapViewModel: ObservableObject {
     /// specs/010 §3.5 — the currently-highlighted roster member/marker, or `nil` when nothing is
     /// selected.
     @Published public private(set) var selectedUserId: String?
+    /// specs/010 §3.4 (amended 2026-08-26, row I39) — the live map view's rendered size in points,
+    /// threaded in from the render boundary (`LiveMapScreen`'s `GeometryReader`) so
+    /// `MapRegion(fitting:viewSizePt:)` can convert the fixed 64pt bounds padding into an angular
+    /// span — mirrors Android resolving `LocalDensity` at `GoogleMapRenderer`, never in the pure
+    /// `MapCameraPolicy` decision. `LiveMapScreen` keeps this current; defaults to a common device
+    /// size so a `.bounds` command that fires before the first real layout pass still produces a
+    /// sane, non-degenerate region.
+    public var mapViewportSizePt: CGSize = MapRegion.unmeasuredViewportSizePt
 
     private let apiClient: FindlyAPIClient
     private var cameraPolicyState = MapCameraPolicyState.initial
@@ -137,7 +146,7 @@ public final class LiveMapViewModel: ObservableObject {
     private func emitCameraCommand(_ target: MapCameraTarget) {
         cameraSequence += 1
         cameraCommand = MapCameraCommand(sequence: cameraSequence, target: target)
-        region = MapRegion(fitting: target)
+        region = MapRegion(fitting: target, viewSizePt: mapViewportSizePt)
     }
 
     private static func initials(for name: String) -> String {

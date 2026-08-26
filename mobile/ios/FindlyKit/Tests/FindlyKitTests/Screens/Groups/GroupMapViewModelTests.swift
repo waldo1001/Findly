@@ -1,5 +1,8 @@
 import Testing
 @testable import FindlyKit
+#if canImport(CoreGraphics)
+import CoreGraphics
+#endif
 
 /// specs/004-ios-client.md §3.4 (001 §12.10; 005 §3) — the group map: position-only (no
 /// `deviceId`/`deviceName`/`batteryPct`/`source`, unlike the family map's `LiveMapViewModel`), and
@@ -41,7 +44,7 @@ struct GroupMapViewModelTests {
         // specs/010-app-shell-and-screen-ux.md §3.2/§3.4 (I35) — one distinct located point on the
         // first load is `MapCameraPolicy`'s `.center` target, not the retired "first annotation,
         // fixed 0.05° span" behavior.
-        #expect(viewModel.region == MapRegion(fitting: .center(lat: 51.0543, lon: 3.7174, zoom: MapCameraPolicy.singlePointZoom)))
+        #expect(viewModel.region == MapRegion(fitting: .center(lat: 51.0543, lon: 3.7174, zoom: MapCameraPolicy.singlePointZoom), viewSizePt: viewModel.mapViewportSizePt))
     }
 
     @Test func annotations_excludeMembersWithNoPositionYet() async {
@@ -58,7 +61,7 @@ struct GroupMapViewModelTests {
         #expect(viewModel.annotations.isEmpty)
         // specs/010 §3.2/§3.4 (I35) — zero located points is `MapCameraPolicy`'s `.defaultRegion`
         // target, not the retired "stay at `.findlyDefault`'s 0.05° span" behavior.
-        #expect(viewModel.region == MapRegion(fitting: .defaultRegion(lat: MapCameraPolicy.defaultLat, lon: MapCameraPolicy.defaultLon, zoom: MapCameraPolicy.defaultZoom)))
+        #expect(viewModel.region == MapRegion(fitting: .defaultRegion(lat: MapCameraPolicy.defaultLat, lon: MapCameraPolicy.defaultLon, zoom: MapCameraPolicy.defaultZoom), viewSizePt: viewModel.mapViewportSizePt))
     }
 
     @Test func load_groupExpired_setsExpiredState() async {
@@ -123,6 +126,34 @@ struct GroupMapViewModelCameraTests {
 
         #expect(viewModel.cameraCommand?.sequence == firstSequence)
         #expect(viewModel.region == regionAfterFirstLoad)
+    }
+
+    /// specs/010 §3.2/§3.4 (amended 2026-08-26, row I39) — mirrors
+    /// `LiveMapViewModelTests.load_withTwoOrMoreDistinctPoints_fitsBoundsUsingTheLiveViewportSize`:
+    /// the group map shares the SAME camera policy through the SAME renderer seam, so it must
+    /// forward `mapViewportSizePt` into the `.bounds` fit identically.
+    @Test func load_withTwoOrMoreDistinctPoints_fitsBoundsUsingTheLiveViewportSize() async {
+        let api = FakeAPIClient()
+        api.getGroupLatestLocationsHandler = { _ in
+            TestFeatures.envelope(GroupLatestLocationsResponse(members: [
+                self.member("u1", "Eric", lat: 50.0, lon: 3.0),
+                self.member("u2", "Noor", lat: 51.0, lon: 4.0),
+            ]))
+        }
+        let viewModel = GroupMapViewModel(apiClient: api, groupId: "grp_1")
+        let viewportSizePt = CGSize(width: 400, height: 800)
+        viewModel.mapViewportSizePt = viewportSizePt
+
+        await viewModel.load()
+
+        let expectedTarget = MapCameraTarget.bounds(southLat: 50.0, northLat: 51.0, westLon: 3.0, eastLon: 4.0, paddingPt: MapCameraPolicy.boundsPaddingPt)
+        #expect(viewModel.cameraCommand?.target == expectedTarget)
+        #expect(viewModel.region == MapRegion(fitting: expectedTarget, viewSizePt: viewportSizePt))
+        // Pin the actual number too — comparing only against a same-function recomputation (above)
+        // is tautological and can't distinguish a correct fit from a wrong one (I39's own lesson,
+        // learned from A37): both sides would agree even if the underlying formula were wrong.
+        #expect(abs(viewModel.region.spanLatDelta - 800.0 / 672.0) < 1e-9)
+        #expect(abs(viewModel.region.spanLonDelta - 400.0 / 272.0) < 1e-9)
     }
 
     @Test func selectMember_withAPosition_selectsAndZoomsToIt() async {

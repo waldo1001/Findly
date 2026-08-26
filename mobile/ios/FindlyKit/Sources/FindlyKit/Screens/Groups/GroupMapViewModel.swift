@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 
 /// specs/004-ios-client.md §3.4 (001 §12.10; 005 §3) — the group's live, position-only map. One
@@ -28,6 +29,11 @@ public final class GroupMapViewModel: ObservableObject {
     /// specs/010 §3.5 — mirrors `LiveMapViewModel.selectedUserId`; position-only, so selection
     /// targets the member's own single point directly rather than resolving a freshest device.
     @Published public private(set) var selectedUserId: String?
+    /// specs/010 §3.4 (amended 2026-08-26, row I39) — mirrors `LiveMapViewModel.mapViewportSizePt`
+    /// exactly: the live map view's rendered size in points, kept current by `GroupMapScreen`'s
+    /// `GeometryReader`, so the fixed 64pt bounds padding converts to an angular span at the render
+    /// boundary rather than in the pure `MapCameraPolicy` decision.
+    public var mapViewportSizePt: CGSize = MapRegion.unmeasuredViewportSizePt
 
     private let apiClient: FindlyAPIClient
     public let groupId: String
@@ -97,7 +103,7 @@ public final class GroupMapViewModel: ObservableObject {
     private func emitCameraCommand(_ target: MapCameraTarget) {
         cameraSequence += 1
         cameraCommand = MapCameraCommand(sequence: cameraSequence, target: target)
-        region = MapRegion(fitting: target)
+        region = MapRegion(fitting: target, viewSizePt: mapViewportSizePt)
     }
 
     /// Every member with a known position — `MapMarkerBubble`-ready. Members with no position yet

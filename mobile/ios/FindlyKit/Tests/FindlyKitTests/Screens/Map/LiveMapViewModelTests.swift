@@ -1,5 +1,8 @@
 import Testing
 @testable import FindlyKit
+#if canImport(CoreGraphics)
+import CoreGraphics
+#endif
 
 /// specs/004-ios-client.md I2 (001 §5.2) — the family map/roster view model: state transitions,
 /// annotation derivation (excluding never-reported devices), and `isStale` passthrough.
@@ -46,7 +49,7 @@ struct LiveMapViewModelTests {
         // specs/010-app-shell-and-screen-ux.md §3.4 (I35) — one distinct located point on the very
         // first load is `MapCameraPolicy`'s `.center` target at `singlePointZoom`, not the retired
         // "first annotation, fixed 0.05° span" behavior.
-        #expect(viewModel.region == MapRegion(fitting: .center(lat: 51.0, lon: 3.7, zoom: MapCameraPolicy.singlePointZoom)))
+        #expect(viewModel.region == MapRegion(fitting: .center(lat: 51.0, lon: 3.7, zoom: MapCameraPolicy.singlePointZoom), viewSizePt: viewModel.mapViewportSizePt))
         #expect(viewModel.cameraCommand?.target == .center(lat: 51.0, lon: 3.7, zoom: MapCameraPolicy.singlePointZoom))
     }
 
@@ -71,7 +74,7 @@ struct LiveMapViewModelTests {
         // specs/010 §3.4 (I35) — zero located points on the very first load is `MapCameraPolicy`'s
         // `.defaultRegion` target (the calm, zoomed-out default), not the retired "stay at
         // `.findlyDefault`'s 0.05° span" behavior.
-        #expect(viewModel.region == MapRegion(fitting: .defaultRegion(lat: MapCameraPolicy.defaultLat, lon: MapCameraPolicy.defaultLon, zoom: MapCameraPolicy.defaultZoom)))
+        #expect(viewModel.region == MapRegion(fitting: .defaultRegion(lat: MapCameraPolicy.defaultLat, lon: MapCameraPolicy.defaultLon, zoom: MapCameraPolicy.defaultZoom), viewSizePt: viewModel.mapViewportSizePt))
     }
 
     @Test func annotations_missingIsStale_defaultsToStale() async {
@@ -181,6 +184,34 @@ struct LiveMapViewModelCameraTests {
 
         #expect(viewModel.cameraCommand?.sequence == firstCommandSequence)
         #expect(viewModel.region == regionAfterFirstLoad)
+    }
+
+    /// specs/010 §3.4 (amended 2026-08-26, row I39) — proves the view model actually FORWARDS
+    /// `mapViewportSizePt` into `MapRegion(fitting:viewSizePt:)` for the `.bounds` (2+ distinct
+    /// points) case, and that the resulting span is the fixed-screen-space-margin value, not a
+    /// proportional one — asserts the exact resulting region, not merely that a camera command was
+    /// minted (a call-count check can't distinguish a correct fit from a wrong one).
+    @Test func load_withTwoOrMoreDistinctPoints_fitsBoundsUsingTheLiveViewportSize() async {
+        let api = FakeAPIClient()
+        api.getLatestLocationsHandler = {
+            TestFeatures.envelope(LatestLocationsResponse(members: [
+                self.member("u1", "Eric", devices: [self.device("d1", lat: 50.0, lon: 3.0)]),
+                self.member("u2", "Noor", devices: [self.device("d2", lat: 51.0, lon: 4.0)]),
+            ]))
+        }
+        let viewModel = LiveMapViewModel(apiClient: api)
+        let viewportSizePt = CGSize(width: 400, height: 800)
+        viewModel.mapViewportSizePt = viewportSizePt
+
+        await viewModel.load()
+
+        let expectedTarget = MapCameraTarget.bounds(southLat: 50.0, northLat: 51.0, westLon: 3.0, eastLon: 4.0, paddingPt: MapCameraPolicy.boundsPaddingPt)
+        #expect(viewModel.cameraCommand?.target == expectedTarget)
+        #expect(viewModel.region == MapRegion(fitting: expectedTarget, viewSizePt: viewportSizePt))
+        // Pin the actual number so a wiring bug (e.g. always using `.unmeasuredViewportSizePt`
+        // instead of the property this test set) is caught even if the equality check above were
+        // wrong for some unrelated reason.
+        #expect(abs(viewModel.region.spanLatDelta - 800.0 / 672.0) < 1e-9)
     }
 
     @Test func theFirstLoad_evenWithZeroPoints_mintsACameraCommand() async {
