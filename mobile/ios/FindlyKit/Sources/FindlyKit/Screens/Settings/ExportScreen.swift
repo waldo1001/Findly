@@ -24,9 +24,17 @@ public struct ExportScreen: View {
     // lifetime instead of silently discarding the one `.task` observes (and, per this screen's own
     // doc above, the one holding `shareURL`/the in-flight `ShareLink`).
     @StateObject private var viewModel: ExportViewModel
+    /// specs/010-app-shell-and-screen-ux.md §2.1 (I34) — fires once `viewModel.state` reaches
+    /// `.routeToOnboarding` (a confirmed `PROFILE_NOT_FOUND` only — see `ExportViewModel.State`'s
+    /// doc for why `FAMILY_NOT_FOUND` deliberately does NOT route here).
+    private let onProfileDeadEnd: (OnboardingVariant) -> Void
 
-    public init(viewModel: @autoclosure @escaping () -> ExportViewModel) {
+    public init(
+        viewModel: @autoclosure @escaping () -> ExportViewModel,
+        onProfileDeadEnd: @escaping (OnboardingVariant) -> Void = { _ in }
+    ) {
         _viewModel = StateObject(wrappedValue: viewModel())
+        self.onProfileDeadEnd = onProfileDeadEnd
     }
 
     public var body: some View {
@@ -36,12 +44,20 @@ public struct ExportScreen: View {
         }
         .background(theme.colors.surfaceVariant)
         .task { await viewModel.load() }
+        .onChange(of: routingVariant) { variant in
+            if let variant { onProfileDeadEnd(variant) }
+        }
+    }
+
+    private var routingVariant: OnboardingVariant? {
+        if case .routeToOnboarding(let variant) = viewModel.state { return variant }
+        return nil
     }
 
     @ViewBuilder
     private var content: some View {
         switch viewModel.state {
-        case .loading:
+        case .loading, .routeToOnboarding:
             LoadingStateView(message: "Loading…")
         case .error(let message):
             ErrorStateView(message: message) {
