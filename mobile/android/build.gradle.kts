@@ -9,7 +9,7 @@
 // sub-plugins are unaffected and still applied the same way.
 plugins {
     id("com.android.application") version "9.3.1" apply false
-    id("org.jetbrains.kotlin.plugin.compose") version "2.3.0" apply false
+    id("org.jetbrains.kotlin.plugin.compose") version "2.4.10" apply false
     id("org.jetbrains.kotlin.plugin.serialization") version "2.3.0" apply false
     // H1 (specs/003 §13): reads app/google-services.json to configure the real Firebase project.
     id("com.google.gms.google-services") version "4.5.0" apply false
