@@ -7,6 +7,7 @@ import com.findly.android.fakes.FakeAuthProvider
 import com.findly.android.fakes.FakeDeviceInfoProvider
 import com.findly.android.fakes.FakeDevicesApi
 import com.findly.android.fakes.FakeFamilyApi
+import com.findly.android.fakes.FakeLocalStateWiper
 import com.findly.android.fakes.FakePushTokenProvider
 import com.findly.android.fakes.InMemoryDeviceIdStore
 import com.findly.android.network.ApiError
@@ -64,6 +65,7 @@ class LaunchGateStateHolderTest {
             registrar(FakeDevicesApi()),
             FakePushTokenProvider(),
             FakeFamilyApi(),
+            FakeLocalStateWiper(),
             backgroundScope,
         )
 
@@ -80,6 +82,7 @@ class LaunchGateStateHolderTest {
             registrar(FakeDevicesApi()),
             FakePushTokenProvider(),
             FakeFamilyApi(),
+            FakeLocalStateWiper(),
             backgroundScope,
         )
 
@@ -93,7 +96,7 @@ class LaunchGateStateHolderTest {
         val familyApi = FakeFamilyApi().apply {
             getMyFamilyResult = ApiResult.Success(familyMe(), features = null)
         }
-        val holder = LaunchGateStateHolder(authProvider, registrar(fakeApi), FakePushTokenProvider(), familyApi, backgroundScope)
+        val holder = LaunchGateStateHolder(authProvider, registrar(fakeApi), FakePushTokenProvider(), familyApi, FakeLocalStateWiper(), backgroundScope)
 
         runCurrent()
 
@@ -115,7 +118,7 @@ class LaunchGateStateHolderTest {
         val fakeApi = FakeDevicesApi().apply {
             resultToReturn = ApiResult.Failure(ApiError.InternalError("boom", null))
         }
-        val holder = LaunchGateStateHolder(authProvider, registrar(fakeApi), FakePushTokenProvider(), FakeFamilyApi(), backgroundScope)
+        val holder = LaunchGateStateHolder(authProvider, registrar(fakeApi), FakePushTokenProvider(), FakeFamilyApi(), FakeLocalStateWiper(), backgroundScope)
 
         runCurrent()
 
@@ -131,7 +134,7 @@ class LaunchGateStateHolderTest {
         val familyApi = FakeFamilyApi().apply {
             getMyFamilyResult = ApiResult.Failure(ApiError.ProfileNotFound("no profile", "r_1"))
         }
-        val holder = LaunchGateStateHolder(authProvider, registrar(fakeApi), FakePushTokenProvider(), familyApi, backgroundScope)
+        val holder = LaunchGateStateHolder(authProvider, registrar(fakeApi), FakePushTokenProvider(), familyApi, FakeLocalStateWiper(), backgroundScope)
 
         runCurrent()
 
@@ -148,7 +151,7 @@ class LaunchGateStateHolderTest {
         val familyApi = FakeFamilyApi().apply {
             getMyFamilyResult = ApiResult.Failure(ApiError.FamilyNotFound("no family", "r_1"))
         }
-        val holder = LaunchGateStateHolder(authProvider, registrar(fakeApi), FakePushTokenProvider(), familyApi, backgroundScope)
+        val holder = LaunchGateStateHolder(authProvider, registrar(fakeApi), FakePushTokenProvider(), familyApi, FakeLocalStateWiper(), backgroundScope)
 
         runCurrent()
 
@@ -166,7 +169,7 @@ class LaunchGateStateHolderTest {
         val familyApi = FakeFamilyApi().apply {
             getMyFamilyResult = ApiResult.Failure(ApiError.NetworkFailure(RuntimeException("offline")))
         }
-        val holder = LaunchGateStateHolder(authProvider, registrar(fakeApi), FakePushTokenProvider(), familyApi, backgroundScope)
+        val holder = LaunchGateStateHolder(authProvider, registrar(fakeApi), FakePushTokenProvider(), familyApi, FakeLocalStateWiper(), backgroundScope)
 
         runCurrent()
 
@@ -178,12 +181,85 @@ class LaunchGateStateHolderTest {
         assertEquals(1, fakeApi.registerDeviceCalls.size)
     }
 
+    /**
+     * specs/010-app-shell-and-screen-ux.md §1.1 (amended, row A37): a CONFIRMED auth failure on the
+     * probe is not an inconclusive one — it MUST route to Sign-in, clearing the local session, and
+     * MUST NOT fail open to the map. Table-driven over all four confirmed auth codes (001 §10) so
+     * parity across the set is visible in one place; each iteration gets fresh fakes so the
+     * per-call-count assertions below aren't polluted by a previous iteration.
+     */
+    @Test
+    fun `a confirmed auth failure on the probe routes to SignedOut, wipes the session, and never registers`() = runTest {
+        val confirmedAuthErrors = listOf(
+            ApiError.AuthMissingToken("no token", "r_1"),
+            ApiError.AuthInvalidToken("bad signature", "r_2"),
+            ApiError.AuthTokenExpired("expired", "r_3"),
+            ApiError.AuthForbidden("forbidden", "r_4"),
+        )
+
+        for (error in confirmedAuthErrors) {
+            val authProvider = FakeAuthProvider(initialState = AuthState.SignedIn("uid-1"))
+            val fakeApi = FakeDevicesApi()
+            val localStateWiper = FakeLocalStateWiper()
+            val familyApi = FakeFamilyApi().apply { getMyFamilyResult = ApiResult.Failure(error) }
+            val holder = LaunchGateStateHolder(
+                authProvider,
+                registrar(fakeApi),
+                FakePushTokenProvider(),
+                familyApi,
+                localStateWiper,
+                backgroundScope,
+            )
+
+            runCurrent()
+
+            assertEquals("$error routes to SignedOut", LaunchUiState.SignedOut, holder.state.value)
+            assertEquals("$error must never attempt device registration", 0, fakeApi.registerDeviceCalls.size)
+            assertEquals("$error must wipe exactly the caller's local state once", listOf("uid-1"), localStateWiper.wipeAllCalls)
+            assertEquals("$error must sign out exactly once", 1, authProvider.signOutCallCount)
+        }
+    }
+
+    /** Companion to the confirmed-auth-failure test above: a genuinely transient failure (no
+     * decodable error code at all — 010 §1.1's amended distinguishing rule) MUST keep failing open
+     * to the map, unchanged. [ApiError.NetworkFailure] and [ApiError.InternalError] both carry no
+     * auth-code classification, so neither may be confused with a confirmed auth failure. */
+    @Test
+    fun `a transient probe failure still fails open to Ready and never signs out`() = runTest {
+        val transientErrors = listOf(
+            ApiError.NetworkFailure(RuntimeException("offline")),
+            ApiError.InternalError("boom", "r_1"),
+        )
+
+        for (error in transientErrors) {
+            val authProvider = FakeAuthProvider(initialState = AuthState.SignedIn("uid-1"))
+            val fakeApi = FakeDevicesApi()
+            val localStateWiper = FakeLocalStateWiper()
+            val familyApi = FakeFamilyApi().apply { getMyFamilyResult = ApiResult.Failure(error) }
+            val holder = LaunchGateStateHolder(
+                authProvider,
+                registrar(fakeApi),
+                FakePushTokenProvider(),
+                familyApi,
+                localStateWiper,
+                backgroundScope,
+            )
+
+            runCurrent()
+
+            assertTrue("$error should fail open to Ready", holder.state.value is LaunchUiState.Ready)
+            assertEquals("$error should still attempt registration", 1, fakeApi.registerDeviceCalls.size)
+            assertEquals("$error must not sign out", 0, authProvider.signOutCallCount)
+            assertEquals("$error must not wipe local state", emptyList<String>(), localStateWiper.wipeAllCalls)
+        }
+    }
+
     @Test
     fun `signed-in registration carries the current FCM push token`() = runTest {
         val authProvider = FakeAuthProvider(initialState = AuthState.SignedIn("uid-1"))
         val fakeApi = FakeDevicesApi()
         val pushTokenProvider = FakePushTokenProvider(tokenToReturn = "fcm-token-abc")
-        val holder = LaunchGateStateHolder(authProvider, registrar(fakeApi), pushTokenProvider, FakeFamilyApi(), backgroundScope)
+        val holder = LaunchGateStateHolder(authProvider, registrar(fakeApi), pushTokenProvider, FakeFamilyApi(), FakeLocalStateWiper(), backgroundScope)
 
         runCurrent()
 
@@ -200,7 +276,7 @@ class LaunchGateStateHolderTest {
         val authProvider = FakeAuthProvider(initialState = AuthState.SignedIn("uid-1"))
         val fakeApi = FakeDevicesApi()
         val pushTokenProvider = FakePushTokenProvider(tokenToReturn = null)
-        val holder = LaunchGateStateHolder(authProvider, registrar(fakeApi), pushTokenProvider, FakeFamilyApi(), backgroundScope)
+        val holder = LaunchGateStateHolder(authProvider, registrar(fakeApi), pushTokenProvider, FakeFamilyApi(), FakeLocalStateWiper(), backgroundScope)
 
         runCurrent()
 
@@ -218,7 +294,7 @@ class LaunchGateStateHolderTest {
         val familyApi = FakeFamilyApi().apply {
             getMyFamilyResult = ApiResult.Failure(ApiError.ProfileNotFound("no profile", "r_1"))
         }
-        val holder = LaunchGateStateHolder(authProvider, registrar(fakeApi), FakePushTokenProvider(), familyApi, backgroundScope)
+        val holder = LaunchGateStateHolder(authProvider, registrar(fakeApi), FakePushTokenProvider(), familyApi, FakeLocalStateWiper(), backgroundScope)
 
         runCurrent()
         assertTrue(holder.state.value is LaunchUiState.Onboarding)
@@ -242,7 +318,7 @@ class LaunchGateStateHolderTest {
         val familyApi = FakeFamilyApi().apply {
             getMyFamilyResult = ApiResult.Failure(ApiError.FamilyNotFound("no family", "r_1"))
         }
-        val holder = LaunchGateStateHolder(authProvider, registrar(fakeApi), FakePushTokenProvider(), familyApi, backgroundScope)
+        val holder = LaunchGateStateHolder(authProvider, registrar(fakeApi), FakePushTokenProvider(), familyApi, FakeLocalStateWiper(), backgroundScope)
         runCurrent()
         assertTrue(holder.state.value is LaunchUiState.Onboarding)
 
@@ -256,7 +332,7 @@ class LaunchGateStateHolderTest {
     fun `retryRegistration is a no-op when the caller was never signed in`() = runTest {
         val authProvider = FakeAuthProvider(initialState = AuthState.SignedOut)
         val fakeApi = FakeDevicesApi()
-        val holder = LaunchGateStateHolder(authProvider, registrar(fakeApi), FakePushTokenProvider(), FakeFamilyApi(), backgroundScope)
+        val holder = LaunchGateStateHolder(authProvider, registrar(fakeApi), FakePushTokenProvider(), FakeFamilyApi(), FakeLocalStateWiper(), backgroundScope)
 
         runCurrent()
         holder.retryRegistration()

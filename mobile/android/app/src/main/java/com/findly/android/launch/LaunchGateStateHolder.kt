@@ -9,6 +9,7 @@ import com.findly.android.network.dto.FamilyMeResponseDto
 import com.findly.android.network.ports.FamilyApi
 import com.findly.android.push.PushTokenProvider
 import com.findly.android.ui.onboarding.OnboardingVariant
+import com.findly.android.ui.settings.LocalStateWiper
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -46,6 +47,7 @@ class LaunchGateStateHolder(
     private val deviceRegistrar: DeviceRegistrar,
     private val pushTokenProvider: PushTokenProvider,
     private val familyApi: FamilyApi,
+    private val localStateWiper: LocalStateWiper,
     private val scope: CoroutineScope,
 ) {
     private val _state = MutableStateFlow<LaunchUiState>(LaunchUiState.Loading)
@@ -70,6 +72,16 @@ class LaunchGateStateHolder(
 
         val probe = familyApi.getMyFamily()
         if (probe is ApiResult.Failure && probe.error is ApiError.ProfileNotFound) {
+            _state.value = LaunchUiState.Onboarding(uid, OnboardingVariant.ProfileLess)
+            return
+        }
+
+        // TODO(A37 RED): deliberately wrong stub — proves LaunchGateStateHolderTest's new
+        // confirmed-auth-failure assertions actually fail before the real fix lands (CLAUDE.md
+        // "stub wrong, don't stub absent"). Wipes local state but forgets to sign out and routes
+        // to the wrong destination; both are fixed in the immediately following GREEN commit.
+        if (probe is ApiResult.Failure && probe.error.isConfirmedAuthFailure()) {
+            localStateWiper.wipeAll(uid)
             _state.value = LaunchUiState.Onboarding(uid, OnboardingVariant.ProfileLess)
             return
         }
@@ -112,4 +124,21 @@ class LaunchGateStateHolder(
         }
         scope.launch { resolve(uid) }
     }
+}
+
+/**
+ * specs/010-app-shell-and-screen-ux.md §1.1 (amended, row A37) — the four confirmed-auth-failure
+ * codes of 001-api-contract.md §10 that MUST route the launch probe to Sign-in rather than fail
+ * open: the backend has told us the caller is unauthorized, which is categorically different from
+ * an *inconclusive* probe (timeout, 5xx, or a 401/403 that arrived with no decodable error code at
+ * all). [ApiError.NetworkFailure] and every other `ApiError` subtype are deliberately excluded —
+ * they stay inconclusive and keep failing open, unchanged.
+ */
+private fun ApiError.isConfirmedAuthFailure(): Boolean = when (this) {
+    is ApiError.AuthMissingToken,
+    is ApiError.AuthInvalidToken,
+    is ApiError.AuthTokenExpired,
+    is ApiError.AuthForbidden,
+    -> true
+    else -> false
 }
