@@ -307,7 +307,11 @@ struct RootView: View {
                     onProfileDeadEnd: { variant in coordinator.showOnboarding(variant) }
                 )
             case .createInvite:
-                CreateInviteScreen(viewModel: CreateInviteViewModel(apiClient: apiClient))
+                // specs/007-public-join-links.md §1, specs/010-app-shell-and-screen-ux.md §5.1 —
+                // same injected `joinLinkHost` instance `GroupDetailScreen` below already uses,
+                // not the type's own `AppConfig.defaultJoinLinkHost` fallback (that default exists
+                // only for previews/tests that don't wire a real config).
+                CreateInviteScreen(viewModel: CreateInviteViewModel(apiClient: apiClient), joinLinkHost: joinLinkHost)
             case .acceptInvite(let prefillCode):
                 AcceptInviteScreen(
                     viewModel: AcceptInviteViewModel(apiClient: apiClient),

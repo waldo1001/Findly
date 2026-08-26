@@ -152,8 +152,10 @@ public final class GroupDetailViewModel: ObservableObject {
     private static let iso8601Formatter = ISO8601DateFormatter()
 
     /// The human-shareable text (`ShareLink` payload) for the join code — canonical uppercase, no
-    /// hyphen (001 §1.4), formatted for readability as `XXXX-XXXX`, mirroring
-    /// `CreateInviteViewModel.shareText(for:)`.
+    /// hyphen (001 §1.4), formatted for readability as `XXXX-XXXX`. specs/007-public-join-links.md
+    /// §4 pins this exact group-share template as the cross-platform contract (unchanged by I37 —
+    /// only the family-invite template gained the `/f` link); `CreateInviteViewModel.shareText`
+    /// carries the family-invite twin, which DOES include the `/f` link per that same section.
     public static func shareText(for code: String, groupName: String) -> String {
         let clean = code.uppercased()
         guard clean.count == 8 else {
