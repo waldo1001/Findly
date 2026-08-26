@@ -91,7 +91,7 @@ struct LiveMapViewModelTests {
     @Test func load_failure_setsErrorState() async {
         let api = FakeAPIClient()
         api.getLatestLocationsHandler = {
-            throw APIError.server(APIErrorBody(code: .familyNotFound, message: "no family", details: nil, requestId: "r1"), httpStatus: 404)
+            throw APIError.server(APIErrorBody(code: .internalError, message: "boom", details: nil, requestId: "r1"), httpStatus: 500)
         }
         let viewModel = LiveMapViewModel(apiClient: api)
 
@@ -101,5 +101,33 @@ struct LiveMapViewModelTests {
             Issue.record("expected .error state, got \(viewModel.state)")
             return
         }
+    }
+
+    // MARK: - specs/010-app-shell-and-screen-ux.md §2.1 (I34) — the profile-dead-end routing rule.
+    // `GET /locations/latest` is family-scoped (001 §5.2/§1.5.4), so BOTH 404s are reachable here;
+    // neither may render the old retryable error card (a Retry on this load can never succeed).
+
+    @Test func load_profileNotFound_routesToOnboardingProfileLess() async {
+        let api = FakeAPIClient()
+        api.getLatestLocationsHandler = {
+            throw APIError.server(APIErrorBody(code: .profileNotFound, message: "no profile", details: nil, requestId: "r1"), httpStatus: 404)
+        }
+        let viewModel = LiveMapViewModel(apiClient: api)
+
+        await viewModel.load()
+
+        #expect(viewModel.state == .routeToOnboarding(.profileLess))
+    }
+
+    @Test func load_familyNotFound_routesToOnboardingFamilyLess() async {
+        let api = FakeAPIClient()
+        api.getLatestLocationsHandler = {
+            throw APIError.server(APIErrorBody(code: .familyNotFound, message: "no family", details: nil, requestId: "r1"), httpStatus: 404)
+        }
+        let viewModel = LiveMapViewModel(apiClient: api)
+
+        await viewModel.load()
+
+        #expect(viewModel.state == .routeToOnboarding(.familyLess))
     }
 }
