@@ -63,6 +63,26 @@ struct ExportViewModelTests {
         #expect(viewModel.state == .loaded(isParent: false, members: []), "a family-less user can still export themselves")
     }
 
+    // MARK: - specs/010-app-shell-and-screen-ux.md §2.1 (I34) — the profile-dead-end routing rule.
+    // Export is the one screen where the two 404s are NOT symmetric: `GET /export` (001 §13.1)
+    // needs only a profile, never a family — a family-less caller can still export themselves, per
+    // `load_familyLess_stillLoadedForSelfExport` above (unchanged, deliberately). Only a confirmed
+    // `PROFILE_NOT_FOUND` may route away; `load()`'s `getMyFamily()` call still 404s
+    // `FAMILY_NOT_FOUND` for a family-less caller, but that must keep falling back to the existing
+    // self-export-only `.loaded` state rather than routing.
+
+    @Test func load_profileNotFound_routesToOnboardingProfileLess() async {
+        let api = FakeAPIClient()
+        api.getMyFamilyHandler = {
+            throw APIError.server(APIErrorBody(code: .profileNotFound, message: "x", details: nil, requestId: "r1"), httpStatus: 404)
+        }
+        let viewModel = ExportViewModel(apiClient: api)
+
+        await viewModel.load()
+
+        #expect(viewModel.state == .routeToOnboarding(.profileLess))
+    }
+
     @Test func load_otherFailure_setsErrorState() async {
         let api = FakeAPIClient()
         api.getMyFamilyHandler = { throw APIError.transport("offline") }
