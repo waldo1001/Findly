@@ -19,12 +19,18 @@ public struct MapMarkerBubble: View {
     private let name: String?
     private let state: MapMarkerBubbleState
     private let badgeText: String?
+    /// specs/010-app-shell-and-screen-ux.md §3.3/§3.5 (I35) — the currently-selected member's
+    /// marker renders in a visually distinct state: value-level styling only (a thicker `primary`
+    /// ring, matching the existing `pillBorder`'s "meaningful stroke" convention), reusing existing
+    /// tokens rather than inventing a new one, per §3.3's own instruction.
+    private let selected: Bool
 
-    public init(initials: String, name: String? = nil, state: MapMarkerBubbleState = .normal, badgeText: String? = nil) {
+    public init(initials: String, name: String? = nil, state: MapMarkerBubbleState = .normal, badgeText: String? = nil, selected: Bool = false) {
         self.initials = initials
         self.name = name
         self.state = state
         self.badgeText = badgeText
+        self.selected = selected
     }
 
     /// Back-compat for the pre-I27 call site (Screens/Map/MapRendering.swift); I28 (screens wave)
@@ -60,9 +66,10 @@ public struct MapMarkerBubble: View {
             .frame(height: 44)
             .background(pillBackground)
             .overlay(pillBorder)
+            .overlay(selectionRing)
             .clipShape(Capsule())
             .shadow(
-                color: state == .normal ? Color.black.opacity(theme.elevation.level3.opacity) : .clear,
+                color: (state == .normal || selected) ? Color.black.opacity(theme.elevation.level3.opacity) : .clear,
                 radius: theme.elevation.level3.blur,
                 y: theme.elevation.level3.y
             )
@@ -71,6 +78,17 @@ public struct MapMarkerBubble: View {
             Triangle()
                 .fill(state == .normal ? theme.colors.primary : theme.colors.surface)
                 .frame(width: 14, height: 7)
+        }
+        // A selected marker sits visually above its siblings on the same map — a small, purely
+        // presentational scale bump (no new token), matching the "visually distinct" instruction.
+        .scaleEffect(selected ? 1.08 : 1.0)
+    }
+
+    @ViewBuilder
+    private var selectionRing: some View {
+        if selected {
+            Capsule()
+                .strokeBorder(theme.colors.primary, lineWidth: 3)
         }
     }
 

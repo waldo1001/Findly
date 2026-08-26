@@ -18,12 +18,21 @@ public final class GroupMapViewModel: ObservableObject {
     }
 
     @Published public private(set) var state: State = .loading
-    /// Two-way bound to the map layer (`MapRendering`), recentered on the first annotation
-    /// whenever a fresh `load()` succeeds — same pattern as `LiveMapViewModel`.
+    /// Two-way bound to the map layer (`MapRendering`). Written ONLY when `cameraCommand` changes
+    /// (specs/010-app-shell-and-screen-ux.md §3.2/§3.4 — the group map adopts the same camera
+    /// policy through the same renderer seam as `LiveMapViewModel`), never rewritten on an
+    /// ordinary refresh.
     @Published public var region: MapRegion = .findlyDefault
+    /// specs/010 §3.4 — mirrors `LiveMapViewModel.cameraCommand` exactly.
+    @Published public private(set) var cameraCommand: MapCameraCommand?
+    /// specs/010 §3.5 — mirrors `LiveMapViewModel.selectedUserId`; position-only, so selection
+    /// targets the member's own single point directly rather than resolving a freshest device.
+    @Published public private(set) var selectedUserId: String?
 
     private let apiClient: FindlyAPIClient
     public let groupId: String
+    private var cameraPolicyState = MapCameraPolicyState.initial
+    private var cameraSequence = 0
 
     public init(apiClient: FindlyAPIClient, groupId: String) {
         self.apiClient = apiClient
@@ -34,10 +43,19 @@ public final class GroupMapViewModel: ObservableObject {
         state = .loading
         do {
             let envelope = try await apiClient.getGroupLatestLocations(groupId: groupId)
-            state = .loaded(envelope.data.members)
-            if let first = annotations(for: envelope.data.members).first {
-                region = MapRegion(centerLat: first.lat, centerLon: first.lon)
+            let members = envelope.data.members
+            state = .loaded(members)
+
+            if let selectedUserId, !members.contains(where: { $0.userId == selectedUserId }) {
+                self.selectedUserId = nil
             }
+
+            let points = Self.locatedPoints(in: members)
+            let hasPoints = !points.isEmpty
+            if MapCameraPolicy.shouldRunOnLoadOrRefresh(state: cameraPolicyState, hasPoints: hasPoints) {
+                emitCameraCommand(MapCameraPolicy.target(points: points))
+            }
+            cameraPolicyState = MapCameraPolicy.nextState(state: cameraPolicyState, hasPoints: hasPoints)
         } catch {
             if (error as? APIError)?.serverCode == .groupExpired {
                 state = .expired
@@ -45,6 +63,41 @@ public final class GroupMapViewModel: ObservableObject {
                 state = .error(userFacingMessage(for: error))
             }
         }
+    }
+
+    /// specs/010 §3.5, position-only mirror of `LiveMapViewModel.selectMember` — there is exactly
+    /// one point per member here, so selection targets it directly rather than resolving a
+    /// freshest device first.
+    public func selectMember(_ userId: String) {
+        guard case .loaded(let members) = state else { return }
+        if selectedUserId == userId {
+            selectedUserId = nil
+            return
+        }
+        guard let member = members.first(where: { $0.userId == userId }) else { return }
+        selectedUserId = userId
+        if let location = member.location {
+            emitCameraCommand(.center(lat: location.lat, lon: location.lon, zoom: MapCameraPolicy.singlePointZoom))
+        }
+    }
+
+    /// specs/010 §3.4's explicit fit-all action — mirrors `LiveMapViewModel.fitAll`.
+    public func fitAll() {
+        guard case .loaded(let members) = state else { return }
+        emitCameraCommand(MapCameraPolicy.target(points: Self.locatedPoints(in: members)))
+    }
+
+    private static func locatedPoints(in members: [GroupMemberLocation]) -> [MapGeoPoint] {
+        members.compactMap { member in
+            guard let location = member.location else { return nil }
+            return MapGeoPoint(lat: location.lat, lon: location.lon)
+        }
+    }
+
+    private func emitCameraCommand(_ target: MapCameraTarget) {
+        cameraSequence += 1
+        cameraCommand = MapCameraCommand(sequence: cameraSequence, target: target)
+        region = MapRegion(fitting: target)
     }
 
     /// Every member with a known position — `MapMarkerBubble`-ready. Members with no position yet
@@ -59,7 +112,8 @@ public final class GroupMapViewModel: ObservableObject {
             guard let location = member.location else { return nil }
             return MapAnnotationItem(
                 id: member.userId, lat: location.lat, lon: location.lon,
-                initials: Self.initials(for: member.displayName), isStale: location.isStale
+                initials: Self.initials(for: member.displayName), isStale: location.isStale,
+                isSelected: member.userId == selectedUserId
             )
         }
     }

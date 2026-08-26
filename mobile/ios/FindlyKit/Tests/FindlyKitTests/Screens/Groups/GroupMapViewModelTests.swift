@@ -38,7 +38,10 @@ struct GroupMapViewModelTests {
         #expect(viewModel.annotations.first?.id == "u1")
         #expect(viewModel.annotations.first?.initials == "ER")
         #expect(viewModel.annotations.first?.isStale == false)
-        #expect(viewModel.region == MapRegion(centerLat: 51.0543, centerLon: 3.7174))
+        // specs/010-app-shell-and-screen-ux.md §3.2/§3.4 (I35) — one distinct located point on the
+        // first load is `MapCameraPolicy`'s `.center` target, not the retired "first annotation,
+        // fixed 0.05° span" behavior.
+        #expect(viewModel.region == MapRegion(fitting: .center(lat: 51.0543, lon: 3.7174, zoom: MapCameraPolicy.singlePointZoom)))
     }
 
     @Test func annotations_excludeMembersWithNoPositionYet() async {
@@ -53,7 +56,9 @@ struct GroupMapViewModelTests {
         await viewModel.load()
 
         #expect(viewModel.annotations.isEmpty)
-        #expect(viewModel.region == .findlyDefault)
+        // specs/010 §3.2/§3.4 (I35) — zero located points is `MapCameraPolicy`'s `.defaultRegion`
+        // target, not the retired "stay at `.findlyDefault`'s 0.05° span" behavior.
+        #expect(viewModel.region == MapRegion(fitting: .defaultRegion(lat: MapCameraPolicy.defaultLat, lon: MapCameraPolicy.defaultLon, zoom: MapCameraPolicy.defaultZoom)))
     }
 
     @Test func load_groupExpired_setsExpiredState() async {
@@ -81,5 +86,120 @@ struct GroupMapViewModelTests {
             Issue.record("expected .error state, got \(viewModel.state)")
             return
         }
+    }
+}
+
+/// specs/010-app-shell-and-screen-ux.md §3.2/§3.4/§3.5 (I35) — the group map adopts the SAME
+/// camera policy and selection behavior as the family map (§3.2: "the same camera policy through
+/// the same renderer seam"), position-only: there is exactly one point per member, so selection
+/// targets it directly rather than resolving a freshest device.
+@MainActor
+struct GroupMapViewModelCameraTests {
+
+    private func member(_ userId: String, _ displayName: String, lat: Double?, lon: Double?) -> GroupMemberLocation {
+        GroupMemberLocation(
+            userId: userId, displayName: displayName, role: "member",
+            location: lat.map { GroupPosition(lat: $0, lon: lon!, accuracyM: 10, recordedAt: "2026-08-26T09:00:00Z", receivedAt: "2026-08-26T09:00:02Z", isStale: false) }
+        )
+    }
+
+    @Test func aRefreshThatChangesThePointSet_mintsNoNewCameraCommand() async {
+        let api = FakeAPIClient()
+        api.getGroupLatestLocationsHandler = { _ in
+            TestFeatures.envelope(GroupLatestLocationsResponse(members: [self.member("u1", "Eric", lat: 51.0, lon: 3.7)]))
+        }
+        let viewModel = GroupMapViewModel(apiClient: api, groupId: "grp_1")
+        await viewModel.load()
+        let firstSequence = viewModel.cameraCommand?.sequence
+        let regionAfterFirstLoad = viewModel.region
+
+        api.getGroupLatestLocationsHandler = { _ in
+            TestFeatures.envelope(GroupLatestLocationsResponse(members: [
+                self.member("u1", "Eric", lat: 52.0, lon: 4.7),
+                self.member("u2", "Noor", lat: 48.0, lon: 2.3),
+            ]))
+        }
+        await viewModel.load()
+
+        #expect(viewModel.cameraCommand?.sequence == firstSequence)
+        #expect(viewModel.region == regionAfterFirstLoad)
+    }
+
+    @Test func selectMember_withAPosition_selectsAndZoomsToIt() async {
+        let api = FakeAPIClient()
+        api.getGroupLatestLocationsHandler = { _ in
+            TestFeatures.envelope(GroupLatestLocationsResponse(members: [self.member("u1", "Eric", lat: 41.0, lon: 2.0)]))
+        }
+        let viewModel = GroupMapViewModel(apiClient: api, groupId: "grp_1")
+        await viewModel.load()
+        let sequenceAfterLoad = viewModel.cameraCommand?.sequence
+
+        viewModel.selectMember("u1")
+
+        #expect(viewModel.selectedUserId == "u1")
+        #expect(viewModel.cameraCommand?.sequence != sequenceAfterLoad)
+        #expect(viewModel.cameraCommand?.target == .center(lat: 41.0, lon: 2.0, zoom: MapCameraPolicy.singlePointZoom))
+    }
+
+    @Test func selectMember_withNoPosition_selectsButDoesNotMoveTheCamera() async {
+        let api = FakeAPIClient()
+        api.getGroupLatestLocationsHandler = { _ in
+            TestFeatures.envelope(GroupLatestLocationsResponse(members: [self.member("u1", "Eric", lat: nil, lon: nil)]))
+        }
+        let viewModel = GroupMapViewModel(apiClient: api, groupId: "grp_1")
+        await viewModel.load()
+        let sequenceAfterLoad = viewModel.cameraCommand?.sequence
+
+        viewModel.selectMember("u1")
+
+        #expect(viewModel.selectedUserId == "u1")
+        #expect(viewModel.cameraCommand?.sequence == sequenceAfterLoad)
+    }
+
+    @Test func selectingTheAlreadySelectedMember_deselects() async {
+        let api = FakeAPIClient()
+        api.getGroupLatestLocationsHandler = { _ in
+            TestFeatures.envelope(GroupLatestLocationsResponse(members: [self.member("u1", "Eric", lat: 41.0, lon: 2.0)]))
+        }
+        let viewModel = GroupMapViewModel(apiClient: api, groupId: "grp_1")
+        await viewModel.load()
+        viewModel.selectMember("u1")
+        #expect(viewModel.selectedUserId == "u1")
+
+        viewModel.selectMember("u1")
+
+        #expect(viewModel.selectedUserId == nil)
+    }
+
+    @Test func fitAll_alwaysMintsANewCameraCommand() async {
+        let api = FakeAPIClient()
+        api.getGroupLatestLocationsHandler = { _ in
+            TestFeatures.envelope(GroupLatestLocationsResponse(members: [self.member("u1", "Eric", lat: 51.0, lon: 3.7)]))
+        }
+        let viewModel = GroupMapViewModel(apiClient: api, groupId: "grp_1")
+        await viewModel.load()
+        await viewModel.load()
+        let steadySequence = viewModel.cameraCommand?.sequence
+
+        viewModel.fitAll()
+
+        #expect(viewModel.cameraCommand?.sequence != steadySequence)
+    }
+
+    @Test func selectingAMember_marksOnlyTheirOwnAnnotationSelected() async {
+        let api = FakeAPIClient()
+        api.getGroupLatestLocationsHandler = { _ in
+            TestFeatures.envelope(GroupLatestLocationsResponse(members: [
+                self.member("u1", "Eric", lat: 51.0, lon: 3.7),
+                self.member("u2", "Noor", lat: 48.0, lon: 2.3),
+            ]))
+        }
+        let viewModel = GroupMapViewModel(apiClient: api, groupId: "grp_1")
+        await viewModel.load()
+
+        viewModel.selectMember("u1")
+
+        #expect(viewModel.annotations.first { $0.id == "u1" }?.isSelected == true)
+        #expect(viewModel.annotations.first { $0.id == "u2" }?.isSelected == false)
     }
 }
