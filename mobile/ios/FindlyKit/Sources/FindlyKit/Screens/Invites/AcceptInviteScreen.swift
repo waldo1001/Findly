@@ -23,8 +23,9 @@ public struct AcceptInviteScreen: View {
     /// sign-in, before this screen ever ran) is guaranteed to have failed with
     /// `DeviceRegistrationError.profileNotYetBootstrapped` — this is the seam `RootView` uses to
     /// retry it now that a profile exists, rather than waiting for the next cold start. Defaults
-    /// to a no-op so this screen's existing navigation-free "stay on the Welcome message" behavior
-    /// is unchanged for any caller that doesn't need the side effect.
+    /// to a no-op, which simply leaves this screen showing `form` after a successful join (010
+    /// §5.2 retires the old terminal "Welcome!" state entirely — see `content` below) for any
+    /// caller that doesn't need the reset-to-root side effect.
     public init(
         viewModel: @autoclosure @escaping () -> AcceptInviteViewModel,
         prefillInviteCode: String = "",
@@ -48,17 +49,19 @@ public struct AcceptInviteScreen: View {
         }
         .background(theme.colors.surfaceVariant)
         .task {
-            // specs/010-app-shell-and-screen-ux.md §5.2 — only resolve when there's no
-            // Onboarding-typed name already to prefill from (a profile-less caller's own
-            // resolveExistingDisplayName() call degrades to nil anyway, since their profile
-            // doesn't exist yet — see that method's doc — but skipping it here also skips a
-            // pointless network call on that path).
-            if displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                await viewModel.resolveExistingDisplayName()
-            }
+            // specs/010-app-shell-and-screen-ux.md §5.2, security review fix (I37 round 2) — only
+            // resolve when there's no Onboarding-typed name already to prefill from.
+            // `loadDisplayNameFallback()` runs its OWN confirming `GET /families/me` probe rather
+            // than trusting `FamilyContextCache` — this screen is reachable via a deep link
+            // arriving BEFORE the launch probe ever runs (`AppCoordinator.push`'s `.launching`
+            // replacement case), so the cache can be genuinely empty here even for a caller who
+            // already has a family; a fresh, self-confirming probe is correct in every arrival
+            // state, not just the common one.
+            guard displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+            await viewModel.loadDisplayNameFallback()
         }
         .onChange(of: viewModel.resolvedDisplayName) { resolved in
-            if displayName.isEmpty, let resolved, !resolved.isEmpty {
+            if displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, let resolved, !resolved.isEmpty {
                 displayName = resolved
             }
         }
