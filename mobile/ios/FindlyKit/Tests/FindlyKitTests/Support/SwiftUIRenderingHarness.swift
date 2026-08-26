@@ -26,14 +26,26 @@ import AppKit
 /// inspection. Tests assert on state/identity the probed view itself reports (e.g. via a plain
 /// recorder object captured in its `body`), not on rendered pixels.
 ///
-/// **Platform note.** `FindlyKit/Package.swift` targets both `.iOS(.v16)` and `.macOS(.v13)` so
-/// the package builds & tests headlessly on any host (see that file's own header comment). This
-/// sandbox has Xcode but no usable Simulator, so `swift test` links and runs against the macOS
-/// host toolchain, where `UIKit` does not exist — only `AppKit`'s `NSHostingController` is
-/// reachable here. Both branches host the identical `Content` view and drive the identical
-/// SwiftUI update machinery (`@StateObject`/`@ObservedObject` semantics are platform-independent),
-/// so the harness's behavior — and what it proves about the ownership contract below — is the same
-/// on either platform; only the concrete hosting-controller type differs.
+/// **Platform note — known, currently-permanent coverage boundary (I18 review finding #2).**
+/// `FindlyKit/Package.swift` targets both `.iOS(.v16)` and `.macOS(.v13)` so the package builds &
+/// tests headlessly on any host (see that file's own header comment), and this class compiles
+/// against either via the `#if canImport(UIKit)/#elseif canImport(AppKit)` branches above. In
+/// practice, though, every place that actually runs `swift test` today — this sandbox, and
+/// `.github/workflows/ios.yml`'s `ios-package` job, the only CI job that runs `test` rather than
+/// just `build` — invokes plain `swift build`/`swift test` with no `-destination`, which compiles
+/// against the macOS host SDK. `canImport(UIKit)` is false there, so the `AppKit`/
+/// `NSHostingController` branch is the ONLY one ever exercised, in this sandbox or in CI. (CI's
+/// `ios-build` job does target an iOS Simulator destination, but it only runs `build`, never
+/// `test`, and never touches `FindlyKitTests`.) This is not a temporary sandbox limitation that
+/// resolves once a Simulator is available — it is the actual, permanent shape of today's test
+/// coverage for this harness. Closing it requires a CI step that runs `xcodebuild test` (or
+/// `swift test --destination ...`) against a real iOS Simulator, which is out of this task's scope
+/// (tracked separately). The fallback itself is legitimate and intentional, not a stopgap:
+/// `@StateObject`/`@ObservedObject` ownership semantics are platform-independent SwiftUI behavior,
+/// both branches host the identical `Content` view through the identical SwiftUI update machinery,
+/// and `Package.swift` already declared `.macOS(.v13)` before this task touched anything — so what
+/// this harness proves about the I16 ownership contract holds on macOS today and will hold
+/// identically on iOS once something actually runs this suite there.
 @MainActor
 public final class SwiftUIRenderingHarness<Content: View> {
     #if canImport(UIKit)
