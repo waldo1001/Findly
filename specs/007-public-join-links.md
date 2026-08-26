@@ -2,9 +2,9 @@
 
 ## Goal
 
-Make group joining work for people who **don't have the app yet** — the convention scenario (005 groups at real-world events, attendees worldwide): the owner shares/prints one QR code; scanning it either opens the app directly on the join screen (installed) or lands on a tiny static page showing the join code and store links (not installed). This spec owns the link format, the landing page and its security invariants, the `.well-known` association files, the hosting/deploy model, and the client integration contract. Product model of groups stays in [005](005-temporary-groups.md); wire shapes of the join API stay in [001 §12.6](001-api-contract.md) — this spec adds **no API endpoint and no storage**.
+Make group joining — and, since the 2026-08-26 amendment, **family-invite joining** — work for people who **don't have the app yet** — the convention scenario (005 groups at real-world events, attendees worldwide), and the family-onboarding scenario (a parent invites a family member over WhatsApp; the recipient is by definition someone without the app): the sharer shares/prints one link or QR; opening it either lands in the app directly on the join screen (installed) or on a tiny static page showing the code and store links (not installed). This spec owns the link formats, the landing pages and their security invariants, the `.well-known` association files, the hosting/deploy model, the **exact share-message text** for both link kinds, and the client integration contract. Product model of groups stays in [005](005-temporary-groups.md); wire shapes stay in [001 §12.6](001-api-contract.md) (group join) and [001 §3.3–3.4](001-api-contract.md) (family invites) — this spec adds **no API endpoint and no storage**. Family-invite screen layout lives in [010 §5](010-app-shell-and-screen-ux.md).
 
-RFC 2119 keywords (MUST/SHOULD/MAY) are used normatively. Promoted from 000 §O16 (product-owner decision, 2026-07-22 — see 000 §D16).
+RFC 2119 keywords (MUST/SHOULD/MAY) are used normatively. Promoted from 000 §O16 (product-owner decision, 2026-07-22 — see 000 §D16). **Amended 2026-08-26** to add the family-invite surface (`/f`) alongside the group surface (`/g`) — the amendments are inline in each section, marked, so section numbers cited elsewhere stay stable.
 
 ## 1. Link format
 
@@ -17,6 +17,16 @@ https://{JOIN_LINK_HOST}/g#{CODE}
 - `JOIN_LINK_HOST` is a **deployment constant** (like the API base URL): v1 value is the Static Web App's default hostname, recorded at provisioning (H4, `docs/azure-setup.md` §7) and baked into client build config (003 §13, 004 §8). A custom domain later is **additive** — the SWA serves both hosts, old printed QR codes keep working; new prints use the new host. Changing the host is a client-release event (intent filters / entitlements name it), acceptable pre-launch.
 - The existing in-app deep link `findly://group-join?code={CODE}` (003/004) **remains valid** unchanged. Once this spec ships, the https form is the canonical one for sharing and QR; the `findly://` form remains as the landing page's "open the app" affordance and for backward compatibility.
 
+**Family-invite form (added 2026-08-26):**
+
+```
+https://{JOIN_LINK_HOST}/f#{CODE}
+```
+
+- Same host, same fragment-carried-capability rule, same normalization — `{CODE}` here is a **family invite code** (001 §1.4 format; 001 §3.3 semantics: **single-use, 72 h expiry**, unlike multi-use group codes). The single-use property makes the fragment rule *more* load-bearing, not less: a logged family code is a logged one-shot credential into a family's live locations.
+- The path distinguishes the kind: `/g` = group join, `/f` = family invite. Consumers MUST NOT treat one as the other (a family code pasted into the group-join screen fails server-side anyway, but the client routes by path, never by guessing).
+- Companion in-app deep link: **`findly://family-join?code={CODE}`** — new, mirroring `findly://group-join`, used as the `/f` landing page's "open the app" affordance and accepted by both clients.
+
 ## 2. Landing page — `GET /g`
 
 A single static HTML page (inline CSS/JS, no framework), served for `/g` regardless of fragment. Behavior:
@@ -25,19 +35,21 @@ A single static HTML page (inline CSS/JS, no framework), served for `/g` regardl
 2. Offers, in order: an **"Open in the app"** link (`findly://group-join?code={CODE}` — works when the app is installed but the OS didn't intercept, e.g. in-browser navigation); **store badges** (Play / App Store — hidden or "coming soon" until the listings exist, H5/H6); and the instruction to install, then re-scan the QR or type the displayed code.
 3. No fragment / unparsable fragment → the same page without the code block ("scan the group's QR code or ask for the code").
 
+**`GET /f` (added 2026-08-26):** the same static page pattern, family-worded — "You've been invited to a family on Findly" — showing the code with the copy button, an **"Open in the app"** link (`findly://family-join?code={CODE}`), the store badges, and the install-then-re-open instruction. It MAY be the same HTML file branching on `location.pathname`, or a second file; either way every invariant below applies to it identically. The page MUST NOT hint whether the code is valid, used, or expired — single-use codes make an existence oracle *more* attractive to probe, and the page stays static and oracle-free exactly like `/g`.
+
 **Security invariants (normative):**
 
 - The page is **fully static**: it MUST NOT call any API, read any storage, or embed any analytics/telemetry/third-party resource. It renders identically whether the code exists, is expired, or is garbage — there is **no existence oracle**.
 - The code MUST NOT be validated, resolved, or logged server-side (it can't be — the server never receives the fragment; keep it that way).
 - The page MUST NOT persist the code anywhere (no cookies/localStorage).
-- Join enforcement (`GROUP_CODE_INVALID`, `GROUP_EXPIRED`, `GROUP_FULL`, App-Check-gated sign-in…) happens exactly where it already lives: in the app against 001 §12.6. The link surface adds zero trust.
+- Join enforcement (`GROUP_CODE_INVALID`, `GROUP_EXPIRED`, `GROUP_FULL`, App-Check-gated sign-in…) happens exactly where it already lives: in the app against 001 §12.6 — and for family invites (`INVITE_INVALID`, `INVITE_ALREADY_USED`, `INVITE_EXPIRED`) against 001 §3.4. The link surface adds zero trust.
 
 ## 3. `.well-known` association files (same host)
 
 | File | Consumer | Content requirements |
 |---|---|---|
 | `/.well-known/assetlinks.json` | Android App Links verifier | `relation: ["delegate_permission/common.handle_all_urls"]`, `android_app` target with the package name and the **debug + release SHA-256 signing fingerprints** (release added when the keystore exists — H5; same fingerprints as the Firebase/App Check registration, 006 §6.5) |
-| `/.well-known/apple-app-site-association` | Apple's CDN (Universal Links) | `applinks.details[].appIDs: ["{TEAMID}.{bundleId}"]`, `components: [{ "/": "/g" }]`. **TeamID is enrollment-gated** (H6): the file ships with the structure in place and gains the real appID once the Apple Developer membership exists — a server-side file update, no app change |
+| `/.well-known/apple-app-site-association` | Apple's CDN (Universal Links) | `applinks.details[].appIDs: ["{TEAMID}.{bundleId}"]`, `components: [{ "/": "/g" }, { "/": "/f" }]` (the `/f` component added 2026-08-26 — a server-side file update). **TeamID is enrollment-gated** (H6): the file ships with the structure in place and gains the real appID once the Apple Developer membership exists — a server-side file update, no app change |
 
 **Implementation note, confirmed against the live H4 deployment (2026-07-22):** Azure Static Web Apps' route-level `headers` override for `Content-Type` does not reliably apply to extensionless files — a documented platform quirk (Azure/static-web-apps#402 and related reports), not a config mistake. The AASA file's actual content lives at `.well-known/apple-app-site-association.json` (so SWA's extension-based MIME detection serves it correctly as `application/json`), with a `staticwebapp.config.json` **`rewrite`** rule (not `redirect` — the client-visible URL and response never change, satisfying this section's no-redirect requirement) mapping the extensionless `/.well-known/apple-app-site-association` path Apple's CDN actually requests to that file. `assetlinks.json` needed no such workaround since it already carries a recognized extension.
 
@@ -50,7 +62,23 @@ Serving rules (normative): both files MUST be served over HTTPS with no redirect
 - **Share & QR:** the share-sheet text switches to the §1 https link (code in fragment). The group detail screen renders a **QR code of that link, generated on-device** — using a networked QR service would leak the capability and is a spec violation. Both platforms MUST generate locally (iOS: CoreImage `CIQRCodeGenerator`; Android: a local generator library, reviewed as a new dependency).
 - A link with a valid host/path but no usable fragment opens the join screen with an empty code field (no error).
 
-## 5. Hosting & deployment
+**Family-invite client integration (added 2026-08-26; screen behavior in 010 §5):**
+
+- **Android:** the existing `https` intent filter gains the `/f` path (same host, same `autoVerify`); a `findly://family-join` filter mirrors the group one. Delivered codes go through the same whitelist-sanitizer pattern (a family-invite twin of `GroupJoinCodeSanitizer`, or the same pure sanitizer parameterized by kind); wrong host/path ignored, `/f` routes only to the join-a-family screen.
+- **iOS:** `InviteCodeParsing` gains the https `/f` + fragment form and the `findly://family-join` form, with the same charset whitelist and hyphen tolerance as `GroupCodeParsing`; the coordinator's `handleDeepLink` routes `/f` to the accept-invite screen with the code prefilled (today it recognizes only group links).
+- **Share text (normative, both platforms, both kinds — previously an unspecced code literal on iOS and absent on Android).** The share sheet MUST share exactly:
+  - Family invite:
+    ```
+    Join our family on Findly — invite code {XXXX-XXXX}
+    https://{JOIN_LINK_HOST}/f#{CODE}
+    ```
+  - Group (pins the already-shipped Android text as the cross-platform contract):
+    ```
+    Join my "{group name}" group on Findly — code {CODE}
+    https://{JOIN_LINK_HOST}/g#{CODE}
+    ```
+  where `{XXXX-XXXX}` is the hyphenated display form and the fragment `{CODE}` is canonical (uppercase, no hyphen). No other content — store URLs deliberately do **not** appear in the message; the landing page carries the store badges, so the message stays short and never goes stale when store URLs change.
+- **QR:** the family-invite create screen renders a QR of the `/f` link, generated on-device under the same rule as the group QR (local generation only; a networked QR service leaks the capability and is a spec violation).
 
 - **Azure Static Web Apps, Free tier** — one resource (H4), also the future home of the web viz (000 §Architecture) and of the store-required legal pages (`/privacy`, `/terms` — authored in H7, hosted here). Free tier includes the default hostname with TLS and free managed certificates for a later custom domain.
 - Repo artifact: **`web/join/`** — `index.html` is not required at root; the deploy maps `/g` and `/.well-known/*` (SWA `staticwebapp.config.json` for routes/headers, including the AASA content-type override).
@@ -72,6 +100,7 @@ Serving rules (normative): both files MUST be served over HTTPS with no redirect
 - **Landing page:** contains zero `fetch`/XHR/external resource references (statically assertable); renders the code block only for a plausible fragment; renders identically for existing vs. nonexistent codes (no oracle).
 - **Association files:** valid JSON, correct content types, no redirects (verified against the live host at H4/H5/H6 as fingerprints/TeamID land).
 - **Capability hygiene:** repo grep — no real join code committed; sample codes in docs/tests use obviously fictional values (`7F3K9QRZ` class); no code ever logged client-side in the new paths.
+- **Family-invite additions (2026-08-26):** `/f` link + `findly://family-join` parsing accepted/rejected exactly like the group forms, and `/f` never routes to the group-join screen (nor `/g` to the family one); the family and group share texts match the §4 templates byte-for-byte (fixed code + host snapshot); the `/f` landing page satisfies every §2 assertion (no fetch/XHR/external resource, code block only for a plausible fragment, renders identically for valid/used/expired/garbage codes); the AASA carries both `/g` and `/f` components.
 
 ## Open questions
 
