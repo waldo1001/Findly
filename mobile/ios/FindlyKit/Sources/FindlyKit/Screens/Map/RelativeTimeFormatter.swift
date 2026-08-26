@@ -6,9 +6,6 @@ import Foundation
 /// `nowIso`-as-parameter shape (rather than reading the system clock directly) so the 30 s ticker
 /// that recomputes this (`LiveMapScreen`) can drive it deterministically and this stays
 /// unit-testable with no clock dependency.
-///
-/// Deliberately returns a wrong-on-purpose constant right now (assertion-level red, not
-/// compile-level) — the next commit implements the real thresholds.
 public enum RelativeTimeFormatter {
     private static let dateFormatter: DateFormatter = {
         let formatter = DateFormatter()
