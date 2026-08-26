@@ -122,6 +122,9 @@ private fun ComponentGallery(modifier: Modifier = Modifier) {
         FindlySectionHeader(title = "Nav drawer (010 §1.2)")
         FindlyNavDrawerMenuButton(onClick = {})
 
+        FindlySectionHeader(title = "Code display (010 §5.1)")
+        FindlyCodeDisplay(code = "7F3K-9QRZ")
+
         FindlySectionHeader(title = "Empty / loading / error states")
         FindlyEmptyState(
             title = "No devices yet",

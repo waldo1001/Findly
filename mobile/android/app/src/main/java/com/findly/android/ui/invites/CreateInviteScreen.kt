@@ -31,6 +31,7 @@ import com.findly.android.ui.designsystem.FindlyTheme
 import com.findly.android.ui.designsystem.components.FindlyButton
 import com.findly.android.ui.designsystem.components.FindlyButtonStyle
 import com.findly.android.ui.designsystem.components.FindlyCard
+import com.findly.android.ui.designsystem.components.FindlyCodeDisplay
 import com.findly.android.ui.designsystem.components.FindlyStatusChip
 import com.findly.android.ui.designsystem.components.FindlyStatusTone
 import com.findly.android.ui.designsystem.components.FindlyTextField
@@ -165,21 +166,11 @@ private fun CreateInviteSuccess(
 
     FindlyCard {
         Column(verticalArrangement = Arrangement.spacedBy(FindlyTheme.spacing.md)) {
-            // 1) The code, large and copyable (titleLarge-class size, hyphenated display form).
-            //    010 §5.1 additionally asks for "tabular figures, letter-spaced" -- deliberately
-            //    NOT implemented as a screen-level TextStyle.copy(letterSpacing = …/
-            //    fontFeatureSettings = …) literal, which would violate 003 §4.3's "screens
-            //    contain zero styling -- no … .sp … outside ui/designsystem/token/" rule, and not
-            //    implemented as a new typography token either, since 003 §4.1's six type roles
-            //    are "normative names -- do not rename [or add to] without a spec PR". titleLarge
-            //    (already bold, already carries its own -0.2sp tracking, 003 §4.2) is used
-            //    unmodified; flagged in this task's report as an open design-token question
-            //    rather than silently worked around with a literal.
-            Text(
-                text = displayCode,
-                color = FindlyTheme.colors.onSurface,
-                style = FindlyTheme.typography.titleLarge,
-            )
+            // 1) The code, large and copyable: titleLarge-class size, tabular figures,
+            //    letter-spaced, hyphenated display form (010 §5.1) -- rendered by the
+            //    FindlyCodeDisplay design-system component (review-round addition) rather than a
+            //    screen-level TextStyle literal, per FindlyCodeDisplay's own doc.
+            FindlyCodeDisplay(code = displayCode)
             Row(horizontalArrangement = Arrangement.spacedBy(FindlyTheme.spacing.sm)) {
                 FindlyButton(
                     text = if (justCopied) "Copied" else "Copy code",
