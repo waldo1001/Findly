@@ -61,10 +61,13 @@ public final class LiveMapViewModel: ObservableObject {
             let points = Self.locatedPoints(in: members)
             let hasPoints = !points.isEmpty
             // specs/010 §3.4 (normative) — decide WHETHER this load/refresh re-runs the camera
-            // policy. Deliberately wrong-on-purpose right now: runs on EVERY successful load,
-            // which is the exact "camera yanking on refresh" bug this task exists to fix. The next
-            // commit gates this on `MapCameraPolicy.shouldRunOnLoadOrRefresh`.
-            emitCameraCommand(MapCameraPolicy.target(points: points))
+            // policy: only on the first successful load, or the first refresh that brings the
+            // first-ever point in from a zero-point open. Never on an ordinary refresh after that,
+            // even one whose marker set changed — this is the actual fix for "every marker-set
+            // change yanks the camera".
+            if MapCameraPolicy.shouldRunOnLoadOrRefresh(state: cameraPolicyState, hasPoints: hasPoints) {
+                emitCameraCommand(MapCameraPolicy.target(points: points))
+            }
             cameraPolicyState = MapCameraPolicy.nextState(state: cameraPolicyState, hasPoints: hasPoints)
         } catch {
             if let variant = onboardingRoutingOutcome(for: error) {
@@ -79,16 +82,27 @@ public final class LiveMapViewModel: ObservableObject {
     /// the camera to their freshest located device at `MapCameraPolicy.singlePointZoom`. A member
     /// with no located device can still be selected (row/marker highlight) but the camera MUST NOT
     /// move. Tapping the already-selected member deselects (camera doesn't move either way).
-    ///
-    /// Deliberately a no-op right now (assertion-level red) — the next commit implements it.
-    public func selectMember(_ userId: String) {}
+    public func selectMember(_ userId: String) {
+        guard case .loaded(let members) = state else { return }
+        if selectedUserId == userId {
+            selectedUserId = nil
+            return
+        }
+        guard let member = members.first(where: { $0.userId == userId }) else { return }
+        selectedUserId = userId
+        if let freshest = MapCameraPolicy.freshestLocatedDevice(devices: member.devices),
+           let lat = freshest.lat, let lon = freshest.lon {
+            emitCameraCommand(.center(lat: lat, lon: lon, zoom: MapCameraPolicy.singlePointZoom))
+        }
+    }
 
     /// specs/010 §3.4's explicit fit-all action: re-runs `MapCameraPolicy.target` over the
     /// currently loaded points, unconditionally (the one trigger that always runs regardless of
     /// policy state).
-    ///
-    /// Deliberately a no-op right now (assertion-level red) — the next commit implements it.
-    public func fitAll() {}
+    public func fitAll() {
+        guard case .loaded(let members) = state else { return }
+        emitCameraCommand(MapCameraPolicy.target(points: Self.locatedPoints(in: members)))
+    }
 
     /// Every device with a known position, across every member — `MapMarkerBubble`-ready. Devices
     /// with `lat`/`lon` both `nil` (never reported, §5.2) are excluded here; they still show up in
