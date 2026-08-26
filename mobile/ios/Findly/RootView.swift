@@ -190,6 +190,20 @@ struct RootView: View {
         UIApplication.shared.open(url)
     }
 
+    /// specs/010-app-shell-and-screen-ux.md §1.1 (amended, row A37) — `AppLaunchResolver`'s
+    /// `onConfirmedAuthFailure` seam, wired at both call sites below (cold-start restore and
+    /// interactive sign-in). Deliberately the SAME two calls, in the SAME order, as `FindlyApp.
+    /// swift`'s forced `onSignedOut` closure (009 §9's "second AUTH_TOKEN_EXPIRED" path) and
+    /// `DeleteAccountViewModel.signOutForRetry()` — every session-ending path in this codebase
+    /// wipes local state via the ONE `LocationRuntimeContainer.wipeLocalState()` method and then
+    /// signs out, never a second wipe implementation (the I43 lesson). `coordinator.showSignIn()`
+    /// is deliberately NOT called here: the caller already routes to `.signIn` from the
+    /// `LaunchDestination` this closure's result feeds into.
+    private func clearSessionOnConfirmedAuthFailure() async {
+        await locationRuntimeContainer.wipeLocalState()
+        try? authProvider.signOut()
+    }
+
     private var content: some View {
         Group {
             switch coordinator.route {
@@ -207,7 +221,8 @@ struct RootView: View {
                         // brand-new phone-auth signup has no profile yet.
                         Task {
                             let destination = await AppLaunchResolver.resolve(
-                                apiClient: apiClient, isSignedIn: true, cache: familyContextCache
+                                apiClient: apiClient, isSignedIn: true, cache: familyContextCache,
+                                onConfirmedAuthFailure: { await clearSessionOnConfirmedAuthFailure() }
                             )
                             coordinator.showPostSignIn(destination)
                         }
@@ -499,7 +514,8 @@ struct RootView: View {
         // launch-resolution table, failing open to the Family Map on anything inconclusive.
         .task {
             let destination = await AppLaunchResolver.resolve(
-                apiClient: apiClient, isSignedIn: authProvider.currentUserId != nil, cache: familyContextCache
+                apiClient: apiClient, isSignedIn: authProvider.currentUserId != nil, cache: familyContextCache,
+                onConfirmedAuthFailure: { await clearSessionOnConfirmedAuthFailure() }
             )
             coordinator.resolveLaunch(destination: destination)
             // specs/009 §7 — first evaluation of the disclosure/prompt/banner state. Deliberately

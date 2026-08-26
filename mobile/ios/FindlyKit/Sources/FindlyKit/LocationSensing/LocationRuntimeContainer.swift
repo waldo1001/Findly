@@ -400,8 +400,10 @@ public final class LocationRuntimeContainer {
     /// other two. The underlying `UserDefaults` key is also process-global rather than per-user
     /// (unlike `deviceIdProvider`/`appVersionTracker`'s `forUserId`-keyed stores) — deliberately
     /// NOT re-keyed per-user here: every session-ending path in this codebase already funnels
-    /// through this one method (there is no voluntary "Sign Out" entry point yet, only the forced
-    /// `AUTH_TOKEN_EXPIRED` path and the account-deletion paths, and all of them call this), so a
+    /// through this one method (there is no voluntary "Sign Out" entry point yet — only the forced
+    /// `AUTH_TOKEN_EXPIRED` path, the account-deletion paths, and, as of A37, `RootView.
+    /// clearSessionOnConfirmedAuthFailure()` for a confirmed auth failure on the launch probe
+    /// (specs/010-app-shell-and-screen-ux.md §1.1) — all of them call this), so a
     /// clear on every one of those paths is already sufficient to stop the value crossing into a
     /// different signed-in user's session — re-keying would add per-user threading through
     /// `LocationSyncRunner` (which is deviceId-scoped, not uid-scoped) for a value this wipe already
