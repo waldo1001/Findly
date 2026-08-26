@@ -236,7 +236,7 @@ public struct LiveMapScreen: View {
                     onLocateNow(selectedMember.userId, selectedMember.displayName)
                 }
             }
-            avatarStack(members: members)
+            RosterAvatarStack(displayNames: members.map(\.displayName))
         }
         .padding(theme.spacing.md)
     }
@@ -320,20 +320,6 @@ public struct LiveMapScreen: View {
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(isSelected ? [.isSelected] : [])
-    }
-
-    private func avatarStack(members: [MemberLocations]) -> some View {
-        HStack(spacing: -8) {
-            ForEach(members.prefix(5), id: \.userId) { member in
-                Text(Self.initials(for: member.displayName))
-                    .font(theme.typography.labelSmall.font)
-                    .foregroundColor(theme.colors.onPrimary)
-                    .frame(width: 32, height: 32)
-                    .background(theme.colors.primary)
-                    .clipShape(Circle())
-                    .overlay(Circle().strokeBorder(theme.colors.surface, lineWidth: 2))
-            }
-        }
     }
 
     private func selectedMember(in members: [MemberLocations]) -> MemberLocations? {

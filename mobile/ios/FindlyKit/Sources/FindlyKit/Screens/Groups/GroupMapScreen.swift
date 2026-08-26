@@ -122,6 +122,8 @@ public struct GroupMapScreen: View {
         }
     }
 
+    /// specs/010 §3.1/§3.2 (review fix 1) — the family map's minimized-detent avatar stack applies
+    /// here too: same components, same fix, same `RosterAvatarStackPlan` cap/overflow semantics.
     private func minimizedRoster(members: [GroupMemberLocation]) -> some View {
         VStack(alignment: .leading, spacing: theme.spacing.sm) {
             Text("Group")
@@ -130,6 +132,7 @@ public struct GroupMapScreen: View {
             Text(summaryLine(for: members))
                 .font(theme.typography.bodyMedium.font)
                 .foregroundColor(theme.onSurfaceMuted)
+            RosterAvatarStack(displayNames: members.map(\.displayName))
         }
         .padding(theme.spacing.md)
     }
