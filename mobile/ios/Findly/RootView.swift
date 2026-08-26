@@ -192,13 +192,27 @@ struct RootView: View {
 
     /// specs/010-app-shell-and-screen-ux.md §1.1 (amended, row A37) — `AppLaunchResolver`'s
     /// `onConfirmedAuthFailure` seam, wired at both call sites below (cold-start restore and
-    /// interactive sign-in). Deliberately the SAME two calls, in the SAME order, as `FindlyApp.
-    /// swift`'s forced `onSignedOut` closure (009 §9's "second AUTH_TOKEN_EXPIRED" path) and
-    /// `DeleteAccountViewModel.signOutForRetry()` — every session-ending path in this codebase
-    /// wipes local state via the ONE `LocationRuntimeContainer.wipeLocalState()` method and then
-    /// signs out, never a second wipe implementation (the I43 lesson). `coordinator.showSignIn()`
-    /// is deliberately NOT called here: the caller already routes to `.signIn` from the
-    /// `LaunchDestination` this closure's result feeds into.
+    /// interactive sign-in). Calls the ONE `LocationRuntimeContainer.wipeLocalState()` method
+    /// every other session-ending path in this codebase already calls — never a second wipe
+    /// implementation (the I43 lesson) — then signs out.
+    ///
+    /// **A37 review (Finding 3) correction: this is NOT "the same order" as the other two
+    /// session-ending paths, and they are not the same order as each other either.**
+    /// `FindlyApp.swift`'s forced `onSignedOut` closure is `signOut()` → `wipeLocalState()`;
+    /// `DeleteAccountViewModel.signOutForRetry()` is `wipeLocalState()` → `clearStoredSession()` →
+    /// `signOut()`. This method's own order (`wipeLocalState()` → `signOut()`) matches neither.
+    /// Functionally harmless — nothing here has a data dependency on the other's completion, and
+    /// `wipeLocalState()` is documented idempotent-safe regardless of when it runs relative to
+    /// sign-out — but the two calls are shared code, not a shared sequence, so don't claim one.
+    ///
+    /// **A37 review (Finding 4): `clearStoredSession()` is deliberately NOT called here**, unlike
+    /// `signOutForRetry()`. Per that method's own doc, it clears only the Keychain-backed
+    /// phone-verification (OTP) id — a leftover of the SMS step, not the auth session itself,
+    /// which `signOut()` already fully tears down. No residue, no risk of a later session
+    /// resuming as the old user; this simply isn't `clearStoredSession()`'s territory (I43).
+    ///
+    /// `coordinator.showSignIn()` is deliberately NOT called here: the caller already routes to
+    /// `.signIn` from the `LaunchDestination` this closure's result feeds into.
     private func clearSessionOnConfirmedAuthFailure() async {
         await locationRuntimeContainer.wipeLocalState()
         try? authProvider.signOut()
@@ -219,21 +233,35 @@ struct RootView: View {
                         // resolves through the EXACT SAME launch-resolution table a cold start
                         // does (below), rather than the pre-010 unconditional `.home`: a
                         // brand-new phone-auth signup has no profile yet.
+                        //
+                        // A37 review (Finding 1): this used to be THREE independent, unstructured
+                        // `Task { }` blocks — one running the resolver above, two firing device
+                        // re-registration / geofence sync with only a SYNCHRONOUS
+                        // `authProvider.currentUserId` guard. That guard could (and did) still
+                        // read "signed in" while the resolver's `Task` was suspended on its own
+                        // network probe, still signed in because `clearSessionOnConfirmedAuthFailure()`
+                        // hadn't run yet — so a caller the backend had already rejected could still
+                        // reach `POST /devices`. `AppLaunchResolver.resolveAfterSignIn` sequences
+                        // all three into ONE `Task`, gating the two triggers on the actually
+                        // RESOLVED destination (a real postcondition — see that function's doc —
+                        // never a timing coincidence), so this is now the single call site for the
+                        // whole interactive-sign-in sequence.
                         Task {
-                            let destination = await AppLaunchResolver.resolve(
-                                apiClient: apiClient, isSignedIn: true, cache: familyContextCache,
-                                onConfirmedAuthFailure: { await clearSessionOnConfirmedAuthFailure() }
+                            let destination = await AppLaunchResolver.resolveAfterSignIn(
+                                apiClient: apiClient, cache: familyContextCache,
+                                onConfirmedAuthFailure: { await clearSessionOnConfirmedAuthFailure() },
+                                // specs/009-device-runtime.md §5 (I12) — device re-registration +
+                                // push-notification registration on first launch after sign-in.
+                                onDeviceRegistration: { await onSignedIn() },
+                                // specs/009-device-runtime.md §6.2 (I11) — "first config sync after
+                                // sign-in" is one of the five geofence re-registration triggers; see
+                                // `LocationRuntimeContainer.onSignedIn()`'s doc for why this in-app
+                                // callback (rather than the cold-start hook alone) is the trigger's
+                                // home.
+                                onGeofenceSync: { await locationRuntimeContainer.onSignedIn() }
                             )
                             coordinator.showPostSignIn(destination)
                         }
-                        // specs/009-device-runtime.md §5 (I12) — device re-registration +
-                        // push-notification registration on first launch after sign-in.
-                        Task { await onSignedIn() }
-                        // specs/009-device-runtime.md §6.2 (I11) — "first config sync after
-                        // sign-in" is one of the five geofence re-registration triggers; see
-                        // `LocationRuntimeContainer.onSignedIn()`'s doc for why this in-app
-                        // callback (rather than the cold-start hook alone) is the trigger's home.
-                        Task { await locationRuntimeContainer.onSignedIn() }
                     })
                 )
 
@@ -523,6 +551,15 @@ struct RootView: View {
             // being asked for their location: explaining family location-sharing to someone who has
             // no family yet is the wrong order.
             permissionFlow.refresh()
+            // A37 review (Finding 1) — this single `.task` is already sequential (unlike the
+            // interactive sign-in path's old three unstructured `Task`s, see
+            // `AppLaunchResolver.resolveAfterSignIn`'s doc): `onSignedIn()`'s own
+            // `authProvider.currentUserId` guard only reads AFTER `resolve()` above — including
+            // `onConfirmedAuthFailure`'s `signOut()` — has fully completed, so it correctly
+            // observes the cleared session and no-ops for a confirmed auth failure without this
+            // guard doing anything. Made explicit anyway rather than left implicit: a real
+            // postcondition, not a coincidence of today's ordering, and it costs nothing.
+            guard destination != .signIn else { return }
             await onSignedIn()
         }
         .environment(\.theme, colorScheme == .dark ? .dark : .light)
