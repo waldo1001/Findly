@@ -6,7 +6,6 @@ import com.findly.android.network.ApiError
 import com.findly.android.network.ApiResult
 import com.findly.android.network.dto.AcceptInviteResponseDto
 import com.findly.android.network.dto.CreateInviteResponseDto
-import com.findly.android.ui.onboarding.OnboardingVariant
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -51,11 +50,14 @@ class InvitesStateHolderTest {
         assertEquals(false, state.isCreatingInvite)
     }
 
-    // specs/010-app-shell-and-screen-ux.md §2.1's routing rule — POST /families/me/invites is
-    // parent-only, family-scoped (001 §3.3/§1.6); createInvite is this screen's load path.
+    // specs/010-app-shell-and-screen-ux.md §2.1's routing rule does NOT apply to createInvite:
+    // POST /families/me/invites is a mutation, and §2.1 is explicit that mutation/action failures
+    // "keep their existing inline error rendering — this rule is about the load path." A confirmed
+    // PROFILE_NOT_FOUND/FAMILY_NOT_FOUND here therefore renders inline like every other code
+    // (review finding, reverted 2026-08-26 — see InvitesStateHolder's class doc).
 
     @Test
-    fun `createInvite PROFILE_NOT_FOUND routes to Onboarding profile-less instead of an inline error`() = runTest {
+    fun `createInvite PROFILE_NOT_FOUND renders inline (createInvite is a mutation, not a load path)`() = runTest {
         val api = FakeFamilyApi().apply {
             createInviteResult = ApiResult.Failure(ApiError.ProfileNotFound("no profile", "r_10"))
         }
@@ -64,12 +66,12 @@ class InvitesStateHolderTest {
         holder.createInvite(role = "member")
 
         val state = holder.state.value
-        assertEquals(OnboardingVariant.ProfileLess, state.createInviteRouteToOnboarding)
-        assertNull(state.createInviteError)
+        assertEquals("We couldn't find your profile.", state.createInviteError)
+        assertNull(state.createdInvite)
     }
 
     @Test
-    fun `createInvite FAMILY_NOT_FOUND routes to Onboarding family-less instead of an inline error`() = runTest {
+    fun `createInvite FAMILY_NOT_FOUND renders inline (createInvite is a mutation, not a load path)`() = runTest {
         val api = FakeFamilyApi().apply {
             createInviteResult = ApiResult.Failure(ApiError.FamilyNotFound("no family", "r_11"))
         }
@@ -78,8 +80,8 @@ class InvitesStateHolderTest {
         holder.createInvite(role = "member")
 
         val state = holder.state.value
-        assertEquals(OnboardingVariant.FamilyLess, state.createInviteRouteToOnboarding)
-        assertNull(state.createInviteError)
+        assertEquals("We couldn't find your family. Please try again.", state.createInviteError)
+        assertNull(state.createdInvite)
     }
 
     @Test

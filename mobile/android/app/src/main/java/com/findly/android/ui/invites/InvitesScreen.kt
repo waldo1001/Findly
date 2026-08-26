@@ -23,7 +23,6 @@ import com.findly.android.ui.designsystem.components.FindlyStatusChip
 import com.findly.android.ui.designsystem.components.FindlyStatusTone
 import com.findly.android.ui.designsystem.components.FindlyTextField
 import com.findly.android.ui.designsystem.components.FindlyTopBar
-import com.findly.android.ui.onboarding.OnboardingVariant
 
 /**
  * The A2 invites screen (001-api-contract.md §3.3/§3.4, specs/003-android-client.md §12): create
@@ -42,7 +41,6 @@ fun InvitesRoute(
     modifier: Modifier = Modifier,
     prefillDisplayName: String = "",
     onAccepted: () -> Unit = {},
-    onRouteToOnboarding: (OnboardingVariant) -> Unit = {},
 ) {
     val state by viewModel.state.collectAsState()
     InvitesScreen(
@@ -51,7 +49,6 @@ fun InvitesRoute(
         onCreateInvite = viewModel::createInvite,
         onAcceptInvite = viewModel::acceptInvite,
         onAccepted = onAccepted,
-        onRouteToOnboarding = onRouteToOnboarding,
         modifier = modifier,
     )
 }
@@ -64,7 +61,6 @@ fun InvitesScreen(
     onCreateInvite: (role: String, emailHint: String?) -> Unit = { _, _ -> },
     onAcceptInvite: (inviteCode: String, displayName: String) -> Unit = { _, _ -> },
     onAccepted: () -> Unit = {},
-    onRouteToOnboarding: (OnboardingVariant) -> Unit = {},
 ) {
     var selectedRole by remember { mutableStateOf("member") }
     var emailHint by remember { mutableStateOf("") }
@@ -75,11 +71,6 @@ fun InvitesScreen(
 
     LaunchedEffect(state.acceptedFamily) {
         if (state.acceptedFamily != null) onAccepted()
-    }
-    // specs/010-app-shell-and-screen-ux.md §2.1's routing rule (createInvite only — see
-    // InvitesUiState.createInviteRouteToOnboarding's doc for why acceptInvite is exempt).
-    LaunchedEffect(state.createInviteRouteToOnboarding) {
-        state.createInviteRouteToOnboarding?.let(onRouteToOnboarding)
     }
 
     Column(modifier = modifier.fillMaxSize()) {

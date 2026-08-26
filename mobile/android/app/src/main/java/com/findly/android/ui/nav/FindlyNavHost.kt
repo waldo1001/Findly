@@ -414,7 +414,6 @@ fun FindlyNavHost(
                 // now (accept-invite is one of the four 001 §1.5.3 profile-bootstrap paths) —
                 // iOS's former terminal "Welcome!" dead-end is retired the same way here.
                 onAccepted = onBootstrapSuccess,
-                onRouteToOnboarding = navigateToOnboarding,
             )
         }
 

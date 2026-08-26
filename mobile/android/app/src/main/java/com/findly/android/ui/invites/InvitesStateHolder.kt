@@ -3,7 +3,6 @@ package com.findly.android.ui.invites
 import com.findly.android.network.ApiResult
 import com.findly.android.network.ports.FamilyApi
 import com.findly.android.network.userMessage
-import com.findly.android.ui.onboarding.ProfileDeadEndRouting
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -13,6 +12,18 @@ import kotlinx.coroutines.flow.asStateFlow
  * [kotlinx.coroutines.CoroutineScope] is needed (like [com.findly.android.ui.history.HistoryStateHolder])
  * since there is nothing to eagerly load — both actions are user-initiated forms.
  * [InvitesViewModel] launches [createInvite]/[acceptInvite] on its own `viewModelScope`.
+ *
+ * **specs/010-app-shell-and-screen-ux.md §2.1 note (review finding, reverted 2026-08-26):**
+ * `createInvite` is a `POST` — a mutation by HTTP semantics and by §2.1's own example — and §2.1's
+ * routing rule is a MUST scoped to *load* paths only ("Mutation/action failures… keep their
+ * existing inline error rendering — this rule is about the load path"). An earlier revision routed
+ * a confirmed `PROFILE_NOT_FOUND`/`FAMILY_NOT_FOUND` here through `ProfileDeadEndRouting` on the
+ * reasoning that this screen has no separate eager load, so `createInvite` stands in for one; that
+ * redraws the spec's GET-vs-POST bright line rather than following it, so it's reverted to the
+ * inline [InvitesUiState.createInviteError] every other mutation on this client uses. (This screen
+ * is reachable only via the parent-gated drawer item, so a caller without a profile/family here is
+ * already a near-unreachable edge case.) Whether §2.1 should extend to "any endpoint with no
+ * separate eager load" is tracked as a spec follow-up, not pre-empted here.
  */
 class InvitesStateHolder(private val familyApi: FamilyApi) {
 
@@ -20,25 +31,19 @@ class InvitesStateHolder(private val familyApi: FamilyApi) {
     val state: StateFlow<InvitesUiState> = _state.asStateFlow()
 
     /** §3.3 — parent only; the server enforces the role check (`403 AUTH_FORBIDDEN` for a
-     * non-parent), surfaced here as an ordinary [InvitesUiState.createInviteError]. */
+     * non-parent), surfaced here as an ordinary [InvitesUiState.createInviteError] — a mutation,
+     * so `PROFILE_NOT_FOUND`/`FAMILY_NOT_FOUND` render inline here too (see this class's doc). */
     suspend fun createInvite(role: String, emailHint: String? = null) {
-        _state.value = _state.value.copy(isCreatingInvite = true, createInviteError = null, createInviteRouteToOnboarding = null)
+        _state.value = _state.value.copy(isCreatingInvite = true, createInviteError = null)
         when (val result = familyApi.createInvite(role, emailHint)) {
             is ApiResult.Success -> _state.value = _state.value.copy(
                 isCreatingInvite = false,
                 createdInvite = CreatedInviteUi(result.data.inviteCode, result.data.role, result.data.expiresAt),
             )
-            is ApiResult.Failure -> {
-                // specs/010-app-shell-and-screen-ux.md §2.1: POST /families/me/invites is
-                // parent-only, family-scoped (001 §3.3/§1.6) — this screen has no separate eager
-                // load, so createInvite is its load path for this rule's purposes.
-                val variant = ProfileDeadEndRouting.classify(result.error, familyScoped = true)
-                _state.value = if (variant != null) {
-                    _state.value.copy(isCreatingInvite = false, createInviteRouteToOnboarding = variant)
-                } else {
-                    _state.value.copy(isCreatingInvite = false, createInviteError = result.error.userMessage())
-                }
-            }
+            is ApiResult.Failure -> _state.value = _state.value.copy(
+                isCreatingInvite = false,
+                createInviteError = result.error.userMessage(),
+            )
         }
     }
 
