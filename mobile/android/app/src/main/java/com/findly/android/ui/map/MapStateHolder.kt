@@ -44,14 +44,22 @@ class MapStateHolder(
         when (val result = locationsApi.getLatestLocations()) {
             is ApiResult.Success -> {
                 val members = result.data.members.map { it.toUi() }
-                // RED-before-GREEN placeholder (devloop/A34): never mints a camera command yet.
+                val points = members.locatedPoints()
+
+                // specs/010-app-shell-and-screen-ux.md §3.4: decide WHETHER this load/refresh
+                // re-runs the camera policy — never on an ordinary refresh, with the one carve-out
+                // MapCameraPolicy itself documents.
+                val shouldRun = MapCameraPolicy.shouldRunOnLoadOrRefresh(cameraPolicyState, points.isNotEmpty())
+                cameraPolicyState = MapCameraPolicy.nextState(cameraPolicyState, points.isNotEmpty())
                 val previousCommand = (current as? MapUiState.Content)?.cameraCommand
+                val cameraCommand = if (shouldRun) nextCameraCommand(MapCamera.target(points)) else previousCommand
+
                 val previousSelected = (current as? MapUiState.Content)?.selectedUserId
                     ?.takeIf { id -> members.any { it.userId == id } }
                 _state.value = MapUiState.Content(
                     members = members,
                     selectedUserId = previousSelected,
-                    cameraCommand = previousCommand,
+                    cameraCommand = cameraCommand,
                 )
             }
             is ApiResult.Failure -> {
@@ -71,18 +79,36 @@ class MapStateHolder(
     /** specs/010 §3.5: selects/deselects [userId], zooming to their freshest located device at
      * [MapCamera.SINGLE_POINT_ZOOM] when one exists; a member with no located device can still be
      * selected (row/marker highlight) but the camera MUST NOT move. Tapping the already-selected
-     * member deselects. RED-before-GREEN placeholder: always selects, never moves the camera. */
+     * member deselects (no camera move either way). */
     fun selectMember(userId: String) {
         val current = _state.value as? MapUiState.Content ?: return
-        _state.value = current.copy(selectedUserId = userId)
+        if (current.selectedUserId == userId) {
+            _state.value = current.copy(selectedUserId = null)
+            return
+        }
+        val member = current.members.firstOrNull { it.userId == userId } ?: return
+        val freshest = MapCameraPolicy.freshestLocatedDevice(member.devices)
+        val cameraCommand = freshest?.let { nextCameraCommand(MapCameraTarget.Center(it.lat!!, it.lon!!, MapCamera.SINGLE_POINT_ZOOM)) }
+            ?: current.cameraCommand
+        _state.value = current.copy(selectedUserId = userId, cameraCommand = cameraCommand)
     }
 
     /** specs/010 §3.4's explicit fit-all action: re-runs [MapCamera.target] over the currently
-     * loaded points unconditionally. RED-before-GREEN placeholder: no-op. */
+     * loaded points, unconditionally (the one trigger that always runs regardless of policy
+     * state). */
     fun fitAll() {
-        // TODO
+        val current = _state.value as? MapUiState.Content ?: return
+        _state.value = current.copy(cameraCommand = nextCameraCommand(MapCamera.target(current.members.locatedPoints())))
+    }
+
+    private fun nextCameraCommand(target: MapCameraTarget): CameraCommand {
+        cameraSeq += 1
+        return CameraCommand(cameraSeq, target)
     }
 }
+
+private fun List<RosterMemberUi>.locatedPoints(): List<Pair<Double, Double>> =
+    flatMap { member -> member.devices.filter { it.hasLocation }.map { it.lat!! to it.lon!! } }
 
 private fun LatestMemberDto.toUi(): RosterMemberUi = RosterMemberUi(
     userId = userId,
