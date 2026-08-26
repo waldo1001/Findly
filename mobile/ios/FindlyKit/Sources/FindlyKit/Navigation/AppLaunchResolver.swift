@@ -60,11 +60,7 @@ public enum AppLaunchResolver {
         let destination = await resolve(
             apiClient: apiClient, isSignedIn: true, cache: cache, onConfirmedAuthFailure: onConfirmedAuthFailure
         )
-        // TODO(A37 RED): deliberately wrong — no gate at all, reproducing (deterministically,
-        // without needing to race an actual scheduler) the pre-fix bug this function exists to
-        // close: the post-sign-in triggers fire unconditionally, so
-        // AppLaunchResolverTests' new "never triggers" assertion fails on a genuine count
-        // mismatch, not a missing symbol. Fixed in the immediately following GREEN commit.
+        guard destination != .signIn else { return destination }
         await onDeviceRegistration()
         await onGeofenceSync()
         return destination
