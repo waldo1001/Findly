@@ -9,6 +9,12 @@ public final class LiveMapViewModel: ObservableObject {
         case loading
         case loaded([MemberLocations])
         case error(String)
+        /// specs/010-app-shell-and-screen-ux.md §2.1 — a confirmed `PROFILE_NOT_FOUND`/
+        /// `FAMILY_NOT_FOUND` on this load. `GET /locations/latest` is family-scoped (001 §5.2,
+        /// §1.5.4), so both variants are reachable. The screen MUST NOT render a retryable error
+        /// card for this — it routes to Onboarding instead (there is nothing behind it worth
+        /// going back to).
+        case routeToOnboarding(OnboardingVariant)
     }
 
     @Published public private(set) var state: State = .loading
@@ -31,7 +37,11 @@ public final class LiveMapViewModel: ObservableObject {
                 region = MapRegion(centerLat: first.lat, centerLon: first.lon)
             }
         } catch {
-            state = .error(userFacingMessage(for: error))
+            if let variant = onboardingRoutingOutcome(for: error) {
+                state = .routeToOnboarding(variant)
+            } else {
+                state = .error(userFacingMessage(for: error))
+            }
         }
     }
 

@@ -11,10 +11,20 @@ public struct LiveMapScreen: View {
     // lifetime instead of silently discarding the one `.task` observes.
     @StateObject private var viewModel: LiveMapViewModel
     private let renderer: any MapRendering
+    /// specs/010-app-shell-and-screen-ux.md §2.1 (I34) — fires once `viewModel.state` reaches
+    /// `.routeToOnboarding`, so `RootView` can reset the stack to the corresponding Onboarding
+    /// variant. Defaults to a no-op so existing previews/tests that don't care about this need not
+    /// supply it.
+    private let onProfileDeadEnd: (OnboardingVariant) -> Void
 
-    public init(viewModel: @autoclosure @escaping () -> LiveMapViewModel, renderer: any MapRendering) {
+    public init(
+        viewModel: @autoclosure @escaping () -> LiveMapViewModel,
+        renderer: any MapRendering,
+        onProfileDeadEnd: @escaping (OnboardingVariant) -> Void = { _ in }
+    ) {
         _viewModel = StateObject(wrappedValue: viewModel())
         self.renderer = renderer
+        self.onProfileDeadEnd = onProfileDeadEnd
     }
 
     public var body: some View {
@@ -24,12 +34,22 @@ public struct LiveMapScreen: View {
         }
         .background(theme.colors.surfaceVariant)
         .task { await viewModel.load() }
+        .onChange(of: routingVariant) { variant in
+            if let variant { onProfileDeadEnd(variant) }
+        }
+    }
+
+    private var routingVariant: OnboardingVariant? {
+        if case .routeToOnboarding(let variant) = viewModel.state { return variant }
+        return nil
     }
 
     @ViewBuilder
     private var content: some View {
         switch viewModel.state {
-        case .loading:
+        case .loading, .routeToOnboarding:
+            // specs/010 §2.1 — MUST NOT render a retryable error card; `onProfileDeadEnd` above
+            // navigates away the instant this state is reached, so this is transient.
             LoadingStateView(message: "Loading map…")
         case .error(let message):
             ErrorStateView(message: message) {
