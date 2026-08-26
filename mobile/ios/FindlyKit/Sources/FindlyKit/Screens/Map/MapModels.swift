@@ -20,6 +20,40 @@ public struct MapRegion: Equatable {
     public static let findlyDefault = MapRegion(centerLat: 51.0543, centerLon: 3.7174)
 }
 
+extension MapRegion {
+    /// Translates a pure `MapCameraTarget` decision (specs/010-app-shell-and-screen-ux.md §3.4)
+    /// into the concrete viewport `MapRendering`'s `Binding<MapRegion>` consumes. This is the
+    /// platform-translation step `MapCameraPolicy` itself deliberately stays agnostic of — same
+    /// layering as Android's `GoogleMapRenderer`, which asks `CameraUpdateFactory.newLatLngBounds`
+    /// to compute the exact fit against a live view's pixel size. SwiftUI's `Map(coordinateRegion:)`
+    /// binding has no equivalent "fit these bounds with N pt of padding" primitive, and there is no
+    /// live view size available to this pure translation either, so `.bounds`' `paddingPt` is
+    /// approximated with a fixed proportional inflation (`boundsInflationFactor`) rather than an
+    /// exact pixel fit — pixel-perfect bounds fitting is a rendering-layer concern the 010 §10 test
+    /// checklist explicitly leaves to the review gate, not a unit test.
+    ///
+    /// `zoom` values (010 §3.4's `SINGLE_POINT_ZOOM`/`DEFAULT_ZOOM`) translate to a span using the
+    /// standard slippy-map convention that zoom level *n* covers `360 / 2^n` degrees at the equator
+    /// (zoom 0 = the whole world) — a deterministic, pure mapping with no dependency on a live map
+    /// view's pixel size.
+    // Deliberately wrong-on-purpose stub (assertion-level red, not compile-level) — always
+    // `.findlyDefault` regardless of `target`. The next commit implements this for real.
+    public init(fitting target: MapCameraTarget) {
+        self = MapRegion.findlyDefault
+    }
+
+    /// A generous safety margin so points at the very edge of a `.bounds` fit are never rendered
+    /// flush against the screen edge.
+    private static let boundsInflationFactor = 1.3
+    /// Floor for a `.bounds` span so two nearly-identical-but-distinct points (already guaranteed
+    /// distinct by `MapCameraPolicy.target`) still produce a visibly non-zero viewport.
+    private static let minimumBoundsSpan = 0.01
+
+    private static func spanDegrees(forZoom zoom: Double) -> Double {
+        360.0 / pow(2.0, zoom)
+    }
+}
+
 /// One family device with a known position (001 §5.2) — `MapMarkerBubble`-ready. Devices with no
 /// fix yet (`lat`/`lon` both `nil`) never produce an annotation; they still appear in the roster
 /// list instead (rendered by `LiveMapScreen`, not the map layer).
