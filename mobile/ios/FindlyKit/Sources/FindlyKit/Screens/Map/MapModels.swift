@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 
 /// specs/004-ios-client.md I2 (001 §5.2) — a platform-agnostic map viewport, decoupled from
@@ -18,6 +19,13 @@ public struct MapRegion: Equatable {
 
     /// A reasonable default viewport before the first family fix arrives.
     public static let findlyDefault = MapRegion(centerLat: 51.0543, centerLon: 3.7174)
+
+    /// specs/010-app-shell-and-screen-ux.md §3.4 (amended 2026-08-26, row I39) — a common device
+    /// logical size, used ONLY as the pre-layout fallback for `LiveMapViewModel.mapViewportSizePt`/
+    /// `GroupMapViewModel.mapViewportSizePt` before the real map view has reported its size via
+    /// `GeometryReader` (headless unit tests; the brief real-world window before the first layout
+    /// pass). Never used once the render boundary has measured the real viewport.
+    public static let unmeasuredViewportSizePt = CGSize(width: 390, height: 844)
 }
 
 extension MapRegion {
@@ -35,8 +43,14 @@ extension MapRegion {
     /// `zoom` values (010 §3.4's `SINGLE_POINT_ZOOM`/`DEFAULT_ZOOM`) translate to a span using the
     /// standard slippy-map convention that zoom level *n* covers `360 / 2^n` degrees at the equator
     /// (zoom 0 = the whole world) — a deterministic, pure mapping with no dependency on a live map
-    /// view's pixel size.
-    public init(fitting target: MapCameraTarget) {
+    /// view's pixel size; only `.bounds` needs `viewSizePt`.
+    ///
+    /// **RED (I39, in progress):** `viewSizePt` is threaded in but not yet used — `.bounds` still
+    /// grows the box by the retired proportional `boundsInflationFactor`, which is exactly the
+    /// non-conformant model specs/010 §3.4's 2026-08-26 amendment forbids. This is the deliberate
+    /// failing step: `MapRegionFittingTests`'s new fixed-margin assertions must fail against this
+    /// stub before the real conversion lands.
+    public init(fitting target: MapCameraTarget, viewSizePt: CGSize) {
         switch target {
         case .defaultRegion(let lat, let lon, let zoom):
             let span = Self.spanDegrees(forZoom: zoom)
@@ -53,8 +67,8 @@ extension MapRegion {
         }
     }
 
-    /// A generous safety margin so points at the very edge of a `.bounds` fit are never rendered
-    /// flush against the screen edge.
+    /// STUB, pending I39's GREEN step — the retired proportional model kept alive only so this
+    /// compiles during RED. Removed once `.bounds` uses `screenSpaceSpan` instead.
     private static let boundsInflationFactor = 1.3
     /// Floor for a `.bounds` span so two nearly-identical-but-distinct points (already guaranteed
     /// distinct by `MapCameraPolicy.target`) still produce a visibly non-zero viewport.
