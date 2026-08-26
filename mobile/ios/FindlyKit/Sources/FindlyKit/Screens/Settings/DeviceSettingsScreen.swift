@@ -1,9 +1,15 @@
 import SwiftUI
 
-/// specs/004-ios-client.md I2 (001 §4.2–4.3) — composes ONLY design-system components. Sync-
-/// interval selection is a row of `FindlyButton` toggles (the allowed §1.4 values); pause is a
-/// `FindlyToggleRow`; rename is a `FindlyTextField` + "Save name" button. All three are hidden
-/// (read-only) for a non-parent viewer, matching §4.3's parent-vs-owner permission split.
+/// specs/004-ios-client.md I2 (001 §4.2–4.3), specs/010-app-shell-and-screen-ux.md §4.2 (I36) —
+/// composes ONLY design-system components. Sync-interval selection is a `FindlyDropdownField`
+/// over the 001 §1.4 values (replacing the pre-010 horizontally-scrolling `FindlyButton` chip
+/// row); pause is a `FindlyToggleRow`; rename is a single aligned field+Save row (replacing the
+/// pre-010 layout, where `FindlyTextField`'s own stacked label sat beside a bare button and threw
+/// the pair's vertical centers out of alignment — §4.2's defect this task exists to fix). All
+/// three are hidden (read-only) for a non-parent viewer, matching §4.3's parent-vs-owner
+/// permission split. Each card's own mutation errors render on that card via
+/// `viewModel.error(forDeviceId:)` — the pre-010 shared top-of-list `lastActionError` banner is
+/// retired, not left alongside this.
 public struct DeviceSettingsScreen: View {
     @Environment(\.theme) private var theme
     // `@StateObject`, NOT `@ObservedObject` — see `HomeScreen`'s doc for the full failure mode
@@ -57,9 +63,6 @@ public struct DeviceSettingsScreen: View {
     private func list(_ devices: [DeviceListItem]) -> some View {
         ScrollView {
             VStack(spacing: theme.spacing.md) {
-                if let lastActionError = viewModel.lastActionError {
-                    ErrorStateView(message: lastActionError)
-                }
                 if devices.isEmpty {
                     EmptyStateView(title: "No devices yet", message: "Devices register automatically after sign-in.")
                 } else {
@@ -108,43 +111,99 @@ private struct DeviceCardView: View {
                             set: { newValue in Task { await viewModel.setTrackingEnabled(deviceId: device.deviceId, newValue) } }
                         )
                     )
-                    intervalPicker
+                    intervalDropdown
                     renameRow
                 }
-            }
-        }
-    }
-
-    private var renameRow: some View {
-        HStack(spacing: theme.spacing.sm) {
-            FindlyTextField("Device name", text: $renameDraft, placeholder: device.deviceName)
-            FindlyButton("Save name", style: .secondary) {
-                Task { await viewModel.rename(deviceId: device.deviceId, name: renameDraft) }
-            }
-            .disabled(renameDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-        }
-    }
-
-    private var intervalPicker: some View {
-        VStack(alignment: .leading, spacing: theme.spacing.xs) {
-            Text("Sync interval")
-                .font(theme.typography.labelSmall.font)
-                .foregroundColor(theme.colors.onSurface.opacity(0.7))
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: theme.spacing.sm) {
-                    ForEach(DeviceSettingsViewModel.allowedSyncIntervals, id: \.self) { minutes in
-                        FindlyButton(label(for: minutes), style: minutes == device.syncIntervalMinutes ? .primary : .secondary) {
-                            Task { await viewModel.setSyncInterval(deviceId: device.deviceId, minutes: minutes) }
-                        }
-                    }
+                // specs/010-app-shell-and-screen-ux.md §4.2 (I36): "Errors from this card's
+                // mutations render on this card, not pooled at the top of the list" — the retired
+                // shared `lastActionError` banner used to sit above the whole list in
+                // `DeviceSettingsScreen.list(_:)`; this is its sole replacement, scoped to this
+                // device's own card only.
+                if let cardError = viewModel.error(forDeviceId: device.deviceId) {
+                    cardErrorText(cardError)
                 }
             }
         }
     }
 
-    private func label(for minutes: Int) -> String {
-        if minutes < 60 { return "\(minutes)m" }
-        if minutes < 1440 { return "\(minutes / 60)h" }
-        return "1d"
+    private var intervalDropdown: some View {
+        FindlyDropdownField(
+            label: "Sync interval",
+            options: SyncIntervalDropdownPlan.options(minSyncIntervalMinutes: viewModel.minSyncIntervalMinutes),
+            selection: device.syncIntervalMinutes,
+            onSelect: { minutes in
+                Task { await viewModel.setSyncInterval(deviceId: device.deviceId, minutes: minutes) }
+            }
+        )
+    }
+
+    /// specs/010-app-shell-and-screen-ux.md §4.2 — "one horizontal row containing the
+    /// device-name input and a Save button, both the same control height (52 pt), vertically
+    /// centered on each other." Deliberately NOT `FindlyTextField` here: that component's own
+    /// stacked label-above-field layout is exactly what threw the pair's vertical centers out of
+    /// alignment before this task — see `DeviceRenameField`'s doc for why a screen-local,
+    /// label-less input (placeholder + accessibility label only, per this same bullet) is used
+    /// instead of changing the shared component's contract for every other call site.
+    private var renameRow: some View {
+        HStack(alignment: .center, spacing: theme.spacing.sm) {
+            DeviceRenameField(placeholder: device.deviceName, text: $renameDraft)
+            FindlyButton("Save", style: .secondary) {
+                let trimmed = renameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+                Task { await viewModel.rename(deviceId: device.deviceId, name: trimmed) }
+            }
+            .frame(width: 96)
+            .disabled(!DeviceRenamePlan.isSaveEnabled(draft: renameDraft, currentName: device.deviceName))
+        }
+    }
+
+    private func cardErrorText(_ message: String) -> some View {
+        HStack(alignment: .top, spacing: theme.spacing.xs) {
+            Text("✕")
+            Text(message)
+        }
+        .font(theme.typography.bodyMedium.font)
+        .foregroundColor(theme.colors.danger)
+    }
+}
+
+/// specs/010-app-shell-and-screen-ux.md §4.2 — the rename row's input: same box geometry as
+/// `FindlyTextField` (52pt height, `surfaceVariant` fill, `outlineStrong`/`primary` border,
+/// `corner.md` radius) but WITHOUT that component's stacked label-above-field row, which is what
+/// misaligns the row against a same-height Save button. Not promoted to a `FindlyTextField`
+/// variant/parameter because no other of `FindlyTextField`'s dozen-plus call sites want this
+/// layout — §4.2 asks for one specific row, not a new general-purpose design-system option — so
+/// this stays screen-local, reading `@Environment(\.theme)` the same way every other
+/// `Screens/`-level view in this codebase already does (e.g. this file's own card text above).
+private struct DeviceRenameField: View {
+    @Environment(\.theme) private var theme
+    @Environment(\.isEnabled) private var isEnabled
+    @FocusState private var isFocused: Bool
+    let placeholder: String
+    @Binding var text: String
+
+    var body: some View {
+        TextField(placeholder, text: $text)
+            .disabled(!isEnabled)
+            .focused($isFocused)
+            .font(theme.typography.bodyLarge.font)
+            .foregroundColor(isEnabled ? theme.colors.onSurface : .findlyTextFieldDisabledText)
+            .padding(.horizontal, theme.spacing.sm)
+            .frame(height: 52)
+            .frame(maxWidth: .infinity)
+            .background(isEnabled ? theme.colors.surfaceVariant : .findlyTextFieldDisabledFill)
+            .clipShape(RoundedRectangle(cornerRadius: theme.corner.md))
+            .overlay(
+                RoundedRectangle(cornerRadius: theme.corner.md)
+                    .strokeBorder(borderColor, lineWidth: 1.5)
+            )
+            // The label lives here, not in a stacked `Text` above the field (§4.2's explicit
+            // instruction) — VoiceOver still announces "Device name" regardless of the current
+            // draft, matching how every other labeled control in this codebase names itself.
+            .accessibilityLabel("Device name")
+    }
+
+    private var borderColor: Color {
+        guard isEnabled else { return .findlyTextFieldDisabledBorder }
+        return isFocused ? theme.colors.primary : theme.outlineStrong
     }
 }

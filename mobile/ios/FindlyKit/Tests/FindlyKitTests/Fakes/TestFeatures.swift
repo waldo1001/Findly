@@ -14,4 +14,18 @@ enum TestFeatures {
     static func envelope<T: Decodable>(_ data: T) -> Envelope<T> {
         Envelope(data: data, features: free)
     }
+
+    /// specs/010-app-shell-and-screen-ux.md §4.2 — a fixture for asserting the sync-interval
+    /// dropdown's floor comes from `features`, not a call-site literal.
+    static func envelope<T: Decodable>(_ data: T, minSyncIntervalMinutes: Int) -> Envelope<T> {
+        var limits = free.limits
+        limits = PlanLimits(
+            maxDevices: limits.maxDevices, maxGeofences: limits.maxGeofences, historyDays: limits.historyDays,
+            minSyncIntervalMinutes: minSyncIntervalMinutes, locateRequestsPerDay: limits.locateRequestsPerDay,
+            maxActiveGroups: limits.maxActiveGroups, maxGroupMembers: limits.maxGroupMembers,
+            maxGroupDurationDays: limits.maxGroupDurationDays, groupGraceDays: limits.groupGraceDays
+        )
+        let features = Features(subscriptionStatus: free.subscriptionStatus, limits: limits, flags: free.flags)
+        return Envelope(data: data, features: features)
+    }
 }
