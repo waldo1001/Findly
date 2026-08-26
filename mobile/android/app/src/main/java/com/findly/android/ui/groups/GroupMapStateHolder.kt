@@ -85,6 +85,14 @@ class GroupMapStateHolder(
         _state.value = current.copy(selectedUserId = userId, cameraCommand = cameraCommand)
     }
 
+    /** specs/010 §3.5: tapping the map background deselects, without moving the camera. */
+    fun deselect() {
+        val current = _state.value as? GroupMapUiState.Content ?: return
+        if (current.selectedUserId != null) {
+            _state.value = current.copy(selectedUserId = null)
+        }
+    }
+
     /** specs/010 §3.4's explicit fit-all action: re-runs [MapCamera.target] over the currently
      * loaded points, unconditionally. */
     fun fitAll() {

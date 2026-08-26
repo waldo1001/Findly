@@ -304,6 +304,43 @@ class MapStateHolderTest {
     }
 
     @Test
+    fun `deselect clears the selection without moving the camera`() = runTest {
+        val api = FakeLocationsApi().apply {
+            getLatestLocationsResult = ApiResult.Success(
+                LatestLocationsResponseDto(members = listOf(memberWithOneDevice("u1", "Eric", "d1", 51.0, 3.0, "2026-08-26T10:00:00Z"))),
+                features = defaultFeatures(),
+            )
+        }
+        val holder = MapStateHolder(api, backgroundScope)
+        runCurrent()
+        holder.selectMember("u1")
+        val selected = holder.state.value as MapUiState.Content
+        assertEquals("u1", selected.selectedUserId)
+
+        holder.deselect()
+
+        val deselected = holder.state.value as MapUiState.Content
+        assertNull(deselected.selectedUserId)
+        assertEquals(selected.cameraCommand, deselected.cameraCommand)
+    }
+
+    @Test
+    fun `deselect is a no-op when nothing is selected`() = runTest {
+        val api = FakeLocationsApi().apply {
+            getLatestLocationsResult = ApiResult.Success(
+                LatestLocationsResponseDto(members = emptyList()),
+                features = defaultFeatures(),
+            )
+        }
+        val holder = MapStateHolder(api, backgroundScope)
+        runCurrent()
+
+        holder.deselect()
+
+        assertNull((holder.state.value as MapUiState.Content).selectedUserId)
+    }
+
+    @Test
     fun `fitAll re-runs the policy over current points on an explicit action`() = runTest {
         val api = FakeLocationsApi().apply {
             getLatestLocationsResult = ApiResult.Success(

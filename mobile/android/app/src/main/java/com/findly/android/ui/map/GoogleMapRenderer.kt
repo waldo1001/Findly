@@ -40,22 +40,35 @@ import com.google.maps.android.compose.rememberUpdatedMarkerState
  * (001-api-contract.md §5.2/§12.10 — `lat`/`lon` are `null`), so it is never placed on the map
  * surface at all — inventing a default location would violate the spec's "never falsely placed"
  * rule. It still surfaces in the roster list beneath the map ([MapScreen]/[GroupMapScreen]'s
- * existing `LazyColumn`), the same split already shipped on iOS
+ * existing `FindlyBottomSheet` roster), the same split already shipped on iOS
  * (`LiveMapViewModel.annotations` excludes no-fix devices from the map layer but the roster still
  * lists them — specs/004-ios-client.md), so both apps render identically per §5.2.
  *
- * Camera fit is decided by the pure, unit-tested [MapCamera] (`MapCameraTest`) — only the actual
+ * Camera fit is decided by the pure, unit-tested [MapCamera]/[MapCameraPolicy]
+ * (`MapCameraTest`/`MapCameraPolicyTest`/`MapStateHolderTest`) — only the actual
  * `CameraUpdateFactory`/`LatLngBounds` translation happens here, since that needs a real
- * `GoogleMap` view.
+ * `GoogleMap` view. specs/010-app-shell-and-screen-ux.md §3.4 (normative): [MapSurface] keys its
+ * camera-animation [LaunchedEffect] on `cameraCommand?.seq` alone — **never** on the marker/points
+ * list — which is what stops an ordinary refresh (markers changing) from moving the camera; only
+ * a genuinely new [CameraCommand] (a new `seq`, minted by the state holder on first load, an
+ * explicit fit-all, or a selection) re-runs it.
  */
 class GoogleMapRenderer : MapRenderer {
 
     @Composable
-    override fun Render(members: List<RosterMemberUi>, modifier: Modifier) {
+    override fun Render(
+        members: List<RosterMemberUi>,
+        selectedUserId: String?,
+        cameraCommand: CameraCommand?,
+        onMemberSelected: (userId: String) -> Unit,
+        onBackgroundTap: () -> Unit,
+        modifier: Modifier,
+    ) {
         val markers = members.flatMap { member ->
             member.devices.filter { it.hasLocation }.map { device ->
                 MapMarker(
                     id = device.deviceId,
+                    userId = member.userId,
                     lat = device.lat!!,
                     lon = device.lon!!,
                     label = initialsFor(member.displayName),
@@ -63,30 +76,56 @@ class GoogleMapRenderer : MapRenderer {
                 )
             }
         }
-        MapSurface(markers = markers, modifier = modifier)
+        MapSurface(
+            markers = markers,
+            selectedUserId = selectedUserId,
+            cameraCommand = cameraCommand,
+            onMemberSelected = onMemberSelected,
+            onBackgroundTap = onBackgroundTap,
+            modifier = modifier,
+        )
     }
 
     /** A5/A12 (specs/005-temporary-groups.md §3): position-only — same visual language as
      * [Render], no device/battery detail in the marker content. */
     @Composable
-    override fun RenderGroup(members: List<GroupMapMemberUi>, modifier: Modifier) {
+    override fun RenderGroup(
+        members: List<GroupMapMemberUi>,
+        selectedUserId: String?,
+        cameraCommand: CameraCommand?,
+        onMemberSelected: (userId: String) -> Unit,
+        onBackgroundTap: () -> Unit,
+        modifier: Modifier,
+    ) {
         val markers = members.filter { it.hasLocation }.map { member ->
             MapMarker(
                 id = member.userId,
+                userId = member.userId,
                 lat = member.lat!!,
                 lon = member.lon!!,
                 label = initialsFor(member.displayName),
                 state = member.markerState,
             )
         }
-        MapSurface(markers = markers, modifier = modifier)
+        MapSurface(
+            markers = markers,
+            selectedUserId = selectedUserId,
+            cameraCommand = cameraCommand,
+            onMemberSelected = onMemberSelected,
+            onBackgroundTap = onBackgroundTap,
+            modifier = modifier,
+        )
     }
 }
 
 /** One plotted pin — already resolved to a known coordinate; callers filter out
- * `hasLocation == false` entries first, since there is nowhere on the map to plot those. */
+ * `hasLocation == false` entries first, since there is nowhere on the map to plot those. [id] is
+ * the Compose `key()` (per-device on the family map, so two devices at the same spot don't
+ * collide); [userId] is the member selection targets — several device markers can share one
+ * [userId] on the family map. */
 private data class MapMarker(
     val id: String,
+    val userId: String,
     val lat: Double,
     val lon: Double,
     val label: String,
@@ -94,7 +133,14 @@ private data class MapMarker(
 )
 
 @Composable
-private fun MapSurface(markers: List<MapMarker>, modifier: Modifier) {
+private fun MapSurface(
+    markers: List<MapMarker>,
+    selectedUserId: String?,
+    cameraCommand: CameraCommand?,
+    onMemberSelected: (userId: String) -> Unit,
+    onBackgroundTap: () -> Unit,
+    modifier: Modifier,
+) {
     val cameraPositionState = rememberCameraPositionState {
         position = CameraPosition.fromLatLngZoom(
             LatLng(MapCamera.DEFAULT_LAT, MapCamera.DEFAULT_LON),
@@ -103,9 +149,13 @@ private fun MapSurface(markers: List<MapMarker>, modifier: Modifier) {
     }
     val density = LocalDensity.current
 
-    val points = markers.map { it.lat to it.lon }
-    LaunchedEffect(points) {
-        val update = when (val target = MapCamera.target(points)) {
+    // specs/010-app-shell-and-screen-ux.md §3.4: keyed on the command's `seq` alone — NOT on
+    // `markers`/`points` — so a refresh that only changes marker positions (no new seq) never
+    // re-triggers this effect. This is the actual fix for "every marker-set change yanks the
+    // camera"; MapStateHolder/GroupMapStateHolder decide WHEN a new seq is minted.
+    LaunchedEffect(cameraCommand?.seq) {
+        val target = cameraCommand?.target ?: return@LaunchedEffect
+        val update = when (target) {
             is MapCameraTarget.Default -> CameraUpdateFactory.newLatLngZoom(
                 LatLng(target.lat, target.lon),
                 target.zoom,
@@ -123,20 +173,30 @@ private fun MapSurface(markers: List<MapMarker>, modifier: Modifier) {
             )
         }
         // Suspends until a map is actually bound (maps-compose's CameraPositionState.animate
-        // contract) — safe to call eagerly on every composition/marker-set change.
+        // contract).
         cameraPositionState.animate(update)
     }
 
-    GoogleMap(modifier = modifier.fillMaxSize(), cameraPositionState = cameraPositionState) {
+    GoogleMap(
+        modifier = modifier.fillMaxSize(),
+        cameraPositionState = cameraPositionState,
+        onMapClick = { onBackgroundTap() },
+    ) {
         markers.forEach { marker ->
             key(marker.id) {
+                val selected = marker.userId == selectedUserId
                 MarkerComposable(
                     marker.label,
                     marker.state,
+                    selected,
                     state = rememberUpdatedMarkerState(position = LatLng(marker.lat, marker.lon)),
                     title = marker.label,
+                    onClick = {
+                        onMemberSelected(marker.userId)
+                        true
+                    },
                 ) {
-                    FindlyMapMarkerBubble(label = marker.label, state = marker.state)
+                    FindlyMapMarkerBubble(label = marker.label, state = marker.state, selected = selected)
                 }
             }
         }

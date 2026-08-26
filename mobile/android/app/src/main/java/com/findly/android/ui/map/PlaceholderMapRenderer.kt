@@ -1,6 +1,7 @@
 package com.findly.android.ui.map
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -22,13 +23,23 @@ import com.findly.android.ui.groups.GroupMapMemberUi
  * real geographic projection, but the roster's marker set is visible end-to-end so previews
  * compose without needing the Maps SDK. Stateless; composes only `ui/designsystem` components and
  * reads only [FindlyTheme] tokens (specs/003-android-client.md §4.3) — no raw Material3 primitive
- * appears in this file.
+ * appears in this file. Tapping a bubble or the background surface still calls through to
+ * [onMemberSelected]/[onBackgroundTap] (specs/010-app-shell-and-screen-ux.md §3.5) even though
+ * there is no real camera to animate — [cameraCommand] is accepted for interface parity but
+ * unused, since there is nothing here to point a camera at.
  */
 class PlaceholderMapRenderer : MapRenderer {
     @Composable
-    override fun Render(members: List<RosterMemberUi>, modifier: Modifier) {
+    override fun Render(
+        members: List<RosterMemberUi>,
+        selectedUserId: String?,
+        cameraCommand: CameraCommand?,
+        onMemberSelected: (userId: String) -> Unit,
+        onBackgroundTap: () -> Unit,
+        modifier: Modifier,
+    ) {
         val markers = members.flatMap { member ->
-            member.devices.filter { it.hasLocation }.map { device -> member.displayName to device }
+            member.devices.filter { it.hasLocation }.map { device -> member to device }
         }
 
         Column(
@@ -36,6 +47,7 @@ class PlaceholderMapRenderer : MapRenderer {
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(FindlyTheme.corner.lg))
                 .background(FindlyTheme.colors.surfaceVariant)
+                .clickable(onClick = onBackgroundTap)
                 .padding(FindlyTheme.spacing.md),
             verticalArrangement = Arrangement.spacedBy(FindlyTheme.spacing.xs),
         ) {
@@ -45,10 +57,12 @@ class PlaceholderMapRenderer : MapRenderer {
                     message = "Real tiles land with H1 (docs/azure-setup.md).",
                 )
             } else {
-                markers.forEach { (displayName, device) ->
+                markers.forEach { (member, device) ->
                     FindlyMapMarkerBubble(
-                        label = "$displayName · ${device.deviceName}",
+                        label = "${member.displayName} · ${device.deviceName}",
                         state = device.markerState,
+                        selected = member.userId == selectedUserId,
+                        modifier = Modifier.clickable { onMemberSelected(member.userId) },
                     )
                 }
             }
@@ -59,7 +73,14 @@ class PlaceholderMapRenderer : MapRenderer {
      * [Render], but position-only: no device name to compose into the label, just the member's
      * display name. */
     @Composable
-    override fun RenderGroup(members: List<GroupMapMemberUi>, modifier: Modifier) {
+    override fun RenderGroup(
+        members: List<GroupMapMemberUi>,
+        selectedUserId: String?,
+        cameraCommand: CameraCommand?,
+        onMemberSelected: (userId: String) -> Unit,
+        onBackgroundTap: () -> Unit,
+        modifier: Modifier,
+    ) {
         val located = members.filter { it.hasLocation }
 
         Column(
@@ -67,6 +88,7 @@ class PlaceholderMapRenderer : MapRenderer {
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(FindlyTheme.corner.lg))
                 .background(FindlyTheme.colors.surfaceVariant)
+                .clickable(onClick = onBackgroundTap)
                 .padding(FindlyTheme.spacing.md),
             verticalArrangement = Arrangement.spacedBy(FindlyTheme.spacing.xs),
         ) {
@@ -80,6 +102,8 @@ class PlaceholderMapRenderer : MapRenderer {
                     FindlyMapMarkerBubble(
                         label = member.displayName,
                         state = member.markerState,
+                        selected = member.userId == selectedUserId,
+                        modifier = Modifier.clickable { onMemberSelected(member.userId) },
                     )
                 }
             }

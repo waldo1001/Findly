@@ -93,6 +93,15 @@ class MapStateHolder(
         _state.value = current.copy(selectedUserId = userId, cameraCommand = cameraCommand)
     }
 
+    /** specs/010 §3.5: tapping the map background deselects whatever member is currently
+     * selected, without moving the camera — a no-op when nothing is selected. */
+    fun deselect() {
+        val current = _state.value as? MapUiState.Content ?: return
+        if (current.selectedUserId != null) {
+            _state.value = current.copy(selectedUserId = null)
+        }
+    }
+
     /** specs/010 §3.4's explicit fit-all action: re-runs [MapCamera.target] over the currently
      * loaded points, unconditionally (the one trigger that always runs regardless of policy
      * state). */

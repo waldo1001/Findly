@@ -207,6 +207,26 @@ class GroupMapStateHolderTest {
     }
 
     @Test
+    fun `deselect clears the selection without moving the camera`() = runTest {
+        val api = FakeGroupsApi().apply {
+            getGroupLatestLocationsResult = ApiResult.Success(
+                GroupLatestLocationsResponseDto(members = listOf(memberAt("u1", "Eric", 51.0, 3.0))),
+                features = groupsFeatures(),
+            )
+        }
+        val holder = GroupMapStateHolder(groupId, api, backgroundScope)
+        runCurrent()
+        holder.selectMember("u1")
+        val selected = holder.state.value as GroupMapUiState.Content
+
+        holder.deselect()
+
+        val deselected = holder.state.value as GroupMapUiState.Content
+        assertNull(deselected.selectedUserId)
+        assertEquals(selected.cameraCommand, deselected.cameraCommand)
+    }
+
+    @Test
     fun `fitAll re-runs the policy over current points on an explicit action`() = runTest {
         val api = FakeGroupsApi().apply {
             getGroupLatestLocationsResult = ApiResult.Success(
