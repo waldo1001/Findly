@@ -40,6 +40,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.findly.android.ui.designsystem.FindlyTheme
 import com.findly.android.queue.worker.LocationForegroundService
 import com.findly.android.ui.groups.GroupJoinHttpsLinkParser
+import com.findly.android.ui.invites.FamilyInviteHttpsLinkParser
 import com.findly.android.launch.LaunchGateViewModel
 import com.findly.android.launch.LaunchGateViewModelFactory
 import com.findly.android.ui.nav.FindlyNavHost
@@ -71,7 +72,13 @@ import com.findly.android.ui.nav.FindlyNavHost
  * elsewhere (e.g. Settings), would get forcibly yanked back to `GroupJoin` by the next rotation.
  * `savedInstanceState` is non-null on precisely those recreations (the system only supplies it
  * when restoring previously-saved state) and null on a genuinely new launch — the standard Android
- * idiom for "handle this Intent once, not on every recreation." */
+ * idiom for "handle this Intent once, not on every recreation."
+ *
+ * **A36 addition** (specs/007-public-join-links.md §1/§4 as amended 2026-08-26, specs/010 §5.2):
+ * the exact same treatment, in parallel, for the public
+ * `https://{JOIN_LINK_HOST}/f#CODE` family-invite link via [FamilyInviteHttpsLinkParser] — same
+ * fragment-based reasoning, same [savedInstanceState]-gated freshness guard, routing to
+ * [com.findly.android.ui.nav.Destinations.InviteAccept] instead of `GroupJoin`. */
 class MainActivity : ComponentActivity() {
 
     private val container get() = (application as FindlyApplication).container
@@ -123,6 +130,19 @@ class MainActivity : ComponentActivity() {
 
         val launchingUri = intent?.data
         val httpsJoinLinkResult = GroupJoinHttpsLinkParser.parseIfFreshLaunch(
+            isFreshLaunch = savedInstanceState == null,
+            scheme = launchingUri?.scheme,
+            host = launchingUri?.host,
+            path = launchingUri?.path,
+            fragment = launchingUri?.fragment,
+            joinLinkHost = container.appConfig.joinLinkHost,
+        )
+        // A36 (specs/007-public-join-links.md §1/§4 as amended 2026-08-26, specs/010 §5.2): the
+        // public https://{JOIN_LINK_HOST}/f#CODE family-invite link, checked the same way and for
+        // the same reason as httpsJoinLinkResult above (fragment-carried codes aren't matched by
+        // Navigation Compose's own uriPattern placeholder syntax) -- same freshness guard, so
+        // rotation/recreation never re-fires the one-time navigation to the accept-invite screen.
+        val httpsFamilyInviteLinkResult = FamilyInviteHttpsLinkParser.parseIfFreshLaunch(
             isFreshLaunch = savedInstanceState == null,
             scheme = launchingUri?.scheme,
             host = launchingUri?.host,
@@ -261,6 +281,7 @@ class MainActivity : ComponentActivity() {
                     container = container,
                     launchGateViewModel = launchGateViewModel,
                     httpsJoinLinkResult = httpsJoinLinkResult,
+                    httpsFamilyInviteLinkResult = httpsFamilyInviteLinkResult,
                     openDevicesOnLaunch = openDevicesOnLaunch,
                 )
                 }

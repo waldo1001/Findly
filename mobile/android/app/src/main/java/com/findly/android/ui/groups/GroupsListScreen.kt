@@ -32,7 +32,8 @@ import java.time.Instant
  * every group the caller belongs to, plus entry points to create/join one. Doubles as the
  * **family-less home** (`Content.hasFamily == false`) — a signed-in user with no family (§1.5.4)
  * is no longer a dead end here, unlike every family-scoped A2 screen; [onManageFamily] routes to
- * the existing `Invites` screen (§3.4's join-a-family flow). The former **A21 profile-less
+ * the accept-invite screen (§3.4's join-a-family flow — `Destinations.InviteAccept` since A36's
+ * split of the former combined `Invites` screen, specs/010 §5.2/§6). The former **A21 profile-less
  * first-run home** (`GroupsListUiState.ProfileNeeded`) is retired by specs/010-app-shell-and-
  * screen-ux.md §2.1/§6: a signed-in user with no `Users` profile row at all now gets
  * [GroupsListUiState.RouteToOnboarding] here instead, routing to the new Onboarding screen (010

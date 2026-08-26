@@ -89,6 +89,42 @@
                     android:host="${joinLinkHost}"
                     android:path="/g" />
             </intent-filter>
+
+            <!-- A36 (specs/007-public-join-links.md §1/§4 as amended 2026-08-26, specs/003-
+                 android-client.md §12.3/§12.2 mirror, specs/010 §5.2): the family-invite twin of
+                 the two group filters above, `findly://family-join?code=XXXXXXXX` — a custom
+                 scheme (not android:autoVerify), so no digital-asset-links verification is
+                 needed; the `code` query param is untrusted input, sanitized in
+                 FindlyNavHost/FamilyInviteCodeSanitizer before any network call, exactly like
+                 group-join's `code` param above. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="findly" android:host="family-join" />
+            </intent-filter>
+
+            <!-- A36 (specs/007-public-join-links.md §1/§4 as amended 2026-08-26, specs/003-
+                 android-client.md §12.3/§12.2 mirror, specs/010 §5.2): the family-invite twin of
+                 the https /g App Link above, path /f instead. Same ${joinLinkHost} placeholder
+                 (one JOIN_LINK_HOST build-config value serves both /g and /f, 007 §1), same
+                 android:autoVerify (App Links verification against the shared assetlinks.json,
+                 007 §3). Unlike the findly:// filter above, the invite code lives in the URL
+                 FRAGMENT (007 §1), never delivered to a server/CDN/proxy at all, so it is
+                 read directly off the delivered Uri and sanitized in
+                 MainActivity/FindlyNavHost via FamilyInviteHttpsLinkParser, the same whitelist
+                 gate as the https /g filter above. A wrong host or path is ignored, never
+                 mis-routed (007 §4); /f never routes to the group-join screen, nor /g to this
+                 one. -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:scheme="https"
+                    android:host="${joinLinkHost}"
+                    android:path="/f" />
+            </intent-filter>
         </activity>
 
         <!-- A9 (specs/003-android-client.md §9; specs/009-device-runtime.md §5): the real FCM

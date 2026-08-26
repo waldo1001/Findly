@@ -62,9 +62,14 @@ import com.findly.android.ui.groups.GroupsListViewModelFactory
 import com.findly.android.ui.history.HistoryRoute
 import com.findly.android.ui.history.HistoryViewModel
 import com.findly.android.ui.history.HistoryViewModelFactory
-import com.findly.android.ui.invites.InvitesRoute
-import com.findly.android.ui.invites.InvitesViewModel
-import com.findly.android.ui.invites.InvitesViewModelFactory
+import com.findly.android.ui.invites.AcceptInviteRoute
+import com.findly.android.ui.invites.AcceptInviteViewModel
+import com.findly.android.ui.invites.AcceptInviteViewModelFactory
+import com.findly.android.ui.invites.CreateInviteRoute
+import com.findly.android.ui.invites.CreateInviteViewModel
+import com.findly.android.ui.invites.CreateInviteViewModelFactory
+import com.findly.android.ui.invites.FamilyInviteCodeSanitizer
+import com.findly.android.ui.invites.FamilyInviteHttpsLinkParser
 import com.findly.android.ui.locate.LocateRoute
 import com.findly.android.ui.locate.LocateViewModel
 import com.findly.android.ui.locate.LocateViewModelFactory
@@ -85,11 +90,12 @@ import kotlinx.coroutines.launch
  * Navigation scaffold (specs/003-android-client.md §12; §12's amendment, specs/010-app-shell-and-
  * screen-ux.md §6). A1 shipped only `Destinations.Home`; A2 wired the rest —
  * [Destinations.Map]/[Destinations.History]/[Destinations.Geofences]/[Destinations.Locate]/
- * `Destinations.Settings`/[Destinations.Invites] — each screen's `ViewModel` built from
+ * `Destinations.Settings`/`Destinations.Invites` — each screen's `ViewModel` built from
  * [container]'s single [com.findly.android.network.FindlyApiClient] (it implements all five
  * 001 §3–§7 port interfaces, so every factory here just narrows it to the one it needs). A35
  * (specs/010 §4.1) retires `Destinations.Settings` in favor of [Destinations.Devices]/
- * [Destinations.Family]/[Destinations.Privacy] below.
+ * [Destinations.Family]/[Destinations.Privacy] below; A36 (specs/010 §5.1/§5.2) retires
+ * `Destinations.Invites` in favor of [Destinations.InviteCreate]/[Destinations.InviteAccept].
  * [Destinations.SignIn] (§7) hosts the phone sign-in screen regardless of `container`'s
  * `authProvider` implementation; a [LaunchedEffect] on `authState` pops this screen once sign-in
  * succeeds, since that's when `authState` flips to `SignedIn`.
@@ -150,6 +156,13 @@ fun FindlyNavHost(
     launchGateViewModel: LaunchGateViewModel,
     navController: NavHostController = rememberNavController(),
     httpsJoinLinkResult: GroupJoinHttpsLinkParser.Result = GroupJoinHttpsLinkParser.Result.NoMatch,
+    /** A36 (specs/007-public-join-links.md §1/§4 as amended, specs/010 §5.2): the public
+     * `https://{JOIN_LINK_HOST}/f#CODE` family-invite link, matched the same way and for the same
+     * reason as [httpsJoinLinkResult] above (Navigation Compose's `uriPattern` placeholder
+     * matching covers path/query segments, not URL fragments) — see that parameter's doc and
+     * [com.findly.android.MainActivity]'s for the full freshness-guard reasoning, which applies
+     * identically here. */
+    httpsFamilyInviteLinkResult: FamilyInviteHttpsLinkParser.Result = FamilyInviteHttpsLinkParser.Result.NoMatch,
     /** A10 (specs/009-device-runtime.md §3.2): true when this composition was launched by tapping
      * the foreground-service's persistent notification — [com.findly.android.MainActivity] already
      * gates this to a fresh launch (same idiom as [httpsJoinLinkResult]'s own freshness guard, its
@@ -165,8 +178,8 @@ fun FindlyNavHost(
 
     // A21 (now specs/010-app-shell-and-screen-ux.md §2.2's Onboarding screen): the display name
     // the user typed once on Onboarding's profile-less variant, carried to whichever of
-    // CreateFamily/Invites they tap next — same "remembered local state instead of a nav-graph
-    // argument" pattern as pendingLocateTarget/pendingCreateContext above (only one of these two
+    // CreateFamily/InviteAccept they tap next — same "remembered local state instead of a
+    // nav-graph argument" pattern as pendingLocateTarget/pendingCreateContext above (only one of these two
     // destinations is ever pending navigation at a time, so one holder suffices).
     var pendingOnboardingDisplayName by remember { mutableStateOf("") }
 
@@ -221,6 +234,18 @@ fun FindlyNavHost(
     LaunchedEffect(Unit) {
         val matched = httpsJoinLinkResult as? GroupJoinHttpsLinkParser.Result.Matched ?: return@LaunchedEffect
         val route = matched.sanitizedCode?.let { "group-join?code=$it" } ?: Destinations.GroupJoin.route
+        navController.navigate(route) {
+            popUpTo(Destinations.Map.route)
+            launchSingleTop = true
+        }
+    }
+
+    // A36 (specs/007 §4 as amended, specs/010 §5.2): one-time navigation to the accept-invite
+    // screen when this composition was launched from a matching https family-invite link -- the
+    // exact mirror of the group https-link effect above.
+    LaunchedEffect(Unit) {
+        val matched = httpsFamilyInviteLinkResult as? FamilyInviteHttpsLinkParser.Result.Matched ?: return@LaunchedEffect
+        val route = matched.sanitizedCode?.let { "invite-accept?code=$it" } ?: Destinations.InviteAccept.route
         navController.navigate(route) {
             popUpTo(Destinations.Map.route)
             launchSingleTop = true
@@ -301,10 +326,10 @@ fun FindlyNavHost(
                                 FindlyNavDrawerDestination.Devices -> navController.navigate(Destinations.Devices.route)
                                 FindlyNavDrawerDestination.Family -> navController.navigate(Destinations.Family.route)
                                 FindlyNavDrawerDestination.PrivacyAndData -> navController.navigate(Destinations.Privacy.route)
-                                // "Invite someone" routes at today's combined Invites screen
-                                // pending its A36 split into Create invite + Join a family (010
-                                // §5.1) — also out of this task's scope.
-                                FindlyNavDrawerDestination.InviteSomeone -> navController.navigate(Destinations.Invites.route)
+                                // A36 (specs/010 §5.1/§1.2): "Invite someone" now reaches the
+                                // dedicated, parent-only create-invite screen (the combined
+                                // Invites screen it used to point at is retired).
+                                FindlyNavDrawerDestination.InviteSomeone -> navController.navigate(Destinations.InviteCreate.route)
                                 FindlyNavDrawerDestination.Groups -> navController.navigate(Destinations.Groups.route)
                             }
                         },
@@ -351,7 +376,7 @@ fun FindlyNavHost(
                 },
                 onAcceptInvite = { displayName ->
                     pendingOnboardingDisplayName = displayName
-                    navController.navigate(Destinations.Invites.route)
+                    navController.navigate(Destinations.InviteAccept.route)
                 },
                 onCreateGroup = { displayName ->
                     pendingCreateContext = GroupsListUiState.CreateJoinContext(
@@ -433,15 +458,44 @@ fun FindlyNavHost(
             PrivacyRoute(viewModel = privacyViewModel, onRouteToOnboarding = navigateToOnboarding)
         }
 
-        composable(Destinations.Invites.route) {
-            val invitesViewModel: InvitesViewModel = viewModel(factory = InvitesViewModelFactory(container.findlyApiClient))
-            InvitesRoute(
-                viewModel = invitesViewModel,
+        // A36 (specs/010 §5.1): parent-only, reached from the drawer's "Invite someone" item.
+        composable(Destinations.InviteCreate.route) {
+            val createInviteViewModel: CreateInviteViewModel =
+                viewModel(factory = CreateInviteViewModelFactory(container.findlyApiClient))
+            CreateInviteRoute(viewModel = createInviteViewModel, joinLinkHost = container.appConfig.joinLinkHost)
+        }
+
+        // A36 (specs/010 §5.2): reached from Onboarding's "I have an invite code", from
+        // GroupsListRoute's "Manage family invites" (family-less state), or from a matching
+        // https://{JOIN_LINK_HOST}/f#CODE / findly://family-join?code=… link (the latter via the
+        // navDeepLink below; the former via httpsFamilyInviteLinkResult's LaunchedEffect above).
+        composable(
+            route = Destinations.InviteAccept.ROUTE_WITH_ARG,
+            arguments = listOf(
+                navArgument(Destinations.InviteAccept.ARG_CODE) {
+                    type = NavType.StringType
+                    nullable = true
+                    defaultValue = null
+                },
+            ),
+            deepLinks = listOf(navDeepLink { uriPattern = Destinations.InviteAccept.DEEP_LINK_URI_PATTERN }),
+        ) { backStackEntry ->
+            val rawCode = backStackEntry.arguments?.getString(Destinations.InviteAccept.ARG_CODE)
+            // The deep link's `code` is untrusted external input -- sanitize before it ever
+            // reaches the screen/StateHolder; an unparsable code silently prefills empty rather
+            // than being trusted as-is.
+            val sanitizedCode = rawCode?.let { FamilyInviteCodeSanitizer.sanitize(it) }.orEmpty()
+            val acceptInviteViewModel: AcceptInviteViewModel =
+                viewModel(factory = AcceptInviteViewModelFactory(container.findlyApiClient))
+            AcceptInviteRoute(
+                viewModel = acceptInviteViewModel,
+                joinLinkHost = container.appConfig.joinLinkHost,
+                prefillCode = sanitizedCode,
                 prefillDisplayName = pendingOnboardingDisplayName,
                 // 010 §5.2: accepting an invite always resets to the Family Map root on success
                 // now (accept-invite is one of the four 001 §1.5.3 profile-bootstrap paths) —
                 // iOS's former terminal "Welcome!" dead-end is retired the same way here.
-                onAccepted = onBootstrapSuccess,
+                onJoined = onBootstrapSuccess,
             )
         }
 
@@ -474,7 +528,7 @@ fun FindlyNavHost(
                     navController.navigate(Destinations.GroupJoin.route)
                 },
                 onOpenGroup = { groupId -> navController.navigate(Destinations.GroupDetail.createRoute(groupId)) },
-                onManageFamily = { navController.navigate(Destinations.Invites.route) },
+                onManageFamily = { navController.navigate(Destinations.InviteAccept.route) },
                 onRouteToOnboarding = navigateToOnboarding,
             )
         }

@@ -6,7 +6,9 @@ import com.findly.android.ui.onboarding.OnboardingVariant
  * Route string constants (specs/003-android-client.md §12; §12's amendment, specs/010-app-shell-
  * and-screen-ux.md §6: `Home` is deleted — the NavHost start destination is now [Map]). [Map]/
  * [History]/[Geofences]/[Locate] were reserved in A1 and are wired to real screens in A2;
- * [Invites] is a new A2 addition (§3.3/§3.4) — additive, same convention as the rest. A5
+ * The A2-added combined `Invites` destination (§3.3/§3.4) was split by A36 into [InviteCreate]/
+ * [InviteAccept] (specs/010-app-shell-and-screen-ux.md §5.1/§5.2/§6) — see their own docs below.
+ * A5
  * additively adds the groups destinations below (specs/005-temporary-groups.md). [Onboarding] is
  * the 010 §2.2 addition replacing the retired `Home`/`GroupsListScreen.ProfileNeeded` first-run UI.
  * A35 (specs/010 §4.1) retires the old `Settings` constant in favor of [Devices]/[Family]/
@@ -40,7 +42,27 @@ sealed class Destinations(val route: String) {
     data object Family : Destinations("family")
     data object Privacy : Destinations("privacy")
 
-    data object Invites : Destinations("invites")
+    /** specs/010-app-shell-and-screen-ux.md §5.1/§6: the combined `Invites` destination splits
+     * into this (parent-only, drawer) and [InviteAccept] (onboarding/deep link) — mirroring
+     * iOS's two routes, which never had a combined screen to split. */
+    data object InviteCreate : Destinations("invite-create")
+
+    /** specs/010-app-shell-and-screen-ux.md §5.2. `?code={code}` is an optional query argument,
+     * matched both by plain in-app navigation (no code) and by the `findly://family-join?code=…`
+     * deep link declared on this same composable in [com.findly.android.ui.nav.FindlyNavHost] —
+     * the same "remembered nav-graph query argument" shape as [GroupJoin] below, for the same
+     * reason (an 8-char Crockford-base32 code has no percent-encoding risk). The incoming `code`
+     * is untrusted and MUST be sanitized via
+     * [com.findly.android.ui.invites.FamilyInviteCodeSanitizer] before use. The
+     * `https://{JOIN_LINK_HOST}/f#{CODE}` form is matched separately by
+     * [com.findly.android.MainActivity] (007 §1: the code lives in the URL fragment, which this
+     * query-argument deep-link syntax cannot express) — see [GroupJoin]'s doc for why. */
+    data object InviteAccept : Destinations("invite-accept") {
+        const val ARG_CODE = "code"
+        const val ROUTE_WITH_ARG = "invite-accept?code={code}"
+        const val DEEP_LINK_URI_PATTERN = "findly://family-join?code={code}"
+    }
+
     data object SignIn : Destinations("sign-in")
 
     /** specs/010-app-shell-and-screen-ux.md §2.2 — one route, two variants (both retiring
