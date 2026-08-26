@@ -151,27 +151,26 @@ public final class GroupDetailViewModel: ObservableObject {
 
     private static let iso8601Formatter = ISO8601DateFormatter()
 
-    /// The human-shareable text (`ShareLink` payload) for the join code — canonical uppercase, no
-    /// hyphen (001 §1.4), formatted for readability as `XXXX-XXXX`. specs/007-public-join-links.md
-    /// §4 pins this exact group-share template as the cross-platform contract (unchanged by I37 —
-    /// only the family-invite template gained the `/f` link); `CreateInviteViewModel.shareText`
-    /// carries the family-invite twin, which DOES include the `/f` link per that same section.
+    /// The bare templated sentence (specs/007-public-join-links.md §4's group template, first
+    /// line only) — reproduced byte-for-byte, NOT paraphrased: `Join my "{group name}" group on
+    /// Findly — code {CODE}`, where the dash is an em dash (U+2014) and `{CODE}` is CANONICAL
+    /// (uppercase, no hyphen) — unlike the family-invite template, which hyphenates its display
+    /// code (`CreateInviteViewModel.displayForm`). This is the exact text `GroupDetailScreen`
+    /// renders in-card next to the share button; `shareText(for:groupName:joinLinkHost:)` below
+    /// is this sentence PLUS the §1 link, and is what actually reaches the share sheet (I42).
     public static func shareText(for code: String, groupName: String) -> String {
-        let clean = code.uppercased()
-        guard clean.count == 8 else {
-            return "Join \(groupName) on Findly! Group code: \(clean)"
-        }
-        let formatted = "\(clean.prefix(4))-\(clean.suffix(4))"
-        return "Join \(groupName) on Findly! Group code: \(formatted)"
+        "Join my \"\(groupName)\" group on Findly \u{2014} code \(code.uppercased())"
     }
 
-    /// I42 (specs/007-public-join-links.md §4) — the full `ShareLink` payload: the templated
-    /// sentence above PLUS the §1 `https://{joinLinkHost}/g#CODE` link, so the share sheet stops
-    /// sending a bare, contextless URL. RED stub: deliberately ignores `joinLinkHost` and returns
-    /// today's already-non-conformant sentence with no link — GREEN implements the real §4
-    /// template on both overloads.
+    /// I42 (specs/007-public-join-links.md §4) — the full `ShareLink` payload: the sentence above,
+    /// a newline, then the §1 `https://{joinLinkHost}/g#CODE` link — matching the template
+    /// byte-for-byte (it also matches the already-shipped Android text, which 007 §4 pins as the
+    /// cross-platform contract). Deliberately no store URL (007 §4: "the message stays short").
+    /// Built from `joinLink(for:joinLinkHost:)` (not string interpolation) so the code stays
+    /// provably fragment-only here too.
     public static func shareText(for code: String, groupName: String, joinLinkHost: String) -> String {
-        shareText(for: code, groupName: groupName)
+        let link = joinLink(for: code, joinLinkHost: joinLinkHost)
+        return "\(shareText(for: code, groupName: groupName))\n\(link.absoluteString)"
     }
 
     /// specs/007-public-join-links.md §1, specs/004-ios-client.md §3.5 — the canonical

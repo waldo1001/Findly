@@ -9,8 +9,9 @@ import SwiftUI
 /// (archived groups reject PATCH, 001 §12.4); kick/leave/delete stay available in every
 /// non-expired state, matching the matrix exactly. `GROUP_EXPIRED` renders as a persistent notice
 /// (`.expired`, same pattern as `GroupMapScreen`) requiring an explicit "Back to groups" tap, not a
-/// silent exit. Since 007/I6, the share card's `ShareLink` and on-device QR carry the canonical
-/// `https://{joinLinkHost}/g#CODE` link rather than plain text.
+/// silent exit. Since 007/I6, the on-device QR carries the canonical `https://{joinLinkHost}/g#CODE`
+/// link; since I42, `ShareLink` carries the full 007 §4 template (sentence + that same link) —
+/// previously it shared only the bare URL, dropping the sentence entirely.
 public struct GroupDetailScreen: View {
     @Environment(\.theme) private var theme
     // `@StateObject`, NOT `@ObservedObject` — see `HomeScreen`'s doc for the full failure mode
