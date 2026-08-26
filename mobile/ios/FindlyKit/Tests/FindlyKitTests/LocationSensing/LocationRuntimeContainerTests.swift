@@ -473,6 +473,24 @@ struct LocationRuntimeContainerTests {
         #expect(cache.isParent == nil, "nor their role")
     }
 
+    /// I26 (specs/008-privacy-endpoints.md §4.4): `LastQueuedFixAtStoring` previously had NO clear
+    /// capability at all — its single sync-rate-limiting timestamp (specs/009 §3.4) survived every
+    /// sign-out and account deletion. Proving this against the container's own `wipeLocalState()`
+    /// (rather than calling `store.clear()` directly) is what makes this a live-called step of the
+    /// real wipe, not merely a method that works in isolation — same rationale as the two
+    /// `wipeLocalState_clearsThe...` tests immediately above.
+    @Test func wipeLocalState_clearsTheLastQueuedFixAtStore() async {
+        let store = InMemoryLastQueuedFixAtStore(initial: Date(timeIntervalSince1970: 1_700_000_000))
+        let container = LocationRuntimeContainer(
+            apiClient: FakeAPIClient(), deviceId: { "device-1" },
+            lastQueuedFixAtStore: store
+        )
+
+        await container.wipeLocalState()
+
+        #expect(store.lastQueuedFixAt() == nil, "a different signed-in user on this device must not inherit the previous caller's sync-rate-limiting timestamp")
+    }
+
     @Test func wipeLocalState_calledTwice_isIdempotentSafe() async {
         let registrar = FakeGeofenceRegistering()
         let container = LocationRuntimeContainer(apiClient: FakeAPIClient(), deviceId: { "device-1" }, geofenceRegistrar: registrar)

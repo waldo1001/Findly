@@ -58,6 +58,12 @@ public final class LocationRuntimeContainer {
     /// on the account-deletion path, instead of a documented-but-uncalled promise.
     public let permissionDisclosureStore: PermissionDisclosureStateStoring
 
+    /// specs/009-device-runtime.md §3.4, specs/008-privacy-endpoints.md §4.4 (I26) — held as a
+    /// property (previously a bare `init` parameter used only to build `syncRunner`, unreachable
+    /// from anywhere else in this class) so `wipeLocalState()` below can be `clear()`'s one real
+    /// caller, matching every other local store this container owns.
+    private let lastQueuedFixAtStore: LastQueuedFixAtStoring
+
     /// specs/010-app-shell-and-screen-ux.md §1.2 (I34 review fix) — the SAME shared instance
     /// `RootView`/`LiveMapScreen` read for the drawer header, injected here for exactly the I31/
     /// I26 reason above: a documented `FamilyContextCache.clear()` that nothing on the real
@@ -148,6 +154,7 @@ public final class LocationRuntimeContainer {
         self.geofenceConfigStore = geofenceConfigStore
         self.geofenceRegistrar = geofenceRegistrar
         self.permissionDisclosureStore = permissionDisclosureStore
+        self.lastQueuedFixAtStore = lastQueuedFixAtStore
         self.familyContextCache = familyContextCache
 
         let queue = FixQueue(store: fixStore)
@@ -384,6 +391,22 @@ public final class LocationRuntimeContainer {
     /// cross-account disclosure, not a cosmetic staleness. Injected here (optional) for the same
     /// "this container owns the one instance" reason as `permissionDisclosureStore`.
     ///
+    /// **I26 addition: also clears `lastQueuedFixAtStore`.** Unlike `permissionDisclosureStore`/
+    /// `familyContextCache` above (which already had a `clear()` nothing called), this store had
+    /// no clear capability at ALL until this fix — its single sync-rate-limiting timestamp
+    /// (specs/009 §3.4) survived every sign-out and account deletion. The value itself carries no
+    /// coordinates and is not sensitive, but 008 §4.4 promises a full local wipe, and leaving one
+    /// store out with no honest doc note would repeat the exact pattern this task closes on the
+    /// other two. The underlying `UserDefaults` key is also process-global rather than per-user
+    /// (unlike `deviceIdProvider`/`appVersionTracker`'s `forUserId`-keyed stores) — deliberately
+    /// NOT re-keyed per-user here: every session-ending path in this codebase already funnels
+    /// through this one method (there is no voluntary "Sign Out" entry point yet, only the forced
+    /// `AUTH_TOKEN_EXPIRED` path and the account-deletion paths, and all of them call this), so a
+    /// clear on every one of those paths is already sufficient to stop the value crossing into a
+    /// different signed-in user's session — re-keying would add per-user threading through
+    /// `LocationSyncRunner` (which is deviceId-scoped, not uid-scoped) for a value this wipe already
+    /// fully neutralizes.
+    ///
     /// Idempotent-safe to call more than once (every step it delegates to already is).
     public func wipeLocalState() async {
         // Post-review fix (concurrency re-review): `stateStore.clear()` MUST run FIRST, before
@@ -414,6 +437,9 @@ public final class LocationRuntimeContainer {
         // why a signed-out-then-different-user-signs-in sequence needed this: the drawer header
         // must never keep showing the previous caller's family name/display name/role.
         familyContextCache?.clear()
+        // I26 (specs/008 §4.4) — see this method's doc above for why this store, which previously
+        // had no clear() at all, joins the existing wipe surface rather than being re-keyed per-user.
+        lastQueuedFixAtStore.clear()
     }
 
     /// specs/009 §4: "at least every 6 hours" — the ONE explicit cadence number the spec gives for

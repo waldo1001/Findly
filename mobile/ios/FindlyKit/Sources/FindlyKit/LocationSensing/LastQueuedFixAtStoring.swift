@@ -11,6 +11,13 @@ import Foundation
 public protocol LastQueuedFixAtStoring {
     func lastQueuedFixAt() -> Date?
     func recordQueuedFixAt(_ date: Date)
+
+    /// I26 (specs/008-privacy-endpoints.md §4.4) — this store previously had NO clear capability
+    /// at all, so its single timestamp survived both sign-out and account deletion. Wired into
+    /// `LocationRuntimeContainer.wipeLocalState()`, the one consolidated local-wipe surface every
+    /// sign-out/account-deletion path already funnels through — see that method's doc for why a
+    /// new store joins the existing surface rather than a parallel wipe path.
+    func clear()
 }
 
 public final class InMemoryLastQueuedFixAtStore: LastQueuedFixAtStoring {
@@ -22,6 +29,7 @@ public final class InMemoryLastQueuedFixAtStore: LastQueuedFixAtStoring {
 
     public func lastQueuedFixAt() -> Date? { value }
     public func recordQueuedFixAt(_ date: Date) { value = date }
+    public func clear() { value = nil }
 }
 
 public final class UserDefaultsLastQueuedFixAtStore: LastQueuedFixAtStoring {
@@ -39,5 +47,9 @@ public final class UserDefaultsLastQueuedFixAtStore: LastQueuedFixAtStoring {
 
     public func recordQueuedFixAt(_ date: Date) {
         defaults.set(date.timeIntervalSince1970, forKey: Self.key)
+    }
+
+    public func clear() {
+        defaults.removeObject(forKey: Self.key)
     }
 }
