@@ -165,4 +165,31 @@ struct HistoryViewModelTests {
         #expect(viewModel.fromDate == "2026-07-10")
         #expect(viewModel.toDate == "2026-07-20")
     }
+
+    // MARK: - specs/010-app-shell-and-screen-ux.md §2.1 (I34) — the profile-dead-end routing rule.
+    // `GET /locations/history` is family-scoped (001 §5.3/§1.5.4).
+
+    @Test func load_profileNotFound_routesToOnboardingProfileLess() async {
+        let api = FakeAPIClient()
+        api.getLocationHistoryHandler = { _, _, _, _, _, _ in
+            throw APIError.server(APIErrorBody(code: .profileNotFound, message: "x", details: nil, requestId: "r1"), httpStatus: 404)
+        }
+        let viewModel = HistoryViewModel(apiClient: api, userId: "u1", fromDate: "2026-07-01", toDate: "2026-07-19")
+
+        await viewModel.load()
+
+        #expect(viewModel.state == .routeToOnboarding(.profileLess))
+    }
+
+    @Test func load_familyNotFound_routesToOnboardingFamilyLess() async {
+        let api = FakeAPIClient()
+        api.getLocationHistoryHandler = { _, _, _, _, _, _ in
+            throw APIError.server(APIErrorBody(code: .familyNotFound, message: "x", details: nil, requestId: "r1"), httpStatus: 404)
+        }
+        let viewModel = HistoryViewModel(apiClient: api, userId: "u1", fromDate: "2026-07-01", toDate: "2026-07-19")
+
+        await viewModel.load()
+
+        #expect(viewModel.state == .routeToOnboarding(.familyLess))
+    }
 }
