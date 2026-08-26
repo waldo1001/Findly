@@ -19,13 +19,19 @@ sealed class MapCameraTarget {
 
     /** Two or more distinct marker positions — fit them all with padding. Only the geographic
      * corners are decided here; the actual zoom level is computed by the Maps SDK's own
-     * `CameraUpdateFactory.newLatLngBounds`, which needs the real view's pixel size. */
+     * `CameraUpdateFactory.newLatLngBounds`, which needs the real view's pixel size.
+     *
+     * [paddingDp] (specs/010-app-shell-and-screen-ux.md §3.4, normative) is density-aware —
+     * `GoogleMapRenderer` converts it to px via the real view's [androidx.compose.ui.unit.Density]
+     * immediately before calling `CameraUpdateFactory.newLatLngBounds`, since that's the only
+     * place a real pixel density exists; this pure module stays SDK/density-agnostic. Replaces
+     * the previous raw `paddingPx = 128`, which rendered a different physical inset per device. */
     data class Bounds(
         val southLat: Double,
         val northLat: Double,
         val westLon: Double,
         val eastLon: Double,
-        val paddingPx: Int,
+        val paddingDp: Float,
     ) : MapCameraTarget()
 }
 
@@ -37,7 +43,10 @@ object MapCamera {
     const val DEFAULT_LON = 3.7174
     const val DEFAULT_ZOOM = 4f
     const val SINGLE_POINT_ZOOM = 15f
-    const val BOUNDS_PADDING_PX = 128
+
+    // RED-before-GREEN placeholder (devloop/A34): deliberately not the spec's 64 dp yet, so
+    // MapCameraTest's new padding assertion fails for a real reason before the fix lands.
+    const val BOUNDS_PADDING_DP = 999f
 
     /**
      * [points] are `lat to lon` pairs for every device/member with a known position — callers
@@ -57,7 +66,7 @@ object MapCamera {
                     northLat = lats.max(),
                     westLon = lons.min(),
                     eastLon = lons.max(),
-                    paddingPx = BOUNDS_PADDING_PX,
+                    paddingDp = BOUNDS_PADDING_DP,
                 )
             }
         }

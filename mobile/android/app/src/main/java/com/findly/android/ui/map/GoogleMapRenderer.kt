@@ -5,6 +5,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.key
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.dp
 import com.findly.android.ui.designsystem.components.FindlyMapMarkerBubble
 import com.findly.android.ui.designsystem.components.FindlyMapMarkerState
 import com.findly.android.ui.groups.GroupMapMemberUi
@@ -99,6 +101,7 @@ private fun MapSurface(markers: List<MapMarker>, modifier: Modifier) {
             MapCamera.DEFAULT_ZOOM,
         )
     }
+    val density = LocalDensity.current
 
     val points = markers.map { it.lat to it.lon }
     LaunchedEffect(points) {
@@ -116,7 +119,7 @@ private fun MapSurface(markers: List<MapMarker>, modifier: Modifier) {
                     LatLng(target.southLat, target.westLon),
                     LatLng(target.northLat, target.eastLon),
                 ),
-                target.paddingPx,
+                with(density) { target.paddingDp.dp.roundToPx() },
             )
         }
         // Suspends until a map is actually bound (maps-compose's CameraPositionState.animate
