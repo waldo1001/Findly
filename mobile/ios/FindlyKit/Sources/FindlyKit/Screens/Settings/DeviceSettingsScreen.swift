@@ -11,9 +11,16 @@ public struct DeviceSettingsScreen: View {
     // in-app navigation; `@StateObject` + `@autoclosure` keeps the first instance for this view's
     // lifetime instead of silently discarding the one `.task` observes.
     @StateObject private var viewModel: DeviceSettingsViewModel
+    /// specs/010-app-shell-and-screen-ux.md §2.1 (I34) — fires once `viewModel.state` reaches
+    /// `.routeToOnboarding`.
+    private let onProfileDeadEnd: (OnboardingVariant) -> Void
 
-    public init(viewModel: @autoclosure @escaping () -> DeviceSettingsViewModel) {
+    public init(
+        viewModel: @autoclosure @escaping () -> DeviceSettingsViewModel,
+        onProfileDeadEnd: @escaping (OnboardingVariant) -> Void = { _ in }
+    ) {
         _viewModel = StateObject(wrappedValue: viewModel())
+        self.onProfileDeadEnd = onProfileDeadEnd
     }
 
     public var body: some View {
@@ -23,12 +30,20 @@ public struct DeviceSettingsScreen: View {
         }
         .background(theme.colors.surfaceVariant)
         .task { await viewModel.load() }
+        .onChange(of: routingVariant) { variant in
+            if let variant { onProfileDeadEnd(variant) }
+        }
+    }
+
+    private var routingVariant: OnboardingVariant? {
+        if case .routeToOnboarding(let variant) = viewModel.state { return variant }
+        return nil
     }
 
     @ViewBuilder
     private var content: some View {
         switch viewModel.state {
-        case .loading:
+        case .loading, .routeToOnboarding:
             LoadingStateView(message: "Loading devices…")
         case .error(let message):
             ErrorStateView(message: message) {
