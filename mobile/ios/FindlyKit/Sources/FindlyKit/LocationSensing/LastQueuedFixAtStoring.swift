@@ -29,10 +29,7 @@ public final class InMemoryLastQueuedFixAtStore: LastQueuedFixAtStoring {
 
     public func lastQueuedFixAt() -> Date? { value }
     public func recordQueuedFixAt(_ date: Date) { value = date }
-    // TODO(I26 RED step): deliberately wrong — must actually reset `value`. Left as a no-op so the
-    // wiring test (`wipeLocalState_clearsTheLastQueuedFixAtStore`) fails on its assertion, not on a
-    // missing symbol, before the real implementation lands.
-    public func clear() {}
+    public func clear() { value = nil }
 }
 
 public final class UserDefaultsLastQueuedFixAtStore: LastQueuedFixAtStoring {
@@ -52,6 +49,7 @@ public final class UserDefaultsLastQueuedFixAtStore: LastQueuedFixAtStoring {
         defaults.set(date.timeIntervalSince1970, forKey: Self.key)
     }
 
-    // TODO(I26 RED step): deliberately wrong — see InMemoryLastQueuedFixAtStore.clear()'s doc.
-    public func clear() {}
+    public func clear() {
+        defaults.removeObject(forKey: Self.key)
+    }
 }
