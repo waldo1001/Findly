@@ -164,9 +164,13 @@ private fun DeviceCard(
             FindlyDropdownField(
                 label = "Sync interval",
                 selected = device.syncIntervalMinutes,
-                options = SyncIntervalOptions.build(limits?.minSyncIntervalMinutes ?: 0),
+                options = SyncIntervalOptions.buildForLimits(limits),
                 onSelect = onSelectSyncInterval,
-                enabled = !device.isMutating,
+                // Fail closed (review-round fix): a null `limits` -- spec-unreachable today,
+                // 003 sec6.2 -- must never fall back to an unrestricted floor. buildForLimits
+                // already disables every option in that case; disabling the whole field too
+                // means there is nothing left to tap, not just nothing selectable.
+                enabled = !device.isMutating && limits != null,
                 modifier = Modifier.padding(top = FindlyTheme.spacing.sm),
             )
 

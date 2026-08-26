@@ -92,7 +92,7 @@ class LocationForegroundService : Service() {
         // (specs/010-app-shell-and-screen-ux.md sec4.1 -- the retired Settings monolith's
         // replacement).
         val settingsIntent = Intent(this, MainActivity::class.java)
-            .putExtra(EXTRA_OPEN_SETTINGS, true)
+            .putExtra(EXTRA_OPEN_DEVICES, true)
         val contentIntent = PendingIntent.getActivity(
             this,
             0,
@@ -121,7 +121,7 @@ class LocationForegroundService : Service() {
 
         /** Read by [com.findly.android.MainActivity] off its launching `Intent` (009 §3.2's
          * notification tap target). */
-        const val EXTRA_OPEN_SETTINGS = "openSettings"
+        const val EXTRA_OPEN_DEVICES = "openDevices"
         private const val CHANNEL_ID = "findly_location_sharing"
         private const val CHANNEL_NAME = "Location sharing"
         private const val NOTIFICATION_ID = 1001

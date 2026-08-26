@@ -38,9 +38,32 @@ object SyncIntervalOptions {
         )
     }
 
-    // STUB (deliberately wrong, not absent) -- reproduces the exact reviewed bug pattern
-    // ("?: 0" fails OPEN, admitting every value) so buildForLimits' red-phase assertions fail
-    // on real, backwards behavior rather than a missing type. About to be replaced with a
-    // fail-closed implementation.
-    fun buildForLimits(limits: PlanLimits?): List<FindlyDropdownOption<Int>> = build(limits?.minSyncIntervalMinutes ?: 0)
+    /**
+     * The fail-closed wrapper around [build] for callers that only have a nullable
+     * [PlanLimits] (specs/010-app-shell-and-screen-ux.md sec4.2/sec9; CLAUDE.md's subscription-
+     * readiness rule -- limits come from `features`, never hardcoded at call sites, and a
+     * fallback for a missing limit must fail closed, never open).
+     *
+     * [limits] is null only for specs/003-android-client.md sec6.2's two documented body-less
+     * successes (sec3.6's bare 204, sec7.1's bare 304) -- `GET /devices` is a 200-with-body
+     * endpoint, so this branch is spec-unreachable for a loaded `DevicesUiState.Content` today.
+     * It still fails closed rather than defaulting the floor to 0: a floor of 0 would disable
+     * *nothing*, silently granting every 001 sec1.4 value regardless of the caller's actual plan
+     * -- exactly backwards for a subscription limit, and exactly the failure mode that becomes
+     * live the moment this branch stops being unreachable (a future contract change, a backend
+     * bug, a new caller).
+     */
+    fun buildForLimits(limits: PlanLimits?): List<FindlyDropdownOption<Int>> {
+        val minSyncIntervalMinutes = limits?.minSyncIntervalMinutes
+        if (minSyncIntervalMinutes != null) return build(minSyncIntervalMinutes)
+
+        return ALLOWED_MINUTES.map { minutes ->
+            FindlyDropdownOption(
+                value = minutes,
+                label = labelFor(minutes),
+                enabled = false,
+                disabledReason = "Couldn't confirm your plan's limits",
+            )
+        }
+    }
 }

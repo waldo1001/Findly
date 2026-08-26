@@ -136,7 +136,7 @@ class MainActivity : ComponentActivity() {
         // httpsJoinLinkResult above (savedInstanceState == null) so a rotation/recreation doesn't
         // re-fire the navigation.
         val openDevicesOnLaunch = savedInstanceState == null &&
-            intent?.getBooleanExtra(LocationForegroundService.EXTRA_OPEN_SETTINGS, false) == true
+            intent?.getBooleanExtra(LocationForegroundService.EXTRA_OPEN_DEVICES, false) == true
 
         setContent {
             FindlyTheme {
