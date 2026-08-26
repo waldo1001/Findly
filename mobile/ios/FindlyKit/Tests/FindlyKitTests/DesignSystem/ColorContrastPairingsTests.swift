@@ -79,6 +79,106 @@ struct ColorContrastPairingsTests {
         ratio(for: pairing) >= pairing.threshold
     }
 
+    // MARK: - A31/I31: exact-color pins for every declared pairing, not just its WCAG floor
+    //
+    // The three loops above only prove a pairing clears >= 4.5/3.0 — that is necessary but not
+    // sufficient. I30's `onSurfaceMuted` correction is the reason this exists: light `onSurface`
+    // at ~70% measured 6.56:1, comfortably cleared the 4.5:1 floor, and was therefore structurally
+    // invisible to a floor-only check — the same real-device report that produced Android's A30.
+    // `DesignTokens2aTests.swift` already pins the exact hex of every *token* this file reads
+    // (`ColorTokens.light/dark`, `Theme.outlineStrong`, `Theme.onSurfaceMuted`,
+    // `Theme.markerOnlineBadgeFill/Label`) — so a token edit already fails a test elsewhere. This
+    // test pins the same exact values again, but keyed to the *declared pairing* itself (the same
+    // object Android's A31 exact-ratio table pins), so an entry here is a direct, per-pairing
+    // record of "this named pairing is built from exactly these colors" — catching a future
+    // pairing declaration that reads the wrong token or an inlined literal instead of the named
+    // one, which a token-level-only pin could never see. iOS's "stronger" exact-hex form (per the
+    // A31 task description) fixes the colour itself rather than a derived ratio, so any drift —
+    // even one that would still clear AA — fails immediately.
+    //
+    // **Deliberately bare `Color(hex:)` literals below, never `ColorTokens.light`/`Theme.light`
+    // accessors.** Comparing a pairing's live color against the SAME live accessor it was built
+    // from is a no-op tautology — it would pass no matter what the token was changed to, since
+    // both sides read the identical source. The whole point of a pin is an independent, frozen
+    // expectation that does not move when the token does.
+    @Test func declaredPairings_pinExactColorsAndAlpha_notJustWCAGFloor() {
+        struct Pin {
+            let foreground: Color
+            let foregroundAlpha: Double
+            let background: Color
+        }
+
+        func pin(_ fgHex: UInt32, _ bgHex: UInt32, alpha: Double = 1.0) -> Pin {
+            Pin(foreground: Color(hex: fgHex), foregroundAlpha: alpha, background: Color(hex: bgHex))
+        }
+
+        let expected: [String: [ColorContrastPairings.Scheme: Pin]] = [
+            // --- text pairings ---
+            "onPrimary/primary": [.light: pin(0xFFFFFF, 0x3A46C8), .dark: pin(0x0A0F27, 0x7C8BFF)],
+            "onSurface/surface": [.light: pin(0x10142A, 0xF2F4FB), .dark: pin(0xE8ECF7, 0x0B0F1C)],
+            "onSurface/surfaceVariant": [.light: pin(0x10142A, 0xE2E6F5), .dark: pin(0xE8ECF7, 0x161D33)],
+            "onDanger/danger": [.light: pin(0xFFFFFF, 0xB3261E), .dark: pin(0x2A0708, 0xFF6B6B)],
+            "mutedText/surface": [.light: pin(0x3A4160, 0xF2F4FB), .dark: pin(0x98A1BD, 0x0B0F1C)],
+            "mutedText/surfaceVariant": [.light: pin(0x3A4160, 0xE2E6F5), .dark: pin(0x98A1BD, 0x161D33)],
+            "success-as-text/surface": [.light: pin(0x10714A, 0xF2F4FB), .dark: pin(0x52E39B, 0x0B0F1C)],
+            "warning-as-text/surface": [.light: pin(0x8A5A00, 0xF2F4FB), .dark: pin(0xFFC44D, 0x0B0F1C)],
+            "danger-as-text/surface": [.light: pin(0xB3261E, 0xF2F4FB), .dark: pin(0xFF6B6B, 0x0B0F1C)],
+
+            // --- stroke pairings ---
+            "outlineStrong/surface": [.light: pin(0x6B739A, 0xF2F4FB), .dark: pin(0x6B739A, 0x0B0F1C)],
+            "outlineStrong/surfaceVariant": [.light: pin(0x6B739A, 0xE2E6F5), .dark: pin(0x6B739A, 0x161D33)],
+            "markerPillFill/primary": [.light: pin(0x52E39B, 0x3A46C8), .dark: pin(0x0B3B26, 0x7C8BFF)],
+            "pausedChipBorder/surface": [.light: pin(0x6B739A, 0xF2F4FB), .dark: pin(0x6B739A, 0x0B0F1C)],
+            "FindlyTextField focusedBorder/surfaceVariant": [.light: pin(0x3A46C8, 0xE2E6F5), .dark: pin(0x7C8BFF, 0x161D33)],
+            "FindlyTextField errorBorder/surfaceVariant": [.light: pin(0xB3261E, 0xE2E6F5), .dark: pin(0xFF6B6B, 0x161D33)],
+            "PermissionBannerView stripe(cannotReport)/surfaceVariant": [.light: pin(0xB3261E, 0xE2E6F5), .dark: pin(0xFF6B6B, 0x161D33)],
+            "PermissionBannerView stripe(foregroundOnly)/surfaceVariant": [.light: pin(0x3A46C8, 0xE2E6F5), .dark: pin(0x7C8BFF, 0x161D33)],
+
+            // --- component pairings ---
+            "StatusChip.online label/fill": [.light: pin(0xFFFFFF, 0x10714A), .dark: pin(0x2A0708, 0x52E39B)],
+            "StatusChip.stale label/fill": [.light: pin(0xFFFFFF, 0x8A5A00), .dark: pin(0x2A0708, 0xFFC44D)],
+            "StatusChip.danger label/fill": [.light: pin(0xFFFFFF, 0xB3261E), .dark: pin(0x2A0708, 0xFF6B6B)],
+            "StatusChip.paused label/surface": [.light: pin(0x10142A, 0xF2F4FB), .dark: pin(0xE8ECF7, 0x0B0F1C)],
+            "MarkerBadge label/fill": [.light: pin(0x062418, 0x52E39B), .dark: pin(0x52E39B, 0x0B3B26)],
+            "ErrorStateView warningGlyph/surfaceVariant": [.light: pin(0x8A5A00, 0xE2E6F5), .dark: pin(0xFFC44D, 0x161D33)],
+            "PermissionBannerView message(0.75)/surfaceVariant": [
+                .light: pin(0x10142A, 0xE2E6F5, alpha: 0.75),
+                .dark: pin(0xE8ECF7, 0x161D33, alpha: 0.75),
+            ],
+            "PermissionDisclosureScreen closing(0.75)/surfaceVariant": [
+                .light: pin(0x10142A, 0xE2E6F5, alpha: 0.75),
+                .dark: pin(0xE8ECF7, 0x161D33, alpha: 0.75),
+            ],
+            "PermissionBannerView dismissIcon/surfaceVariant": [.light: pin(0x3A4160, 0xE2E6F5), .dark: pin(0x98A1BD, 0x161D33)],
+            "primary icon-or-text/surface": [.light: pin(0x3A46C8, 0xF2F4FB), .dark: pin(0x7C8BFF, 0x0B0F1C)],
+            "FindlyTextField errorMessage/surfaceVariant": [.light: pin(0xB3261E, 0xE2E6F5), .dark: pin(0xFF6B6B, 0x161D33)],
+        ]
+
+        let all = ColorContrastPairings.textPairings + ColorContrastPairings.strokePairings + ColorContrastPairings.componentPairings
+
+        let mismatches: [String] = all.compactMap { pairing in
+            guard let want = expected[pairing.name]?[pairing.scheme] else {
+                return "\(pairing.name) (\(pairing.scheme.rawValue)): no A31/I31 exact pin registered — every declared pairing must have one"
+            }
+            if pairing.foreground != want.foreground || pairing.background != want.background || pairing.foregroundAlpha != want.foregroundAlpha {
+                return "\(pairing.name) (\(pairing.scheme.rawValue)): foreground/background/alpha drifted from its A31/I31 pin"
+            }
+            return nil
+        }
+
+        #expect(
+            mismatches.isEmpty,
+            """
+            One or more declared pairings drifted from their A31/I31 exact-color pin, or have no \
+            pin registered at all. Clearing the WCAG floor above is not sufficient evidence a \
+            change was intentional or correct — that is the exact gap I30's onSurfaceMuted fix \
+            closed for one token. If this is a deliberate token change, update `expected` above \
+            in the same commit:
+            \(mismatches.joined(separator: "\n"))
+            """
+        )
+    }
+
     // MARK: - Decorative exemption, explicit (I29 task item 5)
     //
     // Light `outline` (#A9B0CE) is legal ONLY as a decorative hairline/divider — WCAG doesn't

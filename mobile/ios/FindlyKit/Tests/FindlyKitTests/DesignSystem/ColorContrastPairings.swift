@@ -183,6 +183,18 @@ enum ColorContrastPairings {
             TextOrStrokePairing(name: "PermissionBannerView message(0.75)/surfaceVariant", scheme: .light, foreground: light.colors.onSurface, foregroundAlpha: 0.75, background: light.colors.surfaceVariant, threshold: 4.5),
             TextOrStrokePairing(name: "PermissionBannerView message(0.75)/surfaceVariant", scheme: .dark, foreground: dark.colors.onSurface, foregroundAlpha: 0.75, background: dark.colors.surfaceVariant, threshold: 4.5),
 
+            // PermissionDisclosureScreen.swift: the closing paragraph renders the identical
+            // `onSurface.opacity(0.75)` on `surfaceVariant` pattern as the banner message above —
+            // same tokens, same alpha, numerically identical — but a distinct render site in a
+            // different screen file. Added I31/A31 (cross-platform parity gap): Android's A28/A31
+            // declare this render site as its own named pairing ("PermissionDisclosureScreen
+            // closing text (onSurface at 75%) on surfaceVariant" in ColorTokenPairings.kt); this
+            // suite had no equivalent entry even though `PermissionDisclosureScreen.swift` draws
+            // the exact same pattern — exactly the "declared on one platform, missing on the other"
+            // drift A31's task description calls out.
+            TextOrStrokePairing(name: "PermissionDisclosureScreen closing(0.75)/surfaceVariant", scheme: .light, foreground: light.colors.onSurface, foregroundAlpha: 0.75, background: light.colors.surfaceVariant, threshold: 4.5),
+            TextOrStrokePairing(name: "PermissionDisclosureScreen closing(0.75)/surfaceVariant", scheme: .dark, foreground: dark.colors.onSurface, foregroundAlpha: 0.75, background: dark.colors.surfaceVariant, threshold: 4.5),
+
             // The dismiss icon, post-fix: `onSurfaceMuted` (opaque, no ad-hoc opacity) — passes
             // with real margin instead of failing at 4.43:1. Numerically identical to
             // "mutedText/surfaceVariant" above; kept as its own named pairing (same convention as

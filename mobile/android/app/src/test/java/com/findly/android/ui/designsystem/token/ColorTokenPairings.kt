@@ -97,9 +97,14 @@ val declaredColorPairings: List<ColorPairing> = buildList {
         // renders its message body as `onSurface.copy(alpha = 0.75f)` on the banner's own
         // `surfaceVariant` fill — a different, still-live alpha blend six lines from the dismiss
         // glyph above that was structurally invisible to this suite until now. Unlike the dismiss
-        // glyph, this one was never wrong: composited, it measures 7.19:1 light / 8.45:1 dark
+        // glyph, this one was never wrong: composited, it measures 7.14:1 light / 8.44:1 dark
         // (computed from LightFindlyColors/DarkFindlyColors via the same relativeLuminance/
-        // contrastRatio formula this file's tests are pinned against — see ContrastRatioReferenceTest),
+        // contrastRatio formula this file's tests are pinned against — see ContrastRatioReferenceTest;
+        // corrected by A31 from an earlier "7.19/8.45" claimed here, which was a hand/idealized
+        // calculation that skipped compositeOver()'s real behavior — reconstructing a `Color` from
+        // its blended float components round-trips through an 8-bit sRGB pack, which measurably
+        // rounds the blended channels before the ratio is computed. See A31's pinned exact value on
+        // this pairing in ColorTokenContrastTest.kt for how this was caught),
         // comfortably clearing 4.5:1 in both themes. Declared via [foregroundAlpha] so a future
         // change to `onSurface`, `surfaceVariant`, or the 0.75 alpha itself cannot silently drop
         // below AA without this suite catching it — do not change the component's color to "fix"
@@ -109,7 +114,8 @@ val declaredColorPairings: List<ColorPairing> = buildList {
         // A28 review round 2 (interrupted-round outstanding item 4): PermissionDisclosureScreen.kt:88
         // renders its closing paragraph with the identical `onSurface.copy(alpha = 0.75f)` on
         // `surfaceVariant` pattern as the banner message above — same tokens, same alpha, so
-        // numerically identical (7.19:1 light / 8.45:1 dark), but declared as its own entry because
+        // numerically identical (7.14:1 light / 8.44:1 dark — see the correction note on the
+        // pairing above), but declared as its own entry because
         // it is a distinct render site in a screen file. Declaring a pairing here is scope-appropriate
         // for A28 (it is a test/doc addition over an existing token combination, not a screen redesign
         // — that is A27) and does not restyle the screen.
