@@ -192,30 +192,37 @@ struct RootView: View {
 
     /// specs/010-app-shell-and-screen-ux.md §1.1 (amended, row A37) — `AppLaunchResolver`'s
     /// `onConfirmedAuthFailure` seam, wired at both call sites below (cold-start restore and
-    /// interactive sign-in). Calls the ONE `LocationRuntimeContainer.wipeLocalState()` method
-    /// every other session-ending path in this codebase already calls — never a second wipe
-    /// implementation (the I43 lesson) — then signs out.
+    /// interactive sign-in). Routes through the ONE shared `EndOfSessionRoutine.run` every other
+    /// session-ending path in this codebase calls — never a second implementation (the I43
+    /// lesson) — which itself calls `LocationRuntimeContainer.wipeLocalState()` and signs out.
     ///
-    /// **A37 review (Finding 3) correction: this is NOT "the same order" as the other two
-    /// session-ending paths, and they are not the same order as each other either.**
-    /// `FindlyApp.swift`'s forced `onSignedOut` closure is `signOut()` → `wipeLocalState()`;
-    /// `DeleteAccountViewModel.signOutForRetry()` is `wipeLocalState()` → `clearStoredSession()` →
-    /// `signOut()`. This method's own order (`wipeLocalState()` → `signOut()`) matches neither.
-    /// Functionally harmless — nothing here has a data dependency on the other's completion, and
-    /// `wipeLocalState()` is documented idempotent-safe regardless of when it runs relative to
-    /// sign-out — but the two calls are shared code, not a shared sequence, so don't claim one.
+    /// **(I43) This path used to omit `deviceIdProvider`/`appVersionTracker`/`exportArtifactStore`
+    /// entirely** — the same gap the forced-sign-out path (`FindlyApp.swift`'s `onSignedOut`) had,
+    /// before I43 folded every session-ending path through this one routine so a divergence like
+    /// that can't recur unnoticed. There was never a principled reason for THIS path specifically
+    /// to omit them (unlike the one exception below), so it now gets the routine's default
+    /// `Options()` — every axis clears except the one named next.
     ///
-    /// **A37 review (Finding 4): `clearStoredSession()` is deliberately NOT called here**, unlike
-    /// `signOutForRetry()`. Per that method's own doc, it clears only the Keychain-backed
+    /// **A37 review (Finding 4): `clearStoredSession()` is deliberately still NOT called here** —
+    /// the one axis this path omits, via `Options(clearsStoredSession: false)`. Per
+    /// `AuthProviding.clearStoredSession()`'s own doc, it clears only the Keychain-backed
     /// phone-verification (OTP) id — a leftover of the SMS step, not the auth session itself,
     /// which `signOut()` already fully tears down. No residue, no risk of a later session
-    /// resuming as the old user; this simply isn't `clearStoredSession()`'s territory (I43).
+    /// resuming as the old user; this simply isn't `clearStoredSession()`'s territory.
     ///
+    /// `currentUserId` is read here, before the routine's own internal `signOut()` call clears it.
     /// `coordinator.showSignIn()` is deliberately NOT called here: the caller already routes to
     /// `.signIn` from the `LaunchDestination` this closure's result feeds into.
     private func clearSessionOnConfirmedAuthFailure() async {
-        await locationRuntimeContainer.wipeLocalState()
-        try? authProvider.signOut()
+        await EndOfSessionRoutine.run(
+            currentUserId: authProvider.currentUserId,
+            authProvider: authProvider,
+            deviceIdProvider: deviceIdProvider,
+            appVersionTracker: appVersionTracker,
+            exportArtifactStore: exportArtifactStore,
+            wipeLocalState: { await locationRuntimeContainer.wipeLocalState() },
+            options: .init(clearsStoredSession: false)
+        )
     }
 
     private var content: some View {

@@ -360,6 +360,16 @@ public final class LocationRuntimeContainer {
     /// its own previously-separate, now-removed ad-hoc partial wipe — one implementation, three
     /// call sites, not two independently-maintained ones.
     ///
+    /// **(I43) Those call sites no longer invoke this method directly — they, plus
+    /// `RootView.clearSessionOnConfirmedAuthFailure()`, all pass it as the `wipeLocalState` closure
+    /// into `EndOfSessionRoutine.run`, the one place that now also clears
+    /// `deviceIdProvider`/`appVersionTracker`/`exportArtifactStore`/`clearStoredSession()`.** I43
+    /// found `FindlyApp.swift`'s forced `onSignedOut` calling this method directly, alone, having
+    /// silently drifted from account deletion's fuller call list — an export artifact (a plaintext
+    /// copy of the signed-out user's own exported data, 008 §3) could then outlive a forced
+    /// sign-out. This method's OWN contents are unaffected by that fix — see
+    /// `EndOfSessionRoutine`'s doc for the call-site-level list this doc block does not duplicate.
+    ///
     /// `stateStore.clear()` is the piece that makes a stray geofence transition — arriving either
     /// after this method returns, or **racing this method's own suspension points while it's still
     /// running** (`SystemGeofenceRegistrar.forwardTransition` delivers transitions via an

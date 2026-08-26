@@ -14,11 +14,11 @@ import Foundation
 public enum AppLaunchResolver {
     /// - Parameter onConfirmedAuthFailure: specs/010-app-shell-and-screen-ux.md §1.1 (amended, row
     ///   A37) — invoked, before returning, when the probe confirms the caller is unauthorized
-    ///   (`AUTH_MISSING_TOKEN`/`AUTH_INVALID_TOKEN`/`AUTH_TOKEN_EXPIRED`/`AUTH_FORBIDDEN`). Callers
-    ///   wire this to the SAME wipe-then-sign-out shape `FindlyApp.swift`'s forced `onSignedOut`
-    ///   closure already uses (`authProvider.signOut()` + `LocationRuntimeContainer.
-    ///   wipeLocalState()`) — never a second implementation (the I43 lesson). Defaults to a no-op
-    ///   so every existing call site/test that doesn't care is unaffected.
+    ///   (`AUTH_MISSING_TOKEN`/`AUTH_INVALID_TOKEN`/`AUTH_TOKEN_EXPIRED`/`AUTH_FORBIDDEN`).
+    ///   `RootView.clearSessionOnConfirmedAuthFailure()` wires this to the SAME
+    ///   `EndOfSessionRoutine.run` every other session-ending path in this codebase calls (I43) —
+    ///   never a second implementation. Defaults to a no-op so every existing call site/test that
+    ///   doesn't care is unaffected.
     public static func resolve(
         apiClient: FindlyAPIClient,
         isSignedIn: Bool,
