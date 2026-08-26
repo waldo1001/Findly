@@ -486,7 +486,7 @@ fun FindlyNavHost(
             // than being trusted as-is.
             val sanitizedCode = rawCode?.let { FamilyInviteCodeSanitizer.sanitize(it) }.orEmpty()
             val acceptInviteViewModel: AcceptInviteViewModel =
-                viewModel(factory = AcceptInviteViewModelFactory(container.findlyApiClient))
+                viewModel(factory = AcceptInviteViewModelFactory(container.findlyApiClient, container.findlyApiClient))
             AcceptInviteRoute(
                 viewModel = acceptInviteViewModel,
                 joinLinkHost = container.appConfig.joinLinkHost,

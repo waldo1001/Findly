@@ -1,6 +1,7 @@
 package com.findly.android.ui.invites
 
 import com.findly.android.network.ApiResult
+import com.findly.android.network.ports.DevicesApi
 import com.findly.android.network.ports.FamilyApi
 import com.findly.android.network.userMessage
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -19,7 +20,7 @@ import kotlinx.coroutines.flow.asStateFlow
  * §5.2: "normalization before the network call is unchanged"), so a typed, pasted, or deep-link-
  * prefilled code all converge on the identical gate; an unparsable code never leaves the device.
  */
-class AcceptInviteStateHolder(private val familyApi: FamilyApi) {
+class AcceptInviteStateHolder(private val familyApi: FamilyApi, private val devicesApi: DevicesApi) {
 
     private val _state = MutableStateFlow(AcceptInviteUiState())
     val state: StateFlow<AcceptInviteUiState> = _state.asStateFlow()
@@ -57,5 +58,27 @@ class AcceptInviteStateHolder(private val familyApi: FamilyApi) {
                 acceptInviteError = result.error.userMessage(),
             )
         }
+    }
+
+    /**
+     * Review-round fix (specs/010-app-shell-and-screen-ux.md §5.2: "prefilled with the caller's
+     * existing profile displayName when one exists"). 001 §4.2 settles the wire shape: "A
+     * family-less caller gets their own devices only (same response shape;
+     * `ownerDisplayName` = their profile `displayName`)" — no new endpoint, no mutation, and
+     * `GET /devices` works without a family (§1.5.4), which is exactly the caller state the
+     * "Manage family invites" entry point reaches. Any returned device is therefore the
+     * caller's own, so its `ownerDisplayName` **is** the caller's profile `displayName`.
+     *
+     * Best-effort only: a caller with no devices yet, or a failed call, leaves
+     * [AcceptInviteUiState.displayNameFallback] `null` — this is a convenience prefill, never a
+     * blocker on the join flow (the screen's own display-name field still accepts manual entry
+     * either way).
+     */
+    suspend fun loadDisplayNameFallback() {
+        val fallback = when (val result = devicesApi.listDevices()) {
+            is ApiResult.Success -> result.data.devices.firstOrNull()?.ownerDisplayName
+            is ApiResult.Failure -> null
+        }
+        _state.value = _state.value.copy(displayNameFallback = fallback)
     }
 }

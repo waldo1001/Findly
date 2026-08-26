@@ -1,10 +1,13 @@
 package com.findly.android.ui.invites
 
+import com.findly.android.fakes.FakeDevicesApi
 import com.findly.android.fakes.FakeFamilyApi
 import com.findly.android.fakes.defaultFeatures
 import com.findly.android.network.ApiError
 import com.findly.android.network.ApiResult
 import com.findly.android.network.dto.AcceptInviteResponseDto
+import com.findly.android.network.dto.FamilyDeviceDto
+import com.findly.android.network.dto.ListDevicesResponseDto
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -30,7 +33,7 @@ class AcceptInviteStateHolderTest {
                 defaultFeatures(),
             )
         }
-        val holder = AcceptInviteStateHolder(api)
+        val holder = AcceptInviteStateHolder(api, FakeDevicesApi())
 
         holder.acceptInvite(inviteCode = "7F3K9QRZ", displayName = "Noor")
 
@@ -46,7 +49,7 @@ class AcceptInviteStateHolderTest {
         val api = FakeFamilyApi().apply {
             acceptInviteResult = ApiResult.Success(AcceptInviteResponseDto("fam_test", "Wauters", "member"), defaultFeatures())
         }
-        val holder = AcceptInviteStateHolder(api)
+        val holder = AcceptInviteStateHolder(api, FakeDevicesApi())
 
         holder.acceptInvite(inviteCode = "7f3k-9qrz", displayName = "Noor")
 
@@ -56,7 +59,7 @@ class AcceptInviteStateHolderTest {
     @Test
     fun `an invalid code never reaches the network`() = runTest {
         val api = FakeFamilyApi()
-        val holder = AcceptInviteStateHolder(api)
+        val holder = AcceptInviteStateHolder(api, FakeDevicesApi())
 
         holder.acceptInvite(inviteCode = "not-a-code", displayName = "Noor")
 
@@ -69,7 +72,7 @@ class AcceptInviteStateHolderTest {
     @Test
     fun `acceptInvite with a blank display name surfaces a validation message and never reaches the network`() = runTest {
         val api = FakeFamilyApi()
-        val holder = AcceptInviteStateHolder(api)
+        val holder = AcceptInviteStateHolder(api, FakeDevicesApi())
 
         holder.acceptInvite(inviteCode = "7F3K9QRZ", displayName = "  ")
 
@@ -83,7 +86,7 @@ class AcceptInviteStateHolderTest {
     @Test
     fun `acceptInvite surfaces each catalog error as its distinct user-facing message`() = runTest {
         val api = FakeFamilyApi()
-        val holder = AcceptInviteStateHolder(api)
+        val holder = AcceptInviteStateHolder(api, FakeDevicesApi())
 
         // Valid, Crockford-base32 (no I/L/O/U) codes -- AcceptInviteStateHolder now sanitizes
         // before the network call (unlike the retired combined InvitesStateHolder), so a test
@@ -104,5 +107,67 @@ class AcceptInviteStateHolderTest {
         api.acceptInviteResult = ApiResult.Failure(ApiError.FamilyAlreadyMember("raw debug text from server", "r_4"))
         holder.acceptInvite("DDDD4444", "Noor")
         assertEquals("You're already part of a family.", holder.state.value.acceptInviteError)
+    }
+
+    // specs/010-app-shell-and-screen-ux.md §5.2: "prefilled with the caller's existing profile
+    // displayName when one exists". 001 §4.2's own text settles the wire shape: "A family-less
+    // caller gets their own devices only (same response shape; ownerDisplayName = their profile
+    // displayName)" -- GET /devices needs no family and no new endpoint, so for the "Manage
+    // family invites" entry point (an already-profiled, family-less caller) any returned
+    // device's ownerDisplayName IS the caller's own profile displayName.
+
+    @Test
+    fun `loadDisplayNameFallback resolves the caller's own name from the first device's ownerDisplayName`() = runTest {
+        val familyApi = FakeFamilyApi()
+        val devicesApi = FakeDevicesApi().apply {
+            listDevicesResult = ApiResult.Success(
+                ListDevicesResponseDto(
+                    devices = listOf(
+                        FamilyDeviceDto(
+                            deviceId = "device-1",
+                            ownerUserId = "uid-test",
+                            platform = "android",
+                            deviceName = "Pixel 8",
+                            model = "Pixel 8",
+                            appVersion = "1.0.0",
+                            syncIntervalMinutes = 15,
+                            trackingEnabled = true,
+                            pushInvalid = false,
+                            ownerDisplayName = "Noor",
+                        ),
+                    ),
+                ),
+                defaultFeatures(),
+            )
+        }
+        val holder = AcceptInviteStateHolder(familyApi, devicesApi)
+
+        holder.loadDisplayNameFallback()
+
+        assertEquals("Noor", holder.state.value.displayNameFallback)
+    }
+
+    @Test
+    fun `loadDisplayNameFallback leaves null when the caller has no devices yet`() = runTest {
+        val devicesApi = FakeDevicesApi().apply {
+            listDevicesResult = ApiResult.Success(ListDevicesResponseDto(devices = emptyList()), defaultFeatures())
+        }
+        val holder = AcceptInviteStateHolder(FakeFamilyApi(), devicesApi)
+
+        holder.loadDisplayNameFallback()
+
+        assertNull(holder.state.value.displayNameFallback)
+    }
+
+    @Test
+    fun `loadDisplayNameFallback leaves null on a listDevices failure -- never blocks the screen`() = runTest {
+        val devicesApi = FakeDevicesApi().apply {
+            listDevicesResult = ApiResult.Failure(ApiError.ProfileNotFound("no profile", "r_20"))
+        }
+        val holder = AcceptInviteStateHolder(FakeFamilyApi(), devicesApi)
+
+        holder.loadDisplayNameFallback()
+
+        assertNull(holder.state.value.displayNameFallback)
     }
 }

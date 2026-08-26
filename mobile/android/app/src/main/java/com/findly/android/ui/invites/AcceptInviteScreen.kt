@@ -45,6 +45,14 @@ import kotlinx.coroutines.launch
  * `.getClipEntry()`, run through [InviteCodeClipboardExtractor]. A clipboard that doesn't hold a
  * recognizable code/link leaves the field untouched and surfaces a small inline notice rather
  * than silently doing nothing.
+ *
+ * **Display-name prefill (review-round fix):** when [prefillDisplayName] is blank — i.e. this
+ * screen was *not* reached via Onboarding's profile-less display-name field — this route asks
+ * [AcceptInviteViewModel.loadDisplayNameFallback] to resolve the caller's own profile
+ * `displayName` from `GET /devices` (001 §4.2; see [AcceptInviteStateHolder.loadDisplayNameFallback]'s
+ * doc for the wire-shape reasoning). [AcceptInviteScreen] seeds its display-name field from
+ * [AcceptInviteUiState.displayNameFallback] only if the field is still blank when it arrives, so
+ * it never clobbers anything the user already typed.
  */
 @Composable
 fun AcceptInviteRoute(
@@ -56,6 +64,11 @@ fun AcceptInviteRoute(
     onJoined: () -> Unit = {},
 ) {
     val state by viewModel.state.collectAsState()
+
+    LaunchedEffect(Unit) {
+        if (prefillDisplayName.isBlank()) viewModel.loadDisplayNameFallback()
+    }
+
     AcceptInviteScreen(
         state = state,
         joinLinkHost = joinLinkHost,
@@ -86,6 +99,16 @@ fun AcceptInviteScreen(
 
     LaunchedEffect(state.acceptedFamily) {
         if (state.acceptedFamily != null) onJoined()
+    }
+
+    // Review-round fix: seed the display-name field from the resolved fallback (001 §4.2's
+    // GET /devices ownerDisplayName), but only while the field is still blank -- never overwrite
+    // something the user already typed while the fallback was in flight.
+    LaunchedEffect(state.displayNameFallback) {
+        val fallback = state.displayNameFallback
+        if (fallback != null && displayName.isBlank()) {
+            displayName = fallback
+        }
     }
 
     Column(modifier = modifier.fillMaxSize()) {
