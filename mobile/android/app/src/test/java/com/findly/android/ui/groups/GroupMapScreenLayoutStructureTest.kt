@@ -64,19 +64,98 @@ class GroupMapScreenLayoutStructureTest {
         )
     }
 
+    /**
+     * Review fix 2 — see [com.findly.android.ui.map.MapScreenLayoutStructureTest]'s matching test
+     * doc for the full story: a plain `indexOf` ordering check is fooled by a bare roster call
+     * reintroduced as a sibling of `FindlyBottomSheet` (demonstrated live and closed by walking
+     * brace depth instead, mirroring `MainActivityInsetsStructureTest`); and the roster isn't
+     * inlined at the `FindlyBottomSheet(...)` call site — it's rendered through a separate
+     * private `GroupRosterList` composable, so the containment check is on that call, not on
+     * `LazyColumn(` directly (which only appears inside `GroupRosterList`'s own body).
+     */
     @Test
-    fun `the roster LazyColumn lives inside FindlyBottomSheet, not as a bare sibling of the map`() {
+    fun `GroupRosterList is called only from inside FindlyBottomSheet's content lambda, never as a bare sibling of the map`() {
         val sheetOpen = source.indexOf("FindlyBottomSheet(")
         assertTrue("expected a FindlyBottomSheet( call in GroupMapScreen.kt", sheetOpen >= 0)
 
-        val lazyColumnIndex = source.indexOf("LazyColumn(")
-        assertTrue("expected a LazyColumn( call (the roster) in GroupMapScreen.kt", lazyColumnIndex >= 0)
+        val parenOpen = sheetOpen + "FindlyBottomSheet(".length - 1
+        var parenDepth = 0
+        var i = parenOpen
+        do {
+            when (source[i]) {
+                '(' -> parenDepth++
+                ')' -> parenDepth--
+            }
+            i++
+        } while (parenDepth > 0 && i < source.length)
 
+        val contentLambdaOpen = source.indexOf("{", startIndex = i)
         assertTrue(
-            "the roster LazyColumn must be reached only after FindlyBottomSheet( opens — a " +
-                "LazyColumn appearing before it would mean the roster is a bare top-level sibling " +
-                "of the map again, the exact zero-height-roster regression this task fixes",
-            lazyColumnIndex > sheetOpen,
+            "expected FindlyBottomSheet(...) to be followed by a trailing content lambda `{ ... }`",
+            contentLambdaOpen >= 0,
+        )
+
+        var braceDepth = 1
+        var j = contentLambdaOpen + 1
+        while (braceDepth > 0 && j < source.length) {
+            when (source[j]) {
+                '{' -> braceDepth++
+                '}' -> braceDepth--
+            }
+            j++
+        }
+        val contentLambdaClose = j - 1
+
+        // Excludes the `private fun GroupRosterList(` declaration itself, further down the file
+        // — `indexOf("GroupRosterList(")` matches that text too, and it is not a call site.
+        val rosterListCalls = buildList {
+            var searchFrom = 0
+            while (true) {
+                val found = source.indexOf("GroupRosterList(", searchFrom)
+                if (found < 0) break
+                val isDeclaration = source.substring(maxOf(0, found - 4), found) == "fun "
+                if (!isDeclaration) add(found)
+                searchFrom = found + 1
+            }
+        }
+        assertTrue("expected at least one GroupRosterList( call (the roster) in GroupMapScreen.kt", rosterListCalls.isNotEmpty())
+
+        rosterListCalls.forEach { callIndex ->
+            assertTrue(
+                "found a GroupRosterList( call at index $callIndex outside FindlyBottomSheet's " +
+                    "content lambda (open=$contentLambdaOpen, close=$contentLambdaClose) — the " +
+                    "roster anywhere outside the sheet's content slot is a bare sibling of the " +
+                    "map again, the exact zero-height-roster regression this task fixes",
+                callIndex in contentLambdaOpen..contentLambdaClose,
+            )
+        }
+    }
+
+    @Test
+    fun `GroupRosterList's own body actually renders a LazyColumn`() {
+        val defIndex = source.indexOf("private fun GroupRosterList(")
+        assertTrue("expected a private fun GroupRosterList( definition in GroupMapScreen.kt", defIndex >= 0)
+
+        val bodyOpen = source.indexOf("{", startIndex = defIndex)
+        assertTrue("expected GroupRosterList(...) to have a function body", bodyOpen >= 0)
+
+        var depth = 1
+        var k = bodyOpen + 1
+        while (depth > 0 && k < source.length) {
+            when (source[k]) {
+                '{' -> depth++
+                '}' -> depth--
+            }
+            k++
+        }
+        val bodyClose = k - 1
+
+        val lazyColumnIndex = source.indexOf("LazyColumn(", startIndex = bodyOpen)
+        assertTrue(
+            "expected GroupRosterList's body to contain a LazyColumn( call — this is what " +
+                "actually backs the roster once it's confirmed reachable only through " +
+                "FindlyBottomSheet",
+            lazyColumnIndex in bodyOpen..bodyClose,
         )
     }
 }
