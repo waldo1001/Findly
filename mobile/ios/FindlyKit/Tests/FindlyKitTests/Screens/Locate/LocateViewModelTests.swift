@@ -79,6 +79,34 @@ struct LocateViewModelTests {
         }
     }
 
+    // MARK: - specs/010-app-shell-and-screen-ux.md §2.1 (I34) — the profile-dead-end routing rule.
+    // `POST /locate-requests` is family-scoped (001 §6/§1.5.4); `requestLocate` IS this screen's
+    // load path (there is no separate `load()` — it fires from the screen's own `.task`).
+
+    @Test func requestLocate_profileNotFound_routesToOnboardingProfileLess() async {
+        let api = FakeAPIClient()
+        api.createLocateRequestHandler = { _ in
+            throw APIError.server(APIErrorBody(code: .profileNotFound, message: "x", details: nil, requestId: "r1"), httpStatus: 404)
+        }
+        let viewModel = LocateViewModel(apiClient: api)
+
+        await viewModel.requestLocate(target: .device("d9"))
+
+        #expect(viewModel.status == .routeToOnboarding(.profileLess))
+    }
+
+    @Test func requestLocate_familyNotFound_routesToOnboardingFamilyLess() async {
+        let api = FakeAPIClient()
+        api.createLocateRequestHandler = { _ in
+            throw APIError.server(APIErrorBody(code: .familyNotFound, message: "x", details: nil, requestId: "r1"), httpStatus: 404)
+        }
+        let viewModel = LocateViewModel(apiClient: api)
+
+        await viewModel.requestLocate(target: .device("d9"))
+
+        #expect(viewModel.status == .routeToOnboarding(.familyLess))
+    }
+
     @Test func cancel_stopsThePollLoop_beforeItMakesAnotherCall() async throws {
         let api = FakeAPIClient()
         api.createLocateRequestHandler = { _ in
