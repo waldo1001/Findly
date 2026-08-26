@@ -1,5 +1,7 @@
 package com.findly.android.ui.map
 
+import java.time.Instant
+
 /**
  * specs/010-app-shell-and-screen-ux.md §3.4 (normative) — decides WHEN the camera policy re-runs,
  * as pure state kept independent of [MapCamera.target] (which decides WHERE once a run happens).
@@ -20,15 +22,20 @@ data class CameraPolicyState(val hasRunInitial: Boolean = false, val hadAnyPoint
 }
 
 object MapCameraPolicy {
-    // RED-before-GREEN placeholder (devloop/A34): deliberately wrong (always false) so
-    // MapCameraPolicyTest fails for a real assertion reason before the real rule lands.
-    fun shouldRunOnLoadOrRefresh(state: CameraPolicyState, hasPoints: Boolean): Boolean = false
+    /** True on: the very first load/refresh ever (regardless of point count — a screen that
+     * opens with zero points still gets its one "settle on the calm default" run), or the first
+     * later refresh that brings the first-ever point in from a zero-point open. False on every
+     * refresh after that, even one whose marker set changed — the 010 §3.4 rule this task exists
+     * to enforce. */
+    fun shouldRunOnLoadOrRefresh(state: CameraPolicyState, hasPoints: Boolean): Boolean =
+        !state.hasRunInitial || (!state.hadAnyPoint && hasPoints)
 
     fun nextState(state: CameraPolicyState, hasPoints: Boolean): CameraPolicyState =
         CameraPolicyState(hasRunInitial = true, hadAnyPoint = state.hadAnyPoint || hasPoints)
 
     /** specs/010 §3.5 / §10 "Freshest-device resolution": newest `recordedAt` among located
-     * devices wins; devices without a fix are never chosen. RED-before-GREEN placeholder:
-     * deliberately returns the first device unfiltered/unsorted. */
-    fun freshestLocatedDevice(devices: List<RosterDeviceUi>): RosterDeviceUi? = devices.firstOrNull()
+     * devices wins; devices without a fix are never chosen. */
+    fun freshestLocatedDevice(devices: List<RosterDeviceUi>): RosterDeviceUi? =
+        devices.filter { it.hasLocation && it.recordedAt != null }
+            .maxByOrNull { Instant.parse(it.recordedAt) }
 }

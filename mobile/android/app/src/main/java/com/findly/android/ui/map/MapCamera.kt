@@ -44,9 +44,7 @@ object MapCamera {
     const val DEFAULT_ZOOM = 4f
     const val SINGLE_POINT_ZOOM = 15f
 
-    // RED-before-GREEN placeholder (devloop/A34): deliberately not the spec's 64 dp yet, so
-    // MapCameraTest's new padding assertion fails for a real reason before the fix lands.
-    const val BOUNDS_PADDING_DP = 999f
+    const val BOUNDS_PADDING_DP = 64f
 
     /**
      * [points] are `lat to lon` pairs for every device/member with a known position — callers
