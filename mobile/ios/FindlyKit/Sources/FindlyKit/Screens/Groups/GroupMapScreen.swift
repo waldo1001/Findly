@@ -63,6 +63,15 @@ public struct GroupMapScreen: View {
             .onAppear { viewModel.mapViewportSizePt = geometry.size }
             .onChange(of: geometry.size) { viewModel.mapViewportSizePt = $0 }
         }
+        // specs/010 §3.4 (I39 review fix 1) — `.ignoresSafeArea()` on the CHILD map view alone left
+        // the `GeometryReader` itself safe-area-constrained, so `mapViewportSizePt` under-reported
+        // the true full-bleed extent by roughly the status bar/notch + home indicator (almost
+        // entirely on the height/latitude axis) -- the fixed padding was then exact against the
+        // measured frame, not the frame the user actually sees. Ignoring the safe area on the
+        // reader itself is the standard idiom for measuring the true full-bleed size. Chained
+        // BEFORE `.findlyBottomSheet` so the sheet's own occlusion still never shrinks the
+        // measurement (unchanged from before this fix).
+        .ignoresSafeArea()
         .findlyBottomSheet(selection: $sheetDetent) { detent in
             rosterSheetContent(detent: detent)
         }

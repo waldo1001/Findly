@@ -56,8 +56,12 @@ extension MapRegion {
     /// not Android's Mercator-projected pixel space. That is the one place exact cross-platform
     /// parity is NOT achievable: an equirectangular delta and a Mercator-projected fit diverge
     /// slightly away from the equator, and neither platform's zoom is quantized/clamped to its map
-    /// SDK's real camera steps here — 010 §10 explicitly defers pixel-exact fitting to the review
-    /// gate, not a unit test.
+    /// SDK's real camera steps here. 010 §10 does not carve this specific case out by name — its
+    /// actual text reserves the review gate for "rename-row alignment and full-bleed layout"
+    /// (visual, per the design-seam convention). This falls into that SAME category by the same
+    /// logic (visual, sub-perceptual at normal zoom, no live-view-size unit test can assert
+    /// against a real rendered frame) rather than under an explicit named carve-out — the review
+    /// gate is where it is caught, not a unit test.
     ///
     /// `zoom` values (010 §3.4's `SINGLE_POINT_ZOOM`/`DEFAULT_ZOOM`) translate to a span using the
     /// standard slippy-map convention that zoom level *n* covers `360 / 2^n` degrees at the equator
