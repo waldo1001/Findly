@@ -32,8 +32,13 @@ jobs:
       - name: static-page security invariants (specs/007 §2, §7; docs/store-readiness.md §0)
         run: |
           web/join/verify-static-security.sh web/join/index.html
+          web/join/verify-static-security.sh web/join/family.html
           web/join/verify-static-security.sh web/join/privacy.html
           web/join/verify-static-security.sh web/join/terms.html
+
+      - name: family-invite landing page + AASA /f component (specs/007 §1-§3/§7, amended 2026-08-26)
+        run: |
+          web/join/verify-family-invite.sh web/join/family.html web/join/staticwebapp.config.json web/join/.well-known/apple-app-site-association.json
 
       - name: delete-account page checks (specs/008 §6.1 — Firebase config, no analytics, route)
         run: |
