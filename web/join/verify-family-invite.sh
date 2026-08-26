@@ -53,18 +53,37 @@ fi
 
 # 2. The code MUST be read from location.hash only, never location.search — a code in
 #    the query string would be sent to the server/logs by construction, which is exactly
-#    the no-oracle property this page exists to preserve (specs/007 §1, §2). Scans only
-#    the executable <script> body (same extraction as verify-static-security.sh), not
-#    prose — this file's own security-invariant comment legitimately *names*
-#    location.search while documenting that the code must never call it, which is not
-#    itself a violation.
+#    the no-oracle property this page exists to preserve (specs/007 §1, §2).
+#
+#    Code-review finding (2026-08-26): scanning only the executable <script> body (the
+#    original approach here, matching verify-static-security.sh's own extraction) has TWO
+#    working bypasses, both demonstrated against this exact idiom:
+#      (a) a single-line `<script>var leaked = location.search;...</script>` tag defeats
+#          the line-based awk open/close state machine (the "next" on the line that both
+#          opens and closes the tag skips that line's content AND never resets the flag),
+#          so a leak inside such a tag is never extracted at all.
+#      (b) an inline event-handler attribute (e.g. onload="...=location.search") executes
+#          JS entirely outside any <script> tag, so no script-body extraction — however
+#          correct — can ever see it.
+#    The robust fix (direction: strip HTML comments first, then ban the token ANYWHERE in
+#    the file) closes both: it keeps the original false-positive fix (this file's own
+#    security-invariant comment, which legitimately *names* location.search while
+#    documenting that live code must never call it, is stripped before scanning) without
+#    narrowing the search surface to a extractable "code region" that an attacker can step
+#    outside of. Bypass (b) specifically is additionally closed by the unconditional
+#    inline-event-handler ban now in verify-static-security.sh (check 1's invocation
+#    covers this file too).
 if [[ -f "$FILE" ]]; then
-  script_body=$(awk '/<script[ >]/{flag=1; next} /<\/script>/{flag=0} flag' "$FILE" | grep -vE '^[[:space:]]*//' || true)
-  if ! printf '%s\n' "$script_body" | grep -qE 'location\.hash'; then
+  stripped=$(node -e '
+    const fs = require("fs");
+    const html = fs.readFileSync(process.argv[1], "utf8");
+    process.stdout.write(html.replace(/<!--[\s\S]*?-->/g, ""));
+  ' "$FILE")
+  if ! printf '%s' "$stripped" | grep -qE 'location\.hash'; then
     echo "FAIL: page never reads location.hash — cannot display the invite code (specs/007 §2)" >&2
     fail=1
   fi
-  if printf '%s\n' "$script_body" | grep -qE 'location\.search'; then
+  if printf '%s' "$stripped" | grep -qE 'location\.search'; then
     echo "FAIL: page reads location.search — the invite code MUST NOT travel in the query string (specs/007 §1)" >&2
     fail=1
   fi
@@ -109,17 +128,26 @@ if [[ ! -f "$CONFIG_FILE" ]]; then
   echo "FAIL: config not found: $CONFIG_FILE" >&2
   fail=1
 else
+  # Code-review finding (2026-08-26): the original check only asserted that /f had SOME
+  # non-empty string rewrite target, so { "route": "/f", "rewrite": "/index.html" } —
+  # the exact family-to-group cross-routing hazard specs/007 §1/§7 forbids — passed
+  # undetected. Now asserts the ACTUAL target is /family.html, and pins /g -> /index.html
+  # too (the reverse cross-route the same invariant forbids).
   if ! node -e '
     const fs = require("fs");
     const cfg = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
     const routes = cfg.routes || [];
-    const route = routes.find((r) => r.route === "/f");
-    if (!route || typeof route.rewrite !== "string" || !route.rewrite) {
+    const fRoute = routes.find((r) => r.route === "/f");
+    const gRoute = routes.find((r) => r.route === "/g");
+    if (!fRoute || fRoute.rewrite !== "/family.html") {
+      process.exit(1);
+    }
+    if (!gRoute || gRoute.rewrite !== "/index.html") {
       process.exit(1);
     }
     process.exit(0);
   ' "$CONFIG_FILE"; then
-    echo "FAIL: /f route not registered (or malformed) in $CONFIG_FILE (specs/007 §2, §7)" >&2
+    echo "FAIL: /f must rewrite to exactly /family.html and /g to exactly /index.html in $CONFIG_FILE (specs/007 §1, §2, §7 — no family/group cross-routing)" >&2
     fail=1
   fi
 fi
