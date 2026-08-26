@@ -49,8 +49,14 @@ import kotlinx.coroutines.launch
  * **Display-name prefill (review-round fix):** when [prefillDisplayName] is blank — i.e. this
  * screen was *not* reached via Onboarding's profile-less display-name field — this route asks
  * [AcceptInviteViewModel.loadDisplayNameFallback] to resolve the caller's own profile
- * `displayName` from `GET /devices` (001 §4.2; see [AcceptInviteStateHolder.loadDisplayNameFallback]'s
- * doc for the wire-shape reasoning). [AcceptInviteScreen] seeds its display-name field from
+ * `displayName`. That resolution is **not** a single `GET /devices` read: it probes
+ * `GET /families/me` first and only reads a family caller's own name out of that response's own
+ * `members` list; `GET /devices` is consulted **only** as the fallback for a confirmed
+ * `FAMILY_NOT_FOUND` (genuinely family-less) caller, and any other/ambiguous outcome resolves to
+ * no prefill at all rather than guessing — see
+ * [AcceptInviteStateHolder.loadDisplayNameFallback]'s doc for the full three-branch reasoning and
+ * why a single unconditional `GET /devices` read would have risked adopting a *different* family
+ * member's name. [AcceptInviteScreen] seeds its display-name field from
  * [AcceptInviteUiState.displayNameFallback] only if the field is still blank when it arrives, so
  * it never clobbers anything the user already typed.
  */
