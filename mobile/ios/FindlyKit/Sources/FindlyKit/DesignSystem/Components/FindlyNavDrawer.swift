@@ -39,7 +39,12 @@ public struct FindlyNavDrawer: View {
 
     public var body: some View {
         ZStack(alignment: .leading) {
-            Color.black.opacity(0.35)
+            // specs/004-ios-client.md §2.3 (I34 review fix) — derived from the elevation token's
+            // OWN `color` field (`ElevationLevel.color`, which defaults to `.black` but is read
+            // through `theme.elevation`, not declared here), the same "neutral black unless a
+            // component documents a tinted override" convention `MapMarkerBubble`'s shadow already
+            // uses — never a bare `Color.black` literal.
+            theme.elevation.level3.color.opacity(0.35)
                 .ignoresSafeArea()
                 .contentShape(Rectangle())
                 .onTapGesture(perform: onDismiss)
@@ -82,7 +87,11 @@ public struct FindlyNavDrawer: View {
             onSelect(item.id)
         } label: {
             Text(item.title)
-                .font(.system(size: 16, weight: isSelected ? .semibold : .regular))
+                // specs/004-ios-client.md §2.3 (I34 review fix) — no `.font(.system(size:))`
+                // literal; `bodyLarge` (17/regular, §2.1's token vocabulary) is the closest
+                // existing role to a nav-drawer item, and selection is conveyed by color/
+                // background alone (below), not by inventing an undocumented weight override.
+                .font(theme.typography.bodyLarge.font)
                 .foregroundColor(isSelected ? theme.colors.primary : theme.colors.onSurface)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, theme.spacing.md)
