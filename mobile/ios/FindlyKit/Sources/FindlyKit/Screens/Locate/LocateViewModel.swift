@@ -11,6 +11,10 @@ public enum LocateUIStatus: Equatable {
     case pushFailed
     case expired
     case failed(String)
+    /// specs/010-app-shell-and-screen-ux.md §2.1 — a confirmed `PROFILE_NOT_FOUND`/
+    /// `FAMILY_NOT_FOUND` from `requestLocate`, this screen's load path (`POST /locate-requests`
+    /// is family-scoped, 001 §6/§1.5.4). MUST NOT render the retryable `.failed` card.
+    case routeToOnboarding(OnboardingVariant)
 }
 
 @MainActor
@@ -63,7 +67,11 @@ public final class LocateViewModel: ObservableObject {
                 startPolling(requestId: envelope.data.requestId)
             }
         } catch {
-            status = .failed(userFacingMessage(for: error))
+            if let variant = onboardingRoutingOutcome(for: error) {
+                status = .routeToOnboarding(variant)
+            } else {
+                status = .failed(userFacingMessage(for: error))
+            }
         }
     }
 
