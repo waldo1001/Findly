@@ -207,6 +207,49 @@ struct DeviceRegistrationServiceTests {
         #expect(api.registerDeviceCalls.count == 1)
     }
 
+    // MARK: - A37 review (Finding 2, specs/010-app-shell-and-screen-ux.md §1.1 amendment) — the
+    // pre-flight probe must fail CLOSED on a confirmed auth failure, not treat "any code other
+    // than PROFILE_NOT_FOUND" as "profile exists". Before this fix, an AUTH_TOKEN_EXPIRED/etc.
+    // from this service's OWN `getMyFamily()` probe fell through to "profile exists" and `POST
+    // /devices` fired for a caller the backend had already rejected — independent of the
+    // launch-gate race (A37 review Finding 1) this closes the second, non-timing-dependent half
+    // of. All four codes table-driven in one loop so parity across the set is visible in one place.
+
+    @Test func registerOrUpdate_confirmedAuthFailureOnTheProbe_throwsCallerUnauthorized_withoutCallingRegisterDevice() async throws {
+        let confirmedAuthCodes: [APIErrorCode] = [.authMissingToken, .authInvalidToken, .authTokenExpired, .authForbidden]
+        for code in confirmedAuthCodes {
+            let (api, service) = makeService()
+            api.getMyFamilyHandler = {
+                throw APIError.server(APIErrorBody(code: code, message: "unauthorized", details: nil, requestId: "r1"), httpStatus: 401)
+            }
+
+            do {
+                _ = try await service.registerOrUpdate()
+                Issue.record("\(code): expected DeviceRegistrationError.callerUnauthorized to be thrown")
+            } catch DeviceRegistrationError.callerUnauthorized {
+                // expected
+            } catch {
+                Issue.record("\(code): expected .callerUnauthorized, got \(error)")
+            }
+            #expect(api.registerDeviceCalls.isEmpty, "\(code): the doomed POST /devices call must never be made for a confirmed-unauthorized caller")
+            #expect(api.getMyFamilyCallCount == 1)
+        }
+    }
+
+    @Test func registerOnLaunchIfNeeded_confirmedAuthFailure_skipsTheDoomedCall_andDoesNotMarkVersionRegistered() async throws {
+        let tracker = InMemoryAppVersionRegistrationTracker()
+        let (api, service) = makeService(userId: "u1", appVersionTracker: tracker)
+        api.getMyFamilyHandler = {
+            throw APIError.server(APIErrorBody(code: .authTokenExpired, message: "expired", details: nil, requestId: "r1"), httpStatus: 401)
+        }
+
+        let registered = await service.registerOnLaunchIfNeeded()
+
+        #expect(!registered)
+        #expect(api.registerDeviceCalls.isEmpty, "a confirmed-unauthorized caller must never reach POST /devices")
+        #expect(tracker.lastRegisteredAppVersion(forUserId: "u1") == nil)
+    }
+
     @Test func registerOnLaunchIfNeeded_noProfileYet_skipsTheDoomedCall_andDoesNotMarkVersionRegistered() async throws {
         let tracker = InMemoryAppVersionRegistrationTracker()
         let (api, service) = makeService(userId: "u1", appVersionTracker: tracker)

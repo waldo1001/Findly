@@ -14,6 +14,13 @@ import Foundation
 /// `FindlyAPIClient.registerDevice`/`getMyFamily` itself throws).
 public enum DeviceRegistrationError: Error, Equatable {
     case profileNotYetBootstrapped
+    /// specs/010-app-shell-and-screen-ux.md §1.1 (amended, row A37; A37 review, Finding 2) — the
+    /// pre-flight `GET /families/me` probe (or the real `POST /devices` response itself) came back
+    /// with a CONFIRMED `AUTH_MISSING_TOKEN`/`AUTH_INVALID_TOKEN`/`AUTH_TOKEN_EXPIRED`/
+    /// `AUTH_FORBIDDEN` (001 §10). Deliberately distinct from [profileNotYetBootstrapped] — this is
+    /// not "hasn't onboarded yet", it's "the backend has told us this caller is unauthorized" —
+    /// callers must not treat the two as interchangeable.
+    case callerUnauthorized
 }
 
 /// I24 review (security, Minor) — a curated, log-safe summary of a device-registration failure,
@@ -98,8 +105,21 @@ public final class DeviceRegistrationService {
         // (I17), which probes when `displayName` is blank — that's a proxy specific to those two
         // screens' own optional-field ambiguity, not applicable here.
         let hasRegisteredBefore = appVersionTracker.lastRegisteredAppVersion(forUserId: userId) != nil
-        if !hasRegisteredBefore, await isProfileMissing() {
-            throw DeviceRegistrationError.profileNotYetBootstrapped
+        if !hasRegisteredBefore {
+            switch await probeProfileState() {
+            case .exists:
+                break
+            case .missing:
+                throw DeviceRegistrationError.profileNotYetBootstrapped
+            case .confirmedUnauthorized:
+                // TODO(A37 RED): deliberately wrong — throws the WRONG typed error, so
+                // DeviceRegistrationServiceTests' new assertion (`catch .callerUnauthorized`)
+                // fails on a value mismatch rather than a missing symbol (CLAUDE.md "stub wrong,
+                // don't stub absent"). `registerDeviceCalls.isEmpty` already passes here, which is
+                // exactly why that assertion alone would NOT have caught this bug — the
+                // reviewer's point. Fixed in the immediately following GREEN commit.
+                throw DeviceRegistrationError.profileNotYetBootstrapped
+            }
         }
 
         if let pushToken { lastPushToken = pushToken }
@@ -135,15 +155,36 @@ public final class DeviceRegistrationService {
         }
     }
 
-    /// `true` only on a confirmed `PROFILE_NOT_FOUND` (001 §1.5.3) — see `registerOrUpdate`'s doc
-    /// above for the fail-open reasoning. Identical idiom to
-    /// `CreateGroupViewModel.isBootstrappingProfile` / `GroupJoinViewModel.isBootstrappingProfile`.
-    private func isProfileMissing() async -> Bool {
+    /// The pre-flight probe's classification of the caller (specs/010-app-shell-and-screen-ux.md
+    /// §1.1, amended by row A37). `.missing` only on a confirmed `PROFILE_NOT_FOUND` (001 §1.5.3);
+    /// `.confirmedUnauthorized` only on a confirmed `AUTH_MISSING_TOKEN`/`AUTH_INVALID_TOKEN`/
+    /// `AUTH_TOKEN_EXPIRED`/`AUTH_FORBIDDEN` (001 §10) — a caller the backend has told us is
+    /// unauthorized must never reach `POST /devices` either (A37 review, Finding 2: this probe
+    /// previously treated any code OTHER than `PROFILE_NOT_FOUND` — including all four auth
+    /// codes — as "profile exists"). Anything else (inconclusive: a transport/decode failure, or a
+    /// server-carried code the four cases above don't cover, e.g. `FAMILY_NOT_FOUND`, which is
+    /// deliberately `.exists` — device endpoints work without a family, 001 §1.5.4) fails OPEN to
+    /// `.exists`, same reasoning as `CreateGroupViewModel.isBootstrappingProfile` /
+    /// `GroupJoinViewModel.isBootstrappingProfile`.
+    private enum ProfileProbeState {
+        case exists
+        case missing
+        case confirmedUnauthorized
+    }
+
+    private func probeProfileState() async -> ProfileProbeState {
         do {
             _ = try await apiClient.getMyFamily()
-            return false
+            return .exists
         } catch {
-            return (error as? APIError)?.serverCode == .profileNotFound
+            switch (error as? APIError)?.serverCode {
+            case .profileNotFound:
+                return .missing
+            case .authMissingToken, .authInvalidToken, .authTokenExpired, .authForbidden:
+                return .confirmedUnauthorized
+            default:
+                return .exists
+            }
         }
     }
 
