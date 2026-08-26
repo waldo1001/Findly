@@ -129,7 +129,11 @@ private struct DeviceCardView: View {
     private var intervalDropdown: some View {
         FindlyDropdownField(
             label: "Sync interval",
-            options: SyncIntervalDropdownPlan.options(minSyncIntervalMinutes: viewModel.minSyncIntervalMinutes),
+            // `?? 0` is a neutral (nothing disabled), not invented, fallback for a branch that is
+            // unreachable by construction: this card only renders once `state` is `.loaded`, and
+            // `viewModel.minSyncIntervalMinutes` is set from the SAME envelope, in the SAME method,
+            // before `state` becomes `.loaded` (specs/001 §9 — never a plan-specific literal here).
+            options: SyncIntervalDropdownPlan.options(minSyncIntervalMinutes: viewModel.minSyncIntervalMinutes ?? 0),
             selection: device.syncIntervalMinutes,
             onSelect: { minutes in
                 Task { await viewModel.setSyncInterval(deviceId: device.deviceId, minutes: minutes) }

@@ -28,10 +28,12 @@ public final class DeviceSettingsViewModel: ObservableObject {
     /// specs/001-api-contract.md §9 — mirrors the caller's `features.limits.minSyncIntervalMinutes`
     /// from the most recent envelope (`load()` or any successful `update()`, both of which carry a
     /// fresh `features`). Feeds the sync-interval `FindlyDropdownField`'s pre-disable floor.
-    /// CLAUDE.md: limits are always read from `features`, never hardcoded at a call site — the
-    /// initial value below is only ever visible before the first `load()` resolves, and no card
-    /// renders until `state` reaches `.loaded`, so it can never gate a real decision.
-    @Published public private(set) var minSyncIntervalMinutes: Int = SyncIntervalDropdownPlan.allowedMinutes[0]
+    /// CLAUDE.md: limits are always read from `features`, never hardcoded at a call site —
+    /// `nil` until the first envelope arrives is the honest representation of that; no numeric
+    /// default is declared here for a real decision to accidentally key off of, and no card
+    /// renders before `state` reaches `.loaded` (which happens in the same envelope handler that
+    /// sets this), so a caller can never observe a stale or invented floor.
+    @Published public private(set) var minSyncIntervalMinutes: Int?
 
     public let isParent: Bool
     private let apiClient: FindlyAPIClient
