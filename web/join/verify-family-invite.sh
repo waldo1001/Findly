@@ -55,39 +55,70 @@ fi
 #    the query string would be sent to the server/logs by construction, which is exactly
 #    the no-oracle property this page exists to preserve (specs/007 §1, §2).
 #
-#    Code-review finding (2026-08-26): scanning only the executable <script> body (the
-#    original approach here, matching verify-static-security.sh's own extraction) has TWO
-#    working bypasses, both demonstrated against this exact idiom:
-#      (a) a single-line `<script>var leaked = location.search;...</script>` tag defeats
-#          the line-based awk open/close state machine (the "next" on the line that both
-#          opens and closes the tag skips that line's content AND never resets the flag),
-#          so a leak inside such a tag is never extracted at all.
-#      (b) an inline event-handler attribute (e.g. onload="...=location.search") executes
-#          JS entirely outside any <script> tag, so no script-body extraction — however
-#          correct — can ever see it.
-#    The robust fix (direction: strip HTML comments first, then ban the token ANYWHERE in
-#    the file) closes both: it keeps the original false-positive fix (this file's own
-#    security-invariant comment, which legitimately *names* location.search while
-#    documenting that live code must never call it, is stripped before scanning) without
-#    narrowing the search surface to a extractable "code region" that an attacker can step
-#    outside of. Bypass (b) specifically is additionally closed by the unconditional
-#    inline-event-handler ban now in verify-static-security.sh (check 1's invocation
-#    covers this file too).
+#    Round-2 finding: scanning only the executable <script> body has two bypasses (a
+#    single-line <script> tag; an inline event-handler attribute entirely outside any
+#    <script> tag) — fixed in round 2 by stripping HTML comments then scanning the WHOLE
+#    file for the literal token.
+#
+#    Round-3 findings on that round-2 fix, both closed below:
+#      - FIX 2: the comment stripper stopped only at "-->". A browser (WHATWG tokenizer
+#        comment-end-bang state) also ends a comment at "--!>", so
+#        `<!--x--!><body onload="...location.search...">y-->` was stripped as ONE
+#        comment (the real terminator "-->" is only found at the trailing "y-->"),
+#        deleting the live leak along with it. Now terminates at the first of "-->" or
+#        "--!>", same fix as verify-static-security.sh, duplicated here deliberately (the
+#        idiom is duplicated across the two scripts, so both copies needed the fix).
+#      - FIX 5: the literal `location\.search` ban is trivially obfuscatable —
+#        `location['search']` or `location[('sea'+'rch')]` never contain the literal
+#        substring "location.search" but read exactly the same property at runtime. Since
+#        this file has no <script>-body-only fallback protecting it the way
+#        verify-static-security.sh's inline-handler check does, the literal-token check
+#        was the ONLY backstop for /f — so it now also bans computed bracket access on
+#        `location` (`location\s*\[`), which both obfuscation forms above always contain
+#        regardless of what expression computes the key. This does not claim to catch
+#        every possible obfuscation (a sufficiently indirect one always beats a static
+#        grep) — the bar is "no bypass trivially reachable by pasting one alternative
+#        property-access syntax", not "provably complete".
+#    Moved into a real node script (not a `node -e` one-liner) so \s in the JS regexes
+#    naturally covers newlines with no separate line-based patch needed.
+NODE_HASH_CHECK="$(mktemp)"
+cat > "$NODE_HASH_CHECK" <<'NODEEOF'
+"use strict";
+const fs = require("fs");
+// invoked as `node "$NODE_HASH_CHECK" "$FILE"` — a real script file, so argv[2] is the
+// target (argv[1] is this script's own path; see the matching note in
+// verify-static-security.sh, same argv-shift pitfall, same fix).
+const html = fs.readFileSync(process.argv[2], "utf8");
+
+// FIX 2 — stop at the first of "-->" or "--!>" (WHATWG comment-end-bang state).
+const stripped = html.replace(/<!--[\s\S]*?(?:-->|--!>)/g, "");
+
+const hasHash = /location\s*\.\s*hash/.test(stripped);
+const hasSearchLiteral = /location\s*\.\s*search/.test(stripped);
+// FIX 5 — computed/bracket access on `location` (obfuscates the literal token away):
+// catches location['search'], location["search"], location[k], location[('sea'+'rch')].
+const hasBracketAccess = /location\s*\[/.test(stripped);
+
+console.log("HASH=" + (hasHash ? "1" : "0"));
+console.log("SEARCH=" + (hasSearchLiteral ? "1" : "0"));
+console.log("BRACKET=" + (hasBracketAccess ? "1" : "0"));
+NODEEOF
 if [[ -f "$FILE" ]]; then
-  stripped=$(node -e '
-    const fs = require("fs");
-    const html = fs.readFileSync(process.argv[1], "utf8");
-    process.stdout.write(html.replace(/<!--[\s\S]*?-->/g, ""));
-  ' "$FILE")
-  if ! printf '%s' "$stripped" | grep -qE 'location\.hash'; then
+  hash_result=$(node "$NODE_HASH_CHECK" "$FILE")
+  if ! printf '%s\n' "$hash_result" | grep -qF 'HASH=1'; then
     echo "FAIL: page never reads location.hash — cannot display the invite code (specs/007 §2)" >&2
     fail=1
   fi
-  if printf '%s' "$stripped" | grep -qE 'location\.search'; then
+  if printf '%s\n' "$hash_result" | grep -qF 'SEARCH=1'; then
     echo "FAIL: page reads location.search — the invite code MUST NOT travel in the query string (specs/007 §1)" >&2
     fail=1
   fi
+  if printf '%s\n' "$hash_result" | grep -qF 'BRACKET=1'; then
+    echo "FAIL: page uses computed bracket access on location (e.g. location['search']) — obfuscated equivalent of reading the query string (specs/007 §1)" >&2
+    fail=1
+  fi
 fi
+rm -f "$NODE_HASH_CHECK"
 
 # 3. The "Open in the app" affordance MUST use the family deep link form, not the group
 #    one (specs/007 §1: findly://family-join?code={CODE}, distinct from
