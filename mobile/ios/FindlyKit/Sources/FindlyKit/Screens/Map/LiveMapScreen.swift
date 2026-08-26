@@ -11,6 +11,22 @@ public struct LiveMapScreen: View {
     // lifetime instead of silently discarding the one `.task` observes.
     @StateObject private var viewModel: LiveMapViewModel
     private let renderer: any MapRendering
+    /// specs/010-app-shell-and-screen-ux.md §1.2 — the SAME shared instance `RootView` populates
+    /// from the launch probe / `FamilyMembersViewModel`, read here for the drawer header + the
+    /// "Invite someone" parent gate. `@ObservedObject`, not `@StateObject`: unlike a per-screen
+    /// view model, this is one long-lived instance the caller always hands in — there is no
+    /// factory-re-invoked-on-every-re-render risk (the I16 concern) to guard against here.
+    @ObservedObject private var familyContext: FamilyContextCache
+    /// specs/010-app-shell-and-screen-ux.md §1.2 (I34) — the Family Map is the ONLY screen that
+    /// renders the ☰ button / owns the drawer.
+    @State private var isDrawerOpen = false
+    private let onSelectHistory: () -> Void
+    private let onSelectGeofences: () -> Void
+    private let onSelectDevices: () -> Void
+    private let onSelectFamily: () -> Void
+    private let onSelectInviteSomeone: () -> Void
+    private let onSelectGroups: () -> Void
+    private let onSelectPrivacySettings: () -> Void
     /// specs/010-app-shell-and-screen-ux.md §2.1 (I34) — fires once `viewModel.state` reaches
     /// `.routeToOnboarding`, so `RootView` can reset the stack to the corresponding Onboarding
     /// variant. Defaults to a no-op so existing previews/tests that don't care about this need not
@@ -20,22 +36,71 @@ public struct LiveMapScreen: View {
     public init(
         viewModel: @autoclosure @escaping () -> LiveMapViewModel,
         renderer: any MapRendering,
+        familyContext: FamilyContextCache,
+        onSelectHistory: @escaping () -> Void = {},
+        onSelectGeofences: @escaping () -> Void = {},
+        onSelectDevices: @escaping () -> Void = {},
+        onSelectFamily: @escaping () -> Void = {},
+        onSelectInviteSomeone: @escaping () -> Void = {},
+        onSelectGroups: @escaping () -> Void = {},
+        onSelectPrivacySettings: @escaping () -> Void = {},
         onProfileDeadEnd: @escaping (OnboardingVariant) -> Void = { _ in }
     ) {
         _viewModel = StateObject(wrappedValue: viewModel())
         self.renderer = renderer
+        self.familyContext = familyContext
+        self.onSelectHistory = onSelectHistory
+        self.onSelectGeofences = onSelectGeofences
+        self.onSelectDevices = onSelectDevices
+        self.onSelectFamily = onSelectFamily
+        self.onSelectInviteSomeone = onSelectInviteSomeone
+        self.onSelectGroups = onSelectGroups
+        self.onSelectPrivacySettings = onSelectPrivacySettings
         self.onProfileDeadEnd = onProfileDeadEnd
     }
 
     public var body: some View {
-        VStack(spacing: 0) {
-            FindlyNavBar("Family map")
-            content
+        ZStack(alignment: .leading) {
+            VStack(spacing: 0) {
+                FindlyNavBar("Family map", menuAction: { isDrawerOpen = true })
+                content
+            }
+            .background(theme.colors.surfaceVariant)
+
+            if isDrawerOpen {
+                FindlyNavDrawer(
+                    familyName: familyContext.familyName ?? "",
+                    myDisplayName: familyContext.myDisplayName ?? "",
+                    items: FindlyNavDrawerBuilder.items(isParent: familyContext.isParent ?? false),
+                    selectedId: "familyMap",
+                    onSelect: { id in
+                        isDrawerOpen = false
+                        handleDrawerSelection(id)
+                    },
+                    onDismiss: { isDrawerOpen = false }
+                )
+            }
         }
-        .background(theme.colors.surfaceVariant)
         .task { await viewModel.load() }
         .onChange(of: routingVariant) { variant in
             if let variant { onProfileDeadEnd(variant) }
+        }
+    }
+
+    /// specs/010 §1.2 — "Selecting a destination closes the drawer and pushes that screen onto the
+    /// existing stack" (already done by the caller-supplied `onSelectX` closures below); "Family
+    /// map (current)" is a no-op here since we're already on it.
+    private func handleDrawerSelection(_ id: String) {
+        switch id {
+        case "familyMap": break
+        case "history": onSelectHistory()
+        case "geofences": onSelectGeofences()
+        case "devices": onSelectDevices()
+        case "family": onSelectFamily()
+        case "inviteSomeone": onSelectInviteSomeone()
+        case "groups": onSelectGroups()
+        case "privacyData": onSelectPrivacySettings()
+        default: break
         }
     }
 
