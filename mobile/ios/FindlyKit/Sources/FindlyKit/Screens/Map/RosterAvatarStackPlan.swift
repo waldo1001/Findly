@@ -21,10 +21,10 @@ public enum RosterAvatarStackPlan {
         }
     }
 
-    /// Deliberately wrong-on-purpose right now (assertion-level red, not compile-level) — always
-    /// an empty plan regardless of input. The next commit implements the real cap/overflow logic.
     public static func compute(displayNames: [String], maxVisible: Int = RosterAvatarStackPlan.maxVisible) -> Plan {
-        Plan(visibleInitials: [], overflowCount: 0)
+        let visible = displayNames.prefix(maxVisible).map(initialsFor)
+        let overflow = max(displayNames.count - visible.count, 0)
+        return Plan(visibleInitials: Array(visible), overflowCount: overflow)
     }
 
     /// Same short-label convention as `LiveMapViewModel.initials(for:)`/`GroupMapViewModel.initials(for:)`
