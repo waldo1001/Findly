@@ -165,6 +165,15 @@ public final class GroupDetailViewModel: ObservableObject {
         return "Join \(groupName) on Findly! Group code: \(formatted)"
     }
 
+    /// I42 (specs/007-public-join-links.md §4) — the full `ShareLink` payload: the templated
+    /// sentence above PLUS the §1 `https://{joinLinkHost}/g#CODE` link, so the share sheet stops
+    /// sending a bare, contextless URL. RED stub: deliberately ignores `joinLinkHost` and returns
+    /// today's already-non-conformant sentence with no link — GREEN implements the real §4
+    /// template on both overloads.
+    public static func shareText(for code: String, groupName: String, joinLinkHost: String) -> String {
+        shareText(for: code, groupName: groupName)
+    }
+
     /// specs/007-public-join-links.md §1, specs/004-ios-client.md §3.5 — the canonical
     /// `https://{joinLinkHost}/g#CODE` link: this is what the detail screen's `ShareLink` now
     /// shares and what its on-device QR encodes ("the https form is the canonical one for sharing

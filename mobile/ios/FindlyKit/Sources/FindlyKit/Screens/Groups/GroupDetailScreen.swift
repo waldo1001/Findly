@@ -151,7 +151,10 @@ public struct GroupDetailScreen: View {
                     .foregroundColor(theme.colors.onSurface)
                     .multilineTextAlignment(.center)
                 GroupJoinQRCodeView(text: joinLink.absoluteString)
-                ShareLink(item: joinLink)
+                ShareLink(
+                    "Share code",
+                    item: GroupDetailViewModel.shareText(for: code, groupName: name, joinLinkHost: joinLinkHost)
+                )
             }
         }
     }

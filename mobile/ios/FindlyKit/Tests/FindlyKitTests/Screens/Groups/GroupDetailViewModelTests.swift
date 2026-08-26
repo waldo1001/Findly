@@ -234,10 +234,52 @@ struct GroupDetailViewModelTests {
         #expect(viewModel.state == .expired)
     }
 
-    @Test func shareText_formatsCodeAsHyphenatedGroupsAndIncludesGroupName() {
+    // MARK: - specs/007-public-join-links.md §4 (normative) — the group share templates,
+    // byte-for-byte against the SPEC's own string (§7's snapshot-test rule), not the
+    // implementation's own output. Distinct from the family-invite template (007 §4's other
+    // block): the group template's inline `{CODE}` is CANONICAL (uppercase, no hyphen) in both
+    // the sentence and the link fragment — unlike family, which hyphenates the sentence's code.
+
+    @Test func shareText_sentenceOnly_matchesThe007Section4GroupTemplateExactly() {
+        // I42: this is the exact sentence rendered in-card next to the share button.
+        let expected = "Join my \"Festival crew\" group on Findly \u{2014} code 7F3K9QRZ"
+        #expect(GroupDetailViewModel.shareText(for: "7f3k9qrz", groupName: "Festival crew") == expected)
+    }
+
+    @Test func shareText_sentenceOnly_usesCanonicalCode_notTheHyphenatedFamilyForm() {
         let text = GroupDetailViewModel.shareText(for: "7f3k9qrz", groupName: "Festival crew")
-        #expect(text.contains("7F3K-9QRZ"))
-        #expect(text.contains("Festival crew"))
+        #expect(text.contains("code 7F3K9QRZ"))
+        #expect(!text.contains("7F3K-9QRZ"))
+    }
+
+    @Test func shareText_sentenceOnly_dashIsEmDashU2014NotAHyphen() {
+        let text = GroupDetailViewModel.shareText(for: "7f3k9qrz", groupName: "Festival crew")
+        #expect(text.unicodeScalars.contains(Unicode.Scalar(0x2014)!))
+        #expect(!text.contains("Findly - code"), "must be an em dash (U+2014), not a hyphen-minus")
+    }
+
+    // MARK: - I42: the full ShareLink payload (sentence + §1 link) that must reach the share
+    // sheet — previously `GroupDetailScreen` shared only the bare `joinLink` URL, dropping the
+    // sentence entirely.
+
+    @Test func shareText_withLink_matchesThe007Section4TemplateExactly() {
+        let expected = "Join my \"Festival crew\" group on Findly \u{2014} code 7F3K9QRZ\n" +
+            "https://join.example.test/g#7F3K9QRZ"
+        let text = GroupDetailViewModel.shareText(for: "7f3k9qrz", groupName: "Festival crew", joinLinkHost: "join.example.test")
+        #expect(text == expected)
+    }
+
+    @Test func shareText_withLink_fragmentCodeIsCanonicalUppercaseNoHyphen() {
+        let text = GroupDetailViewModel.shareText(for: "7f3k9qrz", groupName: "Festival crew", joinLinkHost: "join.example.test")
+        #expect(text.contains("#7F3K9QRZ"))
+        #expect(!text.contains("#7F3K-9QRZ"))
+    }
+
+    @Test func shareText_withLink_carriesNoStoreUrlOrOtherContent() {
+        // 007 §4: "No other content — store URLs deliberately do not appear in the message."
+        let text = GroupDetailViewModel.shareText(for: "7f3k9qrz", groupName: "Festival crew", joinLinkHost: "join.example.test")
+        #expect(!text.contains("apps.apple.com"))
+        #expect(!text.contains("play.google.com"))
     }
 
     // specs/007-public-join-links.md §1, specs/004-ios-client.md §3.5 — the canonical https link
