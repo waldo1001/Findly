@@ -6,8 +6,11 @@ import com.findly.android.fakes.defaultFeatures
 import com.findly.android.network.ApiError
 import com.findly.android.network.ApiResult
 import com.findly.android.network.dto.AcceptInviteResponseDto
+import com.findly.android.network.dto.CallerRoleDto
 import com.findly.android.network.dto.FamilyDeviceDto
+import com.findly.android.network.dto.FamilyMeResponseDto
 import com.findly.android.network.dto.ListDevicesResponseDto
+import com.findly.android.network.dto.MemberDto
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -110,15 +113,73 @@ class AcceptInviteStateHolderTest {
     }
 
     // specs/010-app-shell-and-screen-ux.md §5.2: "prefilled with the caller's existing profile
-    // displayName when one exists". 001 §4.2's own text settles the wire shape: "A family-less
-    // caller gets their own devices only (same response shape; ownerDisplayName = their profile
-    // displayName)" -- GET /devices needs no family and no new endpoint, so for the "Manage
-    // family invites" entry point (an already-profiled, family-less caller) any returned
-    // device's ownerDisplayName IS the caller's own profile displayName.
+    // displayName when one exists". 001 §4.2's FULL sentence is the wire-shape guarantee this
+    // gates on: "Open family: all members see all devices... A family-less caller gets their
+    // own devices only (same response shape; ownerDisplayName = their profile displayName)." The
+    // ownerDisplayName == caller's-own-name guarantee holds ONLY for a family-less caller -- for
+    // a caller who already has a family, GET /devices returns every member's devices in an
+    // unspecified order, so firstOrNull()?.ownerDisplayName could be a completely different
+    // family member (round-2 review finding: reachable via a deep link into this screen with no
+    // Onboarding-typed name and no check of the caller's current family state -- a PII
+    // misattribution risk, not a cosmetic one). loadDisplayNameFallback() therefore probes
+    // GET /families/me FIRST: a family caller's own name comes from that response's own
+    // `members` list (matched by `me.userId`) and GET /devices is never called; only a confirmed
+    // FAMILY_NOT_FOUND unlocks the GET /devices fallback, where §4.2's guarantee genuinely holds.
 
     @Test
-    fun `loadDisplayNameFallback resolves the caller's own name from the first device's ownerDisplayName`() = runTest {
-        val familyApi = FakeFamilyApi()
+    fun `loadDisplayNameFallback resolves the caller's own name from GET families me when the caller has a family, and never calls listDevices`() = runTest {
+        val familyApi = FakeFamilyApi().apply {
+            getMyFamilyResult = ApiResult.Success(
+                FamilyMeResponseDto(
+                    familyId = "fam_test",
+                    familyName = "Wauters",
+                    createdAt = "2026-07-01T00:00:00Z",
+                    me = CallerRoleDto("uid-caller", "member"),
+                    members = listOf(
+                        MemberDto("uid-other", "parent", "Someone Else", "2026-07-01T00:00:00Z"),
+                        MemberDto("uid-caller", "member", "Noor", "2026-07-02T00:00:00Z"),
+                    ),
+                ),
+                defaultFeatures(),
+            )
+        }
+        val devicesApi = FakeDevicesApi().apply {
+            // Scripted with a DIFFERENT member's name -- if the gate is wrong and this ever gets
+            // called, the assertion below on displayNameFallback would catch the misattribution
+            // even before the explicit listDevicesCallCount check does.
+            listDevicesResult = ApiResult.Success(
+                ListDevicesResponseDto(
+                    devices = listOf(
+                        FamilyDeviceDto(
+                            deviceId = "device-1",
+                            ownerUserId = "uid-other",
+                            platform = "android",
+                            deviceName = "Pixel 8",
+                            model = "Pixel 8",
+                            appVersion = "1.0.0",
+                            syncIntervalMinutes = 15,
+                            trackingEnabled = true,
+                            pushInvalid = false,
+                            ownerDisplayName = "Someone Else",
+                        ),
+                    ),
+                ),
+                defaultFeatures(),
+            )
+        }
+        val holder = AcceptInviteStateHolder(familyApi, devicesApi)
+
+        holder.loadDisplayNameFallback()
+
+        assertEquals("Noor", holder.state.value.displayNameFallback)
+        assertEquals(0, devicesApi.listDevicesCallCount)
+    }
+
+    @Test
+    fun `loadDisplayNameFallback resolves the caller's own name from the first device's ownerDisplayName when genuinely family-less`() = runTest {
+        val familyApi = FakeFamilyApi().apply {
+            getMyFamilyResult = ApiResult.Failure(ApiError.FamilyNotFound("no family", "r_30"))
+        }
         val devicesApi = FakeDevicesApi().apply {
             listDevicesResult = ApiResult.Success(
                 ListDevicesResponseDto(
@@ -145,14 +206,18 @@ class AcceptInviteStateHolderTest {
         holder.loadDisplayNameFallback()
 
         assertEquals("Noor", holder.state.value.displayNameFallback)
+        assertEquals(1, devicesApi.listDevicesCallCount)
     }
 
     @Test
-    fun `loadDisplayNameFallback leaves null when the caller has no devices yet`() = runTest {
+    fun `loadDisplayNameFallback leaves null when family-less with no devices yet`() = runTest {
+        val familyApi = FakeFamilyApi().apply {
+            getMyFamilyResult = ApiResult.Failure(ApiError.FamilyNotFound("no family", "r_31"))
+        }
         val devicesApi = FakeDevicesApi().apply {
             listDevicesResult = ApiResult.Success(ListDevicesResponseDto(devices = emptyList()), defaultFeatures())
         }
-        val holder = AcceptInviteStateHolder(FakeFamilyApi(), devicesApi)
+        val holder = AcceptInviteStateHolder(familyApi, devicesApi)
 
         holder.loadDisplayNameFallback()
 
@@ -160,14 +225,35 @@ class AcceptInviteStateHolderTest {
     }
 
     @Test
-    fun `loadDisplayNameFallback leaves null on a listDevices failure -- never blocks the screen`() = runTest {
-        val devicesApi = FakeDevicesApi().apply {
-            listDevicesResult = ApiResult.Failure(ApiError.ProfileNotFound("no profile", "r_20"))
+    fun `loadDisplayNameFallback leaves null when family-less and listDevices fails -- never blocks the screen`() = runTest {
+        val familyApi = FakeFamilyApi().apply {
+            getMyFamilyResult = ApiResult.Failure(ApiError.FamilyNotFound("no family", "r_32"))
         }
-        val holder = AcceptInviteStateHolder(FakeFamilyApi(), devicesApi)
+        val devicesApi = FakeDevicesApi().apply {
+            listDevicesResult = ApiResult.Failure(ApiError.ProfileNotFound("no profile", "r_33"))
+        }
+        val holder = AcceptInviteStateHolder(familyApi, devicesApi)
 
         holder.loadDisplayNameFallback()
 
         assertNull(holder.state.value.displayNameFallback)
+    }
+
+    @Test
+    fun `loadDisplayNameFallback leaves null on an ambiguous families me outcome, and never calls listDevices`() = runTest {
+        // Anything other than a confirmed FAMILY_NOT_FOUND (a transient failure, an unexpected
+        // catalog code, ...) must NOT be treated as "genuinely family-less" -- the whole point
+        // of the round-2 fix is that GET /devices is only safe to trust once family-less is
+        // actually confirmed, never assumed from an ambiguous outcome.
+        val familyApi = FakeFamilyApi().apply {
+            getMyFamilyResult = ApiResult.Failure(ApiError.ProfileNotFound("no profile yet", "r_34"))
+        }
+        val devicesApi = FakeDevicesApi()
+        val holder = AcceptInviteStateHolder(familyApi, devicesApi)
+
+        holder.loadDisplayNameFallback()
+
+        assertNull(holder.state.value.displayNameFallback)
+        assertEquals(0, devicesApi.listDevicesCallCount)
     }
 }

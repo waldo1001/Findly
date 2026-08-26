@@ -1,5 +1,6 @@
 package com.findly.android.ui.invites
 
+import com.findly.android.network.ApiError
 import com.findly.android.network.ApiResult
 import com.findly.android.network.ports.DevicesApi
 import com.findly.android.network.ports.FamilyApi
@@ -62,22 +63,50 @@ class AcceptInviteStateHolder(private val familyApi: FamilyApi, private val devi
 
     /**
      * Review-round fix (specs/010-app-shell-and-screen-ux.md §5.2: "prefilled with the caller's
-     * existing profile displayName when one exists"). 001 §4.2 settles the wire shape: "A
-     * family-less caller gets their own devices only (same response shape;
-     * `ownerDisplayName` = their profile `displayName`)" — no new endpoint, no mutation, and
-     * `GET /devices` works without a family (§1.5.4), which is exactly the caller state the
-     * "Manage family invites" entry point reaches. Any returned device is therefore the
-     * caller's own, so its `ownerDisplayName` **is** the caller's profile `displayName`.
+     * existing profile displayName when one exists"), **corrected in round 2**: the first cut of
+     * this method called [DevicesApi.listDevices] unconditionally and trusted its first entry's
+     * `ownerDisplayName`. 001 §4.2's guarantee is narrower than that: *"Open family: all members
+     * see all devices... A **family-less caller** gets their **own devices only** (same response
+     * shape; `ownerDisplayName` = their profile `displayName`)"* — the `ownerDisplayName ==
+     * caller's-own-name` property holds **only** while the caller is family-less. A caller who
+     * already has a family gets every member's devices back in an unspecified order, so
+     * `firstOrNull()?.ownerDisplayName` could silently adopt a *different* family member's name
+     * as "the caller's own" — reachable via a deep link into this screen with no Onboarding-typed
+     * name and no prior check of the caller's family state, i.e. a PII-misattribution risk, not a
+     * cosmetic one.
      *
-     * Best-effort only: a caller with no devices yet, or a failed call, leaves
+     * The fix probes [FamilyApi.getMyFamily] first:
+     * - **Success** (the caller has a family): the caller's own name comes straight from that
+     *   response's own `members` list, matched by `me.userId` — never [DevicesApi.listDevices],
+     *   which would return every member's devices for a family caller (001 §4.2).
+     * - **A confirmed `FAMILY_NOT_FOUND` failure** (genuinely family-less): 001 §4.2's guarantee
+     *   now holds, so [DevicesApi.listDevices]'s first entry's `ownerDisplayName` is safe to
+     *   trust as the caller's own name.
+     * - **Any other outcome** (an unresolved/ambiguous probe — `PROFILE_NOT_FOUND`, a transient
+     *   failure, …): neither call site is trustworthy yet, so this leaves
+     *   [AcceptInviteUiState.displayNameFallback] untouched (`null`) rather than guessing.
+     *
+     * Best-effort throughout: a caller with no devices yet, or any failed call, leaves
      * [AcceptInviteUiState.displayNameFallback] `null` — this is a convenience prefill, never a
      * blocker on the join flow (the screen's own display-name field still accepts manual entry
      * either way).
      */
     suspend fun loadDisplayNameFallback() {
-        val fallback = when (val result = devicesApi.listDevices()) {
-            is ApiResult.Success -> result.data.devices.firstOrNull()?.ownerDisplayName
-            is ApiResult.Failure -> null
+        val fallback = when (val familyResult = familyApi.getMyFamily()) {
+            is ApiResult.Success -> {
+                val me = familyResult.data.me
+                familyResult.data.members.firstOrNull { it.userId == me.userId }?.displayName
+            }
+            is ApiResult.Failure -> {
+                if (familyResult.error is ApiError.FamilyNotFound) {
+                    when (val devicesResult = devicesApi.listDevices()) {
+                        is ApiResult.Success -> devicesResult.data.devices.firstOrNull()?.ownerDisplayName
+                        is ApiResult.Failure -> null
+                    }
+                } else {
+                    null
+                }
+            }
         }
         _state.value = _state.value.copy(displayNameFallback = fallback)
     }
