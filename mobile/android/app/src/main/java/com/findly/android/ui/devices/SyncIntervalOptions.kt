@@ -1,5 +1,6 @@
 package com.findly.android.ui.devices
 
+import com.findly.android.network.PlanLimits
 import com.findly.android.ui.designsystem.components.FindlyDropdownOption
 
 /**
@@ -36,4 +37,10 @@ object SyncIntervalOptions {
             disabledReason = if (enabled) null else "Your plan's minimum interval is ${labelFor(minSyncIntervalMinutes)}",
         )
     }
+
+    // STUB (deliberately wrong, not absent) -- reproduces the exact reviewed bug pattern
+    // ("?: 0" fails OPEN, admitting every value) so buildForLimits' red-phase assertions fail
+    // on real, backwards behavior rather than a missing type. About to be replaced with a
+    // fail-closed implementation.
+    fun buildForLimits(limits: PlanLimits?): List<FindlyDropdownOption<Int>> = build(limits?.minSyncIntervalMinutes ?: 0)
 }

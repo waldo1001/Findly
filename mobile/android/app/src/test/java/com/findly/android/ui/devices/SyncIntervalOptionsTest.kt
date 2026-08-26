@@ -1,6 +1,7 @@
 package com.findly.android.ui.devices
 
 import org.junit.Assert.assertEquals
+import com.findly.android.fakes.defaultFeatures
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -65,5 +66,28 @@ class SyncIntervalOptionsTest {
         val options = SyncIntervalOptions.build(minSyncIntervalMinutes = 1440)
         assertTrue(options.filter { it.value != 1440 }.all { !it.enabled })
         assertTrue(options.first { it.value == 1440 }.enabled)
+    }
+
+    @Test
+    fun `buildForLimits with real limits matches build -- the floor is never re-derived`() {
+        val limits = defaultFeatures(minSyncIntervalMinutes = 15).limits
+
+        val fromLimits = SyncIntervalOptions.buildForLimits(limits)
+        val fromFloor = SyncIntervalOptions.build(minSyncIntervalMinutes = 15)
+
+        assertEquals(fromFloor, fromLimits)
+    }
+
+    @Test
+    fun `buildForLimits fails closed -- a null features object disables every value, never defaults the floor to 0`() {
+        val options = SyncIntervalOptions.buildForLimits(limits = null)
+
+        // The bug this pins: "limits?.minSyncIntervalMinutes ?: 0" would disable NOTHING (a
+        // floor of 0 admits every 001 section1.4 value) -- exactly backwards for a subscription
+        // limit whose fallback must fail closed, not open (CLAUDE.md's subscription-readiness
+        // rule: limits come from features, never hardcoded at call sites).
+        assertTrue(options.isNotEmpty())
+        assertTrue(options.all { !it.enabled })
+        assertTrue(options.all { it.disabledReason != null })
     }
 }
