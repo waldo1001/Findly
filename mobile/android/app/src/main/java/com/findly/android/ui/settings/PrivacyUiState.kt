@@ -68,8 +68,9 @@ sealed class DeleteFamilyFlow {
 }
 
 /**
- * State for the Settings screen's privacy section (specs/003-android-client.md §12.4; wire shapes
- * 001-api-contract.md §13). Deliberately decoupled from [SettingsStateHolder]'s family/device
+ * State for the Privacy & data screen (specs/003-android-client.md §12.4; wire shapes
+ * 001-api-contract.md §13). Deliberately decoupled from
+ * [com.findly.android.ui.family.FamilyMembersStateHolder]'s family/device
  * load — export-self and delete-account MUST be reachable "without contacting support"
  * (specs/008-privacy-endpoints.md §4.4) even for a family-less or profile-less caller, so this
  * state holder loads family context independently and degrades gracefully (parent-only entries

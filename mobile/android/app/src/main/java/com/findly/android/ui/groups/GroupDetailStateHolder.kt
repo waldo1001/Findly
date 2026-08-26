@@ -22,7 +22,7 @@ private const val OWNER_CANNOT_LEAVE_MESSAGE = "As the group owner, you can't le
  * Constructor-injected [CoroutineScope] — same pattern as
  * [com.findly.android.ui.map.MapStateHolder]. Owner-only mutations (rename, extend/end,
  * rotate, kick, delete) are gated by [GroupDetailUiState.Content.isOwner] **client-side before any
- * network call**, mirroring [com.findly.android.ui.settings.SettingsStateHolder]'s
+ * network call**, mirroring [com.findly.android.ui.family.FamilyMembersStateHolder]'s
  * `isParent`-gated convention — the server enforces the same role checks regardless (403
  * `AUTH_FORBIDDEN` for role violations elsewhere in 001, though group ownership violations here
  * are actually unreachable server-side misuse given the client gate; defense in depth, not the

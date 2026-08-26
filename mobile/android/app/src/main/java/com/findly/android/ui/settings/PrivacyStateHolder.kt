@@ -14,14 +14,15 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
 /**
- * The Settings screen's privacy section state machine — export, delete-account, delete-family
+ * The Privacy & data screen's state machine — export, delete-account, delete-family
  * (001-api-contract.md §13; specs/008-privacy-endpoints.md; specs/003-android-client.md §12.4).
  *
- * Deliberately independent of [SettingsStateHolder]: it does its own [FamilyApi.getMyFamily] call
- * and, unlike [SettingsStateHolder], never surfaces a blocking error state when that call fails —
- * export-self and delete-account MUST be reachable without contacting support (008 §4.4) even for
- * a family-less or profile-less caller. Parent-only entries (export-a-member, delete-family)
- * simply stay absent (`isParent = false`) whenever the family context couldn't be loaded.
+ * Deliberately independent of [com.findly.android.ui.family.FamilyMembersStateHolder] (and, before
+ * it, the retired `SettingsStateHolder`): it does its own [FamilyApi.getMyFamily] call and never
+ * surfaces a blocking error state when that call fails — export-self and delete-account MUST be
+ * reachable without contacting support (008 §4.4) even for a family-less or profile-less caller.
+ * Parent-only entries (export-a-member, delete-family) simply stay absent (`isParent = false`)
+ * whenever the family context couldn't be loaded.
  */
 class PrivacyStateHolder(
     private val privacyApi: PrivacyApi,

@@ -96,6 +96,29 @@ private fun ComponentGallery(modifier: Modifier = Modifier) {
         FindlySwitchRow(title = "Notify on enter", checked = false, onCheckedChange = {}, subtitle = "Geofence: Home")
         FindlySwitchRow(title = "Disabled", checked = true, onCheckedChange = {}, enabled = false)
 
+        FindlySectionHeader(title = "Dropdown fields (010 §4.2)")
+        FindlyDropdownField(
+            label = "Sync interval",
+            selected = 15,
+            options = listOf(
+                FindlyDropdownOption(5, "5 min", enabled = false, disabledReason = "Your plan's minimum interval is 15 min"),
+                FindlyDropdownOption(10, "10 min", enabled = false, disabledReason = "Your plan's minimum interval is 15 min"),
+                FindlyDropdownOption(15, "15 min"),
+                FindlyDropdownOption(30, "30 min"),
+                FindlyDropdownOption(60, "1 hour"),
+                FindlyDropdownOption(120, "2 hours"),
+                FindlyDropdownOption(1440, "1 day"),
+            ),
+            onSelect = {},
+        )
+        FindlyDropdownField(
+            label = "Disabled field",
+            selected = 15,
+            options = listOf(FindlyDropdownOption(15, "15 min")),
+            onSelect = {},
+            enabled = false,
+        )
+
         FindlySectionHeader(title = "Nav drawer (010 §1.2)")
         FindlyNavDrawerMenuButton(onClick = {})
 

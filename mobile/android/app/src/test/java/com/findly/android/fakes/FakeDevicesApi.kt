@@ -9,7 +9,8 @@ import com.findly.android.network.ports.DevicesApi
 
 /** Test fake — mirrors the backend's `test/fakes/` convention (backend/README.md). Records every
  * [registerDevice] call for assertion (A1); A2 adds scriptable [listDevicesResult] /
- * [updateDeviceResult] for `SettingsStateHolderTest`. */
+ * [updateDeviceResult] for the retired `SettingsStateHolderTest`, now
+ * [com.findly.android.ui.devices.DevicesStateHolderTest]. */
 class FakeDevicesApi : DevicesApi {
     val registerDeviceCalls = mutableListOf<RegisterDeviceRequestDto>()
     val updateDeviceCalls = mutableListOf<Pair<String, UpdateDeviceRequestDto>>()
