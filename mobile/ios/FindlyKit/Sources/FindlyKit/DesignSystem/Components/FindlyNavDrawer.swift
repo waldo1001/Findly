@@ -62,8 +62,18 @@ public struct FindlyNavDrawer: View {
                 }
             }
             .frame(maxWidth: 300, maxHeight: .infinity, alignment: .leading)
-            .background(theme.colors.surface)
-            .ignoresSafeArea(edges: .vertical)
+            // specs/010-app-shell-and-screen-ux.md §1.2 (I46 fix) — `.ignoresSafeArea(edges:
+            // .vertical)` used to sit on this VStack directly, which pulled its CONTENT (the
+            // family-name header, not just the panel's background) out of the safe area, so the
+            // family name rendered under the status bar/clock. The fix is local to this
+            // component's own background — moving `.ignoresSafeArea` onto the `background(_:)`
+            // view is the standard SwiftUI shape for "let the fill bleed edge-to-edge while the
+            // foreground content stays inset": the panel's white fill still reaches the true
+            // screen edges (top under the notch, bottom past the home indicator) but `header`/the
+            // item list are laid out within the safe area, same as I45's fix elsewhere on this
+            // screen — no blanket modifier on a parent, per this row's explicit instruction not to
+            // repeat that shape.
+            .background(theme.colors.surface.ignoresSafeArea(edges: .vertical))
         }
         .transition(.move(edge: .leading))
     }
