@@ -47,9 +47,12 @@ public struct GroupMapScreen: View {
         .onReceive(Self.ticker) { date in now = date }
     }
 
-    /// specs/010 §3.2/§3.4 (amended 2026-08-26, row I39) — mirrors `LiveMapScreen`'s
+    /// specs/010 §3.2/§3.4 (amended 2026-08-27, row I45) — mirrors `LiveMapScreen`'s
     /// `mapWithChromeAndSheet` exactly: the `GeometryReader` is the render boundary that resolves
-    /// `viewModel.mapViewportSizePt` for the pure `MapRegion(fitting:viewSizePt:)` translation.
+    /// `viewModel.mapViewportSizePt` for the pure `MapRegion(fitting:viewSizePt:)` translation. The
+    /// reader itself is deliberately safe-area-respecting (see the trailing doc below) — only the
+    /// map child ignores it, so `topChrome` and the sheet chained after this lay out against the
+    /// true safe area.
     private var mapWithChromeAndSheet: some View {
         GeometryReader { geometry in
             ZStack(alignment: .top) {
@@ -60,21 +63,32 @@ public struct GroupMapScreen: View {
                     .padding(.horizontal, theme.spacing.md)
                     .padding(.top, theme.spacing.sm)
             }
-            .onAppear { viewModel.mapViewportSizePt = geometry.size }
-            .onChange(of: geometry.size) { viewModel.mapViewportSizePt = $0 }
+            .onAppear { viewModel.mapViewportSizePt = bledViewportSize(geometry) }
+            .onChange(of: geometry.size) { _ in viewModel.mapViewportSizePt = bledViewportSize(geometry) }
+            // Rotation is already covered by the `geometry.size` observer above (width/height swap
+            // fires it), but a resized-window host (iPad Stage Manager / split view / an external
+            // display's differing notch) can in principle change `safeAreaInsets` — e.g. moving to
+            // a screen with no home indicator — while the reported point size stays identical.
+            // `EdgeInsets` is `Equatable`, so this costs nothing when it never fires in practice.
+            .onChange(of: geometry.safeAreaInsets) { _ in viewModel.mapViewportSizePt = bledViewportSize(geometry) }
         }
-        // specs/010 §3.4 (I39 review fix 1) — `.ignoresSafeArea()` on the CHILD map view alone left
-        // the `GeometryReader` itself safe-area-constrained, so `mapViewportSizePt` under-reported
-        // the true full-bleed extent by roughly the status bar/notch + home indicator (almost
-        // entirely on the height/latitude axis) -- the fixed padding was then exact against the
-        // measured frame, not the frame the user actually sees. Ignoring the safe area on the
-        // reader itself is the standard idiom for measuring the true full-bleed size. Chained
-        // BEFORE `.findlyBottomSheet` so the sheet's own occlusion still never shrinks the
-        // measurement (unchanged from before this fix).
-        .ignoresSafeArea()
+        // specs/010 §3.4 (I45 fix — TestFlight 220 regression: dead sheet space at the bottom of
+        // every detent, ⌖/back drawn under the Dynamic Island and untappable). I39 put
+        // `.ignoresSafeArea()` on the reader itself to fix the measurement, but that pulls the
+        // READER'S ENTIRE SUBTREE out of the safe area — including `topChrome` (laid out under the
+        // notch) and this `.findlyBottomSheet` (sized against a frame that overruns the home
+        // indicator). The reader now respects the safe area again — `topChrome` and the sheet are
+        // correct — and `mapViewportSizePt` is instead recovered arithmetically via
+        // `MapViewport.bled` from `geometry.safeAreaInsets` (see that type's doc for why that's
+        // lossless). Chained BEFORE `.findlyBottomSheet`, same as before, so the sheet's own
+        // occlusion still never shrinks the measurement.
         .findlyBottomSheet(selection: $sheetDetent) { detent in
             rosterSheetContent(detent: detent)
         }
+    }
+
+    private func bledViewportSize(_ geometry: GeometryProxy) -> CGSize {
+        MapViewport.bled(constrained: geometry.size, safeAreaInsets: geometry.safeAreaInsets)
     }
 
     private var topChrome: some View {

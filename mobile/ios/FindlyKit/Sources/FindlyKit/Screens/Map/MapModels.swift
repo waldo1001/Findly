@@ -1,5 +1,6 @@
 import CoreGraphics
 import Foundation
+import SwiftUI
 
 /// specs/004-ios-client.md I2 (001 §5.2) — a platform-agnostic map viewport, decoupled from
 /// `MKCoordinateRegion` so a `MapRendering` implementation that doesn't use MapKit never needs to
@@ -103,6 +104,31 @@ extension MapRegion {
 
     private static func spanDegrees(forZoom zoom: Double) -> Double {
         360.0 / pow(2.0, zoom)
+    }
+}
+
+/// specs/010-app-shell-and-screen-ux.md §3.4 (I45 fix — "app shell & screen UX regression: dead
+/// sheet space, notch-clashing chrome"). I39 made the `LiveMapScreen`/`GroupMapScreen`
+/// `GeometryReader` itself `.ignoresSafeArea()` so `geometry.size` would report the true
+/// full-bleed extent instead of the safe-area-constrained one — but `.ignoresSafeArea()` on the
+/// reader pulls its ENTIRE subtree out of the safe area, including `topChrome` (drawn under the
+/// Dynamic Island/notch, untappable) and the `FindlyBottomSheet` chained after it (sized against a
+/// frame that overruns the home indicator, producing dead space at the bottom of every detent).
+///
+/// The fix: the reader goes back to respecting the safe area (so `topChrome` and the sheet lay out
+/// correctly again), and the full-bleed size is recovered arithmetically instead.
+/// `GeometryProxy.safeAreaInsets` reports exactly the margins SwiftUI subtracted off
+/// `geometry.size` to produce the constrained value, so adding them back is lossless — this
+/// recovers the identical full-bleed size `.ignoresSafeArea()` on the reader used to produce,
+/// without changing anything about how the subtree itself is laid out. Kept as a free function
+/// (not folded into a view) purely so the arithmetic is unit-testable independent of any live view
+/// hierarchy (`MapViewportBleedingTests`) — `swift test` has no `GeometryReader` to instantiate.
+public enum MapViewport {
+    public static func bled(constrained size: CGSize, safeAreaInsets insets: EdgeInsets) -> CGSize {
+        CGSize(
+            width: size.width + insets.leading + insets.trailing,
+            height: size.height + insets.top + insets.bottom
+        )
     }
 }
 
