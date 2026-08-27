@@ -82,9 +82,35 @@ public struct GroupMapScreen: View {
         // `MapViewport.bled` from `geometry.safeAreaInsets` (see that type's doc for why that's
         // lossless). Chained BEFORE `.findlyBottomSheet`, same as before, so the sheet's own
         // occlusion still never shrinks the measurement.
-        .findlyBottomSheet(selection: $sheetDetent) { detent in
+        // specs/010 §3.2/§3.1 (I46) — same measured-height detents as the Family Map (no drawer
+        // here to dismiss the sheet for, §3.2's own doc: "No drawer").
+        .findlyBottomSheet(
+            selection: $sheetDetent,
+            minimizedHeight: sheetMinimizedHeight,
+            standardHeight: sheetStandardHeight,
+            standardHeightCap: viewModel.mapViewportSizePt.height
+        ) { detent in
             rosterSheetContent(detent: detent)
         }
+    }
+
+    /// specs/010 §3.1/§3.2 (I46) — computed, not measured; see `FindlyBottomSheet`'s header doc for
+    /// why. Group rosters never show `Locate now` (§3.2: position-only, no push-to-locate flow).
+    private var sheetMinimizedHeight: CGFloat {
+        guard case .loaded = viewModel.state else { return 160 }
+        return FindlyBottomSheetHeightPlanning.minimizedHeight(
+            typography: theme.typography, spacing: theme.spacing, showsLocateNow: false
+        )
+    }
+
+    /// specs/010 §3.1/§3.2 (I46) — `fullRoster`'s shape here is simpler than the Family Map's: one
+    /// `FindlyListRow` and one divider per member (position-only, no per-device sub-rows).
+    private var sheetStandardHeight: CGFloat {
+        guard case .loaded(let members) = viewModel.state else { return 320 }
+        return FindlyBottomSheetHeightPlanning.standardHeight(
+            typography: theme.typography, spacing: theme.spacing, showsLocateNow: false,
+            rowCount: members.count, dividerCount: members.count
+        )
     }
 
     private func bledViewportSize(_ geometry: GeometryProxy) -> CGSize {

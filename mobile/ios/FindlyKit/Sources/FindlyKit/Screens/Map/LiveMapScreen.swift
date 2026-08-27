@@ -150,9 +150,52 @@ public struct LiveMapScreen: View {
         // `MapViewport.bled` from `geometry.safeAreaInsets` (see that type's doc for why that's
         // lossless). Chained BEFORE `.findlyBottomSheet`, same as before, so the sheet's own
         // occlusion still never shrinks the measurement.
-        .findlyBottomSheet(selection: $sheetDetent) { detent in
+        // specs/010 §1.2/§3.1 (I46, `39e92a4`) — dismiss the sheet while the drawer is open: a
+        // `.sheet` presents above the ENTIRE view hierarchy, so the in-hierarchy drawer (§1.2)
+        // below can never be brought above it by z-order alone. `standardHeightCap` reuses the
+        // same measured viewport height §3.4's camera fitting already threads through this
+        // GeometryReader, as a practical stand-in for `.large`'s actual extent.
+        .findlyBottomSheet(
+            selection: $sheetDetent,
+            isPresented: .constant(!isDrawerOpen),
+            minimizedHeight: sheetMinimizedHeight,
+            standardHeight: sheetStandardHeight,
+            standardHeightCap: viewModel.mapViewportSizePt.height
+        ) { detent in
             rosterSheetContent(detent: detent)
         }
+    }
+
+    /// specs/010 §3.1 (I46) — computed, not measured; see `FindlyBottomSheet`'s header doc for why.
+    /// Non-`.loaded` states (loading/error/routing) render `LoadingStateView`/`ErrorStateView`
+    /// instead of the roster — a fixed, modest fallback is fine there since those states are
+    /// transient and neither is the roster this rule targets.
+    private var sheetMinimizedHeight: CGFloat {
+        guard case .loaded(let members) = viewModel.state else { return 160 }
+        return FindlyBottomSheetHeightPlanning.minimizedHeight(
+            typography: theme.typography,
+            spacing: theme.spacing,
+            showsLocateNow: selectedMember(in: members) != nil
+        )
+    }
+
+    /// specs/010 §3.1 (I46) — `fullRoster`'s actual row/divider shape: one `FindlyListRow` per
+    /// DEVICE (or one "no devices" row when a member has none), a divider between a member's own
+    /// devices, and one more divider after every member (mirrors `fullRoster`/`memberRow` below
+    /// exactly, so this stays correct if that layout ever changes without this comment being
+    /// re-read — the two are meant to be edited together).
+    private var sheetStandardHeight: CGFloat {
+        guard case .loaded(let members) = viewModel.state else { return 320 }
+        let rowCount = members.reduce(0) { $0 + max(1, $1.devices.count) }
+        let interDeviceDividers = members.reduce(0) { $0 + max(0, $1.devices.count - 1) }
+        let perMemberDividers = members.count
+        return FindlyBottomSheetHeightPlanning.standardHeight(
+            typography: theme.typography,
+            spacing: theme.spacing,
+            showsLocateNow: selectedMember(in: members) != nil,
+            rowCount: rowCount,
+            dividerCount: interDeviceDividers + perMemberDividers
+        )
     }
 
     private func bledViewportSize(_ geometry: GeometryProxy) -> CGSize {
