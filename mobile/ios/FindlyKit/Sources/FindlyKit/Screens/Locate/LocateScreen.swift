@@ -92,10 +92,16 @@ public struct LocateScreen: View {
             // simply never answered ("expired", or any other non-pushFailed terminal) must not be
             // told the opposite of the truth. Mirrors Android's `LocateScreen` branching on the
             // terminal state's raw wire status.
+            // I51 re-review fix (Minor, finding 2): mirrors Android's `LocateScreen`/`FindlyStatusChip`
+            // tone mapping (Warning = stale, Neutral = paused) — an ordinary expiry isn't as serious as
+            // a device that couldn't be reached, so it gets the calmer `.paused` tone. The suffixed
+            // copy stays: Android uses the same "— showing last known" wording for both outcomes, and
+            // post-B26 it's literally true here too since the fallback leaves the last-known position
+            // on screen.
             if viewModel.wireStatus == .pushFailed {
                 StatusChip("Couldn't reach the device — showing last known", kind: .stale)
             } else {
-                StatusChip("Request expired — showing last known", kind: .stale)
+                StatusChip("Request expired — showing last known", kind: .paused)
             }
         case .failed(let message):
             ErrorStateView(message: message) {
