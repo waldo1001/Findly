@@ -142,12 +142,18 @@ class LocateStateHolder(
      * satisfy `now() >= expiresAt` on the very first poll tick and report UNREACHABLE before the
      * target could possibly have answered. Returns `null` (never expires locally) if either
      * timestamp fails to parse — the loop then only ever ends via an explicit terminal status or a
-     * poll failure, same as before this fix for a malformed response. */
+     * poll failure, same as before this fix for a malformed response.
+     *
+     * **A39's final round, finding 2 (Minor):** a zero-length window (`createdAt == expiresAt`) is
+     * malformed data, not a legitimately already-expired request, and must be treated the same as
+     * an unparseable timestamp — `takeIf { it > Duration.ZERO }` (not `!it.isNegative`) so
+     * `Duration.ZERO` also returns `null` instead of satisfying `hasElapsedPollWindow` on the very
+     * first poll tick. */
     private fun pollWindowFor(createdAt: String, expiresAt: String): Duration? {
         val created = parseInstantOrNull(createdAt) ?: return null
         val expires = parseInstantOrNull(expiresAt) ?: return null
         val window = Duration.between(created, expires)
-        return window.takeIf { !it.isNegative }
+        return window.takeIf { it > Duration.ZERO }
     }
 
     /** Both readings come from the same [now] clock, so a constant skew in that clock cancels out
