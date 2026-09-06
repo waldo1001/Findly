@@ -91,15 +91,16 @@ public final class SystemLocationProvider: NSObject, LocationProviding, SystemLo
     private let manager: CLLocationManager
     private let batteryLevelProvider: () -> Int
 
-    /// One in-flight `requestSingleFix` continuation at a time — CoreLocation's `requestLocation()`
-    /// is itself documented as "do not call again until the previous request completes", so a
-    /// second concurrent call here would be a caller bug; the guard makes that fail loud (throws)
-    /// instead of silently double-resuming a continuation (a runtime crash) or leaking one (a hang).
-    private var pendingFixContinuation: CheckedContinuation<LocationFix, Error>?
-    private var pendingFixSource: FixSource?
+    /// specs/009 §3.4 (I50 fix 5) — every in-flight `requestSingleFix` caller, keyed and resumed
+    /// independently so a second concurrent caller (I52's presence timer, I51's `LOCATE_REQUEST`
+    /// handler, and the opportunistic BG-refresh trigger can all call this concurrently) resumes
+    /// exactly once instead of silently overwriting — and leaking — an earlier caller's
+    /// continuation. See `PendingFixContinuations`'s own doc for the full rationale.
+    private let pendingFixes = PendingFixContinuations()
 
-    /// The coordinator background monitoring hands significant-location-change callbacks to — set
-    /// once by `startBackgroundMonitoring(coordinator:)`, cleared by `stopBackgroundMonitoring()`.
+    /// The coordinator background monitoring hands significant-location-change/visit callbacks
+    /// to — set once by `startBackgroundMonitoring(coordinator:)`, cleared by
+    /// `stopBackgroundMonitoring()`.
     private weak var backgroundCoordinator: FixCaptureCoordinator?
 
     /// `batteryLevelProvider` is injected (not read from `UIDevice` directly) so this class stays
@@ -168,63 +169,85 @@ public final class SystemLocationProvider: NSObject, LocationProviding, SystemLo
         // all if we already know it will fail.
         guard isAuthorized else { throw LocationProvidingError.permissionDenied }
 
-        let timeout = FixAccuracyPolicy.timeout(for: source)
-        manager.desiredAccuracy = Self.clAccuracy(for: FixAccuracyPolicy.tier(for: source))
-
-        return try await withThrowingTaskGroup(of: LocationFix.self) { group in
-            group.addTask { [weak self] in
-                guard let self else { throw LocationProvidingError.notImplemented }
-                return try await self.awaitNextLocation(source: source)
-            }
-            group.addTask {
-                try await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
-                throw LocationProvidingError.timedOut
-            }
-            defer { group.cancelAll() }
-            do {
-                let result = try await group.next()!
-                return result
-            } catch {
-                // specs/009 §1.1: "no fix is better than a burned battery" - give up silently on
-                // timeout; a genuine CoreLocation failure still propagates so the caller can log
-                // (never a coordinate/deviceId) an error *category*.
-                self.failPendingFix(with: error)
-                throw error
-            }
-        }
+        return try await awaitNextLocation(source: source)
     }
 
     /// Bridges `CLLocationManagerDelegate`'s callback-based `requestLocation()` to `async/await`
-    /// via a checked continuation. Never leaks/double-resumes: `pendingFixContinuation` is
-    /// consumed exactly once by whichever of `locationManager(_:didUpdateLocations:)` /
-    /// `locationManager(_:didFailWithError:)` / the timeout race (`failPendingFix`) fires first;
-    /// every one of those three paths nils the property out as it resumes.
+    /// via a checked continuation, registered in `pendingFixes` (specs/009 §3.4, I50 fix 5) rather
+    /// than a single property. `CLLocationManager.requestLocation()` itself is (re-)issued only
+    /// when `pendingFixes.register` reports `needsPlatformRequest` — a caller joining an
+    /// already-in-flight request AT AN EQUAL OR LOWER ACCURACY TIER rides along and is resumed by
+    /// the same eventual delegate callback via `pendingFixes.resumeAll`, at no extra GPS cost. Each
+    /// call schedules its OWN independent timeout (its `FixAccuracyPolicy` tier's own value —
+    /// `geofence`'s 15 s vs. everything else's 30 s), so one caller giving up does not disturb any
+    /// other concurrently-pending caller (specs/009 §1.1: "no fix is better than a burned
+    /// battery" — applies per caller, not globally).
+    ///
+    /// **I50 fixes 1+2 (Blocking + Major).** `desiredAccuracy` used to be set unconditionally on
+    /// every call, before this method even knew whether it would actually issue a request — so (a)
+    /// a `.locate` joining an in-flight `.periodic` never got CoreLocation to raise its accuracy at
+    /// all (the write happened, but with no fresh `requestLocation()` to apply it to, and the
+    /// eventual balanced-accuracy delivery was resumed as the mistagged `.locate` result), and (b)
+    /// a `.periodic` arriving during an in-flight `.locate` LOWERED the shared manager's accuracy
+    /// mid-flight, degrading the running high-accuracy request. Setting `desiredAccuracy` ONLY on
+    /// the branch that actually (re-)issues the request — using the seam `register` already
+    /// computed (`needsPlatformRequest` is true exactly when this caller's tier is strictly higher
+    /// than everything already pending) — fixes both: the manager is only ever raised, never
+    /// lowered, while any caller is pending, and a genuinely higher-tier joiner does get its own
+    /// fresh, correctly-accurate `requestLocation()`.
+    ///
+    /// **I50 review 2nd round, Major.** The above decision (`needsPlatformRequest`) was computed
+    /// under `pendingFixes`' lock, but the `manager.desiredAccuracy`/`requestLocation()` calls that
+    /// acted on it ran AFTER that lock was released — on whatever thread the calling `Task` happens
+    /// to be on, which is by design not guaranteed to be the same thread/actor as any other
+    /// concurrent caller (I52's presence timer, I51's push handler, the background-refresh trigger).
+    /// So a caller told to issue could still have its `requestLocation()` land AFTER a second,
+    /// higher-tier caller's — Apple documents that a new `requestLocation()` cancels the previous
+    /// one, so the last mutation silently wins regardless of tier, reintroducing the original
+    /// Blocking symptom under a race window. The same gap let fix 8's belated
+    /// `stopUpdatingLocation()` (below) cancel a brand-new caller's just-issued, legitimately
+    /// pending request. `registerAndAct`/`timeOutAndAct` (`PendingFixContinuations`) close this by
+    /// running the manager mutation WHILE STILL HOLDING that same lock, so "decide, then act" is one
+    /// indivisible step for both register and timeout — see their docs for the full rationale, and
+    /// `PendingFixContinuationsTests` for the registry-level ordering tests (CoreLocation itself
+    /// isn't testable here).
     private func awaitNextLocation(source: FixSource) async throws -> LocationFix {
-        try await withCheckedThrowingContinuation { continuation in
-            self.pendingFixContinuation = continuation
-            self.pendingFixSource = source
-            self.manager.requestLocation()
+        let timeout = FixAccuracyPolicy.timeout(for: source)
+        return try await withCheckedThrowingContinuation { continuation in
+            let id = pendingFixes.registerAndAct(source: source, continuation: continuation) {
+                manager.desiredAccuracy = Self.clAccuracy(for: FixAccuracyPolicy.tier(for: source))
+                manager.requestLocation()
+            }
+            Task { [weak self] in
+                try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+                guard let self else { return }
+                // I50 fix 8 (Minor) — every pending caller (this one included) has now timed out;
+                // nothing is left waiting on CoreLocation's in-flight request, so cancel it rather
+                // than let a stray late delivery fall through to the significant-location-change
+                // hint path mislabeled `source: "periodic"` (specs/001 §5.1's `source` is meant to
+                // say what actually triggered the capture). `stopUpdatingLocation()` is
+                // CoreLocation's documented way to cancel a `requestLocation()` still in flight.
+                self.pendingFixes.timeOutAndAct(id: id, error: LocationProvidingError.timedOut) {
+                    self.manager.stopUpdatingLocation()
+                }
+            }
         }
-    }
-
-    /// Called on the timeout race losing (a genuine timeout) or CoreLocation itself failing —
-    /// resumes the pending continuation exactly once, a no-op if it already resumed via
-    /// `didUpdateLocations`.
-    private func failPendingFix(with error: Error) {
-        guard let continuation = pendingFixContinuation else { return }
-        pendingFixContinuation = nil
-        pendingFixSource = nil
-        continuation.resume(throwing: error)
     }
 
     public func startBackgroundMonitoring(coordinator: FixCaptureCoordinator) {
         backgroundCoordinator = coordinator
-        guard isAuthorized else { return }
+        // specs/009 §3.4 (I50 fix 3, amended 2026-09-06): significant-location-change monitoring
+        // and visit monitoring (§3.4's second cheap wake) both need Always — When-In-Use cannot
+        // wake a suspended app, so starting either earlier only misleads the permission banner
+        // logic. Previously gated on `isAuthorized` (whenInUse-or-always).
+        guard BackgroundLocationPolicy.shouldMonitorSignificantChangesAndVisits(for: authorization) else { return }
         manager.startMonitoringSignificantLocationChanges()
+        manager.startMonitoringVisits()
     }
 
     public func stopBackgroundMonitoring() {
         manager.stopMonitoringSignificantLocationChanges()
+        manager.stopMonitoringVisits()
         backgroundCoordinator = nil
     }
 
@@ -237,24 +260,46 @@ public final class SystemLocationProvider: NSObject, LocationProviding, SystemLo
 }
 
 extension SystemLocationProvider: CLLocationManagerDelegate {
-    /// specs/009 §7 — the app must notice authorization changes without waiting for a foreground
-    /// cycle. Fires when the user answers the dialog, and again if they change the setting in
-    /// system Settings and return. Carries no location data, so the notification is safe to
-    /// broadcast (docs/security-review-checklist.md).
+    /// specs/009 §7/§3.4 — the app must notice authorization changes without waiting for a
+    /// foreground cycle. Fires when the user answers the dialog, and again if they change the
+    /// setting in system Settings and return. Carries no location data, so the notification is
+    /// safe to broadcast (docs/security-review-checklist.md).
+    ///
+    /// **I50 fix 1** — also applies `allowsBackgroundLocationUpdates` here, not just once at
+    /// construction: it MUST be `true` exactly while authorization is Always and `false`
+    /// otherwise (specs/009 §3.4 "Background delivery of one-shot requests" — the root cause of
+    /// every silent iOS background capture, since the property defaults to `false` and
+    /// CoreLocation withholds standard-service `requestLocation()` delivery in the background
+    /// without it). Reacting here, not just once, is what keeps it correct when authorization
+    /// drops below Always later (e.g. the user revokes it from system Settings).
     public func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+        applyBackgroundLocationUpdatesPolicy()
         NotificationCenter.default.post(name: .findlyLocationAuthorizationChanged, object: nil)
+    }
+
+    /// specs/009 §3.4 (I50 fix 1). Setting this without the `location` `UIBackgroundModes` entry
+    /// or the Always permission is a CoreLocation runtime error — both preconditions hold here:
+    /// `Findly/Info.plist` already declares the `location` background mode, and
+    /// `BackgroundLocationPolicy.allowsBackgroundLocationUpdates` only ever returns `true` for
+    /// `.always`.
+    private func applyBackgroundLocationUpdatesPolicy() {
+        manager.allowsBackgroundLocationUpdates = BackgroundLocationPolicy.allowsBackgroundLocationUpdates(for: authorization)
+        manager.showsBackgroundLocationIndicator = false
     }
 
     public func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         guard let location = locations.last else { return }
-        if let continuation = pendingFixContinuation, let source = pendingFixSource {
-            pendingFixContinuation = nil
-            pendingFixSource = nil
-            continuation.resume(returning: location.toLocationFix(source: source, batteryPct: batteryLevelProvider()))
-            return
+        // specs/009 §3.4 (I50 fix 5) — resumes EVERY pending `requestSingleFix` caller (there may
+        // be more than one concurrently waiting on this single in-flight `requestLocation()`),
+        // each tagged with its own `source`. `resumeAll` reports whether anything was actually
+        // resumed so a stray delivery with nobody waiting still falls through to the
+        // significant-location-change/visit hint path below.
+        let resolvedAPendingFix = pendingFixes.resumeAll { source in
+            location.toLocationFix(source: source, batteryPct: self.batteryLevelProvider())
         }
+        guard !resolvedAPendingFix else { return }
         // Not a pending single-fix request - this is a significant-location-change delegate
-        // callback (or a stray late delivery after the single-fix request already resolved via
+        // callback (or a stray late delivery after every single-fix request already resolved via
         // timeout). Route through the coordinator's own suppression (specs/009 §1.2) as a
         // `.periodic` hint rather than enqueuing directly.
         guard let coordinator = backgroundCoordinator else { return }
@@ -262,20 +307,50 @@ extension SystemLocationProvider: CLLocationManagerDelegate {
         Task { await coordinator.captureAndQueue(source: .periodic, hint: fix) }
     }
 
+    /// specs/009 §3.4 (I50 fix 3, amended 2026-09-06) — visit monitoring, the second cheap wake,
+    /// "treated exactly like an SLC callback": the OS-supplied location is passed through the same
+    /// `FixCaptureCoordinator` path (as a `.periodic` hint, subject to §1.2 suppression) rather
+    /// than enqueued directly. The timestamp prefers `departureDate` over `arrivalDate` — see
+    /// `VisitTimestampPolicy`'s doc for why (I50 fix 3, Major: iOS reports a completed visit at
+    /// departure, so preferring arrival stamped a long stay's fix hours stale). `accuracyM` is
+    /// clamped to the backend's `[0, 10000]` range (I50 fix 7, Minor) — `CLVisit.horizontalAccuracy`
+    /// has no documented range, and an out-of-range value is a definitive `400 VALIDATION_FAILED`
+    /// that kills the whole batch (specs/001 §5.1).
+    public func locationManager(_ manager: CLLocationManager, didVisit visit: CLVisit) {
+        guard let coordinator = backgroundCoordinator else { return }
+        let timestamp = VisitTimestampPolicy.timestamp(arrivalDate: visit.arrivalDate, departureDate: visit.departureDate, now: Date())
+        let fix = LocationFix(
+            fixId: UUID().uuidString,
+            recordedAt: ISO8601DateFormatter().string(from: timestamp),
+            lat: visit.coordinate.latitude,
+            lon: visit.coordinate.longitude,
+            accuracyM: AccuracyClamp.clamp(visit.horizontalAccuracy),
+            batteryPct: batteryLevelProvider(),
+            source: .periodic
+        )
+        Task { await coordinator.captureAndQueue(source: .periodic, hint: fix) }
+    }
+
     public func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
-        // specs/009 §9: never log coordinates/deviceId/tokens - only an error category.
-        failPendingFix(with: LocationProvidingError.underlying(String(describing: type(of: error))))
+        // specs/009 §9: never log coordinates/deviceId/tokens - only an error category. Resumes
+        // EVERY pending caller (specs/009 §3.4, I50 fix 5) - CoreLocation delivered one failure for
+        // however many callers are waiting on the single in-flight request.
+        pendingFixes.failAll(with: LocationProvidingError.underlying(String(describing: type(of: error))))
     }
 }
 
 private extension CLLocation {
+    /// `accuracyM` is clamped to the backend's `[0, 10000]` range (I50 fix 7, Minor,
+    /// pre-existing) — `CLLocation.horizontalAccuracy` is documented to go negative when the value
+    /// is invalid, and an out-of-range `accuracyM` is a definitive `400 VALIDATION_FAILED` that
+    /// kills the whole batch (specs/001 §5.1).
     func toLocationFix(source: FixSource, batteryPct: Int) -> LocationFix {
         LocationFix(
             fixId: UUID().uuidString,
             recordedAt: ISO8601DateFormatter().string(from: timestamp),
             lat: coordinate.latitude,
             lon: coordinate.longitude,
-            accuracyM: horizontalAccuracy,
+            accuracyM: AccuracyClamp.clamp(horizontalAccuracy),
             altitudeM: verticalAccuracy >= 0 ? altitude : nil,
             speedMps: speed >= 0 ? speed : nil,
             bearingDeg: course >= 0 ? course : nil,

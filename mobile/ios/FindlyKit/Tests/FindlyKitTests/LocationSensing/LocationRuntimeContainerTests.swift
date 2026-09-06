@@ -95,6 +95,112 @@ struct LocationRuntimeContainerTests {
         #expect(scheduler.scheduleCalls == [TimeInterval(6 * 60 * 60)], "the BG task must still be scheduled, bounded to specs/009 §4's 'at least every 6 hours'")
     }
 
+    @Test func start_whenOnlyWhenInUseAuthorized_doesNotArmSignificantLocationChangeMonitoring() {
+        // specs/009 §3.4 (I50 fix 3, amended 2026-09-06): significant-location-change monitoring
+        // "MUST be started only with Always authorization (When-In-Use cannot wake a suspended
+        // app; starting it earlier only misleads the permission banner logic)." Before this fix
+        // the container's own gate accepted `.whenInUse` too.
+        let provider = FakeLocationProviding()
+        provider.authorization = .whenInUse
+        let scheduler = FakeBackgroundSyncScheduler()
+        let container = LocationRuntimeContainer(
+            apiClient: FakeAPIClient(), deviceId: { "device-1" },
+            locationProvider: provider, backgroundScheduler: scheduler
+        )
+
+        container.start()
+
+        #expect(provider.startBackgroundMonitoringCallCount == 0, "When-In-Use cannot wake a suspended app - SLC/visit monitoring needs Always")
+        #expect(scheduler.scheduleCalls == [nil], "the opportunistic BGAppRefreshTask trigger is unaffected by this gate")
+    }
+
+    @Test func onAuthorizationChanged_whenOnlyWhenInUseAuthorized_doesNotArmMonitoring() {
+        // The other call site of the same gate (specs/009 §7: react to authorization changes, not
+        // just the initial state) - answering the OS dialog with "While Using the App" must not
+        // arm SLC/visit monitoring either.
+        let provider = FakeLocationProviding()
+        provider.authorization = .whenInUse
+        let scheduler = FakeBackgroundSyncScheduler()
+        let container = LocationRuntimeContainer(
+            apiClient: FakeAPIClient(), deviceId: { "device-1" },
+            locationProvider: provider, backgroundScheduler: scheduler
+        )
+
+        container.onAuthorizationChanged()
+
+        #expect(provider.startBackgroundMonitoringCallCount == 0)
+    }
+
+    @Test func onAuthorizationChanged_whenAlwaysAuthorized_armsMonitoring() {
+        let provider = FakeLocationProviding()
+        provider.authorization = .always
+        let scheduler = FakeBackgroundSyncScheduler()
+        let container = LocationRuntimeContainer(
+            apiClient: FakeAPIClient(), deviceId: { "device-1" },
+            locationProvider: provider, backgroundScheduler: scheduler
+        )
+
+        container.onAuthorizationChanged()
+
+        #expect(provider.startBackgroundMonitoringCallCount == 1)
+    }
+
+    @Test func onAuthorizationChanged_downgradedFromAlways_stopsMonitoring() {
+        // Security review Medium finding — onAuthorizationChanged only ever STARTED monitoring
+        // when newly eligible; nothing stopped significant-location-change/visit monitoring when
+        // Always is revoked while they're running. specs/009 §1.3 requires presence to stop
+        // immediately on permission revocation, and for a location app a path that keeps
+        // collecting after a downgrade is an App Store review problem, not just a bug.
+        let provider = FakeLocationProviding()
+        provider.authorization = .always
+        let scheduler = FakeBackgroundSyncScheduler()
+        let container = LocationRuntimeContainer(
+            apiClient: FakeAPIClient(), deviceId: { "device-1" },
+            locationProvider: provider, backgroundScheduler: scheduler
+        )
+        container.onAuthorizationChanged() // Always granted - monitoring starts.
+        #expect(provider.startBackgroundMonitoringCallCount == 1)
+
+        provider.authorization = .whenInUse // The user revokes Always from system Settings.
+        container.onAuthorizationChanged()
+
+        #expect(provider.stopBackgroundMonitoringCallCount == 1, "significant-location-change/visit monitoring must stop the moment Always is revoked")
+    }
+
+    @Test func onAuthorizationChanged_downgradedToDenied_stopsMonitoring() {
+        let provider = FakeLocationProviding()
+        provider.authorization = .always
+        let scheduler = FakeBackgroundSyncScheduler()
+        let container = LocationRuntimeContainer(
+            apiClient: FakeAPIClient(), deviceId: { "device-1" },
+            locationProvider: provider, backgroundScheduler: scheduler
+        )
+        container.onAuthorizationChanged()
+        #expect(provider.startBackgroundMonitoringCallCount == 1)
+
+        provider.authorization = .denied
+        container.onAuthorizationChanged()
+
+        #expect(provider.stopBackgroundMonitoringCallCount == 1)
+    }
+
+    @Test func onAuthorizationChanged_stillAlways_doesNotRedundantlyStopMonitoring() {
+        // A same-state notification (e.g. a spurious re-post) must not stop monitoring that is
+        // correctly still supposed to be running.
+        let provider = FakeLocationProviding()
+        provider.authorization = .always
+        let scheduler = FakeBackgroundSyncScheduler()
+        let container = LocationRuntimeContainer(
+            apiClient: FakeAPIClient(), deviceId: { "device-1" },
+            locationProvider: provider, backgroundScheduler: scheduler
+        )
+        container.onAuthorizationChanged()
+
+        container.onAuthorizationChanged()
+
+        #expect(provider.stopBackgroundMonitoringCallCount == 0)
+    }
+
     @Test func stop_stopsMonitoringAndCancelsTheSchedule() {
         let provider = FakeLocationProviding()
         let scheduler = FakeBackgroundSyncScheduler()
@@ -374,6 +480,33 @@ struct LocationRuntimeContainerTests {
 
         #expect(stateStore.current()?.trackingEnabled == true)
         #expect(getGeofencesCallCount == 1)
+    }
+
+    @Test func resumeFromPause_whenOnlyWhenInUseAuthorized_doesNotArmMonitoring() async {
+        // specs/009 §3.4 (I50 fix 3) - the `onResume` closure has its OWN inline authorization
+        // check (it cannot call `startMonitoringIfAuthorized()`, a private method on `self`, from
+        // inside `init` before all members exist - see that closure's doc) which must use the
+        // SAME Always-only gate, not just the cold-start path exercised above.
+        let provider = FakeLocationProviding()
+        provider.authorization = .whenInUse
+        let api = FakeAPIClient()
+        api.getGeofencesHandler = { _ in .notModified }
+        api.listDevicesHandler = {
+            TestFeatures.envelope(ListDevicesResponse(devices: [
+                DeviceListItem(
+                    deviceId: "device-1", ownerUserId: "user-1", platform: "ios", deviceName: "iPhone",
+                    model: "iPhone15,2", appVersion: "1.0.0", syncIntervalMinutes: 15, trackingEnabled: true,
+                    pushInvalid: false, ownerDisplayName: "Alex", lastSeenAt: "2026-07-19T09:00:00Z"
+                )
+            ]))
+        }
+        let stateStore = InMemoryDeviceSettingsStateStore(initial: DeviceSettingsSnapshot(syncIntervalMinutes: 15, trackingEnabled: false))
+        let container = LocationRuntimeContainer(apiClient: api, deviceId: { "device-1" }, locationProvider: provider, stateStore: stateStore)
+
+        await container.onAppForeground() // polls GET /devices -> observes the resume
+
+        #expect(stateStore.current()?.trackingEnabled == true)
+        #expect(provider.startBackgroundMonitoringCallCount == 0, "When-In-Use cannot wake a suspended app - resume must not arm SLC/visit monitoring without Always")
     }
 
     @Test func geofenceTransitionHandler_isExposedAndSharesTheContainersFixCaptureCoordinator() async {

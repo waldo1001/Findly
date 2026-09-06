@@ -167,7 +167,14 @@ public final class LocationRuntimeContainer {
             provider: locationProvider,
             queue: queue,
             isPaused: { stateStore.current()?.trackingEnabled == false },
-            isPermissionGranted: isPermissionGranted
+            isPermissionGranted: isPermissionGranted,
+            // I50 fix 6 (Minor) — the SAME store/interval `LocationSyncRunner` (below) reads and
+            // writes, so `SystemLocationProvider`'s significant-location-change/visit hint paths
+            // (which call `captureAndQueue(source: .periodic, hint:)` on THIS instance directly)
+            // are now subject to the identical §3.4 × 0.8 elapsed-time gate, instead of bypassing
+            // it entirely. See `FixCaptureCoordinator`'s own doc for why the gate lives here.
+            currentSyncIntervalMinutes: { stateStore.current()?.syncIntervalMinutes ?? Self.defaultSyncIntervalMinutes },
+            lastQueuedFixAtStore: lastQueuedFixAtStore
         )
         self.captureCoordinator = captureCoordinator
 
@@ -202,8 +209,13 @@ public final class LocationRuntimeContainer {
                 // Same authorization gate as `startMonitoringIfAuthorized()`, inlined: this
                 // closure is built inside `init` before all members exist, so it cannot call
                 // a method on `self`. Uses the same local captures the original call did.
-                let auth = locationProvider.authorization
-                if auth == .whenInUse || auth == .always {
+                //
+                // specs/009 §3.4 (I50 fix 3, amended 2026-09-06): significant-location-change
+                // monitoring (and visit monitoring, its §3.4 second cheap wake) needs Always —
+                // When-In-Use cannot wake a suspended app, so starting it there does nothing
+                // useful and only misleads the permission banner logic. Previously this accepted
+                // `.whenInUse` too.
+                if BackgroundLocationPolicy.shouldMonitorSignificantChangesAndVisits(for: locationProvider.authorization) {
                     locationProvider.startBackgroundMonitoring(coordinator: captureCoordinator)
                 }
                 backgroundScheduler.scheduleNextSync()
@@ -264,12 +276,27 @@ public final class LocationRuntimeContainer {
         }
     }
 
-    /// Call once the user has answered the OS prompt (specs/009 §7). Starts the monitoring that
-    /// every call site deliberately defers while authorization is still undetermined; a no-op if
-    /// permission was refused, or if tracking is paused.
+    /// Call once the user has answered the OS prompt, or whenever CoreLocation reports an
+    /// authorization change (specs/009 §7). Starts the monitoring that every call site
+    /// deliberately defers while authorization is still undetermined; a no-op if tracking is
+    /// paused (monitoring is already stopped on that path — see `onPause` in `init`).
+    ///
+    /// **I50 fix 5 (security review Medium) — also STOPS monitoring on a downgrade.** Previously
+    /// this method only ever started monitoring when newly eligible; there was no branch for the
+    /// opposite direction — Always being revoked (system Settings, or the OS itself) while
+    /// significant-location-change/visit monitoring is running. specs/009 §1.3 requires presence
+    /// to stop immediately on permission revocation, and for a location app a path that keeps
+    /// collecting after a downgrade is an App Store review problem, not only a bug. Mirrors how
+    /// `applyBackgroundLocationUpdatesPolicy` (`LocationProviding.swift`) already handles this
+    /// symmetrically for `allowsBackgroundLocationUpdates` — reacting on every change, downgrades
+    /// included.
     public func onAuthorizationChanged() {
         guard stateStore.current()?.trackingEnabled != false else { return }
-        startMonitoringIfAuthorized()
+        if BackgroundLocationPolicy.shouldMonitorSignificantChangesAndVisits(for: locationProvider.authorization) {
+            locationProvider.startBackgroundMonitoring(coordinator: captureCoordinator)
+        } else {
+            locationProvider.stopBackgroundMonitoring()
+        }
     }
 
     /// specs/009 §7 — **the only way this container starts location monitoring.**
@@ -282,8 +309,10 @@ public final class LocationRuntimeContainer {
     /// gate is what makes "no prompt before the explanation" a property of this type rather than
     /// something each caller has to remember.
     private func startMonitoringIfAuthorized() {
-        let auth = locationProvider.authorization
-        guard auth == .whenInUse || auth == .always else { return }
+        // specs/009 §3.4 (I50 fix 3, amended 2026-09-06) — Always-only; see
+        // `BackgroundLocationPolicy.shouldMonitorSignificantChangesAndVisits`'s doc. Previously
+        // this accepted `.whenInUse` too, which cannot wake a suspended app.
+        guard BackgroundLocationPolicy.shouldMonitorSignificantChangesAndVisits(for: locationProvider.authorization) else { return }
         locationProvider.startBackgroundMonitoring(coordinator: captureCoordinator)
     }
 

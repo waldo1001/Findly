@@ -47,7 +47,13 @@ struct LocationSyncRunnerTests {
         await queue.enqueue(makeFix()) // already-queued fix from an earlier trigger
         let lastQueuedFixAtStore = InMemoryLastQueuedFixAtStore(initial: Date())
         let syncCoordinator = LocationSyncCoordinator(queue: queue, apiClient: api, deviceId: { "device-1" })
-        let captureCoordinator = FixCaptureCoordinator(provider: provider, queue: queue, isPaused: { false }, isPermissionGranted: { true })
+        // I50 review 2nd round, Minor — the 0.8 threshold gate now lives solely in
+        // FixCaptureCoordinator (LocationSyncRunner's own copy was removed as a duplicate), so this
+        // test's "under threshold" scenario must be wired onto the coordinator, not the runner.
+        let captureCoordinator = FixCaptureCoordinator(
+            provider: provider, queue: queue, isPaused: { false }, isPermissionGranted: { true },
+            currentSyncIntervalMinutes: { 15 }, lastQueuedFixAtStore: lastQueuedFixAtStore
+        )
         let settingsApplying = FakeDeviceSettingsApplying()
         api.reportLocationsHandler = { _, _, _ in
             TestFeatures.envelope(ReportLocationsResponse(accepted: 1, duplicates: 0, lastKnownUpdated: true, deviceSettings: DeviceSettingsSnapshot(syncIntervalMinutes: 15, trackingEnabled: true), geofenceEtag: "0"))
@@ -72,7 +78,14 @@ struct LocationSyncRunnerTests {
         let queue = FixQueue()
         let lastQueuedFixAtStore = InMemoryLastQueuedFixAtStore(initial: Date(timeIntervalSince1970: 0))
         let syncCoordinator = LocationSyncCoordinator(queue: queue, apiClient: api, deviceId: { "device-1" })
-        let captureCoordinator = FixCaptureCoordinator(provider: provider, queue: queue, isPaused: { false }, isPermissionGranted: { true })
+        // I50 review 2nd round, Minor — see the sibling "below threshold" test's comment: the gate
+        // now lives solely in FixCaptureCoordinator, so this "above threshold" scenario is wired
+        // onto the coordinator too, to keep genuinely exercising the rule rather than passing
+        // vacuously because no gate is configured anywhere.
+        let captureCoordinator = FixCaptureCoordinator(
+            provider: provider, queue: queue, isPaused: { false }, isPermissionGranted: { true },
+            currentSyncIntervalMinutes: { 15 }, lastQueuedFixAtStore: lastQueuedFixAtStore
+        )
         api.reportLocationsHandler = { _, _, _ in
             TestFeatures.envelope(ReportLocationsResponse(accepted: 1, duplicates: 0, lastKnownUpdated: true, deviceSettings: DeviceSettingsSnapshot(syncIntervalMinutes: 15, trackingEnabled: true), geofenceEtag: "0"))
         }

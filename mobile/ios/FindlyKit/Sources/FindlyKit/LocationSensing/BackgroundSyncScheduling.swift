@@ -80,14 +80,51 @@ public final class SystemBackgroundSyncScheduler: BackgroundSyncScheduling {
                 task.setTaskCompleted(success: false)
                 return
             }
-            let work = Task {
+            // specs/009 §3.4 (I50 fix 2, amended 2026-09-06): "the registered handler MUST set an
+            // expirationHandler that cancels the work AND calls setTaskCompleted(success: false)."
+            // Apple's contract is that the expiration handler itself marks the task complete; a
+            // task left uncompleted is terminated by the system and counted against the app's
+            // future refresh budget. The shipped handler only cancelled `work`, never completing
+            // it — combined with item 1's fix (every run burning its full 30 s while
+            // `allowsBackgroundLocationUpdates` was false), this had been progressively starving
+            // the app of background time.
+            //
+            // I50 review fix 4 (Major): `work.cancel()` is cooperative and `LocationSyncRunner.
+            // runOnce()` awaits network I/O with no cancellation checks, so it typically finishes
+            // AFTER the expiration handler above already completed the task — the two
+            // `setTaskCompleted` calls below used to race unsynchronized. `BackgroundTaskCompletionGuard`
+            // is the pure, unit-tested "first call wins" guard that makes whichever of the two
+            // fires first win, and the other a no-op; `adapter` is the thin, `#if os(iOS) &&
+            // canImport(BackgroundTasks)`-only glue that lets the guard operate on the real
+            // `refreshTask`/`work` pair through `BackgroundTaskCompleting` without needing to know
+            // about either concrete type.
+            let completionGuard = BackgroundTaskCompletionGuard()
+            let adapter = BGAppRefreshTaskCompletionAdapter(refreshTask: refreshTask)
+            adapter.work = Task {
                 await handler()
-                refreshTask.setTaskCompleted(success: true)
+                completionGuard.complete(adapter, success: true)
             }
             refreshTask.expirationHandler = {
-                work.cancel()
+                completionGuard.expire(adapter)
             }
         }
     }
+}
+
+/// specs/009 §3.4 (I50 fix 4) — the one production conformance to `BackgroundTaskCompleting`,
+/// adapting a real `BGAppRefreshTask` + its `Task<Void, Never>` work handle. `work` is a `var`,
+/// set immediately after construction rather than passed to `init`, because the work `Task` itself
+/// needs a reference to this adapter (to call `completionGuard.complete(adapter, ...)`) before it
+/// can exist — see `registerLaunchHandler` above.
+private final class BGAppRefreshTaskCompletionAdapter: BackgroundTaskCompleting {
+    private let refreshTask: BGAppRefreshTask
+    var work: Task<Void, Never>?
+
+    init(refreshTask: BGAppRefreshTask) {
+        self.refreshTask = refreshTask
+    }
+
+    func cancelWork() { work?.cancel() }
+    func setTaskCompleted(success: Bool) { refreshTask.setTaskCompleted(success: success) }
 }
 #endif
