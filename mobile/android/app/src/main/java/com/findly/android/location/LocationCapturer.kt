@@ -39,17 +39,34 @@ data class CapturedFix(
  *
  * [FusedLocationCapturer] is the real, `FusedLocationProviderClient`-backed implementation (A10).
  *
+ * [maxCachedAgeMillis] (A40, specs/009 §1.1 "Accepting a recent cached position") bounds the
+ * `lastLocation` fallback used when the primary one-shot request comes back `null` — the caller's
+ * current `syncIntervalMinutes` converted to millis, so "a cached position ≤ `syncIntervalMinutes`
+ * old MAY be queued instead". It is meaningful only for `BALANCED` requests (`periodic`/
+ * `geofence`, via [com.findly.android.location.FixCaptureCoordinator]); `HIGH` (`locate`/`manual`)
+ * MUST NOT use either shortcut and ignores this parameter entirely (see [CapturePolicy]'s doc),
+ * so it defaults to `0` for callers — like
+ * [com.findly.android.pushmessages.LocateRequestPushHandler] — that never need to pass it.
+ *
  * A plain `interface`, not `fun interface`: Kotlin doesn't allow a default parameter value
  * ([timeoutMillis]'s) on a functional-interface's single abstract method. Nothing constructs this
  * via SAM-conversion (a bare trailing lambda) anywhere in the codebase, so this costs nothing.
  */
 interface LocationCapturer {
-    suspend fun captureFix(accuracy: LocationAccuracyTier, timeoutMillis: Long = 30_000L): CapturedFix?
+    suspend fun captureFix(
+        accuracy: LocationAccuracyTier,
+        timeoutMillis: Long = 30_000L,
+        maxCachedAgeMillis: Long = 0L,
+    ): CapturedFix?
 }
 
 /** A9's placeholder wiring target (`AppContainer`) until A10 lands the real implementation above —
  * always "no fix obtainable", which every §1.1 trigger's own contract already treats as a safe,
  * silent give-up (009 §5.1: "give up silently"). */
 object UnimplementedLocationCapturer : LocationCapturer {
-    override suspend fun captureFix(accuracy: LocationAccuracyTier, timeoutMillis: Long): CapturedFix? = null
+    override suspend fun captureFix(
+        accuracy: LocationAccuracyTier,
+        timeoutMillis: Long,
+        maxCachedAgeMillis: Long,
+    ): CapturedFix? = null
 }

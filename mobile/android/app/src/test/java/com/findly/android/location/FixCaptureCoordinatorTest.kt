@@ -27,6 +27,7 @@ class FixCaptureCoordinatorTest {
         paused: Boolean = false,
         permissionGranted: Boolean = true,
         clock: () -> Instant = { Instant.parse("2026-07-19T09:00:00Z") },
+        currentSyncIntervalMinutes: suspend () -> Int = { 15 },
     ) = FixCaptureCoordinator(
         capturer = capturer,
         queueStore = queueStore,
@@ -34,6 +35,7 @@ class FixCaptureCoordinatorTest {
         permissionState = { permissionGranted },
         fixIdGenerator = sequenceIdGenerator(),
         now = clock,
+        currentSyncIntervalMinutes = currentSyncIntervalMinutes,
     )
 
     private fun sequenceIdGenerator(): () -> String {
@@ -86,6 +88,36 @@ class FixCaptureCoordinatorTest {
 
         assertEquals(LocationAccuracyTier.BALANCED, capturer.requestedTiers.single())
         assertEquals(15_000L, capturer.requestedTimeouts.single())
+    }
+
+    @Test
+    fun `periodic capture passes the current sync interval as the cached-fallback bound, in millis`() = runTest {
+        val capturer = FakeLocationCapturer(fixToReturn = fix())
+        val coordinator = coordinator(capturer, currentSyncIntervalMinutes = { 15 })
+
+        coordinator.captureAndQueue(FixSource.Periodic)
+
+        assertEquals(15 * 60_000L, capturer.requestedMaxCachedAges.single())
+    }
+
+    @Test
+    fun `geofence capture also passes the current sync interval as the cached-fallback bound`() = runTest {
+        val capturer = FakeLocationCapturer(fixToReturn = fix())
+        val coordinator = coordinator(capturer, currentSyncIntervalMinutes = { 30 })
+
+        coordinator.captureAndQueue(FixSource.Geofence)
+
+        assertEquals(30 * 60_000L, capturer.requestedMaxCachedAges.single())
+    }
+
+    @Test
+    fun `manual (HIGH) capture never passes a cached-fallback bound - locate and manual want a fresh fix`() = runTest {
+        val capturer = FakeLocationCapturer(fixToReturn = fix())
+        val coordinator = coordinator(capturer, currentSyncIntervalMinutes = { 15 })
+
+        coordinator.captureAndQueue(FixSource.Manual)
+
+        assertEquals(0L, capturer.requestedMaxCachedAges.single())
     }
 
     @Test
@@ -190,8 +222,12 @@ class FixCaptureCoordinatorTest {
         // A capturer that flips `paused` true as a side effect of "being slow" - simulating a
         // pause landing while the (up to 30s) GPS request was in flight.
         val slowCapturer = object : LocationCapturer {
-            override suspend fun captureFix(accuracy: LocationAccuracyTier, timeoutMillis: Long): CapturedFix? {
-                val result = capturer.captureFix(accuracy, timeoutMillis)
+            override suspend fun captureFix(
+                accuracy: LocationAccuracyTier,
+                timeoutMillis: Long,
+                maxCachedAgeMillis: Long,
+            ): CapturedFix? {
+                val result = capturer.captureFix(accuracy, timeoutMillis, maxCachedAgeMillis)
                 paused = true
                 return result
             }

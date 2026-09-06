@@ -11,10 +11,16 @@ import com.findly.android.location.LocationCapturer
 class FakeLocationCapturer(var fixToReturn: CapturedFix?) : LocationCapturer {
     val requestedTiers = mutableListOf<LocationAccuracyTier>()
     val requestedTimeouts = mutableListOf<Long>()
+    val requestedMaxCachedAges = mutableListOf<Long>()
 
-    override suspend fun captureFix(accuracy: LocationAccuracyTier, timeoutMillis: Long): CapturedFix? {
+    override suspend fun captureFix(
+        accuracy: LocationAccuracyTier,
+        timeoutMillis: Long,
+        maxCachedAgeMillis: Long,
+    ): CapturedFix? {
         requestedTiers.add(accuracy)
         requestedTimeouts.add(timeoutMillis)
+        requestedMaxCachedAges.add(maxCachedAgeMillis)
         return fixToReturn
     }
 }
