@@ -137,7 +137,10 @@ fun DevicesScreen(
 
 /** One §4.2 device card. Top to bottom: header row (name + Active/Paused chip), owner line,
  * parent-only controls (tracking toggle, sync-interval dropdown, the single aligned rename row),
- * this card's own mutation error. A non-parent sees only the first two, read-only. */
+ * the this-device battery-optimisation controls (bullet 4, role-independent — code-review fix,
+ * A41 round 2 finding 3), this card's own mutation error. A non-parent sees only the header/owner
+ * line and, on their own device's card, the this-device controls — the parent-only controls stay
+ * read-only/hidden for them. */
 @Composable
 private fun DeviceCard(
     device: DeviceCardUi,
@@ -215,28 +218,33 @@ private fun DeviceCard(
                     style = FindlyButtonStyle.Secondary,
                 )
             }
+        }
 
-            // A41 (specs/010 §4.2, specs/009 §3.2): the battery-optimisation "Battery settings"
-            // action and the OEM-specific dontkillmyapp.com link are Android-runtime-local
-            // settings, not device-record fields — shown only on the card that IS this app
-            // instance, never a family member's remote device.
-            if (device.isThisDevice) {
-                FindlyButton(
-                    text = "Battery settings",
-                    onClick = onOpenBatterySettings,
-                    style = FindlyButtonStyle.Secondary,
-                    modifier = Modifier.padding(top = FindlyTheme.spacing.sm),
+        // Code-review fix (A41 round 2, finding 3): moved out of the `isParent` gate above.
+        // specs/010-app-shell-and-screen-ux.md §4.2 bullet 4 (as amended 2026-09-06, 91fb644):
+        // this "This-device controls" bullet is explicitly "shown regardless of role" and "MUST
+        // NOT sit inside bullet 3's gate" — the battery-optimisation "Battery settings" action and
+        // the OEM-specific dontkillmyapp.com link configure the local OS's treatment of this
+        // installation, not a family setting, so they render for any signed-in user on their own
+        // device's card. A child's phone is a non-parent account and is exactly the device whose
+        // manufacturer is most likely to kill the presence service, so gating these behind
+        // `isParent` would hide them from the user who needs them.
+        if (device.isThisDevice) {
+            FindlyButton(
+                text = "Battery settings",
+                onClick = onOpenBatterySettings,
+                style = FindlyButtonStyle.Secondary,
+                modifier = Modifier.padding(top = FindlyTheme.spacing.sm),
+            )
+            if (vendorLinkUrl != null) {
+                Text(
+                    text = "Some phones need extra steps to keep Findly running — see dontkillmyapp.com",
+                    color = FindlyTheme.colors.subtleText,
+                    style = FindlyTheme.typography.labelSmall,
+                    modifier = Modifier
+                        .padding(top = FindlyTheme.spacing.xs)
+                        .clickable { onOpenVendorLink(vendorLinkUrl) },
                 )
-                if (vendorLinkUrl != null) {
-                    Text(
-                        text = "Some phones need extra steps to keep Findly running — see dontkillmyapp.com",
-                        color = FindlyTheme.colors.subtleText,
-                        style = FindlyTheme.typography.labelSmall,
-                        modifier = Modifier
-                            .padding(top = FindlyTheme.spacing.xs)
-                            .clickable { onOpenVendorLink(vendorLinkUrl) },
-                    )
-                }
             }
         }
 
