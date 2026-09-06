@@ -23,9 +23,10 @@ struct DeviceSettingsCoordinatorTests {
         geofenceRegistrar: FakeGeofenceRegistrarStub = FakeGeofenceRegistrarStub(),
         stateStore: InMemoryDeviceSettingsStateStore = InMemoryDeviceSettingsStateStore(),
         onPause: @escaping () -> Void = {},
-        onResume: @escaping () async -> Void = {}
+        onResume: @escaping () async -> Void = {},
+        reconcilePresence: @escaping () -> Void = {}
     ) -> DeviceSettingsCoordinator {
-        DeviceSettingsCoordinator(scheduler: scheduler, geofenceRegistrar: geofenceRegistrar, stateStore: stateStore, onPause: onPause, onResume: onResume)
+        DeviceSettingsCoordinator(scheduler: scheduler, geofenceRegistrar: geofenceRegistrar, stateStore: stateStore, onPause: onPause, onResume: onResume, reconcilePresence: reconcilePresence)
     }
 
     @Test func firstApplication_rebuildsScheduleWithTheGivenInterval() async {
@@ -87,5 +88,32 @@ struct DeviceSettingsCoordinatorTests {
         await coordinator.applySettings(snapshot)
 
         #expect(scheduler.rescheduleCalls == [15], "the second identical apply must not rebuild again")
+    }
+
+    // MARK: - I52: presence reconciliation (specs/009 §1.3/§3.5) — "on ANY path, if
+    // syncIntervalMinutes changed the schedule MUST be rebuilt immediately... start or stop the
+    // presence service/session per §1.3 when the interval crosses the 30/60 boundary." This is the
+    // single call every settings-arrival path (SETTINGS_CHANGED push, the piggyback, the
+    // paused-device poll) funnels through, so `reconcilePresence` must fire unconditionally - not
+    // only on a pause/resume transition, and not skipped on an idempotent re-apply.
+
+    @Test func applySettings_reconcilesPresence_onEveryApplication_regardlessOfWhatChanged() async {
+        var reconcileCallCount = 0
+        let coordinator = makeCoordinator(reconcilePresence: { reconcileCallCount += 1 })
+
+        await coordinator.applySettings(DeviceSettingsSnapshot(syncIntervalMinutes: 15, trackingEnabled: true))
+        #expect(reconcileCallCount == 1, "first application")
+
+        await coordinator.applySettings(DeviceSettingsSnapshot(syncIntervalMinutes: 15, trackingEnabled: true))
+        #expect(reconcileCallCount == 2, "an idempotent re-apply must still reconcile presence")
+
+        await coordinator.applySettings(DeviceSettingsSnapshot(syncIntervalMinutes: 60, trackingEnabled: true))
+        #expect(reconcileCallCount == 3, "an interval-only change crossing the 30/60 boundary must reconcile presence")
+
+        await coordinator.applySettings(DeviceSettingsSnapshot(syncIntervalMinutes: 60, trackingEnabled: false))
+        #expect(reconcileCallCount == 4, "pause must reconcile presence (which will decide to stop it)")
+
+        await coordinator.applySettings(DeviceSettingsSnapshot(syncIntervalMinutes: 60, trackingEnabled: true))
+        #expect(reconcileCallCount == 5, "resume must reconcile presence (which will decide whether to start it)")
     }
 }

@@ -696,4 +696,140 @@ struct LocationRuntimeContainerTests {
         #expect(await container.geofenceEventQueue.pendingCount() == 0, "a transition racing wipeLocalState()'s own suspension points must still be dropped, not leaked into whichever session signs in next")
         #expect(await container.fixQueue.queuedCount() == 0)
     }
+
+    // MARK: - I52: presence lifecycle (specs/009-device-runtime.md §1.3) — every path that starts
+    // or stops the §1.3 presence session must agree, funneled through one PresencePolicy gate.
+
+    @Test func start_withALiveIntervalAlwaysAuthorization_andTrackingOn_startsPresenceWithTheConfiguredInterval() {
+        let provider = FakeLocationProviding()
+        provider.authorization = .always
+        let stateStore = InMemoryDeviceSettingsStateStore(initial: DeviceSettingsSnapshot(syncIntervalMinutes: 15, trackingEnabled: true))
+        let container = LocationRuntimeContainer(
+            apiClient: FakeAPIClient(), deviceId: { "device-1" },
+            locationProvider: provider, backgroundScheduler: FakeBackgroundSyncScheduler(), stateStore: stateStore
+        )
+
+        container.start()
+
+        #expect(provider.startPresenceCalls == [15])
+    }
+
+    @Test func start_withABatterySaverInterval_neverStartsPresence_evenWithAlwaysAndTrackingOn() {
+        let provider = FakeLocationProviding()
+        provider.authorization = .always
+        let stateStore = InMemoryDeviceSettingsStateStore(initial: DeviceSettingsSnapshot(syncIntervalMinutes: 60, trackingEnabled: true))
+        let container = LocationRuntimeContainer(
+            apiClient: FakeAPIClient(), deviceId: { "device-1" },
+            locationProvider: provider, backgroundScheduler: FakeBackgroundSyncScheduler(), stateStore: stateStore
+        )
+
+        container.start()
+
+        #expect(provider.startPresenceCalls.isEmpty, "60+ intervals stay opportunistic-only per specs/009 §1.3")
+        #expect(provider.stopPresenceCallCount == 1)
+    }
+
+    @Test func start_withWhenInUseOnly_neverStartsPresence_evenOnALiveInterval() {
+        let provider = FakeLocationProviding()
+        provider.authorization = .whenInUse
+        let stateStore = InMemoryDeviceSettingsStateStore(initial: DeviceSettingsSnapshot(syncIntervalMinutes: 15, trackingEnabled: true))
+        let container = LocationRuntimeContainer(
+            apiClient: FakeAPIClient(), deviceId: { "device-1" },
+            locationProvider: provider, backgroundScheduler: FakeBackgroundSyncScheduler(), stateStore: stateStore
+        )
+
+        container.start()
+
+        #expect(provider.startPresenceCalls.isEmpty, "When-In-Use cannot sustain presence - only Always does")
+    }
+
+    @Test func onAppForeground_reestablishesPresence_whenRequired() async {
+        let provider = FakeLocationProviding()
+        provider.authorization = .always
+        let stateStore = InMemoryDeviceSettingsStateStore(initial: DeviceSettingsSnapshot(syncIntervalMinutes: 5, trackingEnabled: true))
+        let container = LocationRuntimeContainer(
+            apiClient: FakeAPIClient(), deviceId: { "device-1" },
+            locationProvider: provider, backgroundScheduler: FakeBackgroundSyncScheduler(), stateStore: stateStore
+        )
+
+        await container.onAppForeground()
+
+        #expect(provider.startPresenceCalls == [5], "specs/009 §1.3: 'MUST be (re)established on... every foreground'")
+    }
+
+    @Test func onAuthorizationChanged_downgradeFromAlways_stopsPresenceImmediately() {
+        let provider = FakeLocationProviding()
+        provider.authorization = .always
+        let stateStore = InMemoryDeviceSettingsStateStore(initial: DeviceSettingsSnapshot(syncIntervalMinutes: 15, trackingEnabled: true))
+        let container = LocationRuntimeContainer(
+            apiClient: FakeAPIClient(), deviceId: { "device-1" },
+            locationProvider: provider, backgroundScheduler: FakeBackgroundSyncScheduler(), stateStore: stateStore
+        )
+        container.start()
+        #expect(provider.startPresenceCalls == [15])
+
+        provider.authorization = .whenInUse
+        container.onAuthorizationChanged()
+
+        #expect(provider.stopPresenceCallCount == 1, "specs/009 §1.3: presence MUST stop immediately on permission revocation")
+    }
+
+    @Test func onAuthorizationChanged_upgradeToAlways_startsPresence() {
+        let provider = FakeLocationProviding()
+        provider.authorization = .whenInUse
+        let stateStore = InMemoryDeviceSettingsStateStore(initial: DeviceSettingsSnapshot(syncIntervalMinutes: 15, trackingEnabled: true))
+        let container = LocationRuntimeContainer(
+            apiClient: FakeAPIClient(), deviceId: { "device-1" },
+            locationProvider: provider, backgroundScheduler: FakeBackgroundSyncScheduler(), stateStore: stateStore
+        )
+        container.start()
+        #expect(provider.startPresenceCalls.isEmpty)
+
+        provider.authorization = .always
+        container.onAuthorizationChanged()
+
+        #expect(provider.startPresenceCalls == [15])
+    }
+
+    @Test func stop_alwaysStopsPresence() {
+        let provider = FakeLocationProviding()
+        let container = LocationRuntimeContainer(
+            apiClient: FakeAPIClient(), deviceId: { "device-1" },
+            locationProvider: provider, backgroundScheduler: FakeBackgroundSyncScheduler()
+        )
+
+        container.stop()
+
+        #expect(provider.stopPresenceCallCount == 1, "specs/009 §1.3: presence MUST stop immediately on sign-out - stop() is wipeLocalState()'s teardown step")
+    }
+
+    @Test func presenceOnTick_runsAFullSyncCycle() async throws {
+        // specs/009 §3.4/handoff I52: "a cadence timer... performing the §1.1 balanced one-shot +
+        // runOnce". `LocationSyncRunner.runOnce()` already performs the balanced one-shot capture
+        // (via FixCaptureCoordinator with no hint) as its first step, so the presence tick's job is
+        // simply to trigger one full runOnce() cycle - this proves the wiring reaches the real
+        // queue/API client, not just a stub.
+        let provider = FakeLocationProviding()
+        provider.authorization = .always
+        provider.nextFix = .success(makeFix())
+        let apiClient = FakeAPIClient()
+        let stateStore = InMemoryDeviceSettingsStateStore(initial: DeviceSettingsSnapshot(syncIntervalMinutes: 5, trackingEnabled: true))
+        let container = LocationRuntimeContainer(
+            apiClient: apiClient, deviceId: { "device-1" },
+            locationProvider: provider, backgroundScheduler: FakeBackgroundSyncScheduler(), stateStore: stateStore,
+            isPermissionGranted: { true }
+        )
+        container.start()
+        guard let onTick = provider.lastPresenceOnTick else {
+            Issue.record("expected startPresence to have been called with an onTick closure")
+            return
+        }
+
+        onTick()
+        // onTick fires an unstructured Task internally (a Timer callback is synchronous) - give it
+        // a moment to actually run the async runOnce() cycle.
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        #expect(provider.requestSingleFixCalls == [.periodic])
+    }
 }

@@ -21,6 +21,14 @@ final class FakeLocationProviding: LocationProviding {
     private(set) var startBackgroundMonitoringCallCount = 0
     private(set) var stopBackgroundMonitoringCallCount = 0
 
+    /// specs/009-device-runtime.md §1.3 (I52) — every `startPresence` call's interval, in order,
+    /// so a test can assert both "presence was (not) started" and "with which interval".
+    private(set) var startPresenceCalls: [Int] = []
+    private(set) var stopPresenceCallCount = 0
+    /// The most recent `onTick` closure handed to `startPresence`, so a test can simulate the
+    /// presence session's own cadence timer firing without a real `Timer`.
+    private(set) var lastPresenceOnTick: (() -> Void)?
+
     func requestSingleFix(source: FixSource) async throws -> LocationFix {
         requestSingleFixCalls.append(source)
         return try nextFix.get()
@@ -32,5 +40,14 @@ final class FakeLocationProviding: LocationProviding {
 
     func stopBackgroundMonitoring() {
         stopBackgroundMonitoringCallCount += 1
+    }
+
+    func startPresence(syncIntervalMinutes: Int, onTick: @escaping () -> Void) {
+        startPresenceCalls.append(syncIntervalMinutes)
+        lastPresenceOnTick = onTick
+    }
+
+    func stopPresence() {
+        stopPresenceCallCount += 1
     }
 }
