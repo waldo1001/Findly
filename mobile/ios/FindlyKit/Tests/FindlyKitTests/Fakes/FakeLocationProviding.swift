@@ -42,9 +42,8 @@ final class FakeLocationProviding: LocationProviding {
     /// pairing must track: `nil` when no presence session is active, the most recently (re)started
     /// interval otherwise. Previously this fake appended unconditionally and modeled no state at
     /// all, so no container-level test could observe idempotency (finding 2's regression) or an
-    /// interval change — this property is what closes that gap. `startPresenceCalls` above is left
-    /// untouched (still records every call, whether or not it was a genuine no-op) so existing
-    /// call-count assertions elsewhere are unaffected.
+    /// interval change — this property, plus the idempotency/rebuild logic in `startPresence`
+    /// below, are what close that gap.
     private(set) var activeIntervalMinutes: Int?
 
     func requestSingleFix(source: FixSource) async throws -> LocationFix {
@@ -60,8 +59,19 @@ final class FakeLocationProviding: LocationProviding {
         stopBackgroundMonitoringCallCount += 1
     }
 
+    /// Mirrors `SystemLocationProvider.startPresence`'s finding-2 contract exactly: a call at the
+    /// SAME interval as the currently-active session is a genuine no-op (specs/009 §1.3
+    /// "establishing presence is idempotent"); a call at a DIFFERENT interval while a session is
+    /// already active tears it down first (mirroring `stopPresence()`) and rebuilds (specs/009 §3.5
+    /// "if syncIntervalMinutes changed the schedule MUST be rebuilt immediately").
+    /// `startPresenceCalledOnMainThread` still records the thread for EVERY call attempt, including
+    /// a suppressed one, since that check (finding 1) is orthogonal to whether the call did anything.
     func startPresence(syncIntervalMinutes: Int, onTick: @escaping () -> Void) {
         startPresenceCalledOnMainThread.append(Thread.isMainThread)
+        if let active = activeIntervalMinutes {
+            guard active != syncIntervalMinutes else { return } // idempotent no-op
+            stopPresence() // interval changed while live -> tear down and rebuild
+        }
         startPresenceCalls.append(syncIntervalMinutes)
         lastPresenceOnTick = onTick
         activeIntervalMinutes = syncIntervalMinutes
