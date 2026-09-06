@@ -79,13 +79,19 @@ public struct FindlyDropdownField<Value: Hashable>: View {
                 .tracking(theme.typography.labelSmall.tracking)
                 .foregroundColor(theme.onSurfaceMuted)
             Menu {
-                ForEach(options) { option in
-                    Button {
-                        onSelect(option.value)
-                    } label: {
-                        Text(menuItemTitle(for: option))
+                // specs/010-app-shell-and-screen-ux.md §4.2 (amended 2026-09-06, 000 §D19): "the
+                // menu groups the values under two captions" — a `Section` header renders once per
+                // distinct `groupLabel`, in the order options already arrive in (never re-sorted),
+                // so an ungrouped caller (every `groupLabel == nil`) renders one flat list exactly
+                // as before.
+                ForEach(Array(groupedOptions.enumerated()), id: \.offset) { _, grouped in
+                    if let label = grouped.label {
+                        Section(header: groupHeader(label: label, description: grouped.description)) {
+                            menuItems(for: grouped.options)
+                        }
+                    } else {
+                        menuItems(for: grouped.options)
                     }
-                    .disabled(!option.isEnabled)
                 }
             } label: {
                 fieldBox
@@ -99,6 +105,47 @@ public struct FindlyDropdownField<Value: Hashable>: View {
     private func menuItemTitle(for option: FindlyDropdownOption<Value>) -> String {
         guard !option.isEnabled, let reason = option.disabledReason else { return option.title }
         return "\(option.title) — \(reason)"
+    }
+
+    /// Consecutive-run grouping (never re-sorted) behind the `Section` rendering above — a caller
+    /// with no grouping concept (every `groupLabel == nil`) collapses to exactly one group with a
+    /// `nil` label, which the call site above renders as a flat, header-less list.
+    private struct OptionGroup {
+        let label: String?
+        let description: String?
+        let options: [FindlyDropdownOption<Value>]
+    }
+
+    private var groupedOptions: [OptionGroup] {
+        var result: [OptionGroup] = []
+        for option in options {
+            if let lastIndex = result.indices.last, result[lastIndex].label == option.groupLabel {
+                result[lastIndex] = OptionGroup(label: option.groupLabel, description: option.groupDescription, options: result[lastIndex].options + [option])
+            } else {
+                result.append(OptionGroup(label: option.groupLabel, description: option.groupDescription, options: [option]))
+            }
+        }
+        return result
+    }
+
+    @ViewBuilder
+    private func menuItems(for options: [FindlyDropdownOption<Value>]) -> some View {
+        ForEach(options) { option in
+            Button {
+                onSelect(option.value)
+            } label: {
+                Text(menuItemTitle(for: option))
+            }
+            .disabled(!option.isEnabled)
+        }
+    }
+
+    /// A native `UIMenu`-backed `Menu` only surfaces a section header's plain text, so the
+    /// group's caption and its 010 §4.2 description are combined into one two-line `Text` rather
+    /// than a richer view that would silently be dropped.
+    private func groupHeader(label: String, description: String?) -> some View {
+        guard let description else { return Text(label) }
+        return Text("\(label)\n\(description)")
     }
 
     private var fieldBox: some View {
@@ -125,7 +172,9 @@ public struct FindlyDropdownField<Value: Hashable>: View {
     }
 
     private var currentTitle: String {
-        options.first(where: { $0.value == selection })?.title ?? ""
+        // specs/010-app-shell-and-screen-ux.md §4.2: "the closed field shows the group name after
+        // the value" — `closedFieldText()` falls back to the bare title when there's no group.
+        options.first(where: { $0.value == selection })?.closedFieldText() ?? ""
     }
 }
 
