@@ -24,7 +24,7 @@ struct DeviceSettingsCoordinatorTests {
         stateStore: InMemoryDeviceSettingsStateStore = InMemoryDeviceSettingsStateStore(),
         onPause: @escaping () -> Void = {},
         onResume: @escaping () async -> Void = {},
-        reconcilePresence: @escaping () -> Void = {}
+        reconcilePresence: @escaping () async -> Void = {}
     ) -> DeviceSettingsCoordinator {
         DeviceSettingsCoordinator(scheduler: scheduler, geofenceRegistrar: geofenceRegistrar, stateStore: stateStore, onPause: onPause, onResume: onResume, reconcilePresence: reconcilePresence)
     }

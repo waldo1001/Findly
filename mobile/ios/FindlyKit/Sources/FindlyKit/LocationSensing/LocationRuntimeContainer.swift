@@ -199,7 +199,15 @@ public final class LocationRuntimeContainer {
         // last line of `init` (once every property genuinely has a value) is visible to this
         // closure the next time it actually runs — always well after `init` returns, since it's
         // only invoked by a real settings-arrival trigger.
-        var containerBox: LocationRuntimeContainer?
+        //
+        // **I52 review round 2, finding 4 (Minor) — `weak`.** Without it, this local var's
+        // captured storage is a genuine retain cycle: container -> settingsCoordinator ->
+        // reconcilePresence closure -> containerBox -> container. Harmless today only because this
+        // container is process-lifetime (nothing ever needed it to deallocate) — see
+        // `deallocates_afterEveryExternalStrongReferenceIsReleased_noRetainCycleThroughContainerBox`
+        // for the regression test. `weak` preserves the exact same "assign as the last line of
+        // init" shape; a captured `weak var` local still resolves to `self` from that point on.
+        weak var containerBox: LocationRuntimeContainer?
 
         let schedulingAdapter = BackgroundSyncSchedulingAdapter(scheduler: backgroundScheduler)
         let settingsCoordinator = DeviceSettingsCoordinator(
@@ -236,6 +244,16 @@ public final class LocationRuntimeContainer {
                 // specs/009 §3.5 (I52) — the single settings-arrival-path presence reconciliation
                 // call (see `DeviceSettingsCoordinator.applySettings`'s own doc for why it's
                 // unconditional). Deferred to `containerBox` for the reason documented above.
+                //
+                // I52 review round 2, finding 1 (Blocking) — the real fix is this closure literal
+                // becoming `async` (see `DeviceSettingsCoordinator.reconcilePresence`'s own doc):
+                // written here, inside `LocationRuntimeContainer.init`'s `@MainActor` context, an
+                // `async` closure literal is itself inferred `@MainActor`-isolated, so the genuine
+                // hop happens at `DeviceSettingsCoordinator.applySettings`'s `await
+                // reconcilePresence()` call — invoking THIS closure. By the time its body runs
+                // here, execution is already on the main actor, so this call needs no further
+                // `await` (the compiler confirms: "no 'async' operations occur within 'await'
+                // expression" when one is added here).
                 containerBox?.reconcilePresence()
             }
         )
@@ -429,6 +447,13 @@ public final class LocationRuntimeContainer {
         if stateStore.current()?.trackingEnabled != false {
             await geofenceConfigSyncCoordinator.sync()
         }
+        // I52 review round 2, finding 7 (Minor) — specs/009 §1.3's re-establishment list doesn't
+        // name sign-in explicitly, but a sign-in in the same process previously re-established
+        // presence only at the next foreground or first flush piggyback. `reconcilePresence()`
+        // reads the cached settings fresh itself, so this is a safe, idempotent no-op on the paused
+        // branch above (mirrors `start()`'s own unconditional call at the end of its own two
+        // branches).
+        reconcilePresence()
     }
 
     /// specs/009 §4's pause teardown, the parts this container owns: stop significant-location-
