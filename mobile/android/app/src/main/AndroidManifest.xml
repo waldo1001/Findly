@@ -170,6 +170,21 @@
             android:exported="false"
             android:foregroundServiceType="location" />
 
+        <!-- A45 (specs/009-device-runtime.md §5.1 option 2): the option-2 expedited-locate
+             fallback does not run in one of our own services — WorkManager runs expedited work
+             inside its own androidx.work.impl.foreground.SystemForegroundService, and
+             LocateRequestWorker.getForegroundInfo() (specs/009 §5.1 option 2) returns a
+             location-typed ForegroundInfo for it. Android 14+ hard-enforces that a typed
+             foreground service declare its type in the manifest entry that actually runs it, so
+             without this override the library's own service entry has no type at all and the
+             entire fallback throws — caught by lintVitalRelease, not by any local gate
+             (`SpecifyForegroundServiceType`). tools:node="merge" overrides the library's manifest
+             entry for this app the same way the androidx.startup provider below already does. -->
+        <service
+            android:name="androidx.work.impl.foreground.SystemForegroundService"
+            android:foregroundServiceType="location"
+            tools:node="merge" />
+
         <!-- A11 (specs/009-device-runtime.md §6.3): GeofencingClient's transition callback
              target. Fired only via the PendingIntent GeofencingClientManager registers with every
              addGeofences call (AppContainer) - exported="false" is safe because delivery goes
