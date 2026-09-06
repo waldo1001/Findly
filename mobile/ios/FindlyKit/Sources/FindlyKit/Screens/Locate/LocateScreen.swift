@@ -79,46 +79,54 @@ public struct LocateScreen: View {
         case .pending:
             LoadingStateView(message: "Last known, updating…")
         case .fulfilled:
-            if let position = viewModel.resolvedPosition {
-                FindlyCard {
-                    VStack(alignment: .leading, spacing: theme.spacing.xs) {
-                        Text("Found!")
-                            .font(theme.typography.titleMedium.font)
-                            .foregroundColor(theme.colors.onSurface)
-                        Text("\(position.lat), \(position.lon)")
-                            .font(theme.typography.bodyMedium.font)
-                            .foregroundColor(theme.colors.onSurface.opacity(0.7))
-                    }
-                }
-            } else {
-                StatusChip("Live", kind: .online)
-            }
+            // specs/009 §5.1 "Requester side": a definitive fulfil within the request window
+            // ("fresh") — no age caption.
+            foundCard(caption: nil)
         case .late:
             // specs/009 §5.1 "Requester side": rendered exactly like `.fulfilled` plus an age
             // caption.
-            if let position = viewModel.resolvedPosition {
-                FindlyCard {
-                    VStack(alignment: .leading, spacing: theme.spacing.xs) {
-                        Text("Found!")
-                            .font(theme.typography.titleMedium.font)
-                            .foregroundColor(theme.colors.onSurface)
-                        Text("\(position.lat), \(position.lon)")
-                            .font(theme.typography.bodyMedium.font)
-                            .foregroundColor(theme.colors.onSurface.opacity(0.7))
-                        Text(LocateAgeCaption.forRecordedAt(position.recordedAt))
-                            .font(theme.typography.labelSmall.font)
-                            .foregroundColor(theme.colors.onSurface.opacity(0.7))
-                    }
-                }
-            } else {
-                StatusChip("Live", kind: .online)
-            }
+            foundCard(caption: viewModel.resolvedPosition.map { LocateAgeCaption.forRecordedAt($0.recordedAt) })
         case .unreachable:
-            StatusChip("Couldn't reach device — showing last known", kind: .stale)
+            // I51 review fix (Blocking, finding 1): 001 §6.2 assigns "couldn't reach the device"
+            // copy specifically to a `pushFailed` wire status — a request that was delivered and
+            // simply never answered ("expired", or any other non-pushFailed terminal) must not be
+            // told the opposite of the truth. Mirrors Android's `LocateScreen` branching on the
+            // terminal state's raw wire status.
+            if viewModel.wireStatus == .pushFailed {
+                StatusChip("Couldn't reach the device — showing last known", kind: .stale)
+            } else {
+                StatusChip("Request expired — showing last known", kind: .stale)
+            }
         case .failed(let message):
             ErrorStateView(message: message) {
                 Task { await viewModel.requestLocate(target: target) }
             }
+        }
+    }
+
+    /// I51 review fix (Minor, finding 5): the `.fulfilled`/`.late` card bodies were identical but
+    /// for one caption line — collapsed here so the two cannot drift. `caption` is `nil` for
+    /// `.fulfilled` (no age line) and the age caption for `.late`.
+    @ViewBuilder
+    private func foundCard(caption: String?) -> some View {
+        if let position = viewModel.resolvedPosition {
+            FindlyCard {
+                VStack(alignment: .leading, spacing: theme.spacing.xs) {
+                    Text("Found!")
+                        .font(theme.typography.titleMedium.font)
+                        .foregroundColor(theme.colors.onSurface)
+                    Text("\(position.lat), \(position.lon)")
+                        .font(theme.typography.bodyMedium.font)
+                        .foregroundColor(theme.colors.onSurface.opacity(0.7))
+                    if let caption {
+                        Text(caption)
+                            .font(theme.typography.labelSmall.font)
+                            .foregroundColor(theme.colors.onSurface.opacity(0.7))
+                    }
+                }
+            }
+        } else {
+            StatusChip("Live", kind: .online)
         }
     }
 }

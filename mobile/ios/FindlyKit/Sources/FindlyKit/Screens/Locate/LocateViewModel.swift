@@ -45,6 +45,15 @@ public final class LocateViewModel: ObservableObject {
     @Published public private(set) var status: LocateUIStatus = .requesting
     @Published public private(set) var lastKnown: LastKnownFix?
     @Published public private(set) var resolvedPosition: LocatedPosition?
+    /// **I51 review fix (Blocking, finding 1).** The raw wire status that triggered `.unreachable`,
+    /// kept "for the UI's own copy" — mirrors Android's `LocateStateHolder`/`LocateUiState.Terminal
+    /// .status`. `nil` until a fallback resolution actually runs. Set from whichever triggered it:
+    /// the wire's own `.expired`/`.pushFailed` when the poll or create response supplied one, or
+    /// `.expired` as the default for a purely local-window timeout (the server never actually said
+    /// anything). Only `.pushFailed` gets the distinct "couldn't reach the device" copy (001 §6.2);
+    /// everything else renders "request expired" — a request that was delivered and simply never
+    /// answered must not be told the opposite of the truth.
+    @Published public private(set) var wireStatus: LocateStatus?
 
     private let apiClient: FindlyAPIClient
     private let pollInterval: Duration
@@ -87,6 +96,7 @@ public final class LocateViewModel: ObservableObject {
         status = .requesting
         lastKnown = nil
         resolvedPosition = nil
+        wireStatus = nil
         do {
             let envelope = try await apiClient.createLocateRequest(target: target)
             let data = envelope.data
@@ -95,8 +105,9 @@ public final class LocateViewModel: ObservableObject {
                 // §6.1: the create response is only ever "pending" or, immediately, "pushFailed"
                 // (no valid token to send to) — it never carries a fix, so a "pushFailed" here takes
                 // the same one-shot fallback path any other non-fresh terminal does, rather than
-                // being assumed unreachable outright (009 §5.1 "Requester side").
-                await resolveViaFallback(targetDeviceId: data.targetDeviceId, createdAt: data.createdAt)
+                // being assumed unreachable outright (009 §5.1 "Requester side"). `data.status` here
+                // is always `.pushFailed` per §6.1, carried through as-is rather than hardcoded.
+                await resolveViaFallback(targetDeviceId: data.targetDeviceId, createdAt: data.createdAt, wireStatus: data.status)
                 return
             }
             status = .pending
@@ -138,7 +149,12 @@ public final class LocateViewModel: ObservableObject {
                     }
                     let windowElapsed = Self.hasElapsed(pollWindow: pollWindow, since: receivedAt, now: self.now)
                     if data.status == .expired || data.status == .pushFailed || windowElapsed {
-                        await self.resolveViaFallback(targetDeviceId: targetDeviceId, createdAt: createdAt)
+                        // I51 review fix (Blocking, finding 1): carry the wire's own terminal status
+                        // through so `.unreachable` can tell "couldn't reach the device" (pushFailed)
+                        // apart from "request expired" (everything else, incl. a purely local-window
+                        // timeout the server never actually confirmed).
+                        let triggerStatus: LocateStatus = (data.status == .expired || data.status == .pushFailed) ? data.status : .expired
+                        await self.resolveViaFallback(targetDeviceId: targetDeviceId, createdAt: createdAt, wireStatus: triggerStatus)
                         return
                     }
                     self.status = .pending
@@ -155,7 +171,12 @@ public final class LocateViewModel: ObservableObject {
     /// **with a usable fix**, is shown as `.late` instead (a late fulfil, or some other report,
     /// already updated last-known). A31/A39-equivalent rule: `recordedAt` alone is not enough — a
     /// "no location yet" device row (001 §5.2, `lat`/`lon` null) must not be rendered as located.
-    private func resolveViaFallback(targetDeviceId: String, createdAt: String) async {
+    ///
+    /// `wireStatus` (I51 review, finding 1) is whatever triggered this call — published onto
+    /// `self.wireStatus` immediately so it is visible even if this resolves to `.late` instead of
+    /// `.unreachable` (harmless either way: only the `.unreachable` chip reads it).
+    private func resolveViaFallback(targetDeviceId: String, createdAt: String, wireStatus: LocateStatus) async {
+        self.wireStatus = wireStatus
         let createdAtDate = Self.parseISO8601(createdAt)
         let device: DeviceLocation?
         do {
