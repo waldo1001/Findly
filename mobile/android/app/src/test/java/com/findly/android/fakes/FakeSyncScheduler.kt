@@ -7,7 +7,7 @@ class FakeSyncScheduler : SyncScheduler {
     var cancelAllCallCount = 0
         private set
 
-    override fun reschedule(syncIntervalMinutes: Int) {
+    override suspend fun reschedule(syncIntervalMinutes: Int) {
         rescheduleCalls.add(syncIntervalMinutes)
     }
 

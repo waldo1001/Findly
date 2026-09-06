@@ -216,10 +216,16 @@ class AppContainer(context: Context) {
      * Pause (§4) calls `unregisterAll()` through the [GeofenceRegistry] half; every §6.2
      * registration trigger calls `registerAll(...)` (a full replace) through the
      * [com.findly.android.pushmessages.GeofenceRegistrar] half, via [geofenceConfigSyncCoordinator]. */
+    /** Shared, stateless (fun interface backed by a live `checkSelfPermission` read, never
+     * cached) `ACCESS_BACKGROUND_LOCATION` check — both [geofencingClientManager] (specs/009 §6.2)
+     * and [syncScheduler] (A41, specs/009 §3.2: "started only when... `ACCESS_BACKGROUND_LOCATION`
+     * is granted") read the same live permission state through this one instance. */
+    private val backgroundLocationPermissionChecker = AndroidBackgroundLocationPermissionChecker(context)
+
     private val geofencingClientManager = GeofencingClientManager(
         geofencingClient = LocationServices.getGeofencingClient(context),
         pendingIntent = geofenceTransitionPendingIntent,
-        permissionState = AndroidBackgroundLocationPermissionChecker(context),
+        permissionState = backgroundLocationPermissionChecker,
         scope = applicationScope,
     )
     private val geofenceRegistry: GeofenceRegistry = geofencingClientManager
@@ -236,7 +242,11 @@ class AppContainer(context: Context) {
     )
 
     private val foregroundServiceController = DefaultForegroundServiceController(context)
-    private val syncScheduler: SyncScheduler = LocationSyncScheduler(context, foregroundServiceController)
+    private val syncScheduler: SyncScheduler = LocationSyncScheduler(
+        context,
+        foregroundServiceController,
+        backgroundLocationPermissionChecker,
+    )
 
     /** A11 (specs/009 §6.2): resume from pause is one of the five geofence re-registration
      * triggers — wired here as [DeviceSettingsCoordinator]'s `onResume` seam so a
