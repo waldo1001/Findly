@@ -11,7 +11,9 @@ export interface PushMessage {
   type: PushMessageType;
   /** FCM data payload — all values MUST be strings (§8 constraint). */
   data: Record<string, string>;
-  /** Present only for §8.2 GEOFENCE_EVENT (server-composed notification title). */
+  /** Server-composed notification/alert title (§8's "normative, server-composed" templates).
+   * Present for §8.1 LOCATE_REQUEST (iOS `aps.alert.title`, amended 2026-09-06) and §8.2
+   * GEOFENCE_EVENT (`notification.title`); absent for the data-only §8.3/§8.4 shapes. */
   notificationTitle?: string;
 }
 

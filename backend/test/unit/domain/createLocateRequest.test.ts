@@ -375,6 +375,27 @@ describe("domain/locate/createLocateRequest", () => {
     });
   });
 
+  it("passes the server-composed title through PushMessage.notificationTitle (specs/001 §8.1 amended 2026-09-06, 000 §O8) — exact string pinned", async () => {
+    const deps = buildDeps();
+    await seedFamily(deps);
+    deps.deviceRepo.seed(TARGET_UID, device({ pushToken: "fcm-token-a" }));
+
+    await createLocateRequest(baseInput(), deps);
+
+    expect(deps.pushSender.sent.length).toBe(1);
+    expect(deps.pushSender.sent[0]!.notificationTitle).toBe("Eric is locating you");
+  });
+
+  it("composes the notificationTitle from the resolved requestedByName even when it falls back to the raw uid", async () => {
+    const deps = buildDeps();
+    await seedFamily(deps);
+    deps.deviceRepo.seed(TARGET_UID, device({ pushToken: "fcm-token-a" }));
+
+    await createLocateRequest(baseInput({ uid: "ghost-uid" }), deps);
+
+    expect(deps.pushSender.sent[0]!.notificationTitle).toBe("ghost-uid is locating you");
+  });
+
   it("pushFailed path (invalidToken outcome) marks the device pushInvalid:true", async () => {
     const deps = buildDeps();
     await seedFamily(deps);
