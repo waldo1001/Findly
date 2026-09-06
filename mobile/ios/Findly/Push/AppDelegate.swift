@@ -72,6 +72,20 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
     /// specs/009-device-runtime.md §5 intro: `data.type` parsing/dispatch never crashes on a
     /// malformed payload - `PushMessageDispatcher.dispatch` already guarantees that, so this method
     /// has nothing further to guard.
+    ///
+    /// **specs/009 §5.1 "iOS execution model" (amended 2026-09-06, I51).** A `LOCATE_REQUEST`'s
+    /// capture can legitimately run close to the full ~30 s the OS allows this callback before
+    /// penalising the app for overrunning it — and `dispatcher.dispatch` awaits the capture *and*
+    /// the fulfil network round trip, so waiting for it to return before calling `completionHandler`
+    /// (the previous, broken behaviour) could exceed that budget on every single locate. This method
+    /// stays deliberately thin/untested glue (repo convention) and cannot observe the exact instant
+    /// `dispatch` sends its outbound fulfil request without reaching into `LocateRequestPushHandler`
+    /// (out of I51's scope), so the safe, AppDelegate-only fix is: call `completionHandler(.newData)`
+    /// immediately — never later than "as soon as sent", which is the MUST's actual requirement —
+    /// while `beginBackgroundTask` keeps the process alive long enough for `dispatch`'s awaited work
+    /// (including the fulfil call) to actually finish in the background. The background task is
+    /// ended in every path: when `dispatch` returns, or by the expiration handler if the OS forces
+    /// it first.
     func application(
         _ application: UIApplication,
         didReceiveRemoteNotification userInfo: [AnyHashable: Any],
@@ -95,9 +109,15 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         // which needs the identical [AnyHashable: Any] -> [String: String] conversion — one
         // FindlyKit implementation instead of two independent copies of the same few lines.
         let data = PushPayloadParsing.stringData(from: userInfo)
+
+        let backgroundTask = BackgroundTaskEnder(application: application)
+        backgroundTask.begin(name: "com.findly.push.dispatch")
+
+        completionHandler(.newData)
+
         Task {
             await dispatcher.dispatch(data)
-            completionHandler(.newData)
+            backgroundTask.end()
         }
     }
 }
@@ -106,11 +126,54 @@ extension AppDelegate: UNUserNotificationCenterDelegate {
     /// specs/001-api-contract.md §8.2 — without this, iOS does not banner a notification while the
     /// app is in the foreground; `GeofenceEventNotifying`'s locally-built request needs this to
     /// actually surface as a user-visible alert in that state.
+    ///
+    /// specs/009-device-runtime.md §5.1 (amended 2026-09-06, I51): "the alert is not presented
+    /// (`willPresent` returns `[]` for this type)" for `LOCATE_REQUEST` — the handler still runs the
+    /// same background path either way, this only suppresses the banner/sound when the app is
+    /// already in the foreground. Every other type's presentation is unchanged.
     func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         willPresent notification: UNNotification,
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
-        completionHandler([.banner, .sound])
+        let data = PushPayloadParsing.stringData(from: notification.request.content.userInfo)
+        if PushMessageType.from(data) == .locateRequest {
+            completionHandler([])
+        } else {
+            completionHandler([.banner, .sound])
+        }
+    }
+}
+
+/// Thread-safe begin/end-once wrapper around `UIApplication`'s background-task API (specs/009 §5.1:
+/// "wrap the work in `beginBackgroundTask` so the fulfil call can complete"). Pure UIKit glue,
+/// deliberately untested (repo convention: `AppDelegate`/CoreLocation glue is thin and untested;
+/// nothing here is a decidable rule — `LocateRequestPushHandler`'s capture/fulfil logic already
+/// carries the testable behaviour). Guards against ending twice (both the normal completion path and
+/// the OS expiration handler call `end()`; only the first has any effect).
+private final class BackgroundTaskEnder {
+    private let application: UIApplication
+    private let lock = NSLock()
+    private var identifier: UIBackgroundTaskIdentifier = .invalid
+
+    init(application: UIApplication) {
+        self.application = application
+    }
+
+    func begin(name: String) {
+        lock.lock()
+        defer { lock.unlock() }
+        identifier = application.beginBackgroundTask(withName: name) { [weak self] in
+            self?.end()
+        }
+    }
+
+    func end() {
+        lock.lock()
+        let id = identifier
+        identifier = .invalid
+        lock.unlock()
+        guard id != .invalid else { return }
+        application.endBackgroundTask(id)
     }
 }
