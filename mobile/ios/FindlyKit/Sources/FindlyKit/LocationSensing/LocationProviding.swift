@@ -295,26 +295,21 @@ extension SystemLocationProvider: CLLocationManagerDelegate {
     /// specs/009 §3.4 (I50 fix 3, amended 2026-09-06) — visit monitoring, the second cheap wake,
     /// "treated exactly like an SLC callback": the OS-supplied location is passed through the same
     /// `FixCaptureCoordinator` path (as a `.periodic` hint, subject to §1.2 suppression) rather
-    /// than enqueued directly. `CLVisit.arrivalDate`/`departureDate` are `Date.distantPast`/
-    /// `.distantFuture` when unknown (e.g. a departure-only visit, or one still ongoing) — falls
-    /// back to `arrivalDate` first, then `departureDate`, then "now", so `recordedAt` is always a
-    /// real timestamp.
+    /// than enqueued directly. The timestamp prefers `departureDate` over `arrivalDate` — see
+    /// `VisitTimestampPolicy`'s doc for why (I50 fix 3, Major: iOS reports a completed visit at
+    /// departure, so preferring arrival stamped a long stay's fix hours stale). `accuracyM` is
+    /// clamped to the backend's `[0, 10000]` range (I50 fix 7, Minor) — `CLVisit.horizontalAccuracy`
+    /// has no documented range, and an out-of-range value is a definitive `400 VALIDATION_FAILED`
+    /// that kills the whole batch (specs/001 §5.1).
     public func locationManager(_ manager: CLLocationManager, didVisit visit: CLVisit) {
         guard let coordinator = backgroundCoordinator else { return }
-        let timestamp: Date
-        if visit.arrivalDate != Date.distantPast {
-            timestamp = visit.arrivalDate
-        } else if visit.departureDate != Date.distantFuture {
-            timestamp = visit.departureDate
-        } else {
-            timestamp = Date()
-        }
+        let timestamp = VisitTimestampPolicy.timestamp(arrivalDate: visit.arrivalDate, departureDate: visit.departureDate, now: Date())
         let fix = LocationFix(
             fixId: UUID().uuidString,
             recordedAt: ISO8601DateFormatter().string(from: timestamp),
             lat: visit.coordinate.latitude,
             lon: visit.coordinate.longitude,
-            accuracyM: visit.horizontalAccuracy,
+            accuracyM: AccuracyClamp.clamp(visit.horizontalAccuracy),
             batteryPct: batteryLevelProvider(),
             source: .periodic
         )
@@ -330,13 +325,17 @@ extension SystemLocationProvider: CLLocationManagerDelegate {
 }
 
 private extension CLLocation {
+    /// `accuracyM` is clamped to the backend's `[0, 10000]` range (I50 fix 7, Minor,
+    /// pre-existing) — `CLLocation.horizontalAccuracy` is documented to go negative when the value
+    /// is invalid, and an out-of-range `accuracyM` is a definitive `400 VALIDATION_FAILED` that
+    /// kills the whole batch (specs/001 §5.1).
     func toLocationFix(source: FixSource, batteryPct: Int) -> LocationFix {
         LocationFix(
             fixId: UUID().uuidString,
             recordedAt: ISO8601DateFormatter().string(from: timestamp),
             lat: coordinate.latitude,
             lon: coordinate.longitude,
-            accuracyM: horizontalAccuracy,
+            accuracyM: AccuracyClamp.clamp(horizontalAccuracy),
             altitudeM: verticalAccuracy >= 0 ? altitude : nil,
             speedMps: speed >= 0 ? speed : nil,
             bearingDeg: course >= 0 ? course : nil,
