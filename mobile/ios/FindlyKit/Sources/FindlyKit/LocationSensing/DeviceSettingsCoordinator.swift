@@ -67,19 +67,22 @@ public actor DeviceSettingsCoordinator: DeviceSettingsApplying {
     private let stateStore: DeviceSettingsStateStoring
     private let onPause: () -> Void
     private let onResume: () async -> Void
+    private let reconcilePresence: () -> Void
 
     public init(
         scheduler: SyncScheduling,
         geofenceRegistrar: GeofenceRegistrarStub = NoOpGeofenceRegistrarStub(),
         stateStore: DeviceSettingsStateStoring,
         onPause: @escaping () -> Void = {},
-        onResume: @escaping () async -> Void = {}
+        onResume: @escaping () async -> Void = {},
+        reconcilePresence: @escaping () -> Void = {}
     ) {
         self.scheduler = scheduler
         self.geofenceRegistrar = geofenceRegistrar
         self.stateStore = stateStore
         self.onPause = onPause
         self.onResume = onResume
+        self.reconcilePresence = reconcilePresence
     }
 
     public func applySettings(_ next: DeviceSettingsSnapshot) async {
@@ -110,6 +113,17 @@ public actor DeviceSettingsCoordinator: DeviceSettingsApplying {
         if actions.rebuildSchedule {
             scheduler.reschedule(syncIntervalMinutes: next.syncIntervalMinutes)
         }
+
+        // specs/009 §3.5 (I52) — "on ANY path, if `syncIntervalMinutes` changed the schedule MUST
+        // be rebuilt immediately... start or stop the presence service/session per §1.3 when the
+        // interval crosses the 30/60 boundary." Called UNCONDITIONALLY, every application — not
+        // only on `rebuildSchedule`/a pause-resume transition — because this is the ONE place all
+        // three settings-arrival paths (SETTINGS_CHANGED push, the POST /locations piggyback, the
+        // paused-device poll) converge, and `PresencePolicy` (the closure's real implementation,
+        // in `LocationRuntimeContainer`) already re-derives its own decision fresh from the
+        // now-updated `stateStore`, so an idempotent re-apply costs nothing beyond one redundant,
+        // idempotent `startPresence`/`stopPresence` call.
+        reconcilePresence()
     }
 }
 

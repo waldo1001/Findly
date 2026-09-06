@@ -190,6 +190,17 @@ public final class LocationRuntimeContainer {
         )
         self.geofenceConfigSyncCoordinator = geofenceConfigSyncCoordinator
 
+        // Forward-reference cell for `self` (specs/009 §1.3, I52) — `reconcilePresence` below
+        // needs to call this container's own `reconcilePresence()` instance method, but `self`
+        // isn't fully initialized yet at this point in `init` (several stored properties, e.g.
+        // `syncRunner`, are assigned further below), so it can't be captured directly — the same
+        // constraint `onResume` above already documents for `captureCoordinator`. A local `var` IS
+        // captured BY REFERENCE in a Swift closure, so setting `containerBox = self` as the very
+        // last line of `init` (once every property genuinely has a value) is visible to this
+        // closure the next time it actually runs — always well after `init` returns, since it's
+        // only invoked by a real settings-arrival trigger.
+        var containerBox: LocationRuntimeContainer?
+
         let schedulingAdapter = BackgroundSyncSchedulingAdapter(scheduler: backgroundScheduler)
         let settingsCoordinator = DeviceSettingsCoordinator(
             scheduler: schedulingAdapter,
@@ -220,6 +231,12 @@ public final class LocationRuntimeContainer {
                 }
                 backgroundScheduler.scheduleNextSync()
                 await geofenceConfigSyncCoordinator.sync()
+            },
+            reconcilePresence: {
+                // specs/009 §3.5 (I52) — the single settings-arrival-path presence reconciliation
+                // call (see `DeviceSettingsCoordinator.applySettings`'s own doc for why it's
+                // unconditional). Deferred to `containerBox` for the reason documented above.
+                containerBox?.reconcilePresence()
             }
         )
         self.settingsCoordinator = settingsCoordinator
@@ -249,6 +266,11 @@ public final class LocationRuntimeContainer {
         )
 
         self.pausedDevicePoller = PausedDevicePoller(apiClient: apiClient, deviceId: deviceId, settingsApplying: settingsCoordinator)
+
+        // Every stored property now has a value — `self` is fully initialized, so it's safe to
+        // hand out (see `containerBox`'s doc above for why this is the only way the
+        // `reconcilePresence` closure built earlier in this initializer can reach this instance).
+        containerBox = self
     }
 
     /// Call once at startup (after sign-in / whenever a `deviceId` becomes available). specs/009
@@ -274,6 +296,10 @@ public final class LocationRuntimeContainer {
         } else {
             backgroundScheduler.scheduleNextSync(afterDelay: Self.pausedPollIntervalSeconds)
         }
+        // specs/009 §1.3: "MUST be (re)established on app cold start" — reconcilePresence() reads
+        // the cached settings itself, so this single call correctly does nothing (stops an
+        // already-stopped presence) on the paused branch above.
+        reconcilePresence()
     }
 
     /// Call once the user has answered the OS prompt, or whenever CoreLocation reports an
@@ -297,6 +323,11 @@ public final class LocationRuntimeContainer {
         } else {
             locationProvider.stopBackgroundMonitoring()
         }
+        // specs/009 §1.3: presence MUST stop immediately on a downgrade below Always, and MUST be
+        // re-established the moment Always is (re-)granted — `PresencePolicy` (inside
+        // `reconcilePresence()`) is the same Always-only gate `BackgroundLocationPolicy` uses
+        // above, so the two mechanisms always agree on what "authorized enough" means.
+        reconcilePresence()
     }
 
     /// specs/009 §7 — **the only way this container starts location monitoring.**
@@ -314,6 +345,57 @@ public final class LocationRuntimeContainer {
         // this accepted `.whenInUse` too, which cannot wake a suspended app.
         guard BackgroundLocationPolicy.shouldMonitorSignificantChangesAndVisits(for: locationProvider.authorization) else { return }
         locationProvider.startBackgroundMonitoring(coordinator: captureCoordinator)
+    }
+
+    /// specs/009-device-runtime.md §1.3 (I52) — **the single place every presence start/stop
+    /// decision is made.** Every lifecycle path that must (re-)establish or tear down presence
+    /// calls this same method (directly, or via the `reconcilePresence` closure handed to
+    /// `DeviceSettingsCoordinator`'s `init` above) rather than re-deriving `PresencePolicy`'s
+    /// inputs itself — the exact discipline this task's brief calls out as the recurring defect
+    /// pattern in the three prior reliability tasks (a rule applied on one path, missed on a
+    /// parallel one). The full call-site list:
+    ///
+    /// 1. `start()` — cold start.
+    /// 2. `onAppForeground()` — every foreground.
+    /// 3. `onAuthorizationChanged()` — a permission upgrade to Always (start) or downgrade below it
+    ///    (stop), including a revocation observed mid-run.
+    /// 4. `DeviceSettingsCoordinator.applySettings` (via the `reconcilePresence` init closure,
+    ///    deferred through `containerBox` — see that closure's doc) — unconditionally, on every
+    ///    settings application from all three arrival paths (`SETTINGS_CHANGED` push, the
+    ///    `POST /locations` piggyback, the paused-device poll), which covers pause, resume, AND a
+    ///    plain interval change crossing the 30/60 boundary with no pause/resume involved.
+    ///
+    /// `stop()` (sign-out's teardown step, via `wipeLocalState()`) is the one exception: it calls
+    /// `locationProvider.stopPresence()` directly rather than through this method, because by that
+    /// point the caller wants an unconditional stop regardless of what `stateStore` still says —
+    /// see `stop()`'s own doc.
+    ///
+    /// Reads `stateStore.current()` fresh on every call (never cached) so a call racing a
+    /// just-applied settings change always sees the latest values — the same "read fresh, never
+    /// assume" discipline `isPaused`/`isPermissionGranted` already use elsewhere in this runtime.
+    private func reconcilePresence() {
+        guard let settings = stateStore.current() else {
+            locationProvider.stopPresence()
+            return
+        }
+        let required = PresencePolicy.isRequired(
+            syncIntervalMinutes: settings.syncIntervalMinutes,
+            authorization: locationProvider.authorization,
+            trackingEnabled: settings.trackingEnabled
+        )
+        if required {
+            locationProvider.startPresence(syncIntervalMinutes: settings.syncIntervalMinutes) { [weak self] in
+                // specs/009 §3.4/handoff I52: "a cadence timer... performing the §1.1 balanced
+                // one-shot + runOnce" — `LocationSyncRunner.runOnce()` already performs exactly
+                // that one-shot capture as its own first step (`maybeCapturePeriodicFix`, gated by
+                // the same §3.4 × 0.8 elapsed rule every other trigger uses), so triggering one
+                // full `runOnce()` cycle per tick is the complete, correct behavior — no separate
+                // capture call is needed here.
+                Task { await self?.syncRunner.runOnce() }
+            }
+        } else {
+            locationProvider.stopPresence()
+        }
     }
 
     /// specs/009 §6.2's "device reboot / app reinstall" registration trigger — both lose OS-level
@@ -360,6 +442,12 @@ public final class LocationRuntimeContainer {
     public func stop() {
         locationProvider.stopBackgroundMonitoring()
         backgroundScheduler.cancelScheduledSync()
+        // specs/009 §1.3: presence MUST stop immediately on sign-out — this is `wipeLocalState()`'s
+        // teardown step (via this method), called unconditionally rather than through
+        // `reconcilePresence()`: a caller reaching `stop()` wants a hard stop regardless of what
+        // `stateStore` still says (and `wipeLocalState()` calls `stateStore.clear()` first anyway,
+        // so `reconcilePresence()` would reach the same answer here, just less directly).
+        locationProvider.stopPresence()
     }
 
     /// **Post-review addition (security review, High finding).** The one consolidated "this device
@@ -535,6 +623,13 @@ public final class LocationRuntimeContainer {
     /// code needed here). Call from the app target's scene-phase/`onAppear` observation.
     public func onAppForeground() async {
         _ = await pausedDevicePoller.poll()
+        // specs/009 §1.3: "MUST be (re)established on... every foreground" — the paused-device
+        // poll above may have just observed a resume (which already reconciles presence via
+        // `DeviceSettingsCoordinator`'s `onResume`/`reconcilePresence` path); calling this again
+        // here is a deliberately redundant, idempotent safety net for the ordinary non-paused case
+        // too, matching how `startMonitoringIfAuthorized` already gets a redundant call on every
+        // foreground via `start()`'s own doc.
+        reconcilePresence()
         _ = await syncRunner.runOnce()
     }
 }

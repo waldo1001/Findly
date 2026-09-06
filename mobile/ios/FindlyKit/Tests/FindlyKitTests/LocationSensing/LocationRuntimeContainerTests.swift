@@ -746,9 +746,14 @@ struct LocationRuntimeContainerTests {
     @Test func onAppForeground_reestablishesPresence_whenRequired() async {
         let provider = FakeLocationProviding()
         provider.authorization = .always
+        let apiClient = FakeAPIClient()
+        // onAppForeground() always polls paused-device settings first (harmless when not
+        // actually paused, per PausedDevicePoller's own doc) - a transport failure here is a
+        // realistic, inert outcome this test doesn't otherwise care about.
+        apiClient.listDevicesHandler = { throw APIError.transport("offline") }
         let stateStore = InMemoryDeviceSettingsStateStore(initial: DeviceSettingsSnapshot(syncIntervalMinutes: 5, trackingEnabled: true))
         let container = LocationRuntimeContainer(
-            apiClient: FakeAPIClient(), deviceId: { "device-1" },
+            apiClient: apiClient, deviceId: { "device-1" },
             locationProvider: provider, backgroundScheduler: FakeBackgroundSyncScheduler(), stateStore: stateStore
         )
 
@@ -813,6 +818,10 @@ struct LocationRuntimeContainerTests {
         provider.authorization = .always
         provider.nextFix = .success(makeFix())
         let apiClient = FakeAPIClient()
+        apiClient.reportLocationsHandler = { _, _, _ in
+            TestFeatures.envelope(ReportLocationsResponse(accepted: 1, duplicates: 0, lastKnownUpdated: true, deviceSettings: DeviceSettingsSnapshot(syncIntervalMinutes: 5, trackingEnabled: true), geofenceEtag: "0"))
+        }
+        apiClient.getGeofencesHandler = { _ in .notModified }
         let stateStore = InMemoryDeviceSettingsStateStore(initial: DeviceSettingsSnapshot(syncIntervalMinutes: 5, trackingEnabled: true))
         let container = LocationRuntimeContainer(
             apiClient: apiClient, deviceId: { "device-1" },

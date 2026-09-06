@@ -31,6 +31,18 @@ public protocol LocationProviding: AnyObject {
     func startBackgroundMonitoring(coordinator: FixCaptureCoordinator)
     func stopBackgroundMonitoring()
 
+    /// specs/009-device-runtime.md §1.3 (I52) — the low-power background presence: a standing
+    /// continuous location session (kilometre accuracy on iOS) plus a repeating cadence timer that
+    /// calls `onTick` at `syncIntervalMinutes` while the session is active. `PresencePolicy`
+    /// (`LocationRuntimeContainer`) is the ONLY thing that decides whether/when this should be
+    /// called — this method itself does not re-check authorization/tracking state, matching how
+    /// `startBackgroundMonitoring` already works. MUST be idempotent: calling it while already
+    /// active is a no-op (specs/009 §1.3: "Establishing presence is idempotent").
+    func startPresence(syncIntervalMinutes: Int, onTick: @escaping () -> Void)
+    /// Stops the presence session. MUST be idempotent: calling it while already stopped is a
+    /// no-op.
+    func stopPresence()
+
     /// Current authorization, collapsed to the four states `PermissionFlowPolicy` reasons about
     /// (specs/009 §7). Distinct from the pre-existing `isAuthorized`, which answers "can I capture
     /// a fix right now?" and cannot distinguish *not yet asked* from *refused* — a distinction the
@@ -78,6 +90,8 @@ public final class NoOpLocationProvider: LocationProviding {
     public func requestSingleFix(source: FixSource) async throws -> LocationFix { throw LocationProvidingError.notImplemented }
     public func startBackgroundMonitoring(coordinator: FixCaptureCoordinator) {}
     public func stopBackgroundMonitoring() {}
+    public func startPresence(syncIntervalMinutes: Int, onTick: @escaping () -> Void) {}
+    public func stopPresence() {}
 }
 
 #if os(iOS) && canImport(CoreLocation)
@@ -102,6 +116,21 @@ public final class SystemLocationProvider: NSObject, LocationProviding, SystemLo
     /// to — set once by `startBackgroundMonitoring(coordinator:)`, cleared by
     /// `stopBackgroundMonitoring()`.
     private weak var backgroundCoordinator: FixCaptureCoordinator?
+
+    /// specs/009 §1.3 (I52) — the presence session's own repeating cadence timer. `nil` exactly
+    /// when presence is not currently active; every accuracy-drain decision
+    /// (`PresenceAccuracyPolicy.drainAction`) reads `isPresenceActive` below rather than a second,
+    /// separately-maintained flag, so the two can never drift apart.
+    private var presenceTimer: Timer?
+
+    private var isPresenceActive: Bool { presenceTimer != nil }
+
+    /// specs/009 §3.4 "Presence session": `kCLLocationAccuracyThreeKilometers` — kilometre
+    /// accuracy is cell/Wi-Fi positioning only, no GPS, which is the entire point of the standing
+    /// session (009 §1.3's cost rationale). Named here (rather than inlined at both call sites)
+    /// because `startPresence` and the `PresenceAccuracyPolicy.resetAccuracyToPresenceBaseline`
+    /// drain action must agree on the exact same value.
+    private static let presenceAccuracy = kCLLocationAccuracyThreeKilometers
 
     /// `batteryLevelProvider` is injected (not read from `UIDevice` directly) so this class stays
     /// constructible — if not fully testable — outside a real device context; the real app target
@@ -227,8 +256,15 @@ public final class SystemLocationProvider: NSObject, LocationProviding, SystemLo
                 // hint path mislabeled `source: "periodic"` (specs/001 §5.1's `source` is meant to
                 // say what actually triggered the capture). `stopUpdatingLocation()` is
                 // CoreLocation's documented way to cancel a `requestLocation()` still in flight.
+                //
+                // I52 item 3: that cancellation is exactly wrong while presence is active —
+                // `stopUpdatingLocation()` would tear down the §1.3 continuous session too, since
+                // both share this one manager. `PresenceAccuracyPolicy.drainAction` is the single
+                // rule both this closure and the delivery/failure paths below consult so the
+                // manager is never stopped out from under a running presence session, and so the
+                // manager's accuracy is put back to the presence baseline instead.
                 self.pendingFixes.timeOutAndAct(id: id, error: LocationProvidingError.timedOut) {
-                    self.manager.stopUpdatingLocation()
+                    self.applyDrainAction()
                 }
             }
         }
@@ -251,10 +287,69 @@ public final class SystemLocationProvider: NSObject, LocationProviding, SystemLo
         backgroundCoordinator = nil
     }
 
+    /// specs/009-device-runtime.md §1.3/§3.4 "Presence session" — the exact configuration named
+    /// there: kilometre accuracy, 500 m distance filter, no automatic pausing, `.other` activity
+    /// type, background delivery enabled, no indicator. `PresencePolicy` (in
+    /// `LocationRuntimeContainer`) is the sole gate on whether/when this is called — this method
+    /// does not re-check authorization or tracking state itself.
+    ///
+    /// **Idempotent by construction** (specs/009 §1.3): a second call while `presenceTimer` is
+    /// already non-nil is a no-op, so re-establishing presence on every foreground/cold-start/
+    /// resume never restarts an already-running session (which would otherwise reset its own
+    /// cadence timer's phase for no reason) and never leaks a second `Timer`.
+    public func startPresence(syncIntervalMinutes: Int, onTick: @escaping () -> Void) {
+        guard presenceTimer == nil else { return }
+
+        manager.desiredAccuracy = Self.presenceAccuracy
+        manager.distanceFilter = 500
+        manager.pausesLocationUpdatesAutomatically = false
+        manager.activityType = .other
+        // specs/009 §3.4 "Background delivery": required for the presence session's continuous
+        // updates to keep flowing while backgrounded, same reasoning as
+        // `applyBackgroundLocationUpdatesPolicy` below — safe here because `PresencePolicy` only
+        // ever calls this method when authorization is already `.always`.
+        manager.allowsBackgroundLocationUpdates = true
+        manager.showsBackgroundLocationIndicator = false
+        manager.startUpdatingLocation()
+
+        let timer = Timer.scheduledTimer(withTimeInterval: TimeInterval(syncIntervalMinutes * 60), repeats: true) { _ in
+            onTick()
+        }
+        // `Timer.scheduledTimer` schedules on the current run loop in the default mode, which a
+        // `UIScrollView`/similar can starve during user interaction — `.common` keeps the cadence
+        // ticking regardless of what else the main run loop is doing.
+        RunLoop.main.add(timer, forMode: .common)
+        presenceTimer = timer
+    }
+
+    /// **Idempotent** (specs/009 §1.3's implicit counterpart to "establishing presence is
+    /// idempotent" — stopping an already-stopped presence must equally be a safe no-op, since
+    /// every lifecycle path in `LocationRuntimeContainer` calls this unconditionally as part of
+    /// `PresencePolicy` reconciliation, whether or not presence happened to be running).
+    public func stopPresence() {
+        presenceTimer?.invalidate()
+        presenceTimer = nil
+        manager.stopUpdatingLocation()
+    }
+
     private static func clAccuracy(for tier: LocationAccuracyTier) -> CLLocationAccuracy {
         switch tier {
         case .balanced: return kCLLocationAccuracyHundredMeters
         case .high: return kCLLocationAccuracyBest
+        }
+    }
+
+    /// specs/009 §1.3/§3.4 (I52 item 3) — the single call site every "every pending
+    /// `requestSingleFix` caller has now drained" path (timeout, a real delivery, a platform
+    /// failure) uses to act on `PresenceAccuracyPolicy.drainAction`. Reading `isPresenceActive`
+    /// fresh here — rather than each call site re-deriving it — is what keeps the decision correct
+    /// even though the three call sites run at different points in this class's lifecycle.
+    private func applyDrainAction() {
+        switch PresenceAccuracyPolicy.drainAction(presenceActive: isPresenceActive) {
+        case .stopUpdating:
+            manager.stopUpdatingLocation()
+        case .resetAccuracyToPresenceBaseline:
+            manager.desiredAccuracy = Self.presenceAccuracy
         }
     }
 }
@@ -291,12 +386,16 @@ extension SystemLocationProvider: CLLocationManagerDelegate {
         guard let location = locations.last else { return }
         // specs/009 §3.4 (I50 fix 5) — resumes EVERY pending `requestSingleFix` caller (there may
         // be more than one concurrently waiting on this single in-flight `requestLocation()`),
-        // each tagged with its own `source`. `resumeAll` reports whether anything was actually
-        // resumed so a stray delivery with nobody waiting still falls through to the
-        // significant-location-change/visit hint path below.
-        let resolvedAPendingFix = pendingFixes.resumeAll { source in
+        // each tagged with its own `source`. `resumeAllAndAct` reports whether anything was
+        // actually resumed so a stray delivery with nobody waiting still falls through to the
+        // significant-location-change/visit hint path below — and, atomically with the drain
+        // (I52 item 3), resets the manager's accuracy back to the §1.3 presence baseline when
+        // presence is active, so a resolved one-shot capture never leaves it raised.
+        let resolvedAPendingFix = pendingFixes.resumeAllAndAct(makeFix: { source in
             location.toLocationFix(source: source, batteryPct: self.batteryLevelProvider())
-        }
+        }, ifDrained: { [weak self] in
+            self?.applyDrainAction()
+        })
         guard !resolvedAPendingFix else { return }
         // Not a pending single-fix request - this is a significant-location-change delegate
         // callback (or a stray late delivery after every single-fix request already resolved via
@@ -334,8 +433,13 @@ extension SystemLocationProvider: CLLocationManagerDelegate {
     public func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
         // specs/009 §9: never log coordinates/deviceId/tokens - only an error category. Resumes
         // EVERY pending caller (specs/009 §3.4, I50 fix 5) - CoreLocation delivered one failure for
-        // however many callers are waiting on the single in-flight request.
-        pendingFixes.failAll(with: LocationProvidingError.underlying(String(describing: type(of: error))))
+        // however many callers are waiting on the single in-flight request. I52 item 3: atomically
+        // with that drain, also apply the same presence-aware accuracy/manager decision the
+        // success and timeout paths use, so a platform-wide failure doesn't leave the manager
+        // raised (or, worse, stopped out from under a running presence session) either.
+        pendingFixes.failAllAndAct(with: LocationProvidingError.underlying(String(describing: type(of: error)))) { [weak self] in
+            self?.applyDrainAction()
+        }
     }
 }
 
