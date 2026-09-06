@@ -20,6 +20,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * The specs/009-device-runtime.md §3.2 foreground service for 5/10-minute sync intervals —
@@ -53,6 +54,22 @@ import kotlinx.coroutines.launch
 class LocationForegroundService : Service() {
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+    /**
+     * Round-3 post-A40 review (finding 2): [runCycle]'s cancel-then-reassign of this field
+     * (`cycleJob?.cancel()` then `cycleJob = serviceScope.launch { … }`) is a read-modify-write
+     * with no mutual exclusion. [cycleStarted] and [currentSyncIntervalMinutes] got `@Volatile` in
+     * round 2, but this field was left plain while [runCycle] was reachable from the main thread
+     * (`onStartCommand`'s two direct calls) *and* from the [Dispatchers.Default] restart-decision
+     * coroutine below — two interleaved calls could each pass the cancel check before either
+     * reassignment lands, losing an update and leaving a job uncancelled (two concurrent
+     * `runOnce()`s, two `finally` blocks both scheduling a next tick on the same
+     * `TICK_REQUEST_CODE`, last alarm wins, a stale interval can persist). Fixed by making
+     * [runCycle] single-threaded by construction instead of adding a lock: the restart-decision
+     * branch now hops back to [Dispatchers.Main] before calling [runCycle], so every call to it —
+     * and therefore every read/write of [cycleJob] — happens on the main thread, the same thread
+     * `onDestroy` already runs on.
+     */
     private var cycleJob: Job? = null
 
     /** Guards against re-triggering an immediate `runOnce` on a redundant `startForegroundService`
@@ -111,7 +128,11 @@ class LocationForegroundService : Service() {
             serviceScope.launch {
                 val container = (application as FindlyApplication).container
                 when (val decision = ServiceRestartDecision.decide(container.cachedDeviceSettings())) {
-                    is ServiceRestartDecision.StartWithInterval -> runCycle(decision.syncIntervalMinutes, attempt = 1)
+                    // Code-review fix (finding 2, round 3 post-A40 review): hop back to the main
+                    // thread before calling runCycle - see cycleJob's doc above for why this,
+                    // rather than a lock, is what keeps its cancel-then-reassign race-free.
+                    is ServiceRestartDecision.StartWithInterval ->
+                        withContext(Dispatchers.Main) { runCycle(decision.syncIntervalMinutes, attempt = 1) }
                     ServiceRestartDecision.Stop -> stopSelf()
                 }
             }
