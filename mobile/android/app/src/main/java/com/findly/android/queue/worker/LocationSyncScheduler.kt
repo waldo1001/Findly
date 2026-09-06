@@ -56,9 +56,16 @@ class LocationSyncScheduler(
     }
 
     private fun enqueueWorkManager(intervalMinutes: Int) {
-        // specs/009 §3.1: "flex interval = min(5 min, period/3)" - always exactly 5 in practice
-        // (every WorkManager-eligible interval is >= 15, so period/3 is always >= 5), spelled out
-        // as the spec's own formula rather than hardcoded so the intent stays obvious.
+        // Code-review fix (A41 round 2, finding 6): this comment used to claim "every
+        // WorkManager-eligible interval is >= 15, so period/3 is always >= 5" - true when this
+        // class only ever saw 15/30/60/120/1440, but false as of this branch: the §3.2
+        // permission-fallback rule (EffectiveSyncStrategySelector) now routes 5 and 10 into this
+        // same method whenever ACCESS_BACKGROUND_LOCATION isn't granted. WorkManager's own
+        // PeriodicWorkRequest floor silently clamps a sub-15-minute period up to 15 minutes (and
+        // its flex up to 5) - the formula below still computes 1-3 for a 5/10-minute request, but
+        // the request that actually reaches the OS runs at the clamped 15/5. specs/009 §3.2 calls
+        // this fallback "still opportunistic", so the clamp is the accepted degradation, not a bug
+        // - spelled out here so the silent clamp isn't mistaken for one.
         val flexMinutes = minOf(5, intervalMinutes / 3)
         val request = PeriodicWorkRequestBuilder<LocationSyncWorker>(
             intervalMinutes.toLong(), TimeUnit.MINUTES,
