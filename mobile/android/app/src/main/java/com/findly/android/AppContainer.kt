@@ -77,6 +77,8 @@ import com.findly.android.ui.settings.ExportArtifactCleaner
 import com.findly.android.ui.settings.ExportFileWriter
 import com.findly.android.ui.settings.LocalStateWiper
 import java.time.LocalDate
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -91,7 +93,30 @@ import kotlinx.coroutines.launch
  */
 class AppContainer(context: Context) {
 
-    private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    /**
+     * Round-3 post-A40 review (finding 1): a [SupervisorJob] isolates sibling coroutines from
+     * each other's failures — it does not swallow exceptions. With no [CoroutineExceptionHandler],
+     * any uncaught throw from *any* `applicationScope.launch` reached the default handler and
+     * killed the process; the round-2 fix guarded [reapplyCachedScheduleSuspending] and
+     * `LocationForegroundService.runCycle` individually but missed [onAppForeground]'s
+     * `ForegroundTrigger(...).run()`, which had no guard of its own and reaches the same Retrofit
+     * path (`LocationSyncRunner.runOnce()` -> `syncCoordinator`/`settingsCoordinator`/geofence
+     * config coordinator) that the foreground service felt obliged to guard. A handler here closes
+     * the whole class of bug instead of one call site at a time. Logs only the exception's class
+     * name, never its message/cause (specs/009 §9: counts and error codes only, never
+     * coordinates/`deviceId`/tokens/phone numbers). The coroutines machinery never delivers a
+     * [CancellationException] to this handler, so cancellation is unaffected.
+     */
+    private val applicationScope = CoroutineScope(
+        SupervisorJob() +
+            Dispatchers.Default +
+            CoroutineExceptionHandler { _, throwable ->
+                Log.d(
+                    "FindlySync",
+                    "unhandled applicationScope coroutine failure (${throwable::class.simpleName})",
+                )
+            },
+    )
 
     val appConfig: AppConfig = AppConfig.fromBuildConfig(
         baseUrl = BuildConfig.BASE_URL,
@@ -407,19 +432,36 @@ class AppContainer(context: Context) {
      * default handler and kills the process — on **every** such cold start, since [start] always
      * calls this. 009 §3.2 already tolerates a device that cannot hold presence (falls back to
      * §3.1 WorkManager); the schedule is simply retried on the next cold start/foreground/boot, so
-     * swallowing the failure here is correct, not a silent bug. Logs a bare count, never a
-     * `deviceId`/coordinates/token (docs/security-review-checklist.md).
+     * swallowing the failure here is correct, not a silent bug.
+     *
+     * Round-3 post-A40 review (finding 3 + finding 4): the `try`/`catch` used to wrap only
+     * [syncScheduler]`.reschedule(...)`, leaving the `deviceSettingsStateStore.current()` read and
+     * [CachedScheduleReapplyDecision.decide] unguarded — a throw there propagated straight out of
+     * this function. For [BootCompletedReceiver] that lands in a plain
+     * `CoroutineScope(Dispatchers.Default)` with no handler, killing the process during boot and
+     * losing the reschedule (finding 4); wrapping the whole body here fixes it at the source for
+     * every caller, not just that one. The catch also used to swallow [CancellationException] —
+     * which a `suspend fun` must never absorb, since cancelling [applicationScope] mid-call would
+     * then silently break structured concurrency — and every programming error (an NPE or
+     * `IllegalStateException` from a mis-wired [syncScheduler]) into an invisible, unlogged no-op
+     * repeating on every cold start/foreground/boot. [CancellationException] is now rethrown
+     * first; anything else is logged by **class name only** (specs/009 §9 permits error codes; the
+     * message/payload may not be logged) — this function logs no count, contrary to what this
+     * doc's previous wording claimed.
      */
     suspend fun reapplyCachedScheduleSuspending() {
-        when (val action = CachedScheduleReapplyDecision.decide(deviceSettingsStateStore.current())) {
-            is CachedScheduleReapplyDecision.Reschedule -> {
-                try {
-                    syncScheduler.reschedule(action.syncIntervalMinutes)
-                } catch (e: Exception) {
-                    Log.d("FindlySync", "cached schedule reapply failed, will retry next cold start/foreground")
-                }
+        try {
+            when (val action = CachedScheduleReapplyDecision.decide(deviceSettingsStateStore.current())) {
+                is CachedScheduleReapplyDecision.Reschedule -> syncScheduler.reschedule(action.syncIntervalMinutes)
+                CachedScheduleReapplyDecision.DoNothing -> Unit
             }
-            CachedScheduleReapplyDecision.DoNothing -> Unit
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.d(
+                "FindlySync",
+                "cached schedule reapply failed (${e::class.simpleName}), will retry next cold start/foreground",
+            )
         }
     }
 

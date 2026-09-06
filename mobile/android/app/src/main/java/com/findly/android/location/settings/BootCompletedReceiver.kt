@@ -26,8 +26,17 @@ import kotlinx.coroutines.launch
  * window has already closed — forfeiting the very exemption `ACTION_BOOT_COMPLETED` grants. Doing
  * the cached read + reschedule inside the `PendingResult` this receiver holds via `goAsync()`
  * keeps the work inside that window; the result is released in a `finally` so the OS can recycle
- * the receiver whether the work succeeds, no-ops, or the reschedule itself fails (swallowed by
- * [com.findly.android.AppContainer.reapplyCachedScheduleSuspending], per finding 1's other half).
+ * the receiver whether the work succeeds, no-ops, or any part of it fails.
+ *
+ * Round-3 post-A40 review (finding 4): this `try`/`finally` had no `catch` — it relied on
+ * [com.findly.android.AppContainer.reapplyCachedScheduleSuspending] to swallow failures, but that
+ * function used to wrap only its `reschedule` call, not the cached-settings read or the reapply
+ * decision ahead of it. A throw from either of those propagated out through this `finally` into
+ * the plain `CoroutineScope(Dispatchers.Default)` below, which carries no
+ * `CoroutineExceptionHandler`, killing the process during boot. Fixed at the source instead of
+ * here: [com.findly.android.AppContainer.reapplyCachedScheduleSuspending] now wraps its entire
+ * body, so every failure short of [kotlinx.coroutines.CancellationException] is swallowed (and
+ * logged by exception class name only) before it can reach this receiver's caller.
  */
 class BootCompletedReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
