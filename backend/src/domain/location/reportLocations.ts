@@ -140,9 +140,11 @@ export async function reportLocations(
   const now = deps.clock.now();
 
   // specs/001 §4.2 (amended 2026-09-06) — every device-originated call refreshes
-  // lastSeenAt, write-skipped to at most once per minute (002 §2.4).
+  // lastSeenAt, write-skipped to at most once per minute (002 §2.4). touchLastSeen is a
+  // timestamp-only merge (never a full-row replace of this stale-by-construction snapshot)
+  // so a concurrent PATCH /devices/{id} (§4.3) or re-registration (§4.1) can't be clobbered.
   if (shouldRefreshLastSeen(device.lastSeenAt, now)) {
-    await deps.deviceRepo.putDevice(input.uid, { ...device, lastSeenAt: now.toISOString() });
+    await deps.deviceRepo.touchLastSeen(input.uid, deviceId, now.toISOString());
   }
 
   const deviceSettings: DeviceSettingsSnapshot = {

@@ -348,6 +348,32 @@ describe("domain/locate/fulfillLocateRequest", () => {
     expect(stored?.lat).toBe(51.0544);
   });
 
+  it("a DIFFERENT fixId on an already-fulfilled request beyond the grace window still stores history/last-known without touching fixJson (specs/001 §11 amended 2026-09-06 — discriminates the short-circuit-before-grace ordering)", async () => {
+    const deps = buildDeps();
+    const priorFixJson = JSON.stringify({ ...fix({ fixId: "a1e2b3c4-0000-4000-8000-000000000099" }) });
+    deps.locateRequestRepo.seed(
+      record({
+        status: "fulfilled",
+        expiresAt: "2026-07-19T08:00:00Z", // far past even the 10-minute grace window
+        fixJson: priorFixJson,
+        fulfilledAt: "2026-07-19T08:00:00Z",
+        late: false,
+      }),
+    );
+
+    const result = await fulfillLocateRequest(
+      baseInput({ body: { fix: fix({ fixId: "a1e2b3c4-0000-4000-8000-000000000003" }) } }),
+      deps,
+    );
+
+    expect(result.status).toBe("fulfilled"); // must not throw LOCATE_REQUEST_EXPIRED
+    const requestRecord = await deps.locateRequestRepo.get(FAMILY_ID, REQUEST_ID);
+    expect(requestRecord?.fixJson).toBe(priorFixJson); // NOT replaced by the different fixId
+    expect(deps.historyStore.fixes.length).toBe(1); // still recorded as a real position, not silently dropped
+    const stored = await deps.lastKnownRepo.get(TARGET_UID, TARGET_DEVICE_ID);
+    expect(stored?.lat).toBe(51.0544);
+  });
+
   it("the SAME fixId replayed against an already-fulfilled request is idempotent, even long past expiresAt", async () => {
     const deps = buildDeps();
     const priorFixJson = JSON.stringify({ ...fix() }); // same fixId as baseInput()'s fix
@@ -537,6 +563,29 @@ describe("domain/locate/fulfillLocateRequest", () => {
 
       const stored = await deps.deviceRepo.getDevice(TARGET_UID, TARGET_DEVICE_ID);
       expect(stored?.lastSeenAt).toBe(recentlySeen);
+    });
+
+    it("does not clobber a concurrent settings change: trackingEnabled flipped to false after the in-request snapshot still reads false after the refresh (Major review fix, 002 §2.4)", async () => {
+      const deps = buildDeps();
+      deps.deviceRepo.seed(TARGET_UID, device({ lastSeenAt: "2026-07-01T00:00:00Z", trackingEnabled: true })); // stale -> triggers a write
+      deps.locateRequestRepo.seed(record({ expiresAt: "2026-07-19T09:11:00Z" }));
+
+      // Simulate a concurrent PATCH /devices/{id} (§4.3) landing between this request's
+      // §1.2 ownership snapshot read and its lastSeenAt refresh write.
+      const originalGetDevice = deps.deviceRepo.getDevice.bind(deps.deviceRepo);
+      deps.deviceRepo.getDevice = async (ownerUserId, deviceId) => {
+        const snapshot = await originalGetDevice(ownerUserId, deviceId);
+        if (snapshot) {
+          await deps.deviceRepo.putDevice(ownerUserId, { ...snapshot, trackingEnabled: false });
+        }
+        return snapshot;
+      };
+
+      await fulfillLocateRequest(baseInput(), deps);
+
+      const stored = await deps.deviceRepo.getDevice(TARGET_UID, TARGET_DEVICE_ID);
+      expect(stored?.trackingEnabled).toBe(false); // must NOT be reverted to the stale snapshot's true
+      expect(stored?.lastSeenAt).toBe(new Date(NOW).toISOString());
     });
   });
 });

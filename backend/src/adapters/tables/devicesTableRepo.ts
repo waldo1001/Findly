@@ -65,6 +65,20 @@ export class TableDeviceRepo implements DeviceRepo {
     );
   }
 
+  /** Timestamp-only write (002 §2.4, DeviceRepo.touchLastSeen): a field-level Merge that
+   * touches ONLY `lastSeenAt`, so it can never rewrite parent-managed settings from a stale
+   * in-request snapshot the way a full `Replace` upsert would. */
+  async touchLastSeen(ownerUserId: string, deviceId: string, lastSeenAt: string): Promise<void> {
+    await this.client.updateEntity(
+      {
+        partitionKey: ownerUserId,
+        rowKey: `${DEVICE_PREFIX}${deviceId}`,
+        lastSeenAt,
+      },
+      "Merge",
+    );
+  }
+
   async listDevices(ownerUserId: string): Promise<DeviceRecord[]> {
     // 002 §4.2 (B20) — a Devices table that has never been created (TableNotFound) resolves
     // to no devices, same as an existing-but-empty partition.

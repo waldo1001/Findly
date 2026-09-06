@@ -176,6 +176,13 @@ export interface DeviceRepo {
   getDevice(ownerUserId: string, deviceId: string): Promise<DeviceRecord | null>;
   /** Full upsert write — the domain computes the final merged state (001 §4.1). */
   putDevice(ownerUserId: string, device: DeviceRecord): Promise<void>;
+  /** Timestamp-only write (002 §2.4): merges ONLY `lastSeenAt` into the currently stored
+   * row — it must never be able to rewrite parent-managed settings (`trackingEnabled`,
+   * `pushToken`, `pushInvalid`, `syncIntervalMinutes`, `deviceName`, ...) from a stale
+   * in-request snapshot taken earlier in the same request. Used by every device-originated
+   * call site's §4.2 refresh (§5.1/§7.3/§6.3) EXCEPT registration (§4.1), which legitimately
+   * keeps `putDevice` because it composes the whole row anyway. */
+  touchLastSeen(ownerUserId: string, deviceId: string, lastSeenAt: string): Promise<void>;
   /** Partition scan = one owner's devices (001 §4.1 cap, §4.2/§5.2/§6.1/§8 fan-out inputs). */
   listDevices(ownerUserId: string): Promise<DeviceRecord[]>;
   /** Partition scan count = the per-user device-cap check (001 §4.1). */

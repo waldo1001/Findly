@@ -127,9 +127,11 @@ export async function fulfillLocateRequest(
   const withinGrace = nowMs <= expiresAtMs + GRACE_MS;
 
   // specs/001 §4.2/§6.3 (amended 2026-09-06) — every device-originated call refreshes
-  // lastSeenAt, write-skipped to at most once per minute (002 §2.4).
+  // lastSeenAt, write-skipped to at most once per minute (002 §2.4). touchLastSeen is a
+  // timestamp-only merge (never a full-row replace of this stale-by-construction snapshot)
+  // so a concurrent PATCH /devices/{id} (§4.3) or re-registration (§4.1) can't be clobbered.
   if (shouldRefreshLastSeen(device.lastSeenAt, now)) {
-    await deps.deviceRepo.putDevice(device.ownerUserId, { ...device, lastSeenAt: now.toISOString() });
+    await deps.deviceRepo.touchLastSeen(device.ownerUserId, device.deviceId, now.toISOString());
   }
 
   const inserted = await deps.idempotencyRepo.tryInsertFixMarker(record.targetDeviceId, body.fix.fixId, receivedAt);
