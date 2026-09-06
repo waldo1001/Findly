@@ -10,5 +10,13 @@ package com.findly.android.pushmessages
  * coordinates, `deviceId`, tokens, or phone numbers in logs).
  */
 object PushPriorityDemotion {
-    fun wasDemoted(priority: Int, originalPriority: Int): Boolean = priority != originalPriority
+    /** FCM's own "not populated" sentinel (`RemoteMessage.PRIORITY_UNKNOWN`) — kept as a plain Int
+     * here (not the Firebase constant) for the same pure-testability reason as the parameters
+     * themselves. Nit fix (A39 review): PRIORITY_UNKNOWN on either side must never count as a
+     * demotion — it means the SDK didn't populate that field, not that FCM downgraded the
+     * message — counting it inflated the demotion diagnostic. */
+    private const val PRIORITY_UNKNOWN = 0
+
+    fun wasDemoted(priority: Int, originalPriority: Int): Boolean =
+        priority != originalPriority && priority != PRIORITY_UNKNOWN && originalPriority != PRIORITY_UNKNOWN
 }

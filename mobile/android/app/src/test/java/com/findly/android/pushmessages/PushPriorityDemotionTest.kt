@@ -27,4 +27,18 @@ class PushPriorityDemotionTest {
     fun `both unknown (0) is not a demotion`() {
         assertFalse(PushPriorityDemotion.wasDemoted(priority = 0, originalPriority = 0))
     }
+
+    // Nit fix (A39 review): PRIORITY_UNKNOWN (0) on either side means the SDK didn't populate
+    // that field - not that FCM downgraded the message - so it must never count as a demotion on
+    // its own, even against a genuinely different value on the other side.
+
+    @Test
+    fun `an unknown originalPriority is never counted as a demotion, even against a different delivered priority`() {
+        assertFalse(PushPriorityDemotion.wasDemoted(priority = 1, originalPriority = 0))
+    }
+
+    @Test
+    fun `an unknown delivered priority is never counted as a demotion, even against a different original priority`() {
+        assertFalse(PushPriorityDemotion.wasDemoted(priority = 0, originalPriority = 1))
+    }
 }
