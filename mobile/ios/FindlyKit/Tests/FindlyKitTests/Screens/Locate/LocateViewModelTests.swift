@@ -124,6 +124,7 @@ struct LocateViewModelTests {
         #expect(viewModel.status == .late, "a wire fulfilled with no fix must fall through to the fallback decision, not render a meaningless Live chip")
         #expect(viewModel.resolvedPosition?.lat == 51.06)
         #expect(api.getLatestLocationsCallCount == 1)
+        #expect(viewModel.wireStatus == .fulfilled, "the wire answered with a real (if fixless) fulfilled status — wireStatus must carry that through as-is, not fabricate .expired as if the server never answered")
     }
 
     @Test func requestLocate_pollWindowElapses_fallbackFindsNewerPosition_rendersLate() async throws {
