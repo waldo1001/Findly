@@ -29,6 +29,21 @@ public actor FixCaptureCoordinator {
     private let isPermissionGranted: () -> Bool
     private let now: () -> Date
 
+    /// specs/009 §3.4 (I50 fix 6, Minor) — the same `× 0.8` elapsed-time gate
+    /// `LocationSyncRunner.runOnce()`'s `BGAppRefreshTask`/foreground trigger already applies
+    /// before calling this method for `source: .periodic`. Optional/`nil`-defaulted: the
+    /// significant-location-change/visit hint paths (`SystemLocationProvider`'s
+    /// `didUpdateLocations`/`didVisit`, both `LocationProviding.swift`) used to call
+    /// `captureAndQueue(source: .periodic, hint:)` directly, bypassing this gate entirely and
+    /// leaving `lastQueuedFixAtStore` stale — queuing every hint regardless of interval and making
+    /// the very next background-refresh trigger capture again immediately. Applying the gate HERE,
+    /// inside the one seam every `.periodic` caller goes through (this class's own doc), fixes both
+    /// hint paths for free without either needing to know about `SyncTriggerPolicy` itself. `nil`
+    /// (the default) means "no gate" — every existing caller/test that doesn't configure this,
+    /// including every non-`.periodic` source, is completely unaffected.
+    private let currentSyncIntervalMinutes: (() -> Int)?
+    private let lastQueuedFixAtStore: LastQueuedFixAtStoring?
+
     private var lastCaptured: (lat: Double, lon: Double, at: Date)?
 
     public init(
@@ -36,12 +51,16 @@ public actor FixCaptureCoordinator {
         queue: FixQueue,
         isPaused: @escaping () -> Bool,
         isPermissionGranted: @escaping () -> Bool,
+        currentSyncIntervalMinutes: (() -> Int)? = nil,
+        lastQueuedFixAtStore: LastQueuedFixAtStoring? = nil,
         now: @escaping () -> Date = Date.init
     ) {
         self.provider = provider
         self.queue = queue
         self.isPaused = isPaused
         self.isPermissionGranted = isPermissionGranted
+        self.currentSyncIntervalMinutes = currentSyncIntervalMinutes
+        self.lastQueuedFixAtStore = lastQueuedFixAtStore
         self.now = now
     }
 
@@ -55,6 +74,18 @@ public actor FixCaptureCoordinator {
     public func captureAndQueue(source: FixSource, hint: LocationFix? = nil) async -> LocationFix? {
         if isPaused() { return nil }
         if !isPermissionGranted() { return nil }
+
+        // I50 fix 6 (Minor) — the iOS opportunistic-trigger elapsed-time rule (specs/009 §3.4)
+        // applies to every `.periodic` caller, hint-triggered ones included; see this gate's own
+        // doc for why it lives here rather than only inside `LocationSyncRunner`.
+        if source == .periodic, let currentSyncIntervalMinutes, let lastQueuedFixAtStore {
+            let shouldCapture = SyncTriggerPolicy.shouldCapture(
+                syncIntervalMinutes: currentSyncIntervalMinutes(),
+                lastQueuedFixAt: lastQueuedFixAtStore.lastQueuedFixAt(),
+                now: now()
+            )
+            guard shouldCapture else { return nil }
+        }
 
         let fix: LocationFix
         if let hint {
@@ -71,6 +102,12 @@ public actor FixCaptureCoordinator {
         lastCaptured = (fix.lat, fix.lon, now())
 
         await queue.enqueue(fix)
+        // I50 fix 6 — record on every successful `.periodic` enqueue (hint-triggered included), so
+        // the very next background-refresh trigger correctly re-evaluates the same 0.8 threshold
+        // instead of finding a stale timestamp and capturing again immediately.
+        if source == .periodic {
+            lastQueuedFixAtStore?.recordQueuedFixAt(now())
+        }
         return fix
     }
 

@@ -167,7 +167,14 @@ public final class LocationRuntimeContainer {
             provider: locationProvider,
             queue: queue,
             isPaused: { stateStore.current()?.trackingEnabled == false },
-            isPermissionGranted: isPermissionGranted
+            isPermissionGranted: isPermissionGranted,
+            // I50 fix 6 (Minor) — the SAME store/interval `LocationSyncRunner` (below) reads and
+            // writes, so `SystemLocationProvider`'s significant-location-change/visit hint paths
+            // (which call `captureAndQueue(source: .periodic, hint:)` on THIS instance directly)
+            // are now subject to the identical §3.4 × 0.8 elapsed-time gate, instead of bypassing
+            // it entirely. See `FixCaptureCoordinator`'s own doc for why the gate lives here.
+            currentSyncIntervalMinutes: { stateStore.current()?.syncIntervalMinutes ?? Self.defaultSyncIntervalMinutes },
+            lastQueuedFixAtStore: lastQueuedFixAtStore
         )
         self.captureCoordinator = captureCoordinator
 
