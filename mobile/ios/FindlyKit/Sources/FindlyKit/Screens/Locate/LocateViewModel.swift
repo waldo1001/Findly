@@ -140,19 +140,22 @@ public final class LocateViewModel: ObservableObject {
                     let envelope = try await self.apiClient.pollLocateRequest(requestId: requestId)
                     if Task.isCancelled { break }
                     let data = envelope.data
-                    if data.status == .fulfilled {
-                        if let fix = data.fix {
-                            self.resolvedPosition = LocatedPosition(lat: fix.lat, lon: fix.lon, accuracyM: fix.accuracyM, recordedAt: fix.recordedAt)
-                        }
+                    // I51 review fix (Minor, finding 4): a `fulfilled` wire response REQUIRES a
+                    // usable fix — otherwise this falls through to the same fallback/unreachable
+                    // decision as any other non-fresh terminal, rather than rendering a "Live" chip
+                    // with no position (outcome and usable fix must move in lockstep, mirroring
+                    // A39's finding 13 on the fallback path).
+                    if data.status == .fulfilled, let fix = data.fix {
+                        self.resolvedPosition = LocatedPosition(lat: fix.lat, lon: fix.lon, accuracyM: fix.accuracyM, recordedAt: fix.recordedAt)
                         self.status = data.late ? .late : .fulfilled
                         return
                     }
                     let windowElapsed = Self.hasElapsed(pollWindow: pollWindow, since: receivedAt, now: self.now)
-                    if data.status == .expired || data.status == .pushFailed || windowElapsed {
+                    if data.status == .expired || data.status == .pushFailed || data.status == .fulfilled || windowElapsed {
                         // I51 review fix (Blocking, finding 1): carry the wire's own terminal status
                         // through so `.unreachable` can tell "couldn't reach the device" (pushFailed)
-                        // apart from "request expired" (everything else, incl. a purely local-window
-                        // timeout the server never actually confirmed).
+                        // apart from "request expired" (everything else, incl. a fixless "fulfilled"
+                        // and a purely local-window timeout the server never actually confirmed).
                         let triggerStatus: LocateStatus = (data.status == .expired || data.status == .pushFailed) ? data.status : .expired
                         await self.resolveViaFallback(targetDeviceId: targetDeviceId, createdAt: createdAt, wireStatus: triggerStatus)
                         return
