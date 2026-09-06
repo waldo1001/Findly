@@ -195,11 +195,26 @@ public final class SystemLocationProvider: NSObject, LocationProviding, SystemLo
     /// than everything already pending) — fixes both: the manager is only ever raised, never
     /// lowered, while any caller is pending, and a genuinely higher-tier joiner does get its own
     /// fresh, correctly-accurate `requestLocation()`.
+    ///
+    /// **I50 review 2nd round, Major.** The above decision (`needsPlatformRequest`) was computed
+    /// under `pendingFixes`' lock, but the `manager.desiredAccuracy`/`requestLocation()` calls that
+    /// acted on it ran AFTER that lock was released — on whatever thread the calling `Task` happens
+    /// to be on, which is by design not guaranteed to be the same thread/actor as any other
+    /// concurrent caller (I52's presence timer, I51's push handler, the background-refresh trigger).
+    /// So a caller told to issue could still have its `requestLocation()` land AFTER a second,
+    /// higher-tier caller's — Apple documents that a new `requestLocation()` cancels the previous
+    /// one, so the last mutation silently wins regardless of tier, reintroducing the original
+    /// Blocking symptom under a race window. The same gap let fix 8's belated
+    /// `stopUpdatingLocation()` (below) cancel a brand-new caller's just-issued, legitimately
+    /// pending request. `registerAndAct`/`timeOutAndAct` (`PendingFixContinuations`) close this by
+    /// running the manager mutation WHILE STILL HOLDING that same lock, so "decide, then act" is one
+    /// indivisible step for both register and timeout — see their docs for the full rationale, and
+    /// `PendingFixContinuationsTests` for the registry-level ordering tests (CoreLocation itself
+    /// isn't testable here).
     private func awaitNextLocation(source: FixSource) async throws -> LocationFix {
         let timeout = FixAccuracyPolicy.timeout(for: source)
         return try await withCheckedThrowingContinuation { continuation in
-            let (id, needsPlatformRequest) = pendingFixes.register(source: source, continuation: continuation)
-            if needsPlatformRequest {
+            let id = pendingFixes.registerAndAct(source: source, continuation: continuation) {
                 manager.desiredAccuracy = Self.clAccuracy(for: FixAccuracyPolicy.tier(for: source))
                 manager.requestLocation()
             }
@@ -212,7 +227,7 @@ public final class SystemLocationProvider: NSObject, LocationProviding, SystemLo
                 // hint path mislabeled `source: "periodic"` (specs/001 §5.1's `source` is meant to
                 // say what actually triggered the capture). `stopUpdatingLocation()` is
                 // CoreLocation's documented way to cancel a `requestLocation()` still in flight.
-                if self.pendingFixes.timeOut(id: id, error: LocationProvidingError.timedOut) {
+                self.pendingFixes.timeOutAndAct(id: id, error: LocationProvidingError.timedOut) {
                     self.manager.stopUpdatingLocation()
                 }
             }

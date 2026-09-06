@@ -56,6 +56,39 @@ public final class PendingFixContinuations: @unchecked Sendable {
         return (id, needsPlatformRequest)
     }
 
+    /// Atomic counterpart to `register` (I50 review 2nd round, Major). `register` correctly
+    /// reports `needsPlatformRequest`, but if the CALLER acts on that report (writing
+    /// `manager.desiredAccuracy` and calling `manager.requestLocation()`) only AFTER this method
+    /// returns — i.e. after the lock is released — nothing stops a second, genuinely concurrent
+    /// `register`/act pair on another thread from interleaving with it: whichever caller's
+    /// CoreLocation mutation lands last on the manager silently wins, independent of which
+    /// caller's tier was actually higher (Apple documents that a new `requestLocation()` cancels
+    /// the previous one). I52's presence timer, I51's push handler, and the background-refresh
+    /// trigger are three realistic concurrent callers with no shared actor/thread guarantee, so
+    /// this is not a theoretical race.
+    ///
+    /// `registerAndAct` closes the gap by running `action` (supplied by
+    /// `SystemLocationProvider.awaitNextLocation`) WHILE STILL HOLDING the lock, exactly when
+    /// `needsPlatformRequest` is true — so this registration's "am I the one that must act" decision
+    /// and the act itself are one indivisible step, and can never interleave with another
+    /// registration's (or `timeOutAndAct`'s) own act. `continuation` is stored but never resumed
+    /// here — resumption always happens outside the lock, via `resumeAll`/`failAll`/`timeOutAndAct`,
+    /// exactly as `register` already guaranteed.
+    @discardableResult
+    public func registerAndAct(source: FixSource, continuation: CheckedContinuation<LocationFix, Error>, ifNeedsPlatformRequest action: () -> Void) -> ID {
+        lock.lock()
+        defer { lock.unlock() }
+        let newTier = FixAccuracyPolicy.tier(for: source)
+        let highestPendingTier = pending.values.map { FixAccuracyPolicy.tier(for: $0.source) }.max()
+        let needsPlatformRequest = highestPendingTier.map { newTier > $0 } ?? true
+        let id = ID()
+        pending[id] = (source, continuation)
+        if needsPlatformRequest {
+            action()
+        }
+        return id
+    }
+
     /// A single caller's own timeout (specs/009 §1.1: "no fix is better than a burned battery") —
     /// resumes and removes ONLY this id, leaving every other concurrently-pending caller untouched
     /// so it can still be satisfied by the real platform answer (or its own, independent timeout).
@@ -76,6 +109,32 @@ public final class PendingFixContinuations: @unchecked Sendable {
         lock.lock()
         let entry = pending.removeValue(forKey: id)
         let isNowEmpty = entry != nil && pending.isEmpty
+        lock.unlock()
+        entry?.continuation.resume(throwing: error)
+        return isNowEmpty
+    }
+
+    /// Atomic counterpart to `timeOut` (I50 review 2nd round, Major) — the second face of the same
+    /// gap `registerAndAct` closes. `timeOut` correctly reports whether THIS timeout is the one
+    /// that emptied the registry, but if the caller's `manager.stopUpdatingLocation()` runs only
+    /// AFTER this method returns, nothing stops a brand-new caller's `registerAndAct` (on another
+    /// thread) from registering and re-issuing `requestLocation()` in the gap between "registry
+    /// went empty" and "stop the old request" — so the belated stop can cancel a live request that,
+    /// by the time it actually runs, legitimately belongs to a new, still-pending caller.
+    ///
+    /// Runs `action` WHILE STILL HOLDING the lock, exactly when `id`'s removal is what emptied the
+    /// registry, so this decision-and-act is indivisible with respect to every `registerAndAct`
+    /// (and every other `timeOutAndAct`) call, which share the same lock. `continuation.resume`
+    /// still happens AFTER the lock is released, matching every other resume in this type — never
+    /// hold the lock across a continuation resume.
+    @discardableResult
+    public func timeOutAndAct(id: ID, error: Error, ifNowEmpty action: () -> Void) -> Bool {
+        lock.lock()
+        let entry = pending.removeValue(forKey: id)
+        let isNowEmpty = entry != nil && pending.isEmpty
+        if isNowEmpty {
+            action()
+        }
         lock.unlock()
         entry?.continuation.resume(throwing: error)
         return isNowEmpty
