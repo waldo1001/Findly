@@ -438,4 +438,106 @@ struct PendingFixContinuationsTests {
         }
         #expect(registry.count == 0)
     }
+
+    // MARK: - I52 item 3: resumeAllAndAct/failAllAndAct — the drain-time accuracy/presence action
+    // must run INSIDE the same critical section register/timeOutAndAct already share, for exactly
+    // the reason those two exist: a concurrent caller registering a brand-new higher-tier request
+    // in the gap between "the registry just drained" and "the caller acted on that" must never be
+    // able to interleave with the act. `resumeAll`/`failAll` above are UNCHANGED (existing callers/
+    // tests keep working) - these are additive atomic counterparts, mirroring registerAndAct/
+    // timeOutAndAct's own shape exactly.
+
+    @Test func resumeAllAndAct_runsTheActionOnlyWhenSomethingWasActuallyPending() async throws {
+        let registry = PendingFixContinuations()
+
+        let notDrained = registry.resumeAllAndAct(makeFix: { makeFix(source: $0) }, ifDrained: {
+            Issue.record("must not run - nothing was pending")
+        })
+        #expect(!notDrained)
+
+        let task = Task<LocationFix, Error> {
+            try await withCheckedThrowingContinuation { continuation in
+                registry.register(source: .periodic, continuation: continuation)
+            }
+        }
+        while registry.count < 1 { await Task.yield() }
+
+        var actionRan = false
+        let drained = registry.resumeAllAndAct(makeFix: { makeFix(source: $0) }, ifDrained: { actionRan = true })
+        #expect(drained)
+        #expect(actionRan)
+        let fix = try await task.value
+        #expect(fix.source == .periodic)
+        #expect(registry.count == 0)
+    }
+
+    @Test func failAllAndAct_runsTheActionOnlyWhenSomethingWasActuallyPending() async throws {
+        let registry = PendingFixContinuations()
+
+        let notDrained = registry.failAllAndAct(with: LocationProvidingError.timedOut, ifDrained: {
+            Issue.record("must not run - nothing was pending")
+        })
+        #expect(!notDrained)
+
+        let task = Task<LocationFix, Error> {
+            try await withCheckedThrowingContinuation { continuation in
+                registry.register(source: .locate, continuation: continuation)
+            }
+        }
+        while registry.count < 1 { await Task.yield() }
+
+        var actionRan = false
+        let drained = registry.failAllAndAct(with: LocationProvidingError.underlying("kCLErrorLocationUnknown"), ifDrained: { actionRan = true })
+        #expect(drained)
+        #expect(actionRan)
+        do {
+            _ = try await task.value
+            Issue.record("expected the pending caller to throw")
+        } catch let error as LocationProvidingError {
+            #expect(error == .underlying("kCLErrorLocationUnknown"))
+        }
+    }
+
+    @Test func resumeAllAndAct_serializesItsActionAgainstAConcurrentRegisterAndActCall() {
+        // The exact concurrency property registerAndAct/timeOutAndAct already prove for each
+        // other, extended to resumeAllAndAct: a delivery draining the registry and a brand-new
+        // caller registering at the same moment must never run their actions concurrently.
+        let registry = PendingFixContinuations()
+        let recorder = EventRecorder()
+        let existingContinuation = makeSynchronousContinuation()
+        registry.register(source: .periodic, continuation: existingContinuation)
+        let newContinuation = makeSynchronousContinuation()
+        let ready = DispatchSemaphore(value: 0)
+        let start = DispatchSemaphore(value: 0)
+
+        let resumeThread = Thread {
+            ready.signal()
+            start.wait()
+            registry.resumeAllAndAct(makeFix: { self.makeFix(source: $0) }, ifDrained: {
+                recorder.record("resume-start")
+                Thread.sleep(forTimeInterval: 0.05)
+                recorder.record("resume-end")
+            })
+        }
+        let registerThread = Thread {
+            ready.signal()
+            start.wait()
+            registry.registerAndAct(source: .locate, continuation: newContinuation) {
+                recorder.record("request-start")
+                Thread.sleep(forTimeInterval: 0.05)
+                recorder.record("request-end")
+            }
+        }
+        resumeThread.start()
+        registerThread.start()
+        ready.wait()
+        ready.wait()
+        start.signal()
+        start.signal()
+        while !resumeThread.isFinished || !registerThread.isFinished { Thread.sleep(forTimeInterval: 0.001) }
+
+        assertNoInterleaving(recorder.all)
+
+        registry.failAll(with: LocationProvidingError.timedOut)
+    }
 }
