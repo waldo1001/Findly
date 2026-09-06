@@ -388,15 +388,17 @@ describe("domain/locate/createLocateRequest", () => {
     expect(stored?.pushInvalid).toBe(true);
   });
 
-  it("a transport 'error' outcome does not flip status away from pending (push is best-effort)", async () => {
+  it("a non-throwing 'error' outcome (e.g. FCM 5xx) creates the request as pushFailed without marking the device pushInvalid (specs/001 §6.1/§6.2 amended 2026-09-06)", async () => {
     const deps = buildDeps();
     await seedFamily(deps);
-    deps.deviceRepo.seed(TARGET_UID, device({ pushToken: "fcm-token-a" }));
+    deps.deviceRepo.seed(TARGET_UID, device({ pushToken: "fcm-token-a", pushInvalid: false }));
     deps.pushSender.setOutcome("error");
 
     const result = await createLocateRequest(baseInput(), deps);
 
-    expect(result.status).toBe("pending");
+    expect(result.status).toBe("pushFailed");
+    const stored = await deps.deviceRepo.getDevice(TARGET_UID, DEVICE_A);
+    expect(stored?.pushInvalid).toBe(false); // the token is not known bad, only the send attempt failed
   });
 
   it("a thrown transport failure (OAuth exchange, FCM 5xx, network error) creates the request as pushFailed instead of propagating (specs/001 §6.1 amended 2026-09-06)", async () => {

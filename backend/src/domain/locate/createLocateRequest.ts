@@ -192,14 +192,22 @@ export async function createLocateRequest(
         // Write back into the DEVICE OWNER's own partition (002 §2.4) — the target, not
         // necessarily the requester.
         await deps.deviceRepo.putDevice(device.ownerUserId, { ...device, pushInvalid: true });
+      } else if (outcome === "error") {
+        // specs/001 §6.1/§6.2 (amended 2026-09-06) — a non-throwing "error" outcome (every
+        // non-ok, non-token-rejection FCM response, including an FCM 5xx — see
+        // src/adapters/push/fcmV1Sender.ts) is a transport-level failure exactly like a
+        // thrown one below: create the request as pushFailed WITHOUT marking the device
+        // pushInvalid — the token itself is not known bad, only the send attempt failed.
+        status = "pushFailed";
       }
     } catch {
-      // specs/001 §6.1 (amended 2026-09-06) — a transport-level failure (OAuth exchange,
-      // FCM 5xx, network error thrown out of the port, per src/ports/pushSender.ts) MUST
-      // NOT fail the request: create it as pushFailed exactly like an invalid token, but
-      // WITHOUT marking the device pushInvalid — the token itself is not known bad, only
-      // the send attempt failed. The requester still gets their last-known answer instead
-      // of a 500.
+      // specs/001 §6.1 (amended 2026-09-06) — a THROWN transport-level failure (OAuth
+      // exchange failure, a missing/malformed FCM_SERVICE_ACCOUNT_JSON, or a rejected
+      // fetch — the only cases fcmV1Sender.ts actually throws for; an FCM 5xx resolves as
+      // the non-throwing "error" outcome handled above, it does NOT throw) MUST NOT fail
+      // the request: create it as pushFailed exactly like an invalid token, but WITHOUT
+      // marking the device pushInvalid — the token itself is not known bad, only the send
+      // attempt failed. The requester still gets their last-known answer instead of a 500.
       status = "pushFailed";
     }
   } else {

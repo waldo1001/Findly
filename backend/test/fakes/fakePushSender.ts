@@ -11,10 +11,13 @@ export class FakePushSender implements PushSender {
     this.outcome = outcome;
   }
 
-  /** Test control: simulates a transport-level failure (specs/001 §6.1 amended
-   * 2026-09-06) — OAuth exchange failure, FCM 5xx, or a network error — by making send()
-   * reject instead of resolving. The real port's contract still says it never throws for a
-   * rejected token, only for transport failure (src/ports/pushSender.ts). */
+  /** Test control: simulates a THROWN transport-level failure (specs/001 §6.1 amended
+   * 2026-09-06) — an OAuth exchange failure, a missing/malformed FCM_SERVICE_ACCOUNT_JSON,
+   * or a rejected fetch — by making send() reject instead of resolving. An FCM 5xx does
+   * NOT throw (src/adapters/push/fcmV1Sender.ts resolves it as outcome "error" instead) —
+   * use setOutcome("error") to simulate that case. The real port's contract still says it
+   * never throws for a rejected token, only for these genuine transport failures
+   * (src/ports/pushSender.ts). */
   setThrows(error: Error): void {
     this.throwError = error;
   }
