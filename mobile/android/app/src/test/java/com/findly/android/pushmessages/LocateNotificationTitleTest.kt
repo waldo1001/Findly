@@ -103,11 +103,40 @@ class LocateNotificationTitleTest {
         return false
     }
 
+    // specs/009-device-runtime.md section 9 (amended 2026-09-06 - A39's final round, finding 4):
+    // the server validates `displayName` for length only (1-30), never for character content, so
+    // a name made entirely of bidi/control characters sanitises down to "" and the title becomes
+    // a bare " is locating you" - indistinguishable from the no-name-supplied fallback below, even
+    // though a name genuinely was supplied. Chosen fix: route both the missing-field case and the
+    // sanitised-to-blank case to the same "Someone" placeholder, so the title is always a complete
+    // sentence and the two cases don't need to be told apart.
+
+    @Test
+    fun `a name that sanitises down to blank falls back to the generic placeholder`() {
+        // Entirely bidi override/isolate controls (U+202E RLO, U+2066 LRI, U+2069 PDI, same
+        // characters as the security-review tests above) - every character is stripped by
+        // sanitize(), leaving "".
+        assertEquals(
+            "Someone is locating you",
+            LocateNotificationTitle.forRequester("\u202E\u2066\u2069"),
+        )
+    }
+
+    @Test
+    fun `a name of only whitespace and control characters falls back to the generic placeholder`() {
+        assertEquals(
+            "Someone is locating you",
+            LocateNotificationTitle.forRequester("  \n "),
+        )
+    }
+
     // specs/009-device-runtime.md section 5.1: requestedByName may be absent from the push data
     // map (never observed in practice, nothing enforces it) - shared by all three A39 handoff
     // branches via the new LocateNotifier (finding 1), which delegates the missing-field default
     // here so it stays covered even though none of its three Android callers are themselves
-    // unit-tested (finding 11, A39 review).
+    // unit-tested (finding 11, A39 review). Finding 4 (A39's final round) routes this case to the
+    // same "Someone" placeholder as a sanitised-to-blank supplied name, rather than leaving it as
+    // the previous, grammatically-broken " is locating you".
 
     @Test
     fun `forRequesterData reads requestedByName out of the push data map`() {
@@ -118,7 +147,7 @@ class LocateNotificationTitleTest {
     }
 
     @Test
-    fun `forRequesterData falls back to the empty string when requestedByName is missing`() {
-        assertEquals(" is locating you", LocateNotificationTitle.forRequesterData(emptyMap()))
+    fun `forRequesterData falls back to the generic placeholder when requestedByName is missing`() {
+        assertEquals("Someone is locating you", LocateNotificationTitle.forRequesterData(emptyMap()))
     }
 }
