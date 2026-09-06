@@ -9,20 +9,30 @@ import com.findly.android.network.DeviceSettingsSnapshot
  * `SharedPreferencesDeviceSettingsStateStore`) and either resume the loop at the cached interval
  * or `stopSelf()`. Pure so the decision is unit-tested without a `Service`/`Context` in the loop.
  *
- * Deliberately expressed against [SyncStrategySelector] ("is this even a foreground-service
- * interval") rather than a hardcoded threshold like "≥ 60": `SyncStrategySelector` itself stays
- * unchanged by this task (A40) and is the only thing A41 needs to touch to widen the
- * foreground-service range to 5/10/15/30 — this decision then follows automatically, with no
- * change of its own.
+ * Code-review fix (A41 round 2, finding 1): originally expressed only against
+ * [SyncStrategySelector] ("is this even a foreground-service interval"), which never considered
+ * `ACCESS_BACKGROUND_LOCATION`. That let a `START_STICKY` restart re-establish the foreground
+ * presence service (with the "Findly is sharing your location" notification) after the OS killed
+ * the process for a permission revocation from system settings — the platform then denies it
+ * location for the life of that restart, violating both §3.2 ("started only when... **and**
+ * `ACCESS_BACKGROUND_LOCATION` is granted") and §1.3 ("Presence MUST stop immediately on...
+ * permission revocation"). Now expressed against [EffectiveSyncStrategySelector], the exact same
+ * permission-aware selector the *forward* path ([com.findly.android.queue.worker.LocationSyncScheduler
+ * .reschedule]) already used — `LocationForegroundService` passes it a fresh
+ * `backgroundLocationGranted` read (`AppContainer.backgroundLocationGranted()`) on every restart,
+ * so the two paths can never drift on what "presence is viable" means.
  */
 sealed class ServiceRestartDecision {
     data class StartWithInterval(val syncIntervalMinutes: Int) : ServiceRestartDecision()
     data object Stop : ServiceRestartDecision()
 
     companion object {
-        fun decide(cached: DeviceSettingsSnapshot?): ServiceRestartDecision {
+        fun decide(cached: DeviceSettingsSnapshot?, backgroundLocationGranted: Boolean): ServiceRestartDecision {
             if (cached == null || !cached.trackingEnabled) return Stop
-            val strategy = SyncStrategySelector.strategyFor(cached.syncIntervalMinutes)
+            val strategy = EffectiveSyncStrategySelector.strategyFor(
+                cached.syncIntervalMinutes,
+                backgroundLocationGranted,
+            )
             return if (strategy is SyncStrategy.ForegroundService) {
                 StartWithInterval(cached.syncIntervalMinutes)
             } else {

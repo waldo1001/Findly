@@ -200,6 +200,13 @@ class AppContainer(context: Context) {
      * [com.findly.android.queue.worker.ServiceRestartDecision]. */
     suspend fun cachedDeviceSettings(): DeviceSettingsSnapshot? = deviceSettingsStateStore.current()
 
+    /** Code-review fix (A41 round 2, finding 1): a fresh `ACCESS_BACKGROUND_LOCATION` read for
+     * [com.findly.android.queue.worker.LocationForegroundService]'s `START_STICKY` restart path —
+     * the same [backgroundLocationPermissionChecker] instance [syncScheduler] itself reads, so a
+     * restart can never disagree with the forward path on whether presence is permission-viable.
+     */
+    suspend fun backgroundLocationGranted(): Boolean = backgroundLocationPermissionChecker.isGranted()
+
     /** A11 (specs/009-device-runtime.md §6.1): the cached geofence config document + ETag —
      * `GeofenceConfigSyncCoordinator`'s source of truth for `If-None-Match` and for re-registering
      * from cache on a `304`/failed fetch (resume, cold start). */

@@ -11,13 +11,19 @@ class ServiceRestartDecisionTest {
 
     @Test
     fun `empty cache - stop`() {
-        assertEquals(ServiceRestartDecision.Stop, ServiceRestartDecision.decide(null))
+        assertEquals(
+            ServiceRestartDecision.Stop,
+            ServiceRestartDecision.decide(null, backgroundLocationGranted = true),
+        )
     }
 
     @Test
     fun `paused cache - stop, even at a foreground-service interval`() {
         val cached = DeviceSettingsSnapshot(syncIntervalMinutes = 5, trackingEnabled = false)
-        assertEquals(ServiceRestartDecision.Stop, ServiceRestartDecision.decide(cached))
+        assertEquals(
+            ServiceRestartDecision.Stop,
+            ServiceRestartDecision.decide(cached, backgroundLocationGranted = true),
+        )
     }
 
     @Test
@@ -25,7 +31,7 @@ class ServiceRestartDecisionTest {
         val cached = DeviceSettingsSnapshot(syncIntervalMinutes = 5, trackingEnabled = true)
         assertEquals(
             ServiceRestartDecision.StartWithInterval(5),
-            ServiceRestartDecision.decide(cached),
+            ServiceRestartDecision.decide(cached, backgroundLocationGranted = true),
         )
     }
 
@@ -36,13 +42,19 @@ class ServiceRestartDecisionTest {
         // a hardcoded threshold, so this needed no change when A41 widened the foreground-service
         // range from {5, 10} to {5, 10, 15, 30} - only the boundary example below moved with it.
         val cached = DeviceSettingsSnapshot(syncIntervalMinutes = 60, trackingEnabled = true)
-        assertEquals(ServiceRestartDecision.Stop, ServiceRestartDecision.decide(cached))
+        assertEquals(
+            ServiceRestartDecision.Stop,
+            ServiceRestartDecision.decide(cached, backgroundLocationGranted = true),
+        )
     }
 
     @Test
     fun `tracking enabled at a battery-saver interval - stop`() {
         val cached = DeviceSettingsSnapshot(syncIntervalMinutes = 120, trackingEnabled = true)
-        assertEquals(ServiceRestartDecision.Stop, ServiceRestartDecision.decide(cached))
+        assertEquals(
+            ServiceRestartDecision.Stop,
+            ServiceRestartDecision.decide(cached, backgroundLocationGranted = true),
+        )
     }
 
     // A41 (specs/009 §1.3/§3, 000 §D19): 15 and 30 widened into the foreground-service range -
@@ -53,7 +65,7 @@ class ServiceRestartDecisionTest {
         val cached = DeviceSettingsSnapshot(syncIntervalMinutes = 15, trackingEnabled = true)
         assertEquals(
             ServiceRestartDecision.StartWithInterval(15),
-            ServiceRestartDecision.decide(cached),
+            ServiceRestartDecision.decide(cached, backgroundLocationGranted = true),
         )
     }
 
@@ -62,7 +74,30 @@ class ServiceRestartDecisionTest {
         val cached = DeviceSettingsSnapshot(syncIntervalMinutes = 30, trackingEnabled = true)
         assertEquals(
             ServiceRestartDecision.StartWithInterval(30),
-            ServiceRestartDecision.decide(cached),
+            ServiceRestartDecision.decide(cached, backgroundLocationGranted = true),
+        )
+    }
+
+    // Code-review fix (A41 round 2, finding 1): the restart path never propagated the §3.2
+    // permission dimension - a START_STICKY restart after location was revoked from system
+    // settings used to select purely on interval and start the foreground service with location
+    // denied by the platform. Expressed against EffectiveSyncStrategySelector now, exactly like
+    // the forward path (LocationSyncScheduler.reschedule).
+    @Test
+    fun `presence interval, background location granted - start the loop`() {
+        val cached = DeviceSettingsSnapshot(syncIntervalMinutes = 15, trackingEnabled = true)
+        assertEquals(
+            ServiceRestartDecision.StartWithInterval(15),
+            ServiceRestartDecision.decide(cached, backgroundLocationGranted = true),
+        )
+    }
+
+    @Test
+    fun `presence interval, background location NOT granted - stop (this closes specs 009 section12's untested revocation line)`() {
+        val cached = DeviceSettingsSnapshot(syncIntervalMinutes = 15, trackingEnabled = true)
+        assertEquals(
+            ServiceRestartDecision.Stop,
+            ServiceRestartDecision.decide(cached, backgroundLocationGranted = false),
         )
     }
 }
