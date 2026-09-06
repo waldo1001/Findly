@@ -15,10 +15,15 @@ struct FixCaptureCoordinatorTests {
         store: InMemoryFixStore = InMemoryFixStore(),
         isPaused: @escaping () -> Bool = { false },
         isPermissionGranted: @escaping () -> Bool = { true },
+        currentSyncIntervalMinutes: (() -> Int)? = nil,
+        lastQueuedFixAtStore: LastQueuedFixAtStoring? = nil,
         now: @escaping () -> Date = { Date(timeIntervalSince1970: 1_000_000) }
     ) -> (FixCaptureCoordinator, FixQueue, InMemoryFixStore) {
         let queue = FixQueue(store: store)
-        let coordinator = FixCaptureCoordinator(provider: provider, queue: queue, isPaused: isPaused, isPermissionGranted: isPermissionGranted, now: now)
+        let coordinator = FixCaptureCoordinator(
+            provider: provider, queue: queue, isPaused: isPaused, isPermissionGranted: isPermissionGranted,
+            currentSyncIntervalMinutes: currentSyncIntervalMinutes, lastQueuedFixAtStore: lastQueuedFixAtStore, now: now
+        )
         return (coordinator, queue, store)
     }
 
@@ -133,6 +138,83 @@ struct FixCaptureCoordinatorTests {
 
         #expect(result == nil)
         #expect(store.loadAll().isEmpty)
+    }
+
+    // I50 review Minor finding 6 — the significant-location-change/visit hint paths
+    // (LocationProviding.swift's didUpdateLocations/didVisit) call captureAndQueue(source:
+    // .periodic, hint:) directly, bypassing SyncTriggerPolicy's × 0.8 elapsed-time gate and never
+    // recording lastQueuedFixAt - so a hint-triggered fix was queued regardless of interval AND
+    // left the timestamp stale, making the very next background-refresh trigger capture again
+    // immediately. Applying the gate HERE, inside the one seam every `.periodic` caller goes
+    // through (including LocationSyncRunner's own, already-gated call), fixes both hint paths for
+    // free without either needing to know about SyncTriggerPolicy itself. Both new params are
+    // optional/nil-defaulted so the many existing callers above (which never configure this) are
+    // completely unaffected — the gate is simply never applied when either is nil.
+
+    @Test func periodicHint_belowTheEightyPercentThreshold_isSuppressed() async {
+        let provider = FakeLocationProviding()
+        let lastQueuedFixAtStore = InMemoryLastQueuedFixAtStore(initial: Date(timeIntervalSince1970: 1_000_000))
+        let (coordinator, _, store) = makeCoordinator(
+            provider: provider,
+            currentSyncIntervalMinutes: { 15 }, // threshold = 15 * 60 * 0.8 = 720s
+            lastQueuedFixAtStore: lastQueuedFixAtStore,
+            now: { Date(timeIntervalSince1970: 1_000_030) } // only 30s elapsed
+        )
+
+        let result = await coordinator.captureAndQueue(source: .periodic, hint: makeFix())
+
+        #expect(result == nil, "a hint-triggered periodic capture arriving before the 0.8 elapsed threshold must be suppressed, exactly like LocationSyncRunner's own gate")
+        #expect(store.loadAll().isEmpty)
+        #expect(provider.requestSingleFixCalls.isEmpty)
+    }
+
+    @Test func periodicHint_aboveTheEightyPercentThreshold_recordsLastQueuedFixAtOnSuccess() async {
+        let provider = FakeLocationProviding()
+        let lastQueuedFixAtStore = InMemoryLastQueuedFixAtStore(initial: Date(timeIntervalSince1970: 1_000_000))
+        let now = Date(timeIntervalSince1970: 1_000_800) // 800s elapsed > 720s threshold
+        let (coordinator, _, store) = makeCoordinator(
+            provider: provider,
+            currentSyncIntervalMinutes: { 15 },
+            lastQueuedFixAtStore: lastQueuedFixAtStore,
+            now: { now }
+        )
+
+        let result = await coordinator.captureAndQueue(source: .periodic, hint: makeFix())
+
+        #expect(result != nil)
+        #expect(store.loadAll().count == 1)
+        #expect(lastQueuedFixAtStore.lastQueuedFixAt() == now, "a successful hint-triggered enqueue must record lastQueuedFixAt, or the very next background-refresh trigger captures again immediately")
+    }
+
+    @Test func periodicHint_withNoLastQueuedFixAtRecorded_isNeverSuppressed() async {
+        // SyncTriggerPolicy.shouldCapture treats "never captured before" as always-eligible.
+        let provider = FakeLocationProviding()
+        let lastQueuedFixAtStore = InMemoryLastQueuedFixAtStore(initial: nil)
+        let (coordinator, _, store) = makeCoordinator(
+            provider: provider, currentSyncIntervalMinutes: { 15 }, lastQueuedFixAtStore: lastQueuedFixAtStore
+        )
+
+        let result = await coordinator.captureAndQueue(source: .periodic, hint: makeFix())
+
+        #expect(result != nil)
+        #expect(store.loadAll().count == 1)
+    }
+
+    @Test func nonPeriodicHint_isNeverGatedByTheElapsedThreshold_norRecordsLastQueuedFixAt() async {
+        let provider = FakeLocationProviding()
+        let lastQueuedFixAtStore = InMemoryLastQueuedFixAtStore(initial: Date(timeIntervalSince1970: 1_000_000))
+        let (coordinator, _, store) = makeCoordinator(
+            provider: provider,
+            currentSyncIntervalMinutes: { 15 },
+            lastQueuedFixAtStore: lastQueuedFixAtStore,
+            now: { Date(timeIntervalSince1970: 1_000_001) } // 1s elapsed - would fail the periodic gate
+        )
+
+        let result = await coordinator.captureAndQueue(source: .geofence, hint: makeFix())
+
+        #expect(result != nil, "the elapsed-time rule is specs/009 §3.4's iOS *periodic*-trigger gate only - geofence/manual/locate captures are unaffected")
+        #expect(store.loadAll().count == 1)
+        #expect(lastQueuedFixAtStore.lastQueuedFixAt() == Date(timeIntervalSince1970: 1_000_000), "non-periodic sources must not touch lastQueuedFixAt either")
     }
 
     @Test func pauseArrivingMidCapture_dropsTheResult_neverQueuesIt() async {
