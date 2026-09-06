@@ -84,8 +84,17 @@ public final class SystemBackgroundSyncScheduler: BackgroundSyncScheduling {
                 await handler()
                 refreshTask.setTaskCompleted(success: true)
             }
+            // specs/009 §3.4 (I50 fix 2, amended 2026-09-06): "the registered handler MUST set an
+            // expirationHandler that cancels the work AND calls setTaskCompleted(success: false)."
+            // Apple's contract is that the expiration handler itself marks the task complete; a
+            // task left uncompleted is terminated by the system and counted against the app's
+            // future refresh budget. The shipped handler only cancelled `work`, never completing
+            // it — combined with item 1's fix (every run burning its full 30 s while
+            // `allowsBackgroundLocationUpdates` was false), this had been progressively starving
+            // the app of background time.
             refreshTask.expirationHandler = {
                 work.cancel()
+                refreshTask.setTaskCompleted(success: false)
             }
         }
     }
