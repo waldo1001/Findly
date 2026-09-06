@@ -808,6 +808,134 @@ struct LocationRuntimeContainerTests {
         #expect(provider.stopPresenceCallCount == 1, "specs/009 §1.3: presence MUST stop immediately on sign-out - stop() is wipeLocalState()'s teardown step")
     }
 
+    // MARK: - I52 review round 2, finding 1 (Blocking) — the presence lifecycle must be main-bound.
+    // DeviceSettingsCoordinator is a genuine `actor`; a settings-arrival call (the SETTINGS_CHANGED
+    // push, the POST /locations piggyback, or the paused-device poll) runs applySettings() on ITS
+    // OWN cooperative-pool executor, not Main. Before the fix, the `reconcilePresence` closure
+    // handed to it was invoked directly from that executor with no hop, so `startPresence` (and its
+    // real `Timer`) landed off Main — the reviewer's own standalone probe measured zero ticks in two
+    // seconds where ~20 were expected.
+
+    @Test func settingsArrival_fromTheCoordinatorsOwnActorExecutor_stillReachesStartPresenceOnTheMainThread() async {
+        let provider = FakeLocationProviding()
+        provider.authorization = .always
+        let stateStore = InMemoryDeviceSettingsStateStore(initial: DeviceSettingsSnapshot(syncIntervalMinutes: 15, trackingEnabled: true))
+        let container = LocationRuntimeContainer(
+            apiClient: FakeAPIClient(), deviceId: { "device-1" },
+            locationProvider: provider, backgroundScheduler: FakeBackgroundSyncScheduler(), stateStore: stateStore
+        )
+
+        // The real reproduction: applySettings() genuinely executes on DeviceSettingsCoordinator's
+        // own actor executor - this is the settings-push/flush-piggyback arrival path, not a
+        // cold-start/foreground call that already happens to run on the container's own MainActor.
+        await container.settingsApplying.applySettings(DeviceSettingsSnapshot(syncIntervalMinutes: 5, trackingEnabled: true))
+
+        #expect(provider.startPresenceCalls == [5])
+        #expect(
+            provider.startPresenceCalledOnMainThread == [true],
+            "specs/009 §1.3 - the presence lifecycle must be main-bound; a settings-arrival path that runs on DeviceSettingsCoordinator's actor executor must still hop to Main before touching the cadence timer"
+        )
+    }
+
+    // MARK: - I52 review round 2, finding 4 (Minor) — containerBox retain cycle.
+    // `container -> settingsCoordinator -> reconcilePresence closure -> containerBox -> container`
+    // is a genuine reference cycle when containerBox is a plain strong local var: the container can
+    // never deallocate once constructed. Harmless today (the container is process-lifetime) but a
+    // real leak if it were ever made per-session.
+
+    @Test func deallocates_afterEveryExternalStrongReferenceIsReleased_noRetainCycleThroughContainerBox() {
+        weak var weakContainer: LocationRuntimeContainer?
+        func makeAndExercise() {
+            let container = LocationRuntimeContainer(apiClient: FakeAPIClient(), deviceId: { "device-1" })
+            weakContainer = container
+            container.start() // exercises reconcilePresence(), which closes over containerBox
+        }
+        makeAndExercise()
+
+        #expect(
+            weakContainer == nil,
+            "finding 4 - containerBox must be a weak box; a strong local var closed over by settingsCoordinator's reconcilePresence closure keeps this container alive forever (container -> settingsCoordinator -> closure -> box -> container)"
+        )
+    }
+
+    // MARK: - I52 review round 2, finding 7 (Minor) — onSignedIn() must reconcile presence too.
+    // Sign-out correctly stops presence (stop()); a sign-in in the same process previously
+    // re-established it only at the next foreground or first flush piggyback.
+
+    @Test func onSignedIn_reestablishesPresence_whenRequired() async {
+        let provider = FakeLocationProviding()
+        provider.authorization = .always
+        let api = FakeAPIClient()
+        api.getGeofencesHandler = { _ in .notModified }
+        let stateStore = InMemoryDeviceSettingsStateStore(initial: DeviceSettingsSnapshot(syncIntervalMinutes: 10, trackingEnabled: true))
+        let container = LocationRuntimeContainer(
+            apiClient: api, deviceId: { "device-1" },
+            locationProvider: provider, backgroundScheduler: FakeBackgroundSyncScheduler(), stateStore: stateStore
+        )
+
+        await container.onSignedIn()
+
+        #expect(
+            provider.startPresenceCalls == [10],
+            "specs/009 §1.3's re-establishment list is silent on sign-in, but a same-process sign-in must not wait for the next foreground/flush piggyback to pick presence back up"
+        )
+    }
+
+    // MARK: - I52 review round 2, findings 2 + 5 — an interval change between two live intervals
+    // must rebuild the presence session immediately, and the fake must model enough state for a
+    // container-level test to observe that (previously it appended unconditionally and modeled no
+    // state at all, which is why finding 2 shipped undetected).
+
+    @Test func startingTwiceAtTheSameLiveInterval_isIdempotent_presenceStartedOnlyOnce() {
+        let provider = FakeLocationProviding()
+        provider.authorization = .always
+        let stateStore = InMemoryDeviceSettingsStateStore(initial: DeviceSettingsSnapshot(syncIntervalMinutes: 15, trackingEnabled: true))
+        let container = LocationRuntimeContainer(
+            apiClient: FakeAPIClient(), deviceId: { "device-1" },
+            locationProvider: provider, backgroundScheduler: FakeBackgroundSyncScheduler(), stateStore: stateStore
+        )
+
+        container.start()
+        container.start() // a second reconcile at the SAME interval must be a no-op (specs/009 §1.3)
+
+        #expect(provider.startPresenceCalls == [15], "an unchanged live interval must not restart an already-running presence session")
+        #expect(provider.activeIntervalMinutes == 15)
+    }
+
+    @Test func applySettings_intervalChangeBetweenTwoLiveIntervals_immediatelyRebuildsPresenceAtTheNewInterval() async {
+        let provider = FakeLocationProviding()
+        provider.authorization = .always
+        let stateStore = InMemoryDeviceSettingsStateStore(initial: DeviceSettingsSnapshot(syncIntervalMinutes: 30, trackingEnabled: true))
+        let container = LocationRuntimeContainer(
+            apiClient: FakeAPIClient(), deviceId: { "device-1" },
+            locationProvider: provider, backgroundScheduler: FakeBackgroundSyncScheduler(), stateStore: stateStore
+        )
+        container.start()
+        #expect(provider.activeIntervalMinutes == 30)
+
+        await container.settingsApplying.applySettings(DeviceSettingsSnapshot(syncIntervalMinutes: 5, trackingEnabled: true))
+
+        #expect(provider.activeIntervalMinutes == 5, "specs/009 §3.5: an interval change between two live intervals must rebuild the presence session immediately, not keep ticking at the old cadence")
+        #expect(provider.startPresenceCalls == [30, 5])
+    }
+
+    @Test func applySettings_pausingOnALiveInterval_stopsPresence() async {
+        let provider = FakeLocationProviding()
+        provider.authorization = .always
+        let stateStore = InMemoryDeviceSettingsStateStore(initial: DeviceSettingsSnapshot(syncIntervalMinutes: 15, trackingEnabled: true))
+        let container = LocationRuntimeContainer(
+            apiClient: FakeAPIClient(), deviceId: { "device-1" },
+            locationProvider: provider, backgroundScheduler: FakeBackgroundSyncScheduler(), stateStore: stateStore
+        )
+        container.start()
+        #expect(provider.activeIntervalMinutes == 15)
+
+        await container.settingsApplying.applySettings(DeviceSettingsSnapshot(syncIntervalMinutes: 15, trackingEnabled: false))
+
+        #expect(provider.stopPresenceCallCount == 1)
+        #expect(provider.activeIntervalMinutes == nil)
+    }
+
     @Test func presenceOnTick_runsAFullSyncCycle() async throws {
         // specs/009 §3.4/handoff I52: "a cadence timer... performing the §1.1 balanced one-shot +
         // runOnce". `LocationSyncRunner.runOnce()` already performs the balanced one-shot capture
