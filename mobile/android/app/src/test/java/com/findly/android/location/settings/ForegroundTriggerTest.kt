@@ -24,13 +24,19 @@ class ForegroundTriggerTest {
     }
 
     @Test
-    fun `runOnce still runs even when poll throws nothing to report`() = runTest {
-        // poll() itself never throws in the real DeviceSettingsCoordinator/SettingsPoller path
-        // (specs/009 §4/§9 route every failure to a PollOutcome), but this pins that the trigger
-        // does not accidentally skip runOnce - e.g. via an early return - for any poll outcome.
+    fun `runOnce still runs when poll throws`() = runTest {
+        // Round-3 post-A40 review (finding 5): the previous version of this test was named for
+        // poll() throwing but exercised a no-op poll(), making it a near-duplicate of the test
+        // above under a misleading name. poll() itself never throws in the real
+        // DeviceSettingsCoordinator/SettingsPoller path (specs/009 §4/§9 route every failure to a
+        // PollOutcome) - but a foreground runOnce cycle is more valuable to a person than the
+        // settings poll that precedes it (specs/009 §1.4), so a defensive poll failure must not
+        // cost them the whole foreground sync. This pins that [ForegroundTrigger.run] swallows a
+        // throwing poll() (anything but CancellationException) rather than propagating it and
+        // skipping runOnce.
         var runOnceCalled = false
         val trigger = ForegroundTrigger(
-            poll = { /* no-op poll outcome */ },
+            poll = { throw IllegalStateException("boom") },
             runOnce = { runOnceCalled = true },
         )
 
