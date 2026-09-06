@@ -88,6 +88,44 @@ struct LocateViewModelTests {
         #expect(api.getLatestLocationsCallCount == 0, "the wire already gave a definitive late fulfil — no fallback needed")
     }
 
+    /// I51 review fix (Minor, finding 4): the same rule A39's finding 13 established for the
+    /// fallback path (outcome and usable fix must move in lockstep) applies to the wire path too —
+    /// a `fulfilled` response with no `fix` must not render a meaningless "Live" chip with no
+    /// position. It must fall through to the same fallback/unreachable decision as any other
+    /// non-fresh terminal.
+    @Test func requestLocate_pollFulfilledWithNullFix_fallsThroughToFallback_notFulfilledWithNoPosition() async throws {
+        let api = FakeAPIClient()
+        api.createLocateRequestHandler = { _ in
+            TestFeatures.envelope(CreateLocateRequestResponse(
+                requestId: "lr_1", status: .pending, targetUserId: "u2", targetDeviceId: "d2",
+                createdAt: "2026-07-19T09:05:12Z", expiresAt: "2026-07-19T09:06:12Z", lastKnown: nil
+            ))
+        }
+        api.pollLocateRequestHandler = { _ in
+            TestFeatures.envelope(PollLocateRequestResponse(
+                requestId: "lr_1", status: .fulfilled, createdAt: "2026-07-19T09:05:12Z",
+                expiresAt: "2026-07-19T09:06:12Z", fulfilledAt: "2026-07-19T09:05:50Z", late: false, fix: nil
+            ))
+        }
+        api.getLatestLocationsHandler = {
+            TestFeatures.envelope(LatestLocationsResponse(members: [
+                MemberLocations(userId: "u2", displayName: "Noor", devices: [
+                    DeviceLocation(deviceId: "d2", deviceName: "Noor's phone", lat: 51.06, lon: 3.72, accuracyM: 8.0, recordedAt: "2026-07-19T09:10:00Z", receivedAt: "2026-07-19T09:10:01Z", batteryPct: 40, source: .periodic, trackingEnabled: true, syncIntervalMinutes: 15, isStale: false)
+                ])
+            ]))
+        }
+        let gate = SleepGate()
+        let viewModel = LocateViewModel(apiClient: api, sleep: { _ in await gate.wait() })
+
+        await viewModel.requestLocate(target: .user("u2"))
+        await gate.release()
+        try await waitUntil { viewModel.status != .pending }
+
+        #expect(viewModel.status == .late, "a wire fulfilled with no fix must fall through to the fallback decision, not render a meaningless Live chip")
+        #expect(viewModel.resolvedPosition?.lat == 51.06)
+        #expect(api.getLatestLocationsCallCount == 1)
+    }
+
     @Test func requestLocate_pollWindowElapses_fallbackFindsNewerPosition_rendersLate() async throws {
         let api = FakeAPIClient()
         api.createLocateRequestHandler = { _ in
