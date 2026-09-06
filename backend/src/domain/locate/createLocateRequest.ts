@@ -119,6 +119,15 @@ function resolveRequesterDisplayName(uid: string, members: FamilyMember[]): stri
   return requester?.displayName ?? uid;
 }
 
+/** specs/001 §8.1 (amended 2026-09-06, 000 §O8) — normative, server-composed, English in v1.
+ * The single place this template is authored: passed through PushMessage.notificationTitle
+ * (src/ports/pushSender.ts) exactly as reportGeofenceEvents.ts does for §8.2, so the pure
+ * FCM body builder (src/domain/push/fcmMessageBodies.ts) just plugs the field in rather than
+ * knowing the wording itself. */
+function buildLocateRequestTitle(requestedByName: string): string {
+  return `${requestedByName} is locating you`;
+}
+
 function toLastKnownAnswer(deviceId: string, record: LastKnownRecord | null): LastKnownAnswer | null {
   if (!record) return null;
   return { deviceId, lat: record.lat, lon: record.lon, accuracyM: record.accuracyM, recordedAt: record.recordedAt };
@@ -185,6 +194,7 @@ export async function createLocateRequest(
       const outcome = await deps.pushSender.send({
         token: device.pushToken as string,
         type: "LOCATE_REQUEST",
+        notificationTitle: buildLocateRequestTitle(requestedByName),
         data: { type: "LOCATE_REQUEST", requestId, requestedByName, expiresAt },
       });
       if (outcome === "invalidToken") {
