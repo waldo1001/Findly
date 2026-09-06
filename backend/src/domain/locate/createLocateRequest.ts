@@ -181,16 +181,26 @@ export async function createLocateRequest(
   let status: LocateRequestStatus = "pending";
   if (hasValidToken(device)) {
     const requestedByName = resolveRequesterDisplayName(input.uid, members);
-    const outcome = await deps.pushSender.send({
-      token: device.pushToken as string,
-      type: "LOCATE_REQUEST",
-      data: { type: "LOCATE_REQUEST", requestId, requestedByName, expiresAt },
-    });
-    if (outcome === "invalidToken") {
+    try {
+      const outcome = await deps.pushSender.send({
+        token: device.pushToken as string,
+        type: "LOCATE_REQUEST",
+        data: { type: "LOCATE_REQUEST", requestId, requestedByName, expiresAt },
+      });
+      if (outcome === "invalidToken") {
+        status = "pushFailed";
+        // Write back into the DEVICE OWNER's own partition (002 §2.4) — the target, not
+        // necessarily the requester.
+        await deps.deviceRepo.putDevice(device.ownerUserId, { ...device, pushInvalid: true });
+      }
+    } catch {
+      // specs/001 §6.1 (amended 2026-09-06) — a transport-level failure (OAuth exchange,
+      // FCM 5xx, network error thrown out of the port, per src/ports/pushSender.ts) MUST
+      // NOT fail the request: create it as pushFailed exactly like an invalid token, but
+      // WITHOUT marking the device pushInvalid — the token itself is not known bad, only
+      // the send attempt failed. The requester still gets their last-known answer instead
+      // of a 500.
       status = "pushFailed";
-      // Write back into the DEVICE OWNER's own partition (002 §2.4) — the target, not
-      // necessarily the requester.
-      await deps.deviceRepo.putDevice(device.ownerUserId, { ...device, pushInvalid: true });
     }
   } else {
     status = "pushFailed";

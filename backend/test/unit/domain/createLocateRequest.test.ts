@@ -399,6 +399,43 @@ describe("domain/locate/createLocateRequest", () => {
     expect(result.status).toBe("pending");
   });
 
+  it("a thrown transport failure (OAuth exchange, FCM 5xx, network error) creates the request as pushFailed instead of propagating (specs/001 §6.1 amended 2026-09-06)", async () => {
+    const deps = buildDeps();
+    await seedFamily(deps);
+    deps.deviceRepo.seed(TARGET_UID, device({ pushToken: "fcm-token-a" }));
+    deps.pushSender.setThrows(new Error("FCM OAuth2 token exchange failed: HTTP 503"));
+
+    const result = await createLocateRequest(baseInput(), deps);
+
+    expect(result.created).toBe(true);
+    expect(result.status).toBe("pushFailed");
+    expect(result.lastKnown).toBeNull(); // requester still gets an answer (last-known), not a 500
+  });
+
+  it("a thrown transport failure does NOT mark the device pushInvalid (the token is not known bad)", async () => {
+    const deps = buildDeps();
+    await seedFamily(deps);
+    deps.deviceRepo.seed(TARGET_UID, device({ pushToken: "fcm-token-a", pushInvalid: false }));
+    deps.pushSender.setThrows(new Error("network error"));
+
+    await createLocateRequest(baseInput(), deps);
+
+    const stored = await deps.deviceRepo.getDevice(TARGET_UID, DEVICE_A);
+    expect(stored?.pushInvalid).toBe(false);
+  });
+
+  it("the locate request is still persisted as pushFailed after a thrown transport failure (not just returned)", async () => {
+    const deps = buildDeps();
+    await seedFamily(deps);
+    deps.deviceRepo.seed(TARGET_UID, device({ pushToken: "fcm-token-a" }));
+    deps.pushSender.setThrows(new Error("network error"));
+
+    const result = await createLocateRequest(baseInput(), deps);
+
+    const stored = await deps.locateRequestRepo.get(FAMILY_ID, result.requestId);
+    expect(stored?.status).toBe("pushFailed");
+  });
+
   it("coalesces with an existing pending request for the same target device, returning 200", async () => {
     const deps = buildDeps();
     await seedFamily(deps);
