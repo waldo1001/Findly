@@ -391,11 +391,22 @@ extension SystemLocationProvider: CLLocationManagerDelegate {
         // significant-location-change/visit hint path below — and, atomically with the drain
         // (I52 item 3), resets the manager's accuracy back to the §1.3 presence baseline when
         // presence is active, so a resolved one-shot capture never leaves it raised.
-        let resolvedAPendingFix = pendingFixes.resumeAllAndAct(makeFix: { source in
-            location.toLocationFix(source: source, batteryPct: self.batteryLevelProvider())
-        }, ifDrained: { [weak self] in
-            self?.applyDrainAction()
-        })
+        // I52 review round 2, finding 3 (Major) — gate on delivery quality BEFORE draining
+        // (`PendingFixDeliveryPolicy`'s own doc has the full rationale): a coarse presence-session
+        // delivery must never satisfy a pending `.locate`/`.manual` caller. `resumeAllAndAct` itself
+        // is left as-is (still used nowhere else, but a deliberately untouched, tested seam); this
+        // uses its finding-3-aware counterpart instead.
+        let resolvedAPendingFix = pendingFixes.resumeAllIfAcceptableAndAct(
+            isAcceptable: { highestPendingTier in
+                PendingFixDeliveryPolicy.shouldResumePendingFixes(highestPendingTier: highestPendingTier, horizontalAccuracyMeters: location.horizontalAccuracy)
+            },
+            makeFix: { source in
+                location.toLocationFix(source: source, batteryPct: self.batteryLevelProvider())
+            },
+            ifDrained: { [weak self] in
+                self?.applyDrainAction()
+            }
+        )
         guard !resolvedAPendingFix else { return }
         // Not a pending single-fix request - this is a significant-location-change delegate
         // callback (or a stray late delivery after every single-fix request already resolved via

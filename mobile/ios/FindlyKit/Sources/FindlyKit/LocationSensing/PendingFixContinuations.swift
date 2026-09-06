@@ -205,6 +205,46 @@ public final class PendingFixContinuations: @unchecked Sendable {
         return true
     }
 
+    /// Atomic counterpart to `resumeAllAndAct` that additionally gates on delivery quality (I52
+    /// review round 2, finding 3) — `SystemLocationProvider.didUpdateLocations` uses this instead
+    /// of `resumeAllAndAct` so a coarse presence-session delivery can never satisfy a pending
+    /// high-accuracy (`.locate`/`.manual`) caller (see `PendingFixDeliveryPolicy`'s own doc for the
+    /// full rationale).
+    ///
+    /// `isAcceptable` is consulted WHILE STILL HOLDING the lock, against the highest tier among the
+    /// callers about to be drained — the same atomicity discipline `registerAndAct`/`timeOutAndAct`/
+    /// `resumeAllAndAct` already share, so this decision can never interleave with a concurrent
+    /// registration. When it returns `false`, the registry is left COMPLETELY untouched: no drain,
+    /// no `action`, `makeFix` never called, every pending continuation still pending — so the
+    /// caller's own timeout, or a later, better delivery, is what eventually resolves them. Returns
+    /// `false` on an empty registry too, without ever consulting `isAcceptable` (there is no tier to
+    /// gate on), matching `resumeAllAndAct`'s own empty-registry behavior.
+    @discardableResult
+    public func resumeAllIfAcceptableAndAct(
+        isAcceptable: (LocationAccuracyTier?) -> Bool,
+        makeFix: (FixSource) -> LocationFix,
+        ifDrained action: () -> Void
+    ) -> Bool {
+        lock.lock()
+        let all = pending
+        guard !all.isEmpty else {
+            lock.unlock()
+            return false
+        }
+        let highestPendingTier = all.values.map { FixAccuracyPolicy.tier(for: $0.source) }.max()
+        guard isAcceptable(highestPendingTier) else {
+            lock.unlock()
+            return false
+        }
+        pending.removeAll()
+        action()
+        lock.unlock()
+        for entry in all.values {
+            entry.continuation.resume(returning: makeFix(entry.source))
+        }
+        return true
+    }
+
     /// Atomic counterpart to `failAll`, the same shape as `resumeAllAndAct` above (I52 item 3) —
     /// `SystemLocationProvider`'s `didFailWithError` uses this so a platform-wide failure also
     /// resets the manager's accuracy back to the presence baseline (when presence is active)
