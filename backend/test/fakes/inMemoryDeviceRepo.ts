@@ -28,6 +28,16 @@ export class InMemoryDeviceRepo implements DeviceRepo {
     this.partition(ownerUserId).set(device.deviceId, { ...device });
   }
 
+  /** Mirrors TableDeviceRepo.touchLastSeen's field-level Merge semantics: merges
+   * `lastSeenAt` into whatever is CURRENTLY stored, never into a caller-held snapshot — so
+   * a concurrent settings change committed after a caller's own read is preserved. */
+  async touchLastSeen(ownerUserId: string, deviceId: string, lastSeenAt: string): Promise<void> {
+    const roster = this.partition(ownerUserId);
+    const current = roster.get(deviceId);
+    if (!current) return;
+    roster.set(deviceId, { ...current, lastSeenAt });
+  }
+
   async listDevices(ownerUserId: string): Promise<DeviceRecord[]> {
     const roster = this.devices.get(ownerUserId);
     return roster ? [...roster.values()].map((d) => ({ ...d })) : [];

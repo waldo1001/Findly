@@ -210,16 +210,19 @@ describe("domain/locate/fulfillLocateRequest", () => {
     );
   });
 
-  it("within the window: marks the request fulfilled and returns status fulfilled", async () => {
+  it("within the window: marks the request fulfilled and returns status fulfilled, late:false", async () => {
     const deps = buildDeps();
     deps.locateRequestRepo.seed(record({ expiresAt: "2026-07-19T09:11:00Z" }));
 
     const result = await fulfillLocateRequest(baseInput(), deps);
 
     expect(result.status).toBe("fulfilled");
+    expect(result.late).toBe(false);
     expect(result.features).toEqual(getFeatures("free"));
     const stored = await deps.locateRequestRepo.get(FAMILY_ID, REQUEST_ID);
     expect(stored?.status).toBe("fulfilled");
+    expect(stored?.fulfilledAt).toBe(new Date(NOW).toISOString());
+    expect(stored?.late).toBe(false);
   });
 
   it("updates last-known and appends history exactly like a §5.1 report", async () => {
@@ -314,20 +317,103 @@ describe("domain/locate/fulfillLocateRequest", () => {
     expect(storedFix.bearingDeg).toBe(90);
   });
 
-  it("does not downgrade an already-fulfilled request's status when a later expired-window fulfill attempt arrives", async () => {
+  it("a DIFFERENT fixId on an already-fulfilled request does not throw, even past expiresAt: stored as history but does not replace fixJson (specs/001 §6.3 amended 2026-09-06)", async () => {
     const deps = buildDeps();
     const priorFixJson = JSON.stringify({ ...fix({ fixId: "a1e2b3c4-0000-4000-8000-000000000099" }) });
     deps.locateRequestRepo.seed(
-      record({ status: "fulfilled", expiresAt: "2026-07-19T09:09:00Z", fixJson: priorFixJson }),
+      record({
+        status: "fulfilled",
+        expiresAt: "2026-07-19T09:09:00Z",
+        fixJson: priorFixJson,
+        fulfilledAt: "2026-07-19T09:09:00Z",
+        late: false,
+      }),
     );
 
-    await expectAppError(
-      fulfillLocateRequest(baseInput({ body: { fix: fix({ fixId: "a1e2b3c4-0000-4000-8000-000000000002" }) } }), deps),
-      "LOCATE_REQUEST_EXPIRED",
+    const result = await fulfillLocateRequest(
+      baseInput({ body: { fix: fix({ fixId: "a1e2b3c4-0000-4000-8000-000000000002" }) } }),
+      deps,
     );
+
+    expect(result.status).toBe("fulfilled");
+    expect(result.late).toBe(false); // unchanged — the ORIGINAL fulfil's late value
 
     const requestRecord = await deps.locateRequestRepo.get(FAMILY_ID, REQUEST_ID);
     expect(requestRecord?.status).toBe("fulfilled"); // must NOT be clobbered to "expired"
+    expect(requestRecord?.fixJson).toBe(priorFixJson); // NOT replaced by the different fixId
+
+    // But it IS stored as history/last-known, same as any other accepted fix (idempotent-on-fixId dedupe).
+    expect(deps.historyStore.fixes.length).toBe(1);
+    const stored = await deps.lastKnownRepo.get(TARGET_UID, TARGET_DEVICE_ID);
+    expect(stored?.lat).toBe(51.0544);
+  });
+
+  it("a DIFFERENT fixId on an already-fulfilled request beyond the grace window still stores history/last-known without touching fixJson (specs/001 §11 amended 2026-09-06 — discriminates the short-circuit-before-grace ordering)", async () => {
+    const deps = buildDeps();
+    const priorFixJson = JSON.stringify({ ...fix({ fixId: "a1e2b3c4-0000-4000-8000-000000000099" }) });
+    deps.locateRequestRepo.seed(
+      record({
+        status: "fulfilled",
+        expiresAt: "2026-07-19T08:00:00Z", // far past even the 10-minute grace window
+        fixJson: priorFixJson,
+        fulfilledAt: "2026-07-19T08:00:00Z",
+        late: false,
+      }),
+    );
+
+    const result = await fulfillLocateRequest(
+      baseInput({ body: { fix: fix({ fixId: "a1e2b3c4-0000-4000-8000-000000000003" }) } }),
+      deps,
+    );
+
+    expect(result.status).toBe("fulfilled"); // must not throw LOCATE_REQUEST_EXPIRED
+    const requestRecord = await deps.locateRequestRepo.get(FAMILY_ID, REQUEST_ID);
+    expect(requestRecord?.fixJson).toBe(priorFixJson); // NOT replaced by the different fixId
+    expect(deps.historyStore.fixes.length).toBe(1); // still recorded as a real position, not silently dropped
+    const stored = await deps.lastKnownRepo.get(TARGET_UID, TARGET_DEVICE_ID);
+    expect(stored?.lat).toBe(51.0544);
+  });
+
+  it("the SAME fixId replayed against an already-fulfilled request is idempotent, even long past expiresAt", async () => {
+    const deps = buildDeps();
+    const priorFixJson = JSON.stringify({ ...fix() }); // same fixId as baseInput()'s fix
+    deps.locateRequestRepo.seed(
+      record({
+        status: "fulfilled",
+        expiresAt: "2026-07-19T08:00:00Z", // far in the past, well outside any grace window
+        fixJson: priorFixJson,
+        fulfilledAt: "2026-07-19T08:00:30Z",
+        late: true,
+      }),
+    );
+    // The marker for this fixId was already inserted by the original fulfil.
+    await deps.idempotencyRepo.tryInsertFixMarker(TARGET_DEVICE_ID, fix().fixId as string, "2026-07-19T08:00:30Z");
+
+    const result = await fulfillLocateRequest(baseInput(), deps);
+
+    expect(result.status).toBe("fulfilled");
+    expect(result.late).toBe(true); // the ORIGINAL late value, not recomputed against "now"
+    const requestRecord = await deps.locateRequestRepo.get(FAMILY_ID, REQUEST_ID);
+    expect(requestRecord?.fixJson).toBe(priorFixJson);
+  });
+
+  it("defaults late to false for an already-fulfilled request whose stored late field was never set (legacy/undefined)", async () => {
+    const deps = buildDeps();
+    const priorFixJson = JSON.stringify({ ...fix() }); // same fixId as baseInput()'s fix
+    const seeded = record({
+      status: "fulfilled",
+      expiresAt: "2026-07-19T09:11:00Z",
+      fixJson: priorFixJson,
+      fulfilledAt: "2026-07-19T09:09:30Z",
+      // `late` deliberately omitted (undefined) — must fall back to false, not true.
+    });
+    delete seeded.late;
+    deps.locateRequestRepo.seed(seeded);
+    await deps.idempotencyRepo.tryInsertFixMarker(TARGET_DEVICE_ID, fix().fixId as string, "2026-07-19T09:09:30Z");
+
+    const result = await fulfillLocateRequest(baseInput(), deps);
+
+    expect(result.late).toBe(false);
   });
 
   it("increments fixes usage on an accepted fulfill", async () => {
@@ -339,39 +425,108 @@ describe("domain/locate/fulfillLocateRequest", () => {
     expect(await deps.usageRepo.get(FAMILY_ID, "fixes", "2026-07-19")).toBe(1);
   });
 
-  it("is idempotent on fixId: a replay does not double-write last-known/history/fixes usage", async () => {
+  it("is idempotent on fixId: a replay does not double-write last-known/history/fixes usage, and returns the same late value", async () => {
     const deps = buildDeps();
     deps.locateRequestRepo.seed(record({ expiresAt: "2026-07-19T09:11:00Z" }));
 
-    await fulfillLocateRequest(baseInput(), deps);
+    const first = await fulfillLocateRequest(baseInput(), deps);
     const result = await fulfillLocateRequest(baseInput(), deps);
 
     expect(result.status).toBe("fulfilled");
+    expect(result.late).toBe(first.late);
     expect(deps.historyStore.fixes.length).toBe(1);
     expect(await deps.usageRepo.get(FAMILY_ID, "fixes", "2026-07-19")).toBe(1);
   });
 
-  it("past expiresAt: throws LOCATE_REQUEST_EXPIRED but still stores last-known + history", async () => {
-    const deps = buildDeps();
-    deps.locateRequestRepo.seed(record({ status: "pending", expiresAt: "2026-07-19T09:09:59Z" }));
-
-    await expectAppError(fulfillLocateRequest(baseInput(), deps), "LOCATE_REQUEST_EXPIRED");
-
-    const stored = await deps.lastKnownRepo.get(TARGET_UID, TARGET_DEVICE_ID);
-    expect(stored?.lat).toBe(51.0544);
-    expect(deps.historyStore.fixes.length).toBe(1);
-
-    const requestRecord = await deps.locateRequestRepo.get(FAMILY_ID, REQUEST_ID);
-    expect(requestRecord?.status).toBe("expired");
-  });
-
-  it("does not flip to expired exactly at expiresAt (boundary: only strictly past expires)", async () => {
+  it("does not flip to expired exactly at expiresAt (boundary: only strictly past expires), late:false", async () => {
     const deps = buildDeps();
     deps.locateRequestRepo.seed(record({ status: "pending", expiresAt: NOW }));
 
     const result = await fulfillLocateRequest(baseInput(), deps);
 
     expect(result.status).toBe("fulfilled");
+    expect(result.late).toBe(false);
+  });
+
+  describe("grace window (specs/001 §6.3 amended 2026-09-06)", () => {
+    it("a fulfil 1 second past expiresAt is accepted as fulfilled, late:true, and stores fixJson/fulfilledAt", async () => {
+      const deps = buildDeps();
+      deps.locateRequestRepo.seed(record({ status: "pending", expiresAt: "2026-07-19T09:09:59Z" }));
+
+      const result = await fulfillLocateRequest(baseInput(), deps);
+
+      expect(result.status).toBe("fulfilled");
+      expect(result.late).toBe(true);
+      const stored = await deps.lastKnownRepo.get(TARGET_UID, TARGET_DEVICE_ID);
+      expect(stored?.lat).toBe(51.0544);
+      expect(deps.historyStore.fixes.length).toBe(1);
+
+      const requestRecord = await deps.locateRequestRepo.get(FAMILY_ID, REQUEST_ID);
+      expect(requestRecord?.status).toBe("fulfilled");
+      expect(requestRecord?.late).toBe(true);
+      expect(requestRecord?.fulfilledAt).toBe(new Date(NOW).toISOString());
+      expect(requestRecord?.fixJson).toBeTruthy();
+    });
+
+    it("flips an already lazily-expired request to fulfilled when the fulfil arrives inside the grace window", async () => {
+      const deps = buildDeps();
+      deps.locateRequestRepo.seed(record({ status: "expired", expiresAt: "2026-07-19T09:09:59Z" }));
+
+      const result = await fulfillLocateRequest(baseInput(), deps);
+
+      expect(result.status).toBe("fulfilled");
+      expect(result.late).toBe(true);
+      const requestRecord = await deps.locateRequestRepo.get(FAMILY_ID, REQUEST_ID);
+      expect(requestRecord?.status).toBe("fulfilled");
+    });
+
+    it("accepts a fulfil exactly at the 10-minute grace boundary (now == expiresAt + 10min)", async () => {
+      const deps = buildDeps();
+      // expiresAt + 10min === NOW exactly.
+      deps.locateRequestRepo.seed(record({ status: "pending", expiresAt: "2026-07-19T09:00:00Z" }));
+
+      const result = await fulfillLocateRequest(baseInput(), deps);
+
+      expect(result.status).toBe("fulfilled");
+      expect(result.late).toBe(true);
+    });
+
+    it("rejects a fulfil 1 second past the 10-minute grace boundary: 410, fix still stored, status stays expired", async () => {
+      const deps = buildDeps();
+      // expiresAt + 10min is 1 second before NOW.
+      deps.locateRequestRepo.seed(record({ status: "pending", expiresAt: "2026-07-19T08:59:59Z" }));
+
+      await expectAppError(fulfillLocateRequest(baseInput(), deps), "LOCATE_REQUEST_EXPIRED");
+
+      const stored = await deps.lastKnownRepo.get(TARGET_UID, TARGET_DEVICE_ID);
+      expect(stored?.lat).toBe(51.0544);
+      expect(deps.historyStore.fixes.length).toBe(1);
+
+      const requestRecord = await deps.locateRequestRepo.get(FAMILY_ID, REQUEST_ID);
+      expect(requestRecord?.status).toBe("expired");
+      expect(requestRecord?.fixJson).toBeFalsy();
+    });
+
+    it("a fulfil more than 10 minutes past expiresAt on an ALREADY-expired request throws 410 without re-flipping status, and does not even re-write it", async () => {
+      const deps = buildDeps();
+      deps.locateRequestRepo.seed(record({ status: "expired", expiresAt: "2026-07-19T08:59:59Z" }));
+
+      // Distinguishes "only re-writes when status was pending" from "always (re-)writes
+      // expired regardless of prior status" — both produce the same final stored value
+      // here, so the write-call-count itself is the only observable difference.
+      let updateCalls = 0;
+      const originalUpdate = deps.locateRequestRepo.update.bind(deps.locateRequestRepo);
+      deps.locateRequestRepo.update = async (familyId, requestId, patch) => {
+        updateCalls++;
+        return originalUpdate(familyId, requestId, patch);
+      };
+
+      await expectAppError(fulfillLocateRequest(baseInput(), deps), "LOCATE_REQUEST_EXPIRED");
+
+      const requestRecord = await deps.locateRequestRepo.get(FAMILY_ID, REQUEST_ID);
+      expect(requestRecord?.status).toBe("expired");
+      expect(updateCalls).toBe(0);
+    });
   });
 
   it("a paused target device MAY still fulfill (TRACKING_PAUSED does not apply here)", async () => {
@@ -384,5 +539,53 @@ describe("domain/locate/fulfillLocateRequest", () => {
     const result = await fulfillLocateRequest(baseInput(), deps);
 
     expect(result.status).toBe("fulfilled");
+  });
+
+  describe("lastSeenAt refresh (specs/001 §4.2/§6.3 amended 2026-09-06, 002 §2.4 write-skip)", () => {
+    it("refreshes the fulfilling device's lastSeenAt when it is stale (well over a minute old)", async () => {
+      const deps = buildDeps();
+      deps.deviceRepo.seed(TARGET_UID, device({ lastSeenAt: "2026-07-01T00:00:00Z" }));
+      deps.locateRequestRepo.seed(record({ expiresAt: "2026-07-19T09:11:00Z" }));
+
+      await fulfillLocateRequest(baseInput(), deps);
+
+      const stored = await deps.deviceRepo.getDevice(TARGET_UID, TARGET_DEVICE_ID);
+      expect(stored?.lastSeenAt).toBe(new Date(NOW).toISOString());
+    });
+
+    it("skips the lastSeenAt write when the device was seen less than a minute ago (write-skip)", async () => {
+      const deps = buildDeps();
+      const recentlySeen = new Date(new Date(NOW).getTime() - 30_000).toISOString();
+      deps.deviceRepo.seed(TARGET_UID, device({ lastSeenAt: recentlySeen }));
+      deps.locateRequestRepo.seed(record({ expiresAt: "2026-07-19T09:11:00Z" }));
+
+      await fulfillLocateRequest(baseInput(), deps);
+
+      const stored = await deps.deviceRepo.getDevice(TARGET_UID, TARGET_DEVICE_ID);
+      expect(stored?.lastSeenAt).toBe(recentlySeen);
+    });
+
+    it("does not clobber a concurrent settings change: trackingEnabled flipped to false after the in-request snapshot still reads false after the refresh (Major review fix, 002 §2.4)", async () => {
+      const deps = buildDeps();
+      deps.deviceRepo.seed(TARGET_UID, device({ lastSeenAt: "2026-07-01T00:00:00Z", trackingEnabled: true })); // stale -> triggers a write
+      deps.locateRequestRepo.seed(record({ expiresAt: "2026-07-19T09:11:00Z" }));
+
+      // Simulate a concurrent PATCH /devices/{id} (§4.3) landing between this request's
+      // §1.2 ownership snapshot read and its lastSeenAt refresh write.
+      const originalGetDevice = deps.deviceRepo.getDevice.bind(deps.deviceRepo);
+      deps.deviceRepo.getDevice = async (ownerUserId, deviceId) => {
+        const snapshot = await originalGetDevice(ownerUserId, deviceId);
+        if (snapshot) {
+          await deps.deviceRepo.putDevice(ownerUserId, { ...snapshot, trackingEnabled: false });
+        }
+        return snapshot;
+      };
+
+      await fulfillLocateRequest(baseInput(), deps);
+
+      const stored = await deps.deviceRepo.getDevice(TARGET_UID, TARGET_DEVICE_ID);
+      expect(stored?.trackingEnabled).toBe(false); // must NOT be reverted to the stale snapshot's true
+      expect(stored?.lastSeenAt).toBe(new Date(NOW).toISOString());
+    });
   });
 });

@@ -24,7 +24,7 @@ import { findDeviceInFamily, listDevicesForMembers } from "../family/deviceFanou
 import { getFeatures, type Features } from "../plan";
 
 const REQUEST_ID_LENGTH = 20;
-const EXPIRY_MS = 60 * 1000; // now + 60s (§6.1)
+const EXPIRY_MS = 180 * 1000; // now + 180s (§6.1, amended 2026-09-06 — was 60s)
 
 export interface CreateLocateRequestDeps {
   deviceRepo: DeviceRepo;
@@ -60,6 +60,7 @@ export interface CreateLocateRequestResult {
   status: LocateRequestStatus;
   targetUserId: string;
   targetDeviceId: string;
+  createdAt: string;
   expiresAt: string;
   lastKnown: LastKnownAnswer | null;
   features: Features;
@@ -159,6 +160,7 @@ export async function createLocateRequest(
       status: existing.status,
       targetUserId,
       targetDeviceId,
+      createdAt: existing.createdAt,
       expiresAt: existing.expiresAt,
       lastKnown,
       features,
@@ -179,16 +181,34 @@ export async function createLocateRequest(
   let status: LocateRequestStatus = "pending";
   if (hasValidToken(device)) {
     const requestedByName = resolveRequesterDisplayName(input.uid, members);
-    const outcome = await deps.pushSender.send({
-      token: device.pushToken as string,
-      type: "LOCATE_REQUEST",
-      data: { type: "LOCATE_REQUEST", requestId, requestedByName, expiresAt },
-    });
-    if (outcome === "invalidToken") {
+    try {
+      const outcome = await deps.pushSender.send({
+        token: device.pushToken as string,
+        type: "LOCATE_REQUEST",
+        data: { type: "LOCATE_REQUEST", requestId, requestedByName, expiresAt },
+      });
+      if (outcome === "invalidToken") {
+        status = "pushFailed";
+        // Write back into the DEVICE OWNER's own partition (002 §2.4) — the target, not
+        // necessarily the requester.
+        await deps.deviceRepo.putDevice(device.ownerUserId, { ...device, pushInvalid: true });
+      } else if (outcome === "error") {
+        // specs/001 §6.1/§6.2 (amended 2026-09-06) — a non-throwing "error" outcome (every
+        // non-ok, non-token-rejection FCM response, including an FCM 5xx — see
+        // src/adapters/push/fcmV1Sender.ts) is a transport-level failure exactly like a
+        // thrown one below: create the request as pushFailed WITHOUT marking the device
+        // pushInvalid — the token itself is not known bad, only the send attempt failed.
+        status = "pushFailed";
+      }
+    } catch {
+      // specs/001 §6.1 (amended 2026-09-06) — a THROWN transport-level failure (OAuth
+      // exchange failure, a missing/malformed FCM_SERVICE_ACCOUNT_JSON, or a rejected
+      // fetch — the only cases fcmV1Sender.ts actually throws for; an FCM 5xx resolves as
+      // the non-throwing "error" outcome handled above, it does NOT throw) MUST NOT fail
+      // the request: create it as pushFailed exactly like an invalid token, but WITHOUT
+      // marking the device pushInvalid — the token itself is not known bad, only the send
+      // attempt failed. The requester still gets their last-known answer instead of a 500.
       status = "pushFailed";
-      // Write back into the DEVICE OWNER's own partition (002 §2.4) — the target, not
-      // necessarily the requester.
-      await deps.deviceRepo.putDevice(device.ownerUserId, { ...device, pushInvalid: true });
     }
   } else {
     status = "pushFailed";
@@ -214,6 +234,7 @@ export async function createLocateRequest(
     status,
     targetUserId,
     targetDeviceId,
+    createdAt,
     expiresAt,
     lastKnown,
     features,

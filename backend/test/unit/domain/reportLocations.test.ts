@@ -1153,4 +1153,57 @@ describe("domain/location/reportLocations", () => {
       // every other test asserting presence only when a membership was actually seeded.
     });
   });
+
+  describe("lastSeenAt refresh (specs/001 §4.2 amended 2026-09-06, 002 §2.4 write-skip)", () => {
+    it("refreshes the reporting device's lastSeenAt when it is stale (well over a minute old)", async () => {
+      const deps = buildDeps();
+      seedDevice(deps, { lastSeenAt: "2026-07-01T00:00:00Z" }); // far older than NOW
+
+      await reportLocations(baseInput(), deps);
+
+      const stored = await deps.deviceRepo.getDevice(USER_ID, DEVICE_ID);
+      expect(stored?.lastSeenAt).toBe(new Date(NOW).toISOString());
+    });
+
+    it("skips the lastSeenAt write when the device was seen less than a minute ago (write-skip)", async () => {
+      const deps = buildDeps();
+      const recentlySeen = new Date(new Date(NOW).getTime() - 30_000).toISOString(); // 30s ago
+      seedDevice(deps, { lastSeenAt: recentlySeen });
+
+      await reportLocations(baseInput(), deps);
+
+      const stored = await deps.deviceRepo.getDevice(USER_ID, DEVICE_ID);
+      expect(stored?.lastSeenAt).toBe(recentlySeen); // untouched
+    });
+
+    it("does not clobber a concurrent settings change: trackingEnabled flipped to false after the in-request snapshot still reads false after the refresh (Major review fix, 002 §2.4)", async () => {
+      const deps = buildDeps();
+      seedDevice(deps, { lastSeenAt: "2026-07-01T00:00:00Z", trackingEnabled: true }); // stale -> triggers a write
+
+      // Simulate a concurrent PATCH /devices/{id} (§4.3) landing between this request's
+      // §1.2 ownership snapshot read (the FIRST getDevice call) and its lastSeenAt refresh
+      // write: the domain still acts on the pre-mutation snapshot (trackingEnabled: true,
+      // so it does not itself reject with TRACKING_PAUSED), but the stored row is flipped
+      // to false immediately after that first snapshot is taken — a full-row replace using
+      // the stale snapshot would silently revert the pause. Only the FIRST call injects the
+      // concurrent write; reportLocations' own later re-read (002 §4.2 device-existence
+      // guard) must see it undisturbed, not have this fake re-flip it again.
+      let getDeviceCalls = 0;
+      const originalGetDevice = deps.deviceRepo.getDevice.bind(deps.deviceRepo);
+      deps.deviceRepo.getDevice = async (ownerUserId, deviceId) => {
+        const snapshot = await originalGetDevice(ownerUserId, deviceId);
+        getDeviceCalls++;
+        if (getDeviceCalls === 1 && snapshot) {
+          await deps.deviceRepo.putDevice(ownerUserId, { ...snapshot, trackingEnabled: false });
+        }
+        return snapshot;
+      };
+
+      await reportLocations(baseInput(), deps);
+
+      const stored = await deps.deviceRepo.getDevice(USER_ID, DEVICE_ID);
+      expect(stored?.trackingEnabled).toBe(false); // must NOT be reverted to the stale snapshot's true
+      expect(stored?.lastSeenAt).toBe(new Date(NOW).toISOString()); // the refresh itself still happened
+    });
+  });
 });

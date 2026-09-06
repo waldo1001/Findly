@@ -36,7 +36,12 @@ export interface LocateRequestFix {
 export interface PollLocateRequestResult {
   requestId: string;
   status: LocateRequestStatus;
+  createdAt: string;
   expiresAt: string;
+  /** Server receive time of the accepted fulfil (§6.3), null until fulfilled. */
+  fulfilledAt: string | null;
+  /** True when fulfilled after expiresAt (§6.3 grace window, amended 2026-09-06). */
+  late: boolean;
   fix: LocateRequestFix | null;
   features: Features;
 }
@@ -77,5 +82,14 @@ export async function pollLocateRequest(
       ? { ...(JSON.parse(record.fixJson) as Omit<LocateRequestFix, "deviceId">), deviceId: record.targetDeviceId }
       : null;
 
-  return { requestId: record.requestId, status, expiresAt: record.expiresAt, fix, features };
+  return {
+    requestId: record.requestId,
+    status,
+    createdAt: record.createdAt,
+    expiresAt: record.expiresAt,
+    fulfilledAt: record.fulfilledAt ?? null,
+    late: record.late ?? false,
+    fix,
+    features,
+  };
 }

@@ -579,4 +579,52 @@ describe("domain/geofence/reportGeofenceEvents", () => {
 
     expect(geofenceEventsCalls).toBe(0);
   });
+
+  describe("lastSeenAt refresh (specs/001 §4.2 amended 2026-09-06, 002 §2.4 write-skip)", () => {
+    it("refreshes the reporting device's lastSeenAt when it is stale (well over a minute old)", async () => {
+      const deps = buildDeps();
+      await seedFamily(deps);
+      seedReporterDevice(deps, { lastSeenAt: "2026-07-01T00:00:00Z" });
+
+      await reportGeofenceEvents(baseInput(), deps);
+
+      const stored = await deps.deviceRepo.getDevice(REPORTER_UID, DEVICE_ID);
+      expect(stored?.lastSeenAt).toBe(new Date(NOW).toISOString());
+    });
+
+    it("skips the lastSeenAt write when the device was seen less than a minute ago (write-skip)", async () => {
+      const deps = buildDeps();
+      await seedFamily(deps);
+      const recentlySeen = new Date(new Date(NOW).getTime() - 30_000).toISOString();
+      seedReporterDevice(deps, { lastSeenAt: recentlySeen });
+
+      await reportGeofenceEvents(baseInput(), deps);
+
+      const stored = await deps.deviceRepo.getDevice(REPORTER_UID, DEVICE_ID);
+      expect(stored?.lastSeenAt).toBe(recentlySeen);
+    });
+
+    it("does not clobber a concurrent settings change: trackingEnabled flipped to false after the in-request snapshot still reads false after the refresh (Major review fix, 002 §2.4)", async () => {
+      const deps = buildDeps();
+      await seedFamily(deps);
+      seedReporterDevice(deps, { lastSeenAt: "2026-07-01T00:00:00Z", trackingEnabled: true }); // stale -> triggers a write
+
+      // Simulate a concurrent PATCH /devices/{id} (§4.3) landing between this request's
+      // §1.2 ownership snapshot read and its lastSeenAt refresh write.
+      const originalGetDevice = deps.deviceRepo.getDevice.bind(deps.deviceRepo);
+      deps.deviceRepo.getDevice = async (ownerUserId, deviceId) => {
+        const snapshot = await originalGetDevice(ownerUserId, deviceId);
+        if (snapshot) {
+          await deps.deviceRepo.putDevice(ownerUserId, { ...snapshot, trackingEnabled: false });
+        }
+        return snapshot;
+      };
+
+      await reportGeofenceEvents(baseInput(), deps);
+
+      const stored = await deps.deviceRepo.getDevice(REPORTER_UID, DEVICE_ID);
+      expect(stored?.trackingEnabled).toBe(false); // must NOT be reverted to the stale snapshot's true
+      expect(stored?.lastSeenAt).toBe(new Date(NOW).toISOString());
+    });
+  });
 });

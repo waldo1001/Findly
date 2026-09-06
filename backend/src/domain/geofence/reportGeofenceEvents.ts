@@ -26,6 +26,7 @@ import type { GeofenceConfigRepo, GeofenceEntry } from "../../ports/geofenceConf
 import type { PushSender } from "../../ports/pushSender";
 import { listDevicesForMembers } from "../family/deviceFanout";
 import { getFeatures, type Features } from "../plan";
+import { shouldRefreshLastSeen } from "../device/lastSeenPolicy";
 
 export interface ReportGeofenceEventsDeps {
   deviceRepo: DeviceRepo;
@@ -109,6 +110,16 @@ export async function reportGeofenceEvents(
     throw new AppError("DEVICE_NOT_FOUND", "X-Device-Id is not registered to the calling user");
   }
 
+  const now = deps.clock.now();
+
+  // specs/001 §4.2 (amended 2026-09-06) — every device-originated call refreshes
+  // lastSeenAt, write-skipped to at most once per minute (002 §2.4). touchLastSeen is a
+  // timestamp-only merge (never a full-row replace of this stale-by-construction snapshot)
+  // so a concurrent PATCH /devices/{id} (§4.3) or re-registration (§4.1) can't be clobbered.
+  if (shouldRefreshLastSeen(device.lastSeenAt, now)) {
+    await deps.deviceRepo.touchLastSeen(input.uid, deviceId, now.toISOString());
+  }
+
   const deviceSettings: DeviceSettingsSnapshot = {
     syncIntervalMinutes: device.syncIntervalMinutes,
     trackingEnabled: device.trackingEnabled,
@@ -120,7 +131,6 @@ export async function reportGeofenceEvents(
 
   const body = parseOrThrow(reportGeofenceEventsRequestSchema, input.body);
 
-  const now = deps.clock.now();
   const receivedAt = now.toISOString();
   const date = usageDate(now);
 

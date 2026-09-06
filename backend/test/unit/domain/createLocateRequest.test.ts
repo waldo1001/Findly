@@ -206,7 +206,7 @@ describe("domain/locate/createLocateRequest", () => {
     expect(deps.pushSender.sent[0]!.data.requestedByName).toBe("ghost-uid");
   });
 
-  it("creates a 201 pending request, returns instant lastKnown null when never reported, expiresAt = now+60s", async () => {
+  it("creates a 201 pending request, returns instant lastKnown null when never reported, expiresAt = now+180s (specs/001 §6.1 amended 2026-09-06), createdAt = now", async () => {
     const deps = buildDeps();
     await seedFamily(deps);
     deps.deviceRepo.seed(TARGET_UID, device());
@@ -218,9 +218,24 @@ describe("domain/locate/createLocateRequest", () => {
     expect(result.targetUserId).toBe(TARGET_UID);
     expect(result.targetDeviceId).toBe(DEVICE_A);
     expect(result.requestId).toMatch(/^lr_[A-Za-z0-9]{20}$/);
-    expect(result.expiresAt).toBe(new Date(new Date(NOW).getTime() + 60_000).toISOString());
+    expect(result.createdAt).toBe(new Date(NOW).toISOString());
+    expect(result.expiresAt).toBe(new Date(new Date(NOW).getTime() + 180_000).toISOString());
     expect(result.lastKnown).toBeNull();
     expect(result.features).toEqual(getFeatures("free"));
+  });
+
+  it("coalesced (200) responses also carry the ORIGINAL request's createdAt, not the coalescing call's time", async () => {
+    const deps = buildDeps();
+    await seedFamily(deps);
+    deps.deviceRepo.seed(TARGET_UID, device());
+
+    const first = await createLocateRequest(baseInput(), deps);
+    deps.clock.set(new Date("2026-07-19T09:10:30Z"));
+    const second = await createLocateRequest(baseInput(), deps);
+
+    expect(second.created).toBe(false);
+    expect(second.createdAt).toBe(first.createdAt);
+    expect(second.createdAt).toBe(new Date(NOW).toISOString());
   });
 
   it("returns the instant lastKnown answer when the target device has reported before", async () => {
@@ -373,15 +388,54 @@ describe("domain/locate/createLocateRequest", () => {
     expect(stored?.pushInvalid).toBe(true);
   });
 
-  it("a transport 'error' outcome does not flip status away from pending (push is best-effort)", async () => {
+  it("a non-throwing 'error' outcome (e.g. FCM 5xx) creates the request as pushFailed without marking the device pushInvalid (specs/001 §6.1/§6.2 amended 2026-09-06)", async () => {
     const deps = buildDeps();
     await seedFamily(deps);
-    deps.deviceRepo.seed(TARGET_UID, device({ pushToken: "fcm-token-a" }));
+    deps.deviceRepo.seed(TARGET_UID, device({ pushToken: "fcm-token-a", pushInvalid: false }));
     deps.pushSender.setOutcome("error");
 
     const result = await createLocateRequest(baseInput(), deps);
 
-    expect(result.status).toBe("pending");
+    expect(result.status).toBe("pushFailed");
+    const stored = await deps.deviceRepo.getDevice(TARGET_UID, DEVICE_A);
+    expect(stored?.pushInvalid).toBe(false); // the token is not known bad, only the send attempt failed
+  });
+
+  it("a thrown transport failure (OAuth exchange, FCM 5xx, network error) creates the request as pushFailed instead of propagating (specs/001 §6.1 amended 2026-09-06)", async () => {
+    const deps = buildDeps();
+    await seedFamily(deps);
+    deps.deviceRepo.seed(TARGET_UID, device({ pushToken: "fcm-token-a" }));
+    deps.pushSender.setThrows(new Error("FCM OAuth2 token exchange failed: HTTP 503"));
+
+    const result = await createLocateRequest(baseInput(), deps);
+
+    expect(result.created).toBe(true);
+    expect(result.status).toBe("pushFailed");
+    expect(result.lastKnown).toBeNull(); // requester still gets an answer (last-known), not a 500
+  });
+
+  it("a thrown transport failure does NOT mark the device pushInvalid (the token is not known bad)", async () => {
+    const deps = buildDeps();
+    await seedFamily(deps);
+    deps.deviceRepo.seed(TARGET_UID, device({ pushToken: "fcm-token-a", pushInvalid: false }));
+    deps.pushSender.setThrows(new Error("network error"));
+
+    await createLocateRequest(baseInput(), deps);
+
+    const stored = await deps.deviceRepo.getDevice(TARGET_UID, DEVICE_A);
+    expect(stored?.pushInvalid).toBe(false);
+  });
+
+  it("the locate request is still persisted as pushFailed after a thrown transport failure (not just returned)", async () => {
+    const deps = buildDeps();
+    await seedFamily(deps);
+    deps.deviceRepo.seed(TARGET_UID, device({ pushToken: "fcm-token-a" }));
+    deps.pushSender.setThrows(new Error("network error"));
+
+    const result = await createLocateRequest(baseInput(), deps);
+
+    const stored = await deps.locateRequestRepo.get(FAMILY_ID, result.requestId);
+    expect(stored?.status).toBe("pushFailed");
   });
 
   it("coalesces with an existing pending request for the same target device, returning 200", async () => {
