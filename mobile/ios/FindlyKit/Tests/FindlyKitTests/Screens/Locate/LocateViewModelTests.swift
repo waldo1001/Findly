@@ -1,28 +1,42 @@
+import Foundation
 import Testing
 @testable import FindlyKit
 
 /// specs/004-ios-client.md I2 (001 §6) — create → poll-every-2s-until-terminal. Uses an injected,
 /// externally-releasable `sleep` so the poll loop advances deterministically instead of racing a
 /// real 2 s timer.
+///
+/// **specs/009-device-runtime.md §5.1 "Requester side" (amended 2026-09-06, I51, building on
+/// B26/A39's Android precedent).** Polling now stops at a terminal status **or the local end of the
+/// request window**, then performs one `GET /locations/latest` fallback before declaring the device
+/// unreachable — mirroring `LocateStateHolder`'s Android shape (window derived from the server's own
+/// `createdAt`/`expiresAt` pair so clock skew cancels, measured as locally-elapsed time; a
+/// zero-length or unparsable window never expires locally; a `late` outcome requires a non-null
+/// fix, not `recordedAt` alone).
 @MainActor
 struct LocateViewModelTests {
 
-    @Test func requestLocate_pending_startsPolling_andStopsAtFulfilled() async throws {
+    @Test func requestLocate_pending_startsPolling_andStopsAtFresh() async throws {
         let api = FakeAPIClient()
         api.createLocateRequestHandler = { _ in
             TestFeatures.envelope(CreateLocateRequestResponse(
                 requestId: "lr_1", status: .pending, targetUserId: "u2", targetDeviceId: "d2",
-                expiresAt: "2026-07-19T09:06:12Z", lastKnown: LastKnownFix(deviceId: "d2", lat: 51.0, lon: 3.7, accuracyM: 10, recordedAt: "2026-07-19T08:50:00Z")
+                createdAt: "2026-07-19T09:05:12Z", expiresAt: "2026-07-19T09:06:12Z",
+                lastKnown: LastKnownFix(deviceId: "d2", lat: 51.0, lon: 3.7, accuracyM: 10, recordedAt: "2026-07-19T08:50:00Z")
             ))
         }
         var pollCount = 0
         api.pollLocateRequestHandler = { _ in
             pollCount += 1
             if pollCount < 2 {
-                return TestFeatures.envelope(PollLocateRequestResponse(requestId: "lr_1", status: .pending, expiresAt: "2026-07-19T09:06:12Z", fix: nil))
+                return TestFeatures.envelope(PollLocateRequestResponse(
+                    requestId: "lr_1", status: .pending, createdAt: "2026-07-19T09:05:12Z",
+                    expiresAt: "2026-07-19T09:06:12Z", fulfilledAt: nil, late: false, fix: nil
+                ))
             }
             return TestFeatures.envelope(PollLocateRequestResponse(
-                requestId: "lr_1", status: .fulfilled, expiresAt: "2026-07-19T09:06:12Z",
+                requestId: "lr_1", status: .fulfilled, createdAt: "2026-07-19T09:05:12Z",
+                expiresAt: "2026-07-19T09:06:12Z", fulfilledAt: "2026-07-19T09:05:50Z", late: false,
                 fix: FulfilledFix(deviceId: "d2", fixId: "f1", recordedAt: "2026-07-19T09:05:44Z", lat: 51.0544, lon: 3.7170, accuracyM: 4.8, altitudeM: nil, speedMps: nil, bearingDeg: nil, batteryPct: 77, source: .locate)
             ))
         }
@@ -40,7 +54,7 @@ struct LocateViewModelTests {
 
         await gate.release()
         try await waitUntil { viewModel.status == .fulfilled }
-        #expect(viewModel.fulfilledFix?.lat == 51.0544)
+        #expect(viewModel.resolvedPosition?.lat == 51.0544)
 
         // Terminal — a further release must not trigger any additional poll.
         await gate.release()
@@ -48,19 +62,252 @@ struct LocateViewModelTests {
         #expect(api.pollLocateRequestCalls.count == 2)
     }
 
-    @Test func requestLocate_immediatePushFailed_neverStartsPolling() async {
+    @Test func requestLocate_pollFulfilledLate_rendersLateWithPosition_noFallbackCall() async throws {
+        let api = FakeAPIClient()
+        api.createLocateRequestHandler = { _ in
+            TestFeatures.envelope(CreateLocateRequestResponse(
+                requestId: "lr_1", status: .pending, targetUserId: "u2", targetDeviceId: "d2",
+                createdAt: "2026-07-19T09:05:12Z", expiresAt: "2026-07-19T09:06:12Z", lastKnown: nil
+            ))
+        }
+        api.pollLocateRequestHandler = { _ in
+            TestFeatures.envelope(PollLocateRequestResponse(
+                requestId: "lr_1", status: .fulfilled, createdAt: "2026-07-19T09:05:12Z",
+                expiresAt: "2026-07-19T09:06:12Z", fulfilledAt: "2026-07-19T09:15:00Z", late: true,
+                fix: FulfilledFix(deviceId: "d2", fixId: "f1", recordedAt: "2026-07-19T09:14:55Z", lat: 51.05, lon: 3.71, accuracyM: 6.0, altitudeM: nil, speedMps: nil, bearingDeg: nil, batteryPct: 50, source: .locate)
+            ))
+        }
+        let gate = SleepGate()
+        let viewModel = LocateViewModel(apiClient: api, sleep: { _ in await gate.wait() })
+
+        await viewModel.requestLocate(target: .user("u2"))
+        await gate.release()
+        try await waitUntil { viewModel.status == .late }
+
+        #expect(viewModel.resolvedPosition?.recordedAt == "2026-07-19T09:14:55Z")
+        #expect(api.getLatestLocationsCallCount == 0, "the wire already gave a definitive late fulfil — no fallback needed")
+    }
+
+    @Test func requestLocate_pollWindowElapses_fallbackFindsNewerPosition_rendersLate() async throws {
+        let api = FakeAPIClient()
+        api.createLocateRequestHandler = { _ in
+            TestFeatures.envelope(CreateLocateRequestResponse(
+                requestId: "lr_1", status: .pending, targetUserId: "u2", targetDeviceId: "d2",
+                createdAt: "2026-07-19T09:05:12Z", expiresAt: "2026-07-19T09:05:16Z", lastKnown: nil
+            ))
+        }
+        api.pollLocateRequestHandler = { _ in
+            TestFeatures.envelope(PollLocateRequestResponse(
+                requestId: "lr_1", status: .pending, createdAt: "2026-07-19T09:05:12Z",
+                expiresAt: "2026-07-19T09:05:16Z", fulfilledAt: nil, late: false, fix: nil
+            ))
+        }
+        api.getLatestLocationsHandler = {
+            TestFeatures.envelope(LatestLocationsResponse(members: [
+                MemberLocations(userId: "u2", displayName: "Noor", devices: [
+                    DeviceLocation(deviceId: "d2", deviceName: "Noor's phone", lat: 51.06, lon: 3.72, accuracyM: 8.0, recordedAt: "2026-07-19T09:10:00Z", receivedAt: "2026-07-19T09:10:01Z", batteryPct: 40, source: .periodic, trackingEnabled: true, syncIntervalMinutes: 15, isStale: false)
+                ])
+            ]))
+        }
+        let clock = SteppingClock(start: parseDate("2026-07-19T09:05:12Z"))
+        let gate = SleepGate()
+        let viewModel = LocateViewModel(apiClient: api, now: clock.now, sleep: { _ in await gate.wait() })
+
+        await viewModel.requestLocate(target: .user("u2"))
+        clock.advance(by: 10) // past the 4s window
+        await gate.release()
+        try await waitUntil { viewModel.status == .late }
+
+        #expect(api.getLatestLocationsCallCount == 1)
+        #expect(viewModel.resolvedPosition?.lat == 51.06)
+    }
+
+    @Test func requestLocate_pollWindowElapses_fallbackFindsNoNewerPosition_rendersUnreachable() async throws {
+        let api = FakeAPIClient()
+        api.createLocateRequestHandler = { _ in
+            TestFeatures.envelope(CreateLocateRequestResponse(
+                requestId: "lr_1", status: .pending, targetUserId: "u2", targetDeviceId: "d2",
+                createdAt: "2026-07-19T09:05:12Z", expiresAt: "2026-07-19T09:05:16Z", lastKnown: nil
+            ))
+        }
+        api.pollLocateRequestHandler = { _ in
+            TestFeatures.envelope(PollLocateRequestResponse(
+                requestId: "lr_1", status: .pending, createdAt: "2026-07-19T09:05:12Z",
+                expiresAt: "2026-07-19T09:05:16Z", fulfilledAt: nil, late: false, fix: nil
+            ))
+        }
+        api.getLatestLocationsHandler = {
+            // recordedAt is OLDER than createdAt — not a newer answer.
+            TestFeatures.envelope(LatestLocationsResponse(members: [
+                MemberLocations(userId: "u2", displayName: "Noor", devices: [
+                    DeviceLocation(deviceId: "d2", deviceName: "Noor's phone", lat: 51.0, lon: 3.7, accuracyM: 8.0, recordedAt: "2026-07-19T08:00:00Z", receivedAt: "2026-07-19T08:00:01Z", batteryPct: 40, source: .periodic, trackingEnabled: true, syncIntervalMinutes: 15, isStale: true)
+                ])
+            ]))
+        }
+        let clock = SteppingClock(start: parseDate("2026-07-19T09:05:12Z"))
+        let gate = SleepGate()
+        let viewModel = LocateViewModel(apiClient: api, now: clock.now, sleep: { _ in await gate.wait() })
+
+        await viewModel.requestLocate(target: .user("u2"))
+        clock.advance(by: 10)
+        await gate.release()
+        try await waitUntil { viewModel.status == .unreachable }
+
+        #expect(viewModel.resolvedPosition == nil)
+    }
+
+    /// A39's review (mirrored here): deciding `late` off `recordedAt` alone yields a "located" state
+    /// with no coordinates — the screen would then silently backfill the stale `lastKnown` position
+    /// under a fresh-looking chip. A non-null fix is required.
+    @Test func requestLocate_fallbackFindsNewerRecordedAtButNoCoordinates_rendersUnreachable_notLate() async throws {
+        let api = FakeAPIClient()
+        api.createLocateRequestHandler = { _ in
+            TestFeatures.envelope(CreateLocateRequestResponse(
+                requestId: "lr_1", status: .pending, targetUserId: "u2", targetDeviceId: "d2",
+                createdAt: "2026-07-19T09:05:12Z", expiresAt: "2026-07-19T09:05:16Z", lastKnown: nil
+            ))
+        }
+        api.pollLocateRequestHandler = { _ in
+            TestFeatures.envelope(PollLocateRequestResponse(
+                requestId: "lr_1", status: .pending, createdAt: "2026-07-19T09:05:12Z",
+                expiresAt: "2026-07-19T09:05:16Z", fulfilledAt: nil, late: false, fix: nil
+            ))
+        }
+        api.getLatestLocationsHandler = {
+            // recordedAt IS newer than createdAt, but lat/lon are still null (001 §5.2 "no location
+            // yet" shape) — must not be shown as an answer.
+            TestFeatures.envelope(LatestLocationsResponse(members: [
+                MemberLocations(userId: "u2", displayName: "Noor", devices: [
+                    DeviceLocation(deviceId: "d2", deviceName: "Noor's phone", lat: nil, lon: nil, accuracyM: nil, recordedAt: "2026-07-19T09:10:00Z", receivedAt: nil, batteryPct: nil, source: nil, trackingEnabled: true, syncIntervalMinutes: 15, isStale: nil)
+                ])
+            ]))
+        }
+        let clock = SteppingClock(start: parseDate("2026-07-19T09:05:12Z"))
+        let gate = SleepGate()
+        let viewModel = LocateViewModel(apiClient: api, now: clock.now, sleep: { _ in await gate.wait() })
+
+        await viewModel.requestLocate(target: .user("u2"))
+        clock.advance(by: 10)
+        await gate.release()
+        try await waitUntil { viewModel.status == .unreachable }
+
+        #expect(viewModel.resolvedPosition == nil)
+    }
+
+    /// A39's clock-skew fix, mirrored: the window is `Duration(createdAt, expiresAt)` — two server
+    /// values, so a constant offset in the local clock cancels — measured as **locally elapsed**
+    /// time since the request was received. A phone whose clock runs fast must not report
+    /// unreachable on its very first poll tick just because its own `now()` reads past the server's
+    /// `expiresAt`.
+    @Test func requestLocate_clientClockRunsFast_doesNotExpireOnFirstTick_onlyAfterRealElapsedWindow() async throws {
+        let api = FakeAPIClient()
+        api.createLocateRequestHandler = { _ in
+            TestFeatures.envelope(CreateLocateRequestResponse(
+                requestId: "lr_1", status: .pending, targetUserId: "u2", targetDeviceId: "d2",
+                createdAt: "2026-07-19T09:05:00Z", expiresAt: "2026-07-19T09:05:04Z", lastKnown: nil
+            ))
+        }
+        api.pollLocateRequestHandler = { _ in
+            TestFeatures.envelope(PollLocateRequestResponse(
+                requestId: "lr_1", status: .pending, createdAt: "2026-07-19T09:05:00Z",
+                expiresAt: "2026-07-19T09:05:04Z", fulfilledAt: nil, late: false, fix: nil
+            ))
+        }
+        api.getLatestLocationsHandler = {
+            TestFeatures.envelope(LatestLocationsResponse(members: []))
+        }
+        // The phone's own clock is wildly ahead of the server (e.g. 4 years fast) — an absolute
+        // `now() >= expiresAt` comparison would satisfy on tick one. Only the locally-elapsed delta
+        // since the request was received may drive expiry.
+        let clock = SteppingClock(start: parseDate("2030-01-01T00:00:00Z"))
+        let gate = SleepGate()
+        let viewModel = LocateViewModel(apiClient: api, now: clock.now, sleep: { _ in await gate.wait() })
+
+        await viewModel.requestLocate(target: .user("u2"))
+
+        clock.advance(by: 1) // 1 s of real elapsed time — window is 4 s, must not expire yet.
+        await gate.release()
+        try await waitUntil { api.pollLocateRequestCalls.count == 1 }
+        #expect(viewModel.status == .pending)
+        #expect(api.getLatestLocationsCallCount == 0)
+
+        clock.advance(by: 4) // now 5 s of real elapsed time — past the 4 s window.
+        await gate.release()
+        try await waitUntil { viewModel.status == .unreachable }
+        #expect(api.getLatestLocationsCallCount == 1)
+    }
+
+    /// A39's final round, mirrored: a zero-length or unparsable window is malformed data, not an
+    /// already-expired request — it must never satisfy the local-elapsed check.
+    @Test func requestLocate_zeroLengthWindow_neverExpiresLocally_onlyWireStatusEndsIt() async throws {
+        let api = FakeAPIClient()
+        api.createLocateRequestHandler = { _ in
+            TestFeatures.envelope(CreateLocateRequestResponse(
+                requestId: "lr_1", status: .pending, targetUserId: "u2", targetDeviceId: "d2",
+                createdAt: "2026-07-19T09:05:00Z", expiresAt: "2026-07-19T09:05:00Z", lastKnown: nil
+            ))
+        }
+        var pollCount = 0
+        api.pollLocateRequestHandler = { _ in
+            pollCount += 1
+            return TestFeatures.envelope(PollLocateRequestResponse(
+                requestId: "lr_1", status: .pending, createdAt: "2026-07-19T09:05:00Z",
+                expiresAt: "2026-07-19T09:05:00Z", fulfilledAt: nil, late: false, fix: nil
+            ))
+        }
+        let clock = SteppingClock(start: parseDate("2026-07-19T09:05:00Z"))
+        let gate = SleepGate()
+        let viewModel = LocateViewModel(apiClient: api, now: clock.now, sleep: { _ in await gate.wait() })
+
+        await viewModel.requestLocate(target: .user("u2"))
+
+        clock.advance(by: 999) // arbitrarily large local elapsed time
+        await gate.release()
+        try await waitUntil { api.pollLocateRequestCalls.count == 1 }
+        #expect(viewModel.status == .pending, "a zero-length window must never be treated as instantly expired")
+        #expect(api.getLatestLocationsCallCount == 0)
+
+        viewModel.cancel()
+    }
+
+    @Test func requestLocate_immediatePushFailed_resolvesViaFallback_late() async throws {
         let api = FakeAPIClient()
         api.createLocateRequestHandler = { _ in
             TestFeatures.envelope(CreateLocateRequestResponse(
                 requestId: "lr_2", status: .pushFailed, targetUserId: "u2", targetDeviceId: "d2",
-                expiresAt: "2026-07-19T09:06:12Z", lastKnown: nil
+                createdAt: "2026-07-19T09:05:00Z", expiresAt: "2026-07-19T09:06:12Z", lastKnown: nil
             ))
+        }
+        api.getLatestLocationsHandler = {
+            TestFeatures.envelope(LatestLocationsResponse(members: [
+                MemberLocations(userId: "u2", displayName: "Noor", devices: [
+                    DeviceLocation(deviceId: "d2", deviceName: "Noor's phone", lat: 51.0, lon: 3.7, accuracyM: 10, recordedAt: "2026-07-19T09:05:30Z", receivedAt: "2026-07-19T09:05:31Z", batteryPct: 60, source: .periodic, trackingEnabled: true, syncIntervalMinutes: 15, isStale: false)
+                ])
+            ]))
         }
         let viewModel = LocateViewModel(apiClient: api, sleep: { _ in Issue.record("sleep must not be called") })
 
         await viewModel.requestLocate(target: .user("u2"))
 
-        #expect(viewModel.status == .pushFailed)
+        #expect(viewModel.status == .late)
+        #expect(api.pollLocateRequestCalls.isEmpty)
+        #expect(api.getLatestLocationsCallCount == 1)
+    }
+
+    @Test func requestLocate_immediatePushFailed_noNewerPosition_resolvesUnreachable() async {
+        let api = FakeAPIClient()
+        api.createLocateRequestHandler = { _ in
+            TestFeatures.envelope(CreateLocateRequestResponse(
+                requestId: "lr_2", status: .pushFailed, targetUserId: "u2", targetDeviceId: "d2",
+                createdAt: "2026-07-19T09:05:00Z", expiresAt: "2026-07-19T09:06:12Z", lastKnown: nil
+            ))
+        }
+        api.getLatestLocationsHandler = { TestFeatures.envelope(LatestLocationsResponse(members: [])) }
+        let viewModel = LocateViewModel(apiClient: api, sleep: { _ in Issue.record("sleep must not be called") })
+
+        await viewModel.requestLocate(target: .user("u2"))
+
+        #expect(viewModel.status == .unreachable)
         #expect(api.pollLocateRequestCalls.isEmpty)
     }
 
@@ -112,11 +359,14 @@ struct LocateViewModelTests {
         api.createLocateRequestHandler = { _ in
             TestFeatures.envelope(CreateLocateRequestResponse(
                 requestId: "lr_3", status: .pending, targetUserId: "u2", targetDeviceId: "d2",
-                expiresAt: "2026-07-19T09:06:12Z", lastKnown: nil
+                createdAt: "2026-07-19T09:05:12Z", expiresAt: "2026-07-19T09:06:12Z", lastKnown: nil
             ))
         }
         api.pollLocateRequestHandler = { _ in
-            TestFeatures.envelope(PollLocateRequestResponse(requestId: "lr_3", status: .pending, expiresAt: "2026-07-19T09:06:12Z", fix: nil))
+            TestFeatures.envelope(PollLocateRequestResponse(
+                requestId: "lr_3", status: .pending, createdAt: "2026-07-19T09:05:12Z",
+                expiresAt: "2026-07-19T09:06:12Z", fulfilledAt: nil, late: false, fix: nil
+            ))
         }
         let gate = SleepGate()
         let viewModel = LocateViewModel(apiClient: api, sleep: { _ in await gate.wait() })
@@ -127,6 +377,34 @@ struct LocateViewModelTests {
 
         try await Task.sleep(for: .milliseconds(20))
         #expect(api.pollLocateRequestCalls.isEmpty, "cancel() before the sleep resolves must prevent any further poll")
+    }
+}
+
+private func parseDate(_ iso: String) -> Date {
+    ISO8601DateFormatter().date(from: iso)!
+}
+
+/// A test-only controllable clock: `now()` only changes when the test explicitly `advance`s it,
+/// modelling "locally elapsed" wall-clock time independently of what the injected `sleep` gate does
+/// (specs/009 §5.1 "Requester side" clock-skew rule — mirrors A39's Android `now: () -> Instant`).
+final class SteppingClock: @unchecked Sendable {
+    private let lock = NSLock()
+    private var current: Date
+
+    init(start: Date) {
+        self.current = start
+    }
+
+    func advance(by seconds: TimeInterval) {
+        lock.lock()
+        current = current.addingTimeInterval(seconds)
+        lock.unlock()
+    }
+
+    func now() -> Date {
+        lock.lock()
+        defer { lock.unlock() }
+        return current
     }
 }
 
