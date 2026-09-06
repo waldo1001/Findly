@@ -206,7 +206,7 @@ describe("domain/locate/createLocateRequest", () => {
     expect(deps.pushSender.sent[0]!.data.requestedByName).toBe("ghost-uid");
   });
 
-  it("creates a 201 pending request, returns instant lastKnown null when never reported, expiresAt = now+60s", async () => {
+  it("creates a 201 pending request, returns instant lastKnown null when never reported, expiresAt = now+180s (specs/001 §6.1 amended 2026-09-06), createdAt = now", async () => {
     const deps = buildDeps();
     await seedFamily(deps);
     deps.deviceRepo.seed(TARGET_UID, device());
@@ -218,9 +218,24 @@ describe("domain/locate/createLocateRequest", () => {
     expect(result.targetUserId).toBe(TARGET_UID);
     expect(result.targetDeviceId).toBe(DEVICE_A);
     expect(result.requestId).toMatch(/^lr_[A-Za-z0-9]{20}$/);
-    expect(result.expiresAt).toBe(new Date(new Date(NOW).getTime() + 60_000).toISOString());
+    expect(result.createdAt).toBe(new Date(NOW).toISOString());
+    expect(result.expiresAt).toBe(new Date(new Date(NOW).getTime() + 180_000).toISOString());
     expect(result.lastKnown).toBeNull();
     expect(result.features).toEqual(getFeatures("free"));
+  });
+
+  it("coalesced (200) responses also carry the ORIGINAL request's createdAt, not the coalescing call's time", async () => {
+    const deps = buildDeps();
+    await seedFamily(deps);
+    deps.deviceRepo.seed(TARGET_UID, device());
+
+    const first = await createLocateRequest(baseInput(), deps);
+    deps.clock.set(new Date("2026-07-19T09:10:30Z"));
+    const second = await createLocateRequest(baseInput(), deps);
+
+    expect(second.created).toBe(false);
+    expect(second.createdAt).toBe(first.createdAt);
+    expect(second.createdAt).toBe(new Date(NOW).toISOString());
   });
 
   it("returns the instant lastKnown answer when the target device has reported before", async () => {

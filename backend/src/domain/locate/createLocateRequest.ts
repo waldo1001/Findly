@@ -24,7 +24,7 @@ import { findDeviceInFamily, listDevicesForMembers } from "../family/deviceFanou
 import { getFeatures, type Features } from "../plan";
 
 const REQUEST_ID_LENGTH = 20;
-const EXPIRY_MS = 60 * 1000; // now + 60s (§6.1)
+const EXPIRY_MS = 180 * 1000; // now + 180s (§6.1, amended 2026-09-06 — was 60s)
 
 export interface CreateLocateRequestDeps {
   deviceRepo: DeviceRepo;
@@ -60,6 +60,7 @@ export interface CreateLocateRequestResult {
   status: LocateRequestStatus;
   targetUserId: string;
   targetDeviceId: string;
+  createdAt: string;
   expiresAt: string;
   lastKnown: LastKnownAnswer | null;
   features: Features;
@@ -159,6 +160,7 @@ export async function createLocateRequest(
       status: existing.status,
       targetUserId,
       targetDeviceId,
+      createdAt: existing.createdAt,
       expiresAt: existing.expiresAt,
       lastKnown,
       features,
@@ -214,6 +216,7 @@ export async function createLocateRequest(
     status,
     targetUserId,
     targetDeviceId,
+    createdAt,
     expiresAt,
     lastKnown,
     features,

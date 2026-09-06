@@ -84,6 +84,7 @@ app.http("createLocateRequest", {
             status: result.status,
             targetUserId: result.targetUserId,
             targetDeviceId: result.targetDeviceId,
+            createdAt: result.createdAt,
             expiresAt: result.expiresAt,
             lastKnown: result.lastKnown,
           },
