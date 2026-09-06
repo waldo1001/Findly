@@ -145,6 +145,62 @@ struct LocationRuntimeContainerTests {
         #expect(provider.startBackgroundMonitoringCallCount == 1)
     }
 
+    @Test func onAuthorizationChanged_downgradedFromAlways_stopsMonitoring() {
+        // Security review Medium finding — onAuthorizationChanged only ever STARTED monitoring
+        // when newly eligible; nothing stopped significant-location-change/visit monitoring when
+        // Always is revoked while they're running. specs/009 §1.3 requires presence to stop
+        // immediately on permission revocation, and for a location app a path that keeps
+        // collecting after a downgrade is an App Store review problem, not just a bug.
+        let provider = FakeLocationProviding()
+        provider.authorization = .always
+        let scheduler = FakeBackgroundSyncScheduler()
+        let container = LocationRuntimeContainer(
+            apiClient: FakeAPIClient(), deviceId: { "device-1" },
+            locationProvider: provider, backgroundScheduler: scheduler
+        )
+        container.onAuthorizationChanged() // Always granted - monitoring starts.
+        #expect(provider.startBackgroundMonitoringCallCount == 1)
+
+        provider.authorization = .whenInUse // The user revokes Always from system Settings.
+        container.onAuthorizationChanged()
+
+        #expect(provider.stopBackgroundMonitoringCallCount == 1, "significant-location-change/visit monitoring must stop the moment Always is revoked")
+    }
+
+    @Test func onAuthorizationChanged_downgradedToDenied_stopsMonitoring() {
+        let provider = FakeLocationProviding()
+        provider.authorization = .always
+        let scheduler = FakeBackgroundSyncScheduler()
+        let container = LocationRuntimeContainer(
+            apiClient: FakeAPIClient(), deviceId: { "device-1" },
+            locationProvider: provider, backgroundScheduler: scheduler
+        )
+        container.onAuthorizationChanged()
+        #expect(provider.startBackgroundMonitoringCallCount == 1)
+
+        provider.authorization = .denied
+        container.onAuthorizationChanged()
+
+        #expect(provider.stopBackgroundMonitoringCallCount == 1)
+    }
+
+    @Test func onAuthorizationChanged_stillAlways_doesNotRedundantlyStopMonitoring() {
+        // A same-state notification (e.g. a spurious re-post) must not stop monitoring that is
+        // correctly still supposed to be running.
+        let provider = FakeLocationProviding()
+        provider.authorization = .always
+        let scheduler = FakeBackgroundSyncScheduler()
+        let container = LocationRuntimeContainer(
+            apiClient: FakeAPIClient(), deviceId: { "device-1" },
+            locationProvider: provider, backgroundScheduler: scheduler
+        )
+        container.onAuthorizationChanged()
+
+        container.onAuthorizationChanged()
+
+        #expect(provider.stopBackgroundMonitoringCallCount == 0)
+    }
+
     @Test func stop_stopsMonitoringAndCancelsTheSchedule() {
         let provider = FakeLocationProviding()
         let scheduler = FakeBackgroundSyncScheduler()
