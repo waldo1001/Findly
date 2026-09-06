@@ -27,6 +27,12 @@
     <!-- Geofence / locate / settings push notifications (001-api-contract.md §8) -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!-- A41 (specs/009-device-runtime.md §3.2 "Battery-optimisation exemption"): lets the app
+         show ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS once per install, offered only after
+         background location permission is granted (009 §3.2/§7) - Play permits this permission
+         for apps whose core function (background location) is defeated by Doze. -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+
     <application
         android:name=".FindlyApplication"
         android:allowBackup="true"

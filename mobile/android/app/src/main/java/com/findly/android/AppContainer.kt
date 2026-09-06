@@ -23,6 +23,8 @@ import com.findly.android.location.AndroidBatteryLevelProvider
 import com.findly.android.location.AndroidLocationPermissionChecker
 import com.findly.android.location.PermissionDisclosureStore
 import com.findly.android.location.SharedPreferencesPermissionDisclosureStore
+import com.findly.android.location.battery.BatteryOptimizationPromptStore
+import com.findly.android.location.battery.SharedPreferencesBatteryOptimizationPromptStore
 import com.findly.android.location.FixCaptureCoordinator
 import com.findly.android.location.FusedLocationCapturer
 import com.findly.android.location.LocationCapturer
@@ -66,6 +68,7 @@ import com.findly.android.queue.worker.FindlyWorkerFactory
 import com.findly.android.queue.worker.LastCaptureDateStore
 import com.findly.android.queue.worker.LocationSyncRunner
 import com.findly.android.queue.worker.LocationSyncScheduler
+import com.findly.android.queue.worker.PresenceRequirementPolicy
 import com.findly.android.queue.worker.ScheduleRebuilder
 import com.findly.android.queue.worker.SettingsPollScheduler
 import com.findly.android.queue.worker.SharedPreferencesLastCaptureDateStore
@@ -82,6 +85,9 @@ import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
 /**
@@ -196,6 +202,13 @@ class AppContainer(context: Context) {
      * [com.findly.android.queue.worker.ServiceRestartDecision]. */
     suspend fun cachedDeviceSettings(): DeviceSettingsSnapshot? = deviceSettingsStateStore.current()
 
+    /** Code-review fix (A41 round 2, finding 1): a fresh `ACCESS_BACKGROUND_LOCATION` read for
+     * [com.findly.android.queue.worker.LocationForegroundService]'s `START_STICKY` restart path —
+     * the same [backgroundLocationPermissionChecker] instance [syncScheduler] itself reads, so a
+     * restart can never disagree with the forward path on whether presence is permission-viable.
+     */
+    suspend fun backgroundLocationGranted(): Boolean = backgroundLocationPermissionChecker.isGranted()
+
     /** A11 (specs/009-device-runtime.md §6.1): the cached geofence config document + ETag —
      * `GeofenceConfigSyncCoordinator`'s source of truth for `If-None-Match` and for re-registering
      * from cache on a `304`/failed fetch (resume, cold start). */
@@ -216,10 +229,16 @@ class AppContainer(context: Context) {
      * Pause (§4) calls `unregisterAll()` through the [GeofenceRegistry] half; every §6.2
      * registration trigger calls `registerAll(...)` (a full replace) through the
      * [com.findly.android.pushmessages.GeofenceRegistrar] half, via [geofenceConfigSyncCoordinator]. */
+    /** Shared, stateless (fun interface backed by a live `checkSelfPermission` read, never
+     * cached) `ACCESS_BACKGROUND_LOCATION` check — both [geofencingClientManager] (specs/009 §6.2)
+     * and [syncScheduler] (A41, specs/009 §3.2: "started only when... `ACCESS_BACKGROUND_LOCATION`
+     * is granted") read the same live permission state through this one instance. */
+    private val backgroundLocationPermissionChecker = AndroidBackgroundLocationPermissionChecker(context)
+
     private val geofencingClientManager = GeofencingClientManager(
         geofencingClient = LocationServices.getGeofencingClient(context),
         pendingIntent = geofenceTransitionPendingIntent,
-        permissionState = AndroidBackgroundLocationPermissionChecker(context),
+        permissionState = backgroundLocationPermissionChecker,
         scope = applicationScope,
     )
     private val geofenceRegistry: GeofenceRegistry = geofencingClientManager
@@ -236,7 +255,11 @@ class AppContainer(context: Context) {
     )
 
     private val foregroundServiceController = DefaultForegroundServiceController(context)
-    private val syncScheduler: SyncScheduler = LocationSyncScheduler(context, foregroundServiceController)
+    private val syncScheduler: SyncScheduler = LocationSyncScheduler(
+        context,
+        foregroundServiceController,
+        backgroundLocationPermissionChecker,
+    )
 
     /** A11 (specs/009 §6.2): resume from pause is one of the five geofence re-registration
      * triggers — wired here as [DeviceSettingsCoordinator]'s `onResume` seam so a
@@ -280,6 +303,76 @@ class AppContainer(context: Context) {
      */
     val permissionDisclosureStore: PermissionDisclosureStore =
         SharedPreferencesPermissionDisclosureStore(context)
+
+    /** A41 (specs/009 §3.2 "Battery-optimisation exemption"): persists whether the once-per-
+     * install prompt flow has already been answered (accepted or declined — both count, §3.2:
+     * "the app records the answer, never re-prompts automatically"). Exposed for
+     * [com.findly.android.MainActivity] (the automatic offer) and the Devices screen's "Battery
+     * settings" action (010 §4.2). */
+    val batteryOptimizationPromptStore: BatteryOptimizationPromptStore =
+        SharedPreferencesBatteryOptimizationPromptStore(context)
+
+    /** Code-review fix (A41 round 2, finding 4): shared signal so the Devices screen's
+     * user-initiated "Battery settings" tap ([com.findly.android.ui.nav.FindlyNavHost],
+     * `BatterySettingsActionPolicy.OfferPrompt`) raises the **same** rationale dialog
+     * [com.findly.android.MainActivity] already owns for the once-per-install automatic offer
+     * (`BatteryOptimizationRationaleDialog`), rather than skipping straight to the OS prompt and
+     * recording an answer before the user has seen any explanation (009 §3.2: "explain **and**
+     * offer"). `MainActivity` shows the dialog when either its own
+     * `BatteryOptimizationPromptPolicy.shouldOffer` condition or this flag is true; the dialog's
+     * own `onContinue`/`onNotNow` callbacks are the only place that both records the answer and
+     * calls [consumeBatteryRationaleDialogRequest]. */
+    private val _batteryRationaleDialogRequested = MutableStateFlow(false)
+    val batteryRationaleDialogRequested: StateFlow<Boolean> = _batteryRationaleDialogRequested.asStateFlow()
+
+    fun requestBatteryRationaleDialog() {
+        _batteryRationaleDialogRequested.value = true
+    }
+
+    fun consumeBatteryRationaleDialogRequest() {
+        _batteryRationaleDialogRequested.value = false
+    }
+
+    /**
+     * A41 (specs/009 §7: "never... in the same session as the OS location prompt"): true only for
+     * the remainder of *this process's* lifetime after [recordBackgroundLocationPermissionGrantedThisSession]
+     * is called — [com.findly.android.MainActivity] calls it the moment the
+     * `ACCESS_BACKGROUND_LOCATION` result callback fires. Deliberately in-memory only, never
+     * persisted: a fresh process is by definition "a later session" (§7), so this MUST reset to
+     * `false` on every cold start — `AppContainer` is constructed exactly once per process (this
+     * class's own doc), which is what makes a plain field the correct scope here.
+     */
+    @Volatile
+    var backgroundLocationPermissionGrantedThisSession: Boolean = false
+        private set
+
+    fun recordBackgroundLocationPermissionGrantedThisSession() {
+        backgroundLocationPermissionGrantedThisSession = true
+    }
+
+    /** A41 (specs/009 §3.2/§7, 000 §D19): whether presence is *currently* the effective sync
+     * strategy for this device — the decision itself now lives in the tested
+     * [com.findly.android.queue.worker.PresenceRequirementPolicy] (code-review fix, A41 round 2
+     * finding 8; this method is left with only the two reads). Code-review fix (A41 round 2,
+     * finding 2): no longer takes a `backgroundLocationGranted` parameter — it used to be fed
+     * `permissionState.authorization == LocationAuthorization.ALWAYS` from
+     * [com.findly.android.MainActivity], a *different* notion of "granted" than
+     * [backgroundLocationPermissionChecker] (that resolver is undefined pre-API 29 for
+     * `ACCESS_BACKGROUND_LOCATION` and always resolved `WHEN_IN_USE` there, so the automatic
+     * battery offer could never fire on API 26-28 even while presence was genuinely running).
+     * Reading [backgroundLocationPermissionChecker] here directly — the same instance
+     * [syncScheduler] itself reads — makes the two definitions structurally identical instead of
+     * merely intended to match. */
+    suspend fun presenceCurrentlyRequired(): Boolean {
+        val cached = deviceSettingsStateStore.current()
+        val granted = backgroundLocationPermissionChecker.isGranted()
+        return PresenceRequirementPolicy.decide(cached, granted)
+    }
+
+    /** A41 (specs/010 §4.2): this app instance's own registered `deviceId`, for
+     * [com.findly.android.ui.devices.DevicesStateHolder]'s `isThisDevice` marking — `null` only
+     * when nobody is signed in (mirrors [currentDeviceIdOrNull]'s own doc). */
+    fun localDeviceIdOrNull(): String? = currentDeviceIdOrNull()
 
     /** True when this device's configured interval needs background reporting (003 §11.3). */
     suspend fun requiresBackgroundLocation(): Boolean =

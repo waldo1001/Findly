@@ -48,8 +48,12 @@ import kotlinx.coroutines.withContext
  * OS may restart this service with a **null** `Intent` after killing it. That case (and any other
  * intent that carries neither [ACTION_TICK] nor a fresh `EXTRA_SYNC_INTERVAL_MINUTES`) is routed
  * through [ServiceRestartDecision], which reads the cached settings
- * (`AppContainer.deviceSettingsStateStore`, the same store §3.5 writes) and either resumes the
- * cycle at the cached interval or `stopSelf()`s — never sits foregrounded with no loop running.
+ * (`AppContainer.deviceSettingsStateStore`, the same store §3.5 writes) **and** a fresh
+ * `ACCESS_BACKGROUND_LOCATION` read (`AppContainer.backgroundLocationGranted()`, code-review fix
+ * A41 round 2 finding 1 — a restart used to ignore the permission dimension entirely, which could
+ * re-foreground the presence service after the permission was revoked from system settings) and
+ * either resumes the cycle at the cached interval or `stopSelf()`s — never sits foregrounded with
+ * no loop running, and never with location denied by the platform.
  */
 class LocationForegroundService : Service() {
 
@@ -127,7 +131,19 @@ class LocationForegroundService : Service() {
             cycleStarted = true
             serviceScope.launch {
                 val container = (application as FindlyApplication).container
-                when (val decision = ServiceRestartDecision.decide(container.cachedDeviceSettings())) {
+                // Code-review fix (A41 round 2, finding 1): the restart decision now propagates
+                // the same live ACCESS_BACKGROUND_LOCATION read the forward path
+                // (LocationSyncScheduler.reschedule) uses, so a START_STICKY restart after the
+                // permission was revoked from system settings stops rather than re-foregrounding
+                // with location denied (specs/009 §3.2/§1.3). The suspending isGranted() read is
+                // free here - this branch already hops through serviceScope's Dispatchers.Default.
+                val backgroundLocationGranted = container.backgroundLocationGranted()
+                when (
+                    val decision = ServiceRestartDecision.decide(
+                        container.cachedDeviceSettings(),
+                        backgroundLocationGranted,
+                    )
+                ) {
                     // Code-review fix (finding 2, round 3 post-A40 review): hop back to the main
                     // thread before calling runCycle - see cycleJob's doc above for why this,
                     // rather than a lock, is what keeps its cancel-then-reassign race-free.

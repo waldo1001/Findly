@@ -1,5 +1,9 @@
 package com.findly.android.ui.nav
 
+import android.content.Intent
+import android.net.Uri
+import android.os.Build
+import android.provider.Settings
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -9,6 +13,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
@@ -29,6 +34,9 @@ import com.findly.android.auth.AuthState
 import com.findly.android.launch.LaunchGateViewModel
 import com.findly.android.launch.LaunchUiState
 import com.findly.android.network.PlanLimits
+import com.findly.android.location.battery.BatteryOptimizationOemPolicy
+import com.findly.android.location.battery.BatterySettingsAction
+import com.findly.android.location.battery.BatterySettingsActionPolicy
 import com.findly.android.ui.devices.DevicesRoute
 import com.findly.android.ui.devices.DevicesViewModel
 import com.findly.android.ui.devices.DevicesViewModelFactory
@@ -84,6 +92,7 @@ import com.findly.android.ui.settings.PrivacyViewModelFactory
 import com.findly.android.ui.signin.SignInRoute
 import com.findly.android.ui.signin.SignInViewModel
 import com.findly.android.ui.signin.SignInViewModelFactory
+import com.findly.android.util.startActivitySafely
 import kotlinx.coroutines.launch
 
 /**
@@ -431,10 +440,53 @@ fun FindlyNavHost(
             // the retired SettingsStateHolder's own family probe).
             val launchState by launchGateViewModel.state.collectAsState()
             val isParent = (launchState as? LaunchUiState.Ready)?.familyHeader?.isParent ?: false
+            // Code-review fix (A41 round 2, finding 9): resolved per-load (a () -> String?
+            // supplier) rather than snapshotted once when this viewModel(factory = ...) call
+            // first runs. container.localDeviceIdOrNull() can resolve null mid sign-out/sign-in
+            // (auth state not yet SignedIn) - a plain snapshot would then cache null for this
+            // ViewModel's whole lifetime and no card would ever be marked isThisDevice on this
+            // screen visit, even after sign-in completes. DevicesStateHolder now calls the
+            // supplier fresh on every load().
             val devicesViewModel: DevicesViewModel = viewModel(
-                factory = DevicesViewModelFactory(container.findlyApiClient, isParent),
+                factory = DevicesViewModelFactory(container.findlyApiClient, isParent) {
+                    container.localDeviceIdOrNull()
+                },
             )
-            DevicesRoute(viewModel = devicesViewModel, onRouteToOnboarding = navigateToOnboarding)
+            // A41 (specs/010 §4.2, specs/009 §3.2): Android-runtime-local settings (which OS
+            // dialog/settings page to open, whether this OEM needs the dontkillmyapp.com link) -
+            // untested framework glue by design, same bucket as every other Context-touching call
+            // site in this file; the decision itself (BatterySettingsActionPolicy/
+            // BatteryOptimizationOemPolicy) is pure and tested.
+            val context = LocalContext.current
+            DevicesRoute(
+                viewModel = devicesViewModel,
+                onRouteToOnboarding = navigateToOnboarding,
+                onOpenBatterySettings = {
+                    when (BatterySettingsActionPolicy.actionFor(container.batteryOptimizationPromptStore.hasAnswered())) {
+                        BatterySettingsAction.OfferPrompt -> {
+                            // Code-review fix (A41 round 2, finding 4): this used to
+                            // recordAnswered() and launch the system intent directly - a bare OS
+                            // dialog with no rationale, and the once-per-install automatic offer
+                            // permanently suppressed before it ever explained anything (009 §3.2:
+                            // "explain AND offer"). Now raises the same rationale dialog
+                            // MainActivity shows for the automatic offer; only that dialog's own
+                            // onContinue/onNotNow record the answer.
+                            container.requestBatteryRationaleDialog()
+                        }
+                        BatterySettingsAction.OpenSystemBatterySettings -> {
+                            // Code-review fix (A41 round 2, finding 5): guarded - not every
+                            // device resolves this intent (009 §3.2 "Declining is not fatal").
+                            context.startActivitySafely(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+                        }
+                    }
+                },
+                vendorLinkUrl = BatteryOptimizationOemPolicy.vendorLinkUrl(Build.MANUFACTURER),
+                onOpenVendorLink = { url ->
+                    // Code-review fix (A41 round 2, finding 5): guarded, no-op fallback - a
+                    // broken vendor link has no sensible "open app settings" fallback.
+                    context.startActivitySafely(Intent(Intent.ACTION_VIEW, Uri.parse(url)), fallback = null)
+                },
+            )
         }
 
         composable(Destinations.Family.route) {

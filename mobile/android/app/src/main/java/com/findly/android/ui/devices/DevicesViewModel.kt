@@ -12,8 +12,11 @@ import kotlinx.coroutines.launch
 class DevicesViewModel(
     devicesApi: DevicesApi,
     isParent: Boolean,
+    // Code-review fix (A41 round 2, finding 9): a supplier, resolved fresh by
+    // DevicesStateHolder on every load() rather than a value snapshotted once here.
+    localDeviceId: () -> String? = { null },
 ) : ViewModel() {
-    private val stateHolder = DevicesStateHolder(devicesApi, isParent, viewModelScope)
+    private val stateHolder = DevicesStateHolder(devicesApi, isParent, viewModelScope, localDeviceId)
     val state: StateFlow<DevicesUiState> = stateHolder.state
     val isParent: Boolean = stateHolder.isParent
 
@@ -41,7 +44,9 @@ class DevicesViewModel(
 class DevicesViewModelFactory(
     private val devicesApi: DevicesApi,
     private val isParent: Boolean,
+    private val localDeviceId: () -> String? = { null },
 ) : ViewModelProvider.Factory {
     @Suppress("UNCHECKED_CAST")
-    override fun <T : ViewModel> create(modelClass: Class<T>): T = DevicesViewModel(devicesApi, isParent) as T
+    override fun <T : ViewModel> create(modelClass: Class<T>): T =
+        DevicesViewModel(devicesApi, isParent, localDeviceId) as T
 }

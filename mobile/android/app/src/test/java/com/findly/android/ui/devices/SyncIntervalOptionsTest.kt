@@ -90,4 +90,45 @@ class SyncIntervalOptionsTest {
         assertTrue(options.all { !it.enabled })
         assertTrue(options.all { it.disabledReason != null })
     }
+
+    // --- Live / Battery saver grouping (010 §4.2, amended 2026-09-06, 000 §D19) ---
+
+    @Test
+    fun `5, 10, 15 and 30 minutes are grouped under Live`() {
+        val options = SyncIntervalOptions.build(minSyncIntervalMinutes = 5)
+        for (minutes in listOf(5, 10, 15, 30)) {
+            assertEquals("minutes=$minutes", "Live", options.first { it.value == minutes }.groupLabel)
+        }
+    }
+
+    @Test
+    fun `60, 120 and 1440 minutes are grouped under Battery saver`() {
+        val options = SyncIntervalOptions.build(minSyncIntervalMinutes = 5)
+        for (minutes in listOf(60, 120, 1440)) {
+            assertEquals("minutes=$minutes", "Battery saver", options.first { it.value == minutes }.groupLabel)
+        }
+    }
+
+    @Test
+    fun `group descriptions match the 010 section4_2 wording exactly`() {
+        val options = SyncIntervalOptions.build(minSyncIntervalMinutes = 5)
+        assertEquals(
+            "keeps Findly running in the background; on Android a persistent notification is shown",
+            options.first { it.value == 5 }.groupDescription,
+        )
+        assertEquals(
+            "reports when the phone wakes up; positions may be hours old",
+            options.first { it.value == 60 }.groupDescription,
+        )
+    }
+
+    @Test
+    fun `every option in the same group carries the identical group label and description`() {
+        val options = SyncIntervalOptions.build(minSyncIntervalMinutes = 5)
+        val liveOptions = options.filter { it.value in listOf(5, 10, 15, 30) }
+        val batterySaverOptions = options.filter { it.value in listOf(60, 120, 1440) }
+
+        assertEquals(1, liveOptions.map { it.groupLabel to it.groupDescription }.distinct().size)
+        assertEquals(1, batterySaverOptions.map { it.groupLabel to it.groupDescription }.distinct().size)
+    }
 }

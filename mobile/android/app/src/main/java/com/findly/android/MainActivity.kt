@@ -11,6 +11,7 @@ import android.provider.Settings
 import androidx.compose.foundation.layout.Column
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -27,7 +28,10 @@ import com.findly.android.location.PermissionBanner
 import com.findly.android.location.PermissionDisclosureKind
 import com.findly.android.location.PermissionFlowPolicy
 import com.findly.android.location.PermissionFlowStep
+import com.findly.android.location.battery.BatteryOptimizationPromptPolicy
 import com.findly.android.ui.designsystem.components.FindlyPermissionBanner
+import com.findly.android.ui.permissions.BatteryOptimizationRationaleDialog
+import com.findly.android.util.startActivitySafely
 import com.findly.android.ui.permissions.PermissionDisclosureScreen
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Box
@@ -116,6 +120,10 @@ class MainActivity : ComponentActivity() {
      */
     private val backgroundLocationLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) {
+            // A41 (specs/009 §7): "never... in the same session as the OS location prompt" - the
+            // battery-optimisation offer below reads this to withhold itself until a later app
+            // open, however this callback resolved (granted or refused).
+            container.recordBackgroundLocationPermissionGrantedThisSession()
             permissionEpoch.intValue++
         }
 
@@ -240,6 +248,54 @@ class MainActivity : ComponentActivity() {
 
                 // Safe to ask now: no disclosure is on screen (that branch returned above).
                 LaunchedEffect(Unit) { requestNotificationPermissionIfNeeded() }
+
+                // A41 (specs/009 §3.2/§7, 000 §D19): the once-per-install battery-optimisation
+                // offer - also gated on no disclosure being on screen, and on a fresh suspend read
+                // of whether presence is *currently* the effective sync strategy (interval <= 30
+                // AND background permission granted). Code-review fix (A41 round 2, finding 2):
+                // container.presenceCurrentlyRequired() now takes no parameter and reads the same
+                // AndroidBackgroundLocationPermissionChecker the scheduler uses, instead of being
+                // fed permissionState.authorization == ALWAYS - that reader was undefined pre-API
+                // 29 for ACCESS_BACKGROUND_LOCATION and always resolved WHEN_IN_USE there, so this
+                // offer could never fire on API 26-28, exactly the Doze-afflicted population the
+                // exemption exists for.
+                var presenceRequiredForBattery by remember { mutableStateOf(false) }
+                LaunchedEffect(epoch) {
+                    presenceRequiredForBattery = container.presenceCurrentlyRequired()
+                }
+                // Code-review fix (A41 round 2, finding 4): also shown when the Devices screen's
+                // user-initiated "Battery settings" tap requested it (FindlyNavHost,
+                // BatterySettingsActionPolicy.OfferPrompt) - that tap no longer skips straight to
+                // the OS prompt; it raises this exact dialog instead (009 §3.2: "explain AND
+                // offer").
+                val batteryRationaleDialogRequested by container.batteryRationaleDialogRequested.collectAsState()
+                if (BatteryOptimizationPromptPolicy.shouldOffer(
+                        presenceRequired = presenceRequiredForBattery,
+                        alreadyAnswered = container.batteryOptimizationPromptStore.hasAnswered(),
+                        backgroundPermissionGrantedThisSession = container.backgroundLocationPermissionGrantedThisSession,
+                    ) || batteryRationaleDialogRequested
+                ) {
+                    BatteryOptimizationRationaleDialog(
+                        onContinue = {
+                            container.batteryOptimizationPromptStore.recordAnswered()
+                            container.consumeBatteryRationaleDialogRequest()
+                            // Code-review fix (A41 round 2, finding 5): guarded - not every
+                            // device resolves this intent (009 §3.2 "Declining is not fatal").
+                            startActivitySafely(
+                                Intent(
+                                    Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                                    Uri.fromParts("package", packageName, null),
+                                ),
+                            )
+                            permissionEpoch.intValue++
+                        },
+                        onNotNow = {
+                            container.batteryOptimizationPromptStore.recordAnswered()
+                            container.consumeBatteryRationaleDialogRequest()
+                            permissionEpoch.intValue++
+                        },
+                    )
+                }
 
                 Column {
                     // A25 (009 §7): null means the OS itself already irrevocably refused — the

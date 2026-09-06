@@ -124,7 +124,7 @@ class DeviceSettingsCoordinatorTest {
             }
         }
         val recordingScheduler = object : SyncScheduler {
-            override fun reschedule(syncIntervalMinutes: Int) {
+            override suspend fun reschedule(syncIntervalMinutes: Int) {
                 events.add("reschedule")
             }
             override fun cancelAll() {

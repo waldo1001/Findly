@@ -57,6 +57,71 @@ class DevicesStateHolderTest {
     }
 
     @Test
+    fun `the card whose deviceId matches localDeviceId is marked isThisDevice, others are not`() = runTest {
+        val devicesApi = FakeDevicesApi().apply {
+            listDevicesResult = ApiResult.Success(
+                ListDevicesResponseDto(listOf(familyDevice(id = "d1"), familyDevice(id = "d2"))),
+                defaultFeatures(minSyncIntervalMinutes = 15),
+            )
+        }
+        val holder = DevicesStateHolder(devicesApi, isParent = true, scope = backgroundScope, localDeviceId = { "d2" })
+        runCurrent()
+
+        val state = holder.state.value as DevicesUiState.Content
+        assertTrue(state.devices.single { it.deviceId == "d2" }.isThisDevice)
+        assertTrue(!state.devices.single { it.deviceId == "d1" }.isThisDevice)
+    }
+
+    @Test
+    fun `a null localDeviceId marks no card as isThisDevice`() = runTest {
+        val devicesApi = FakeDevicesApi().apply {
+            listDevicesResult = ApiResult.Success(
+                ListDevicesResponseDto(listOf(familyDevice(id = "d1"))),
+                defaultFeatures(minSyncIntervalMinutes = 15),
+            )
+        }
+        val holder = DevicesStateHolder(devicesApi, isParent = true, scope = backgroundScope, localDeviceId = { null })
+        runCurrent()
+
+        val state = holder.state.value as DevicesUiState.Content
+        assertTrue(!state.devices.single().isThisDevice)
+    }
+
+    // Code-review fix (A41 round 2, finding 9): localDeviceId is now a supplier resolved fresh on
+    // every load(), not a value snapshotted once at construction - this pins that behavior. It
+    // models FindlyNavHost's real failure case: container.localDeviceIdOrNull() resolves null the
+    // first time (auth state not yet SignedIn, e.g. mid sign-out/sign-in), then resolves the real
+    // id once sign-in completes and a later load() re-runs.
+    @Test
+    fun `localDeviceId is re-resolved on every load, not cached from the first`() = runTest {
+        var currentLocalDeviceId: String? = null
+        val devicesApi = FakeDevicesApi().apply {
+            listDevicesResult = ApiResult.Success(
+                ListDevicesResponseDto(listOf(familyDevice(id = "d1"))),
+                defaultFeatures(minSyncIntervalMinutes = 15),
+            )
+        }
+        val holder = DevicesStateHolder(
+            devicesApi,
+            isParent = true,
+            scope = backgroundScope,
+            localDeviceId = { currentLocalDeviceId },
+        )
+        runCurrent()
+
+        val firstState = holder.state.value as DevicesUiState.Content
+        assertTrue(!firstState.devices.single().isThisDevice)
+
+        // Sign-in completes; the supplier now resolves the real id.
+        currentLocalDeviceId = "d1"
+        holder.load()
+        runCurrent()
+
+        val secondState = holder.state.value as DevicesUiState.Content
+        assertTrue(secondState.devices.single().isThisDevice)
+    }
+
+    @Test
     fun `a confirmed PROFILE_NOT_FOUND routes to Onboarding profile-less`() = runTest {
         val devicesApi = FakeDevicesApi().apply {
             listDevicesResult = ApiResult.Failure(ApiError.ProfileNotFound("no profile", "r_1"))
