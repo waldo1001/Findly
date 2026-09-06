@@ -30,8 +30,10 @@ import com.findly.android.location.TrackingPauseState
 import com.findly.android.location.geofence.GeofenceTransitionHandler
 import com.findly.android.location.geofence.GeofenceTransitionReceiver
 import com.findly.android.location.geofence.GeofencingClientManager
+import com.findly.android.location.settings.CachedScheduleReapplyDecision
 import com.findly.android.location.settings.DeviceSettingsCoordinator
 import com.findly.android.location.settings.DeviceSettingsStateStore
+import com.findly.android.location.settings.ForegroundTrigger
 import com.findly.android.location.settings.GeofenceConfigStateStore
 import com.findly.android.location.settings.GeofenceConfigSyncCoordinator
 import com.findly.android.location.settings.GeofenceRegistry
@@ -107,6 +109,10 @@ class AppContainer(context: Context) {
 
     fun onActivityStarted(activity: Activity) {
         currentActivity = activity
+        // A40 (specs/009-device-runtime.md §3.2 "Restart and recovery"): "every app cold start
+        // and foreground MUST call reschedule(cachedInterval) idempotently" - restores a service
+        // lost to any OEM kill by the next time the user opens the app, at the latest.
+        reapplyCachedSchedule()
         // specs/009-device-runtime.md §4: "re-check settings... on every app foreground".
         onAppForeground()
     }
@@ -153,8 +159,17 @@ class AppContainer(context: Context) {
     /** A10 (specs/009 §3.5/§4): the settings-application entry point — **this is the seam A9's
      * `SETTINGS_CHANGED` push handler calls**, alongside the `POST /locations` piggyback
      * ([LocationSyncRunner], via [com.findly.android.queue.worker.SyncOutcomeReactor]) and the
-     * paused-device poll ([settingsPoller] below). */
+     * paused-device poll ([settingsPoller] below). Kept private (code-review fix, post-A40
+     * review: the only outside consumer, [com.findly.android.queue.worker.LocationForegroundService],
+     * is read-only) — reached from outside this class only via [cachedDeviceSettings], matching
+     * the existing [requiresBackgroundLocation] accessor pattern below. */
     private val deviceSettingsStateStore: DeviceSettingsStateStore = SharedPreferencesDeviceSettingsStateStore(context)
+
+    /** Read-only view of [deviceSettingsStateStore] for callers outside this container — currently
+     * just [com.findly.android.queue.worker.LocationForegroundService]'s null-intent
+     * `START_STICKY` restart (specs/009 §3.2 "Restart and recovery"), via
+     * [com.findly.android.queue.worker.ServiceRestartDecision]. */
+    suspend fun cachedDeviceSettings(): DeviceSettingsSnapshot? = deviceSettingsStateStore.current()
 
     /** A11 (specs/009-device-runtime.md §6.1): the cached geofence config document + ETag —
      * `GeofenceConfigSyncCoordinator`'s source of truth for `If-None-Match` and for re-registering
@@ -266,6 +281,9 @@ class AppContainer(context: Context) {
         queueStore = fixQueueStore,
         pauseState = trackingPauseState,
         permissionState = locationPermissionState,
+        // A40 (specs/009 §1.1 "Accepting a recent cached position"): bounds a BALANCED
+        // (periodic/geofence) capture's lastLocation fallback to the device's current cadence.
+        currentSyncIntervalMinutes = { deviceSettingsStateStore.current()?.syncIntervalMinutes ?: DEFAULT_SYNC_INTERVAL_MINUTES },
     )
 
     /** A11 (specs/009 §6.3): the tested decision logic behind a `GeofencingClient` enter/exit
@@ -337,9 +355,72 @@ class AppContainer(context: Context) {
     )
 
     /** specs/009 §4: "re-check settings... on every app foreground" — `MainActivity`/
-     * [onActivityStarted] calls this. Harmless no-op when not paused. */
+     * [onActivityStarted] calls this. Harmless no-op when not paused.
+     *
+     * A40 (specs/009 §1.4 "Foreground use is a trigger"): also runs one full [LocationSyncRunner]
+     * cycle — capture-if-due, flush fixes, flush geofence events, apply piggyback — so a person
+     * actively looking at the family map is never themselves stale on everyone else's map (iOS
+     * already does this; this closes the Android gap). Both calls run off the main thread on
+     * [applicationScope]; the settings poll runs first so a resume-from-pause observed here takes
+     * effect for the very same foreground's capture attempt. */
     fun onAppForeground() {
-        applicationScope.launch { settingsPollerOrNull()?.poll() }
+        applicationScope.launch {
+            // code-review fix (finding 3, post-A40 review): the two-call sequence itself is
+            // decidable logic ("run poll, then runOnce, in that order, once") extracted into
+            // ForegroundTrigger so 009 §12's "every foreground runs one full runOnce cycle" has a
+            // pure-Kotlin unit test (ForegroundTriggerTest) instead of shipping untested.
+            ForegroundTrigger(
+                poll = { settingsPollerOrNull()?.poll() },
+                runOnce = { locationSyncRunnerOrNull()?.runOnce() },
+            ).run()
+        }
+    }
+
+    /**
+     * A40 (specs/009-device-runtime.md §3.2 "Restart and recovery" / §3.5): the one idempotent
+     * "re-apply the cached schedule" entry point — [BootCompletedReceiver], [start] (cold start)
+     * and [onActivityStarted] (foreground) all call this same function rather than three
+     * divergent copies of "read cached settings, reschedule if tracking is on". Safe to call
+     * often: [CachedScheduleReapplyDecision] no-ops when there is nothing cached or tracking is
+     * paused, and [syncScheduler]'s own `reschedule` is itself a no-op when nothing changed
+     * (WorkManager's `ExistingPeriodicWorkPolicy.UPDATE`, a redundant `startForegroundService`).
+     */
+    fun reapplyCachedSchedule() {
+        applicationScope.launch { reapplyCachedScheduleSuspending() }
+    }
+
+    /**
+     * The actual re-apply work behind [reapplyCachedSchedule], as a plain `suspend fun` rather
+     * than fire-and-forget on [applicationScope] — [BootCompletedReceiver] needs to run this
+     * *inside* its own `goAsync()` pending-result window (the broadcast's temporary
+     * start-from-background exemption) rather than dispatch it and return immediately, which
+     * would let the foreground-service start land after the exemption window already closed.
+     * [reapplyCachedSchedule] stays the entry point for callers that don't need to await
+     * completion (cold start, foreground).
+     *
+     * Code-review fix (finding 1, post-A40 review): [syncScheduler]`.reschedule(...)` calls
+     * `ContextCompat.startForegroundService` for a cached 5/10 interval, which throws
+     * `ForegroundServiceStartNotAllowedException` (targetSdk 37) when the process was created in
+     * the background with no visible activity and no active exemption — e.g. a process WorkManager
+     * or an FCM message spun up with nothing on screen. [applicationScope] carries no
+     * `CoroutineExceptionHandler` (`AppContainer`'s doc), so an uncaught throw here reaches the
+     * default handler and kills the process — on **every** such cold start, since [start] always
+     * calls this. 009 §3.2 already tolerates a device that cannot hold presence (falls back to
+     * §3.1 WorkManager); the schedule is simply retried on the next cold start/foreground/boot, so
+     * swallowing the failure here is correct, not a silent bug. Logs a bare count, never a
+     * `deviceId`/coordinates/token (docs/security-review-checklist.md).
+     */
+    suspend fun reapplyCachedScheduleSuspending() {
+        when (val action = CachedScheduleReapplyDecision.decide(deviceSettingsStateStore.current())) {
+            is CachedScheduleReapplyDecision.Reschedule -> {
+                try {
+                    syncScheduler.reschedule(action.syncIntervalMinutes)
+                } catch (e: Exception) {
+                    Log.d("FindlySync", "cached schedule reapply failed, will retry next cold start/foreground")
+                }
+            }
+            CachedScheduleReapplyDecision.DoNothing -> Unit
+        }
     }
 
     private companion object {
@@ -462,6 +543,13 @@ class AppContainer(context: Context) {
         // detects resume) - ExistingPeriodicWorkPolicy.KEEP inside makes this call idempotent, and
         // SettingsPollWorker itself no-ops cleanly while signed out (settingsPollerOrNull() null).
         settingsPollScheduler.ensureScheduled()
+
+        // A40 (specs/009 §3.2 "Restart and recovery"): "every app cold start and foreground MUST
+        // call reschedule(cachedInterval) idempotently" - restores a foreground service/WorkManager
+        // schedule lost to any OEM kill, a fresh process, or a reinstall, the moment the app is
+        // next opened at the latest. A fresh install/never-synced device has nothing cached yet -
+        // CachedScheduleReapplyDecision.DoNothing in that case.
+        reapplyCachedSchedule()
 
         // specs/009 §6.2: device reboot / app reinstall both lose OS-level geofence registrations
         // without changing anything server-side. `AppContainer` is constructed exactly once per
