@@ -16,7 +16,13 @@ object LocateNotificationTitle {
      * including this class's own " is locating you" suffix), collapses newlines and other
      * control characters into a single space so they cannot reflow or truncate the title, and
      * clamps to 30 characters as defence in depth even though the server already enforces that
-     * bound. This is a client-side obligation regardless of any server-side hardening. */
+     * bound. This is a client-side obligation regardless of any server-side hardening.
+     *
+     * **A39's final round, finding 4 (Minor):** a name made entirely of bidi/control characters
+     * (or, per [forRequesterData], one missing from the push data entirely) sanitises down to a
+     * blank string - [sanitize] falls back to [PLACEHOLDER_NAME] in that case, rather than
+     * rendering the grammatically-broken " is locating you" that used to make an adversarial name
+     * indistinguishable from no name having been supplied at all. */
     fun forRequester(requestedByName: String): String = "${sanitize(requestedByName)} is locating you"
 
     /** specs/009 section 5.1: `requestedByName` may be absent from the push `data` map entirely
@@ -32,10 +38,17 @@ object LocateNotificationTitle {
     private val BIDI_CONTROLS = ('\u202A'..'\u202E') + ('\u2066'..'\u2069')
     private const val MAX_NAME_LENGTH = 30
 
+    /** specs/009 section 9 (amended 2026-09-06 - A39's final round, finding 4): used both when
+     * [sanitize] strips a supplied name down to nothing and when `requestedByName` is missing from
+     * the push data entirely ([forRequesterData]) - the two cases are deliberately
+     * indistinguishable in the rendered title, so there is only one fallback string. */
+    private const val PLACEHOLDER_NAME = "Someone"
+
     private fun sanitize(name: String): String {
         val withoutBidi = name.filterNot { it in BIDI_CONTROLS }
         val withoutControls = withoutBidi.map { ch -> if (ch.isISOControl()) ' ' else ch }.joinToString("")
         val collapsed = withoutControls.replace(Regex(" +"), " ").trim()
+        if (collapsed.isBlank()) return PLACEHOLDER_NAME
         return clampToCodePoints(collapsed, MAX_NAME_LENGTH)
     }
 
