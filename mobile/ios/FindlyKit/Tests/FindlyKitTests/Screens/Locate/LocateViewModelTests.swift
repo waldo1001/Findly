@@ -311,6 +311,58 @@ struct LocateViewModelTests {
         #expect(api.pollLocateRequestCalls.isEmpty)
     }
 
+    // MARK: - I51 review fix (Blocking, finding 1): `.unreachable` must not collapse the
+    // `pushFailed`/`expired` distinction — 001 §6.2 assigns "couldn't reach the device" copy
+    // specifically to `pushFailed`, never to a request that was simply never answered. Mirrors
+    // Android's `LocateStateHolder`, which keeps the raw wire status on its terminal state "for
+    // the UI's own copy".
+
+    @Test func requestLocate_immediatePushFailed_unreachable_carriesWireStatusPushFailed() async {
+        let api = FakeAPIClient()
+        api.createLocateRequestHandler = { _ in
+            TestFeatures.envelope(CreateLocateRequestResponse(
+                requestId: "lr_2", status: .pushFailed, targetUserId: "u2", targetDeviceId: "d2",
+                createdAt: "2026-07-19T09:05:00Z", expiresAt: "2026-07-19T09:06:12Z", lastKnown: nil
+            ))
+        }
+        api.getLatestLocationsHandler = { TestFeatures.envelope(LatestLocationsResponse(members: [])) }
+        let viewModel = LocateViewModel(apiClient: api, sleep: { _ in Issue.record("sleep must not be called") })
+
+        await viewModel.requestLocate(target: .user("u2"))
+
+        #expect(viewModel.status == .unreachable)
+        #expect(viewModel.wireStatus == .pushFailed, "the create-time pushFailed short-circuit must carry its wire status onto the view model, so the screen can render the 'couldn't reach the device' copy rather than 'request expired'")
+    }
+
+    @Test func requestLocate_pollWindowElapses_unreachable_defaultsWireStatusExpired() async throws {
+        let api = FakeAPIClient()
+        api.createLocateRequestHandler = { _ in
+            TestFeatures.envelope(CreateLocateRequestResponse(
+                requestId: "lr_1", status: .pending, targetUserId: "u2", targetDeviceId: "d2",
+                createdAt: "2026-07-19T09:05:12Z", expiresAt: "2026-07-19T09:05:16Z", lastKnown: nil
+            ))
+        }
+        api.pollLocateRequestHandler = { _ in
+            TestFeatures.envelope(PollLocateRequestResponse(
+                requestId: "lr_1", status: .pending, createdAt: "2026-07-19T09:05:12Z",
+                expiresAt: "2026-07-19T09:05:16Z", fulfilledAt: nil, late: false, fix: nil
+            ))
+        }
+        api.getLatestLocationsHandler = {
+            TestFeatures.envelope(LatestLocationsResponse(members: []))
+        }
+        let clock = SteppingClock(start: parseDate("2026-07-19T09:05:12Z"))
+        let gate = SleepGate()
+        let viewModel = LocateViewModel(apiClient: api, now: clock.now, sleep: { _ in await gate.wait() })
+
+        await viewModel.requestLocate(target: .user("u2"))
+        clock.advance(by: 10) // past the 4s window — the server never actually said "expired".
+        await gate.release()
+        try await waitUntil { viewModel.status == .unreachable }
+
+        #expect(viewModel.wireStatus == .expired, "a local-window timeout with no wire-terminal status at all must default to .expired, not be confused with pushFailed's distinct copy")
+    }
+
     @Test func requestLocate_createFailure_setsFailedStatus() async {
         let api = FakeAPIClient()
         api.createLocateRequestHandler = { _ in
