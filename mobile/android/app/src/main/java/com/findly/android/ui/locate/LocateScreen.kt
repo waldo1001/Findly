@@ -8,6 +8,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
 import com.findly.android.ui.designsystem.FindlyTheme
@@ -21,6 +24,8 @@ import com.findly.android.ui.designsystem.components.FindlyStatusChip
 import com.findly.android.ui.designsystem.components.FindlyStatusTone
 import com.findly.android.ui.designsystem.components.FindlyTopBar
 import com.findly.android.ui.onboarding.OnboardingVariant
+import java.time.Instant
+import kotlinx.coroutines.delay
 
 /**
  * The A2 "locate now" screen (001-api-contract.md §6, specs/003-android-client.md §12's `Locate`
@@ -58,6 +63,18 @@ fun LocateScreen(
     // specs/010-app-shell-and-screen-ux.md §2.1's routing rule.
     LaunchedEffect(state) {
         if (state is LocateUiState.RouteToOnboarding) onRouteToOnboarding(state.variant)
+    }
+
+    // Nit fix (A39 review): LocateAgeCaption.forRecordedAt's default `now` is only re-evaluated
+    // when this composable itself recomposes - without a periodic trigger, a LATE caption like
+    // "1 minute ago" would freeze forever instead of advancing to "2 minutes ago". Ticks once a
+    // minute, matching the caption's own granularity - no more frequently needed.
+    var ageCaptionNow by remember { mutableStateOf(Instant.now()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(60_000)
+            ageCaptionNow = Instant.now()
+        }
     }
 
     Column(modifier = modifier.fillMaxSize()) {
@@ -115,7 +132,7 @@ fun LocateScreen(
                             FindlyListRow(
                                 title = "Location",
                                 subtitle = if (state.outcome == LocateOutcome.LATE && state.fix != null) {
-                                    "${point.first}, ${point.second} · ${LocateAgeCaption.forRecordedAt(state.fix.recordedAt)}"
+                                    "${point.first}, ${point.second} · ${LocateAgeCaption.forRecordedAt(state.fix.recordedAt, ageCaptionNow)}"
                                 } else {
                                     "${point.first}, ${point.second}"
                                 },
