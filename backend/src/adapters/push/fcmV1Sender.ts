@@ -1,17 +1,23 @@
-// specs/001 §8 — FCM HTTP v1 send adapter. Thin: builds the concrete FCM v1 request from a
-// PushMessage, exchanges the runtime-only FCM_SERVICE_ACCOUNT_JSON credential for a short-lived
-// OAuth2 access token (scope firebase.messaging), and POSTs to
+// specs/001 §8 — FCM HTTP v1 send adapter. Thin: exchanges the runtime-only
+// FCM_SERVICE_ACCOUNT_JSON credential for a short-lived OAuth2 access token (scope
+// firebase.messaging), builds the concrete FCM v1 request body via the PURE builders in
+// src/domain/push/fcmMessageBodies.ts, and POSTs to
 // https://fcm.googleapis.com/v1/projects/<project>/messages:send. Excluded from mutation
-// (src/adapters/**) and has no unit tests (thin integration surface, per backend/README.md) —
-// the credential is read from the environment at call time, never logged, never committed.
+// (src/adapters/**) and has no unit tests of its own (thin integration surface, per
+// backend/README.md) — the credential is read from the environment at call time, never
+// logged, never committed.
 //
 // B4 built §8.1 LOCATE_REQUEST. B5 added §8.2 GEOFENCE_EVENT (notification + data) and §8.4
 // GEOFENCE_CONFIG_CHANGED (data-only). B24 closed the §8.3 SETTINGS_CHANGED gap left open by
 // B4/B5 — src/domain/device/patchDeviceSettings.ts already called pushSender.send() for it
 // (best-effort, failure swallowed there), but buildFcmBody's default case threw for any type
-// it didn't recognize, so every SETTINGS_CHANGED push silently failed until now.
+// it didn't recognize, so every SETTINGS_CHANGED push silently failed until then. B27 lifted
+// the four buildXxxBody functions (and the buildFcmBody dispatcher) into src/domain/push/
+// fcmMessageBodies.ts, which is pure and now falls under the mutation gate, and amended
+// buildLocateRequestBody there for the §8.1 user-visible iOS alert.
 
 import { importPKCS8, SignJWT } from "jose";
+import { buildFcmBody } from "../../domain/push/fcmMessageBodies";
 import type { PushMessage, PushSendOutcome, PushSender } from "../../ports/pushSender";
 
 interface ServiceAccountJson {
@@ -85,87 +91,6 @@ async function getAccessToken(serviceAccount: ServiceAccountJson): Promise<strin
     expiresAtMs: nowMs + (json.expires_in ?? TOKEN_TTL_SECONDS) * 1000,
   };
   return cachedAccessToken.token;
-}
-
-function buildLocateRequestBody(message: PushMessage): Record<string, unknown> {
-  // specs/001 §8.1 — exact LOCATE_REQUEST shape: high-priority Android, background APNs push.
-  return {
-    message: {
-      token: message.token,
-      android: { priority: "high" },
-      apns: {
-        headers: { "apns-priority": "5", "apns-push-type": "background" },
-        payload: { aps: { "content-available": 1 } },
-      },
-      data: message.data,
-    },
-  };
-}
-
-function buildGeofenceEventBody(message: PushMessage): Record<string, unknown> {
-  // specs/001 §8.2 — notification + data: server-composed English title, no body (the
-  // notification's own timestamp conveys the time in the recipient's locale/zone).
-  // mutable-content:1 lets an iOS Notification Service Extension re-render the alert locally.
-  return {
-    message: {
-      token: message.token,
-      notification: { title: message.notificationTitle },
-      android: { priority: "normal" },
-      apns: {
-        headers: { "apns-priority": "5", "apns-push-type": "alert" },
-        payload: { aps: { "mutable-content": 1 } },
-      },
-      data: message.data,
-    },
-  };
-}
-
-function buildGeofenceConfigChangedBody(message: PushMessage): Record<string, unknown> {
-  // specs/001 §8.4 — data-only, normal priority; device responds with GET /geofences
-  // (If-None-Match) and re-registers platform geofences.
-  return {
-    message: {
-      token: message.token,
-      android: { priority: "normal" },
-      apns: {
-        headers: { "apns-priority": "5", "apns-push-type": "background" },
-        payload: { aps: { "content-available": 1 } },
-      },
-      data: message.data,
-    },
-  };
-}
-
-function buildSettingsChangedBody(message: PushMessage): Record<string, unknown> {
-  // specs/001 §8.3 — data-only, normal priority; carries the complete current values of both
-  // fields (full state, never a delta), so the device can apply immediately regardless of
-  // reorder. Best-effort: the guaranteed pickup paths are the §5.1 piggyback/settings poll.
-  return {
-    message: {
-      token: message.token,
-      android: { priority: "normal" },
-      apns: {
-        headers: { "apns-priority": "5", "apns-push-type": "background" },
-        payload: { aps: { "content-available": 1 } },
-      },
-      data: message.data,
-    },
-  };
-}
-
-function buildFcmBody(message: PushMessage): Record<string, unknown> {
-  switch (message.type) {
-    case "LOCATE_REQUEST":
-      return buildLocateRequestBody(message);
-    case "GEOFENCE_EVENT":
-      return buildGeofenceEventBody(message);
-    case "SETTINGS_CHANGED":
-      return buildSettingsChangedBody(message);
-    case "GEOFENCE_CONFIG_CHANGED":
-      return buildGeofenceConfigChangedBody(message);
-    default:
-      throw new Error(`fcmV1Sender: unknown push message type "${message.type}"`);
-  }
 }
 
 /**
