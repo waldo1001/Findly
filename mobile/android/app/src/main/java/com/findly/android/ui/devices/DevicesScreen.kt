@@ -1,5 +1,6 @@
 package com.findly.android.ui.devices
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -44,6 +45,11 @@ fun DevicesRoute(
     viewModel: DevicesViewModel,
     modifier: Modifier = Modifier,
     onRouteToOnboarding: (OnboardingVariant) -> Unit = {},
+    // A41 (specs/010 §4.2, specs/009 §3.2): Android-runtime-local settings, not part of the
+    // DevicesApi port - only meaningful on the DeviceCardUi.isThisDevice card.
+    onOpenBatterySettings: () -> Unit = {},
+    vendorLinkUrl: String? = null,
+    onOpenVendorLink: (String) -> Unit = {},
 ) {
     val state by viewModel.state.collectAsState()
 
@@ -60,6 +66,9 @@ fun DevicesRoute(
         onSelectSyncInterval = viewModel::setSyncInterval,
         onRenameDraftChange = viewModel::updateRenameDraft,
         onSaveRename = viewModel::rename,
+        onOpenBatterySettings = onOpenBatterySettings,
+        vendorLinkUrl = vendorLinkUrl,
+        onOpenVendorLink = onOpenVendorLink,
         modifier = modifier,
     )
 }
@@ -74,6 +83,9 @@ fun DevicesScreen(
     onSelectSyncInterval: (deviceId: String, minutes: Int) -> Unit = { _, _ -> },
     onRenameDraftChange: (deviceId: String, draft: String) -> Unit = { _, _ -> },
     onSaveRename: (deviceId: String, name: String) -> Unit = { _, _ -> },
+    onOpenBatterySettings: () -> Unit = {},
+    vendorLinkUrl: String? = null,
+    onOpenVendorLink: (String) -> Unit = {},
 ) {
     Column(modifier = modifier.fillMaxSize()) {
         FindlyTopBar(title = "Devices")
@@ -111,6 +123,9 @@ fun DevicesScreen(
                                 onSelectSyncInterval = { minutes -> onSelectSyncInterval(device.deviceId, minutes) },
                                 onRenameDraftChange = { draft -> onRenameDraftChange(device.deviceId, draft) },
                                 onSaveRename = { onSaveRename(device.deviceId, device.renameDraft.trim()) },
+                                onOpenBatterySettings = onOpenBatterySettings,
+                                vendorLinkUrl = vendorLinkUrl,
+                                onOpenVendorLink = onOpenVendorLink,
                             )
                         }
                     }
@@ -132,6 +147,9 @@ private fun DeviceCard(
     onSelectSyncInterval: (Int) -> Unit,
     onRenameDraftChange: (String) -> Unit,
     onSaveRename: () -> Unit,
+    onOpenBatterySettings: () -> Unit = {},
+    vendorLinkUrl: String? = null,
+    onOpenVendorLink: (String) -> Unit = {},
 ) {
     FindlyCard(modifier = Modifier.fillMaxWidth()) {
         Row(
@@ -196,6 +214,29 @@ private fun DeviceCard(
                         device.renameDraft.trim() != device.deviceName,
                     style = FindlyButtonStyle.Secondary,
                 )
+            }
+
+            // A41 (specs/010 §4.2, specs/009 §3.2): the battery-optimisation "Battery settings"
+            // action and the OEM-specific dontkillmyapp.com link are Android-runtime-local
+            // settings, not device-record fields — shown only on the card that IS this app
+            // instance, never a family member's remote device.
+            if (device.isThisDevice) {
+                FindlyButton(
+                    text = "Battery settings",
+                    onClick = onOpenBatterySettings,
+                    style = FindlyButtonStyle.Secondary,
+                    modifier = Modifier.padding(top = FindlyTheme.spacing.sm),
+                )
+                if (vendorLinkUrl != null) {
+                    Text(
+                        text = "Some phones need extra steps to keep Findly running — see dontkillmyapp.com",
+                        color = FindlyTheme.colors.subtleText,
+                        style = FindlyTheme.typography.labelSmall,
+                        modifier = Modifier
+                            .padding(top = FindlyTheme.spacing.xs)
+                            .clickable { onOpenVendorLink(vendorLinkUrl) },
+                    )
+                }
             }
         }
 

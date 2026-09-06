@@ -27,7 +27,9 @@ import com.findly.android.location.PermissionBanner
 import com.findly.android.location.PermissionDisclosureKind
 import com.findly.android.location.PermissionFlowPolicy
 import com.findly.android.location.PermissionFlowStep
+import com.findly.android.location.battery.BatteryOptimizationPromptPolicy
 import com.findly.android.ui.designsystem.components.FindlyPermissionBanner
+import com.findly.android.ui.permissions.BatteryOptimizationRationaleDialog
 import com.findly.android.ui.permissions.PermissionDisclosureScreen
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Box
@@ -116,6 +118,10 @@ class MainActivity : ComponentActivity() {
      */
     private val backgroundLocationLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) {
+            // A41 (specs/009 §7): "never... in the same session as the OS location prompt" - the
+            // battery-optimisation offer below reads this to withhold itself until a later app
+            // open, however this callback resolved (granted or refused).
+            container.recordBackgroundLocationPermissionGrantedThisSession()
             permissionEpoch.intValue++
         }
 
@@ -240,6 +246,41 @@ class MainActivity : ComponentActivity() {
 
                 // Safe to ask now: no disclosure is on screen (that branch returned above).
                 LaunchedEffect(Unit) { requestNotificationPermissionIfNeeded() }
+
+                // A41 (specs/009 §3.2/§7, 000 §D19): the once-per-install battery-optimisation
+                // offer - also gated on no disclosure being on screen, and on a fresh suspend read
+                // of whether presence is *currently* the effective sync strategy (interval <= 30
+                // AND background permission granted, container.presenceCurrentlyRequired's exact
+                // EffectiveSyncStrategySelector check).
+                var presenceRequiredForBattery by remember { mutableStateOf(false) }
+                LaunchedEffect(epoch, permissionState.authorization) {
+                    presenceRequiredForBattery = container.presenceCurrentlyRequired(
+                        backgroundLocationGranted = permissionState.authorization == LocationAuthorization.ALWAYS,
+                    )
+                }
+                if (BatteryOptimizationPromptPolicy.shouldOffer(
+                        presenceRequired = presenceRequiredForBattery,
+                        alreadyAnswered = container.batteryOptimizationPromptStore.hasAnswered(),
+                        backgroundPermissionGrantedThisSession = container.backgroundLocationPermissionGrantedThisSession,
+                    )
+                ) {
+                    BatteryOptimizationRationaleDialog(
+                        onContinue = {
+                            container.batteryOptimizationPromptStore.recordAnswered()
+                            startActivity(
+                                Intent(
+                                    Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                                    Uri.fromParts("package", packageName, null),
+                                ),
+                            )
+                            permissionEpoch.intValue++
+                        },
+                        onNotNow = {
+                            container.batteryOptimizationPromptStore.recordAnswered()
+                            permissionEpoch.intValue++
+                        },
+                    )
+                }
 
                 Column {
                     // A25 (009 §7): null means the OS itself already irrevocably refused — the

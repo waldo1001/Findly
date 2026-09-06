@@ -1,5 +1,9 @@
 package com.findly.android.ui.nav
 
+import android.content.Intent
+import android.net.Uri
+import android.os.Build
+import android.provider.Settings
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -9,6 +13,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
@@ -29,6 +34,9 @@ import com.findly.android.auth.AuthState
 import com.findly.android.launch.LaunchGateViewModel
 import com.findly.android.launch.LaunchUiState
 import com.findly.android.network.PlanLimits
+import com.findly.android.location.battery.BatteryOptimizationOemPolicy
+import com.findly.android.location.battery.BatterySettingsAction
+import com.findly.android.location.battery.BatterySettingsActionPolicy
 import com.findly.android.ui.devices.DevicesRoute
 import com.findly.android.ui.devices.DevicesViewModel
 import com.findly.android.ui.devices.DevicesViewModelFactory
@@ -432,9 +440,36 @@ fun FindlyNavHost(
             val launchState by launchGateViewModel.state.collectAsState()
             val isParent = (launchState as? LaunchUiState.Ready)?.familyHeader?.isParent ?: false
             val devicesViewModel: DevicesViewModel = viewModel(
-                factory = DevicesViewModelFactory(container.findlyApiClient, isParent),
+                factory = DevicesViewModelFactory(container.findlyApiClient, isParent, container.localDeviceIdOrNull()),
             )
-            DevicesRoute(viewModel = devicesViewModel, onRouteToOnboarding = navigateToOnboarding)
+            // A41 (specs/010 §4.2, specs/009 §3.2): Android-runtime-local settings (which OS
+            // dialog/settings page to open, whether this OEM needs the dontkillmyapp.com link) -
+            // untested framework glue by design, same bucket as every other Context-touching call
+            // site in this file; the decision itself (BatterySettingsActionPolicy/
+            // BatteryOptimizationOemPolicy) is pure and tested.
+            val context = LocalContext.current
+            DevicesRoute(
+                viewModel = devicesViewModel,
+                onRouteToOnboarding = navigateToOnboarding,
+                onOpenBatterySettings = {
+                    when (BatterySettingsActionPolicy.actionFor(container.batteryOptimizationPromptStore.hasAnswered())) {
+                        BatterySettingsAction.OfferPrompt -> {
+                            container.batteryOptimizationPromptStore.recordAnswered()
+                            context.startActivity(
+                                Intent(
+                                    Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                                    Uri.fromParts("package", context.packageName, null),
+                                ),
+                            )
+                        }
+                        BatterySettingsAction.OpenSystemBatterySettings -> {
+                            context.startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+                        }
+                    }
+                },
+                vendorLinkUrl = BatteryOptimizationOemPolicy.vendorLinkUrl(Build.MANUFACTURER),
+                onOpenVendorLink = { url -> context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) },
+            )
         }
 
         composable(Destinations.Family.route) {

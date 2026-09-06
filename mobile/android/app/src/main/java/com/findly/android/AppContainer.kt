@@ -23,6 +23,8 @@ import com.findly.android.location.AndroidBatteryLevelProvider
 import com.findly.android.location.AndroidLocationPermissionChecker
 import com.findly.android.location.PermissionDisclosureStore
 import com.findly.android.location.SharedPreferencesPermissionDisclosureStore
+import com.findly.android.location.battery.BatteryOptimizationPromptStore
+import com.findly.android.location.battery.SharedPreferencesBatteryOptimizationPromptStore
 import com.findly.android.location.FixCaptureCoordinator
 import com.findly.android.location.FusedLocationCapturer
 import com.findly.android.location.LocationCapturer
@@ -62,6 +64,8 @@ import com.findly.android.queue.room.MIGRATION_1_2
 import com.findly.android.queue.room.RoomFixQueueStore
 import com.findly.android.queue.room.RoomGeofenceEventQueueStore
 import com.findly.android.queue.worker.DefaultForegroundServiceController
+import com.findly.android.queue.worker.EffectiveSyncStrategySelector
+import com.findly.android.queue.worker.SyncStrategy
 import com.findly.android.queue.worker.FindlyWorkerFactory
 import com.findly.android.queue.worker.LastCaptureDateStore
 import com.findly.android.queue.worker.LocationSyncRunner
@@ -290,6 +294,50 @@ class AppContainer(context: Context) {
      */
     val permissionDisclosureStore: PermissionDisclosureStore =
         SharedPreferencesPermissionDisclosureStore(context)
+
+    /** A41 (specs/009 §3.2 "Battery-optimisation exemption"): persists whether the once-per-
+     * install prompt flow has already been answered (accepted or declined — both count, §3.2:
+     * "the app records the answer, never re-prompts automatically"). Exposed for
+     * [com.findly.android.MainActivity] (the automatic offer) and the Devices screen's "Battery
+     * settings" action (010 §4.2). */
+    val batteryOptimizationPromptStore: BatteryOptimizationPromptStore =
+        SharedPreferencesBatteryOptimizationPromptStore(context)
+
+    /**
+     * A41 (specs/009 §7: "never... in the same session as the OS location prompt"): true only for
+     * the remainder of *this process's* lifetime after [recordBackgroundLocationPermissionGrantedThisSession]
+     * is called — [com.findly.android.MainActivity] calls it the moment the
+     * `ACCESS_BACKGROUND_LOCATION` result callback fires. Deliberately in-memory only, never
+     * persisted: a fresh process is by definition "a later session" (§7), so this MUST reset to
+     * `false` on every cold start — `AppContainer` is constructed exactly once per process (this
+     * class's own doc), which is what makes a plain field the correct scope here.
+     */
+    @Volatile
+    var backgroundLocationPermissionGrantedThisSession: Boolean = false
+        private set
+
+    fun recordBackgroundLocationPermissionGrantedThisSession() {
+        backgroundLocationPermissionGrantedThisSession = true
+    }
+
+    /** A41 (specs/009 §3.2/§7, 000 §D19): whether presence is *currently* the effective sync
+     * strategy for this device — the same [com.findly.android.queue.worker.EffectiveSyncStrategySelector]
+     * check [syncScheduler] itself uses, restated here (rather than re-derived by the caller) so
+     * [com.findly.android.MainActivity]'s battery-prompt gating and the scheduler can never drift
+     * on what "presence required" means. A paused device has no presence regardless of interval. */
+    suspend fun presenceCurrentlyRequired(backgroundLocationGranted: Boolean): Boolean {
+        val cached = deviceSettingsStateStore.current() ?: return false
+        if (!cached.trackingEnabled) return false
+        return EffectiveSyncStrategySelector.strategyFor(
+            cached.syncIntervalMinutes,
+            backgroundLocationGranted,
+        ) is SyncStrategy.ForegroundService
+    }
+
+    /** A41 (specs/010 §4.2): this app instance's own registered `deviceId`, for
+     * [com.findly.android.ui.devices.DevicesStateHolder]'s `isThisDevice` marking — `null` only
+     * when nobody is signed in (mirrors [currentDeviceIdOrNull]'s own doc). */
+    fun localDeviceIdOrNull(): String? = currentDeviceIdOrNull()
 
     /** True when this device's configured interval needs background reporting (003 §11.3). */
     suspend fun requiresBackgroundLocation(): Boolean =
