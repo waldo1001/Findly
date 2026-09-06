@@ -11,14 +11,34 @@ public struct FindlyDropdownOption<Value: Hashable>: Identifiable, Equatable {
     public let title: String
     public let isEnabled: Bool
     public let disabledReason: String?
+    /// specs/010-app-shell-and-screen-ux.md §4.2 (amended 2026-09-06, 000 §D19) — lets a caller
+    /// section the menu under a caption (today: the sync-interval field's "Live"/"Battery saver"
+    /// groups, `SyncIntervalDropdownPlan`). `nil` for a caller with no grouping concept, in which
+    /// case `FindlyDropdownField` renders no section headers and `closedFieldText()` returns the
+    /// plain `title`. Mirrors Android's `FindlyDropdownOption.groupLabel`/`groupDescription`.
+    public let groupLabel: String?
+    public let groupDescription: String?
 
     public var id: Value { value }
 
-    public init(value: Value, title: String, isEnabled: Bool = true, disabledReason: String? = nil) {
+    public init(value: Value, title: String, isEnabled: Bool = true, disabledReason: String? = nil, groupLabel: String? = nil, groupDescription: String? = nil) {
         self.value = value
         self.title = title
         self.isEnabled = isEnabled
         self.disabledReason = disabledReason
+        self.groupLabel = groupLabel
+        self.groupDescription = groupDescription
+    }
+}
+
+/// specs/010-app-shell-and-screen-ux.md §4.2: "the closed field shows the group name after the
+/// value", e.g. `15 min · Live`. A plain function (no SwiftUI dependency) so the exact format is
+/// unit-testable without a view-hosting test harness — mirrors Android's top-level
+/// `FindlyDropdownOption<T>.closedFieldText()` extension function exactly.
+public extension FindlyDropdownOption {
+    func closedFieldText() -> String {
+        guard let groupLabel else { return title }
+        return "\(title) · \(groupLabel)"
     }
 }
 

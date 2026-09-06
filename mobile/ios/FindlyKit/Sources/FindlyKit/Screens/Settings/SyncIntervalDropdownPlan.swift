@@ -10,6 +10,41 @@ public enum SyncIntervalDropdownPlan {
     /// The seven allowed `syncIntervalMinutes` values, exactly 001 §1.4's set, ascending.
     public static let allowedMinutes = [5, 10, 15, 30, 60, 120, 1440]
 
+    /// specs/010-app-shell-and-screen-ux.md §4.2 (amended 2026-09-06, 000 §D19) — the two captions
+    /// the sync-interval dropdown sections its values under: `live` is the four presence-backed
+    /// intervals (009 §1.3), `batterySaver` the three opportunistic-only ones (§3.1). `label`/
+    /// `description` are 010 §4.2's exact wording, reused verbatim for both the menu's section
+    /// header and (via `FindlyDropdownOption.closedFieldText()`) the closed field's
+    /// `"15 min · Live"` suffix. Mirrors Android's `SyncIntervalGroup` exactly, including the
+    /// Android-specific clause in `live`'s description — 010 §4.2 gives this as ONE cross-platform
+    /// caption so both platforms read identically, not an Android-only string.
+    public enum Group: Equatable {
+        case live
+        case batterySaver
+
+        public var label: String {
+            switch self {
+            case .live: return "Live"
+            case .batterySaver: return "Battery saver"
+            }
+        }
+
+        public var description: String {
+            switch self {
+            case .live: return "keeps Findly running in the background; on Android a persistent notification is shown"
+            case .batterySaver: return "reports when the phone wakes up; positions may be hours old"
+            }
+        }
+    }
+
+    /// specs/009-device-runtime.md §1.3/§3: the four presence ("live") intervals vs. the three
+    /// opportunistic ("battery saver") ones — the exact same boundary `PresencePolicy` draws for
+    /// the presence-session gate, restated here as the presentation grouping rather than
+    /// re-deriving it (this module doesn't depend on `LocationSensing`'s runtime wiring).
+    public static func group(for minutes: Int) -> Group {
+        minutes <= 30 ? .live : .batterySaver
+    }
+
     /// Exact wording from 001 §4.2 ("5 min, 10 min, 15 min, 30 min, 1 hour, 2 hours, 1 day") —
     /// not the abbreviated "5m/1h/1d" the pre-010 chip row used.
     public static func label(for minutes: Int) -> String {
@@ -28,11 +63,14 @@ public enum SyncIntervalDropdownPlan {
     public static func options(minSyncIntervalMinutes floor: Int) -> [FindlyDropdownOption<Int>] {
         allowedMinutes.map { minutes in
             let isEnabled = minutes >= floor
+            let group = group(for: minutes)
             return FindlyDropdownOption(
                 value: minutes,
                 title: label(for: minutes),
                 isEnabled: isEnabled,
-                disabledReason: isEnabled ? nil : "Your plan requires at least \(label(for: floor))"
+                disabledReason: isEnabled ? nil : "Your plan requires at least \(label(for: floor))",
+                groupLabel: group.label,
+                groupDescription: group.description
             )
         }
     }
@@ -51,7 +89,9 @@ public enum SyncIntervalDropdownPlan {
                     value: minutes,
                     title: label(for: minutes),
                     isEnabled: false,
-                    disabledReason: "We couldn't confirm your plan's limits."
+                    disabledReason: "We couldn't confirm your plan's limits.",
+                    groupLabel: group(for: minutes).label,
+                    groupDescription: group(for: minutes).description
                 )
             }
         }
