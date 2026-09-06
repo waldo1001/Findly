@@ -112,7 +112,15 @@ app.http("pollLocateRequest", {
       return {
         status: 200,
         jsonBody: ok(
-          { requestId: result.requestId, status: result.status, expiresAt: result.expiresAt, fix: result.fix },
+          {
+            requestId: result.requestId,
+            status: result.status,
+            createdAt: result.createdAt,
+            expiresAt: result.expiresAt,
+            fulfilledAt: result.fulfilledAt,
+            late: result.late,
+            fix: result.fix,
+          },
           result.features,
         ),
       };
@@ -150,7 +158,7 @@ app.http("fulfillLocateRequest", {
           clock,
         },
       );
-      return { status: 200, jsonBody: ok({ status: result.status }, result.features) };
+      return { status: 200, jsonBody: ok({ status: result.status, late: result.late }, result.features) };
     } catch (err) {
       return errorResponse(err, requestId, context, "fulfillLocateRequest");
     }

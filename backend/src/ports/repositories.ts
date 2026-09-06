@@ -248,6 +248,12 @@ export interface LocateRequestRecord {
   status: LocateRequestStatus;
   createdAt: string;
   expiresAt: string;
+  /** Server receive time of the accepted fulfil (001 §6.2/§6.3, 002 §2.7 — amended
+   * 2026-09-06). Absent until fulfilled. */
+  fulfilledAt?: string;
+  /** True when the accepted fulfil arrived after `expiresAt` (001 §6.3 grace window,
+   * amended 2026-09-06). Absent until fulfilled. */
+  late?: boolean;
   fixJson?: string;
 }
 

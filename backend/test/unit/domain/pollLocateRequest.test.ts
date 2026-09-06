@@ -83,6 +83,37 @@ describe("domain/locate/pollLocateRequest", () => {
     expect(result.features).toEqual(getFeatures("free"));
   });
 
+  it("carries createdAt through, and reports fulfilledAt null / late false on a pending request (specs/001 §6.2 amended 2026-09-06)", async () => {
+    const deps = buildDeps();
+    deps.locateRequestRepo.seed(
+      record({ status: "pending", createdAt: "2026-07-19T09:09:00Z", expiresAt: "2026-07-19T09:11:00Z" }),
+    );
+
+    const result = await pollLocateRequest(baseInput(), deps);
+
+    expect(result.createdAt).toBe("2026-07-19T09:09:00Z");
+    expect(result.fulfilledAt).toBeNull();
+    expect(result.late).toBe(false);
+  });
+
+  it("reports fulfilledAt and late:true for a request fulfilled inside the grace window", async () => {
+    const deps = buildDeps();
+    deps.locateRequestRepo.seed(
+      record({
+        status: "fulfilled",
+        expiresAt: "2026-07-19T09:09:00Z",
+        fulfilledAt: "2026-07-19T09:09:45Z",
+        late: true,
+      }),
+    );
+
+    const result = await pollLocateRequest(baseInput(), deps);
+
+    expect(result.status).toBe("fulfilled");
+    expect(result.fulfilledAt).toBe("2026-07-19T09:09:45Z");
+    expect(result.late).toBe(true);
+  });
+
   it("lazily flips pending -> expired in place when polled past expiresAt", async () => {
     const deps = buildDeps();
     deps.locateRequestRepo.seed(record({ status: "pending", expiresAt: "2026-07-19T09:09:59Z" }));

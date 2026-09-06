@@ -22,6 +22,8 @@ function toRecord(requestId: string, familyId: string, entity: Record<string, un
     status: entity.status as LocateRequestStatus,
     createdAt: String(entity.createdAt),
     expiresAt: String(entity.expiresAt),
+    fulfilledAt: entity.fulfilledAt != null ? String(entity.fulfilledAt) : undefined,
+    late: entity.late != null ? Boolean(entity.late) : undefined,
     fixJson: entity.fixJson != null ? String(entity.fixJson) : undefined,
   };
 }
@@ -39,6 +41,8 @@ export class TableLocateRequestRepo implements LocateRequestRepo {
       status: record.status,
       createdAt: record.createdAt,
       expiresAt: record.expiresAt,
+      fulfilledAt: record.fulfilledAt ?? null,
+      late: record.late ?? null,
       fixJson: record.fixJson ?? null,
     });
   }

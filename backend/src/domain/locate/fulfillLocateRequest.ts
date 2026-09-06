@@ -23,6 +23,10 @@ import type {
 import type { FixLine, HistoryStore } from "../../ports/historyStore";
 import { getFeatures, type Features } from "../plan";
 
+// specs/001 §6.3 (amended 2026-09-06) — a fulfil received within this many ms after
+// expiresAt is still accepted (late:true) instead of throwing LOCATE_REQUEST_EXPIRED.
+const GRACE_MS = 10 * 60 * 1000;
+
 export interface FulfillLocateRequestDeps {
   deviceRepo: DeviceRepo;
   locateRequestRepo: LocateRequestRepo;
@@ -46,6 +50,9 @@ export interface FulfillLocateRequestInput {
 
 export interface FulfillLocateRequestResult {
   status: "fulfilled";
+  /** True when this fulfil (or the original one, for an idempotent/history-only replay)
+   * was accepted after expiresAt (§6.3 grace window, amended 2026-09-06). */
+  late: boolean;
   features: Features;
 }
 
@@ -113,7 +120,10 @@ export async function fulfillLocateRequest(
   const now = deps.clock.now();
   const receivedAt = now.toISOString();
   const date = usageDate(now);
-  const isExpired = now.getTime() > new Date(record.expiresAt).getTime();
+  const nowMs = now.getTime();
+  const expiresAtMs = new Date(record.expiresAt).getTime();
+  const late = nowMs > expiresAtMs;
+  const withinGrace = nowMs <= expiresAtMs + GRACE_MS;
 
   const inserted = await deps.idempotencyRepo.tryInsertFixMarker(record.targetDeviceId, body.fix.fixId, receivedAt);
   if (inserted) {
@@ -143,7 +153,16 @@ export async function fulfillLocateRequest(
     await deps.usageRepo.increment(familyId, "fixes", date);
   }
 
-  if (isExpired) {
+  // specs/001 §6.3 (amended 2026-09-06) — a second fulfil for an already-fulfilled request
+  // is idempotent on fixId: same fixId replays the same result; a DIFFERENT fixId is
+  // stored as history/last-known above, but does NOT replace fixJson/late/fulfilledAt on
+  // the request row itself. Either way, no throw — the request already reached its
+  // terminal fulfilled state, regardless of how much time has passed since.
+  if (record.status === "fulfilled") {
+    return { status: "fulfilled", late: record.late ?? false, features };
+  }
+
+  if (!withinGrace) {
     if (record.status === "pending") {
       await deps.locateRequestRepo.update(familyId, record.requestId, { status: "expired" });
     }
@@ -151,9 +170,14 @@ export async function fulfillLocateRequest(
   }
 
   const fixJson = JSON.stringify(toStoredFix(body.fix));
-  await deps.locateRequestRepo.update(familyId, record.requestId, { status: "fulfilled", fixJson });
+  await deps.locateRequestRepo.update(familyId, record.requestId, {
+    status: "fulfilled",
+    fixJson,
+    fulfilledAt: receivedAt,
+    late,
+  });
 
-  return { status: "fulfilled", features };
+  return { status: "fulfilled", late, features };
 }
 
 /**
