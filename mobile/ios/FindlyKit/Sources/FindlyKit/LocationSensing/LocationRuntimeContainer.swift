@@ -269,12 +269,27 @@ public final class LocationRuntimeContainer {
         }
     }
 
-    /// Call once the user has answered the OS prompt (specs/009 §7). Starts the monitoring that
-    /// every call site deliberately defers while authorization is still undetermined; a no-op if
-    /// permission was refused, or if tracking is paused.
+    /// Call once the user has answered the OS prompt, or whenever CoreLocation reports an
+    /// authorization change (specs/009 §7). Starts the monitoring that every call site
+    /// deliberately defers while authorization is still undetermined; a no-op if tracking is
+    /// paused (monitoring is already stopped on that path — see `onPause` in `init`).
+    ///
+    /// **I50 fix 5 (security review Medium) — also STOPS monitoring on a downgrade.** Previously
+    /// this method only ever started monitoring when newly eligible; there was no branch for the
+    /// opposite direction — Always being revoked (system Settings, or the OS itself) while
+    /// significant-location-change/visit monitoring is running. specs/009 §1.3 requires presence
+    /// to stop immediately on permission revocation, and for a location app a path that keeps
+    /// collecting after a downgrade is an App Store review problem, not only a bug. Mirrors how
+    /// `applyBackgroundLocationUpdatesPolicy` (`LocationProviding.swift`) already handles this
+    /// symmetrically for `allowsBackgroundLocationUpdates` — reacting on every change, downgrades
+    /// included.
     public func onAuthorizationChanged() {
         guard stateStore.current()?.trackingEnabled != false else { return }
-        startMonitoringIfAuthorized()
+        if BackgroundLocationPolicy.shouldMonitorSignificantChangesAndVisits(for: locationProvider.authorization) {
+            locationProvider.startBackgroundMonitoring(coordinator: captureCoordinator)
+        } else {
+            locationProvider.stopBackgroundMonitoring()
+        }
     }
 
     /// specs/009 §7 — **the only way this container starts location monitoring.**
