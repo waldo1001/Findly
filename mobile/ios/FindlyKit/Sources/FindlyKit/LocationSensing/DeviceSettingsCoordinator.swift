@@ -67,19 +67,37 @@ public actor DeviceSettingsCoordinator: DeviceSettingsApplying {
     private let stateStore: DeviceSettingsStateStoring
     private let onPause: () -> Void
     private let onResume: () async -> Void
+    /// **I52 review round 2, finding 1 (Blocking) — `async`, not a bare `() -> Void`.** This actor
+    /// is a genuine `actor`: `applySettings` executes on ITS OWN cooperative-pool executor, not
+    /// Main. The closure `LocationRuntimeContainer.init` hands in ultimately calls a private,
+    /// `@MainActor`-isolated method on that (`@MainActor`) container. A bare synchronous
+    /// `() -> Void` closure type erases that isolation requirement — Swift 5 language mode (this
+    /// package's tools-version) only WARNS "call to main actor-isolated instance method... in a
+    /// synchronous nonisolated context" rather than refusing to compile, so the call went through
+    /// anyway, running directly on whatever thread `applySettings` happened to be on: the actor's
+    /// executor, never Main. `Timer.scheduledTimer` registered there never fires (its run loop is
+    /// never pumped) — the reviewer's own standalone probe measured zero ticks in two seconds where
+    /// ~20 were expected. Declaring this `async` forces every caller to `await` it, which for a
+    /// closure built inside a `@MainActor` context and calling into a `@MainActor`-isolated method
+    /// genuinely performs the actor hop (rather than merely warning about skipping it) — the
+    /// `@Test settingsArrival_fromTheCoordinatorsOwnActorExecutor_stillReachesStartPresenceOnTheMainThread`
+    /// test is what proves this now lands on Main.
+    private let reconcilePresence: () async -> Void
 
     public init(
         scheduler: SyncScheduling,
         geofenceRegistrar: GeofenceRegistrarStub = NoOpGeofenceRegistrarStub(),
         stateStore: DeviceSettingsStateStoring,
         onPause: @escaping () -> Void = {},
-        onResume: @escaping () async -> Void = {}
+        onResume: @escaping () async -> Void = {},
+        reconcilePresence: @escaping () async -> Void = {}
     ) {
         self.scheduler = scheduler
         self.geofenceRegistrar = geofenceRegistrar
         self.stateStore = stateStore
         self.onPause = onPause
         self.onResume = onResume
+        self.reconcilePresence = reconcilePresence
     }
 
     public func applySettings(_ next: DeviceSettingsSnapshot) async {
@@ -110,6 +128,21 @@ public actor DeviceSettingsCoordinator: DeviceSettingsApplying {
         if actions.rebuildSchedule {
             scheduler.reschedule(syncIntervalMinutes: next.syncIntervalMinutes)
         }
+
+        // specs/009 §3.5 (I52) — "on ANY path, if `syncIntervalMinutes` changed the schedule MUST
+        // be rebuilt immediately... start or stop the presence service/session per §1.3 when the
+        // interval crosses the 30/60 boundary." Called UNCONDITIONALLY, every application — not
+        // only on `rebuildSchedule`/a pause-resume transition — because this is the ONE place all
+        // three settings-arrival paths (SETTINGS_CHANGED push, the POST /locations piggyback, the
+        // paused-device poll) converge, and `PresencePolicy` (the closure's real implementation,
+        // in `LocationRuntimeContainer`) already re-derives its own decision fresh from the
+        // now-updated `stateStore`, so an idempotent re-apply costs nothing beyond one redundant,
+        // idempotent `startPresence`/`stopPresence` call.
+        //
+        // I52 review round 2, finding 1 - `await` here is what actually performs the Main-actor
+        // hop (see `reconcilePresence`'s own doc) rather than merely calling straight through on
+        // this actor's own executor.
+        await reconcilePresence()
     }
 }
 

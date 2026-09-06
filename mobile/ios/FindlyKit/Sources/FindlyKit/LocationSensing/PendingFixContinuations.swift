@@ -174,6 +174,99 @@ public final class PendingFixContinuations: @unchecked Sendable {
         }
     }
 
+    /// Atomic counterpart to `resumeAll` (I52 item 3, mirrors `registerAndAct`/`timeOutAndAct`'s
+    /// own established pattern). `resumeAll` always drains the ENTIRE registry when there is
+    /// anything to drain, so "did this call just empty the registry" and "was anything pending"
+    /// are the same question here — `action` runs exactly when that's true, WHILE STILL HOLDING
+    /// the lock, so it can never interleave with a concurrent `registerAndAct`/`timeOutAndAct`/
+    /// another `resumeAllAndAct`/`failAllAndAct` call (all six methods share one lock).
+    /// `SystemLocationProvider`'s `didUpdateLocations` uses this to decide, in that same atomic
+    /// step, whether the manager's accuracy must reset to the §1.3 presence baseline
+    /// (`PresenceAccuracyPolicy.drainAction`) — a decision that would otherwise race a brand-new,
+    /// concurrently-registering higher-tier caller the same way fix 8's belated
+    /// `stopUpdatingLocation()` used to.
+    ///
+    /// `resumeAll` itself is left untouched (existing callers/tests are unaffected) — this is a
+    /// strictly additive seam for a caller that also needs the atomic action.
+    @discardableResult
+    public func resumeAllAndAct(makeFix: (FixSource) -> LocationFix, ifDrained action: () -> Void) -> Bool {
+        lock.lock()
+        let all = pending
+        guard !all.isEmpty else {
+            lock.unlock()
+            return false
+        }
+        pending.removeAll()
+        action()
+        lock.unlock()
+        for entry in all.values {
+            entry.continuation.resume(returning: makeFix(entry.source))
+        }
+        return true
+    }
+
+    /// Atomic counterpart to `resumeAllAndAct` that additionally gates on delivery quality (I52
+    /// review round 2, finding 3) — `SystemLocationProvider.didUpdateLocations` uses this instead
+    /// of `resumeAllAndAct` so a coarse presence-session delivery can never satisfy a pending
+    /// high-accuracy (`.locate`/`.manual`) caller (see `PendingFixDeliveryPolicy`'s own doc for the
+    /// full rationale).
+    ///
+    /// `isAcceptable` is consulted WHILE STILL HOLDING the lock, against the highest tier among the
+    /// callers about to be drained — the same atomicity discipline `registerAndAct`/`timeOutAndAct`/
+    /// `resumeAllAndAct` already share, so this decision can never interleave with a concurrent
+    /// registration. When it returns `false`, the registry is left COMPLETELY untouched: no drain,
+    /// no `action`, `makeFix` never called, every pending continuation still pending — so the
+    /// caller's own timeout, or a later, better delivery, is what eventually resolves them. Returns
+    /// `false` on an empty registry too, without ever consulting `isAcceptable` (there is no tier to
+    /// gate on), matching `resumeAllAndAct`'s own empty-registry behavior.
+    @discardableResult
+    public func resumeAllIfAcceptableAndAct(
+        isAcceptable: (LocationAccuracyTier?) -> Bool,
+        makeFix: (FixSource) -> LocationFix,
+        ifDrained action: () -> Void
+    ) -> Bool {
+        lock.lock()
+        let all = pending
+        guard !all.isEmpty else {
+            lock.unlock()
+            return false
+        }
+        let highestPendingTier = all.values.map { FixAccuracyPolicy.tier(for: $0.source) }.max()
+        guard isAcceptable(highestPendingTier) else {
+            lock.unlock()
+            return false
+        }
+        pending.removeAll()
+        action()
+        lock.unlock()
+        for entry in all.values {
+            entry.continuation.resume(returning: makeFix(entry.source))
+        }
+        return true
+    }
+
+    /// Atomic counterpart to `failAll`, the same shape as `resumeAllAndAct` above (I52 item 3) —
+    /// `SystemLocationProvider`'s `didFailWithError` uses this so a platform-wide failure also
+    /// resets the manager's accuracy back to the presence baseline (when presence is active)
+    /// atomically with the drain, instead of leaving it raised until the next capture happens to
+    /// fix it.
+    @discardableResult
+    public func failAllAndAct(with error: Error, ifDrained action: () -> Void) -> Bool {
+        lock.lock()
+        let all = pending
+        guard !all.isEmpty else {
+            lock.unlock()
+            return false
+        }
+        pending.removeAll()
+        action()
+        lock.unlock()
+        for entry in all.values {
+            entry.continuation.resume(throwing: error)
+        }
+        return true
+    }
+
     /// Test/introspection only — production code never needs to know how many callers are
     /// pending, only whether ITS OWN id still is (`timeOut`) or whether ANY are (`resumeAll`'s
     /// return value).

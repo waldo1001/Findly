@@ -86,4 +86,52 @@ struct SyncIntervalDropdownPlanTests {
         let nilFloorOptions = SyncIntervalDropdownPlan.options(minSyncIntervalMinutes: nil)
         #expect(nilFloorOptions.allSatisfy { $0.isEnabled == false }, "nil must not be treated as 0")
     }
+
+    // MARK: - Live / Battery saver grouping (010 §4.2, amended 2026-09-06, 000 §D19)
+    // Mirrors Android's SyncIntervalOptionsTest's "Live / Battery saver grouping" section exactly,
+    // same values/wording, so both platforms present the trade-off identically.
+
+    @Test func liveIntervals_areGroupedUnderLive() {
+        let options = SyncIntervalDropdownPlan.options(minSyncIntervalMinutes: 5)
+        for minutes in [5, 10, 15, 30] {
+            let option = options.first { $0.value == minutes }
+            #expect(option?.groupLabel == "Live", "minutes=\(minutes)")
+        }
+    }
+
+    @Test func batterySaverIntervals_areGroupedUnderBatterySaver() {
+        let options = SyncIntervalDropdownPlan.options(minSyncIntervalMinutes: 5)
+        for minutes in [60, 120, 1440] {
+            let option = options.first { $0.value == minutes }
+            #expect(option?.groupLabel == "Battery saver", "minutes=\(minutes)")
+        }
+    }
+
+    @Test func groupDescriptions_matchThe010Section4_2WordingExactly() {
+        let options = SyncIntervalDropdownPlan.options(minSyncIntervalMinutes: 5)
+        #expect(options.first { $0.value == 5 }?.groupDescription == "keeps Findly running in the background; on Android a persistent notification is shown")
+        #expect(options.first { $0.value == 60 }?.groupDescription == "reports when the phone wakes up; positions may be hours old")
+    }
+
+    @Test func everyOptionInTheSameGroup_carriesTheIdenticalGroupLabelAndDescription() {
+        let options = SyncIntervalDropdownPlan.options(minSyncIntervalMinutes: 5)
+        let live = options.filter { [5, 10, 15, 30].contains($0.value) }
+        let batterySaver = options.filter { [60, 120, 1440].contains($0.value) }
+
+        #expect(Set(live.map { $0.groupLabel }).count == 1)
+        #expect(Set(live.map { $0.groupDescription }).count == 1)
+        #expect(Set(batterySaver.map { $0.groupLabel }).count == 1)
+        #expect(Set(batterySaver.map { $0.groupDescription }).count == 1)
+    }
+
+    @Test func closedFieldText_appendsTheGroupLabelAfterTheValue() {
+        let options = SyncIntervalDropdownPlan.options(minSyncIntervalMinutes: 5)
+        #expect(options.first { $0.value == 15 }?.closedFieldText() == "15 min · Live")
+        #expect(options.first { $0.value == 60 }?.closedFieldText() == "1 hour · Battery saver")
+    }
+
+    @Test func closedFieldText_withNoGroupLabel_isJustTheTitle() {
+        let option = FindlyDropdownOption(value: 1, title: "ungrouped")
+        #expect(option.closedFieldText() == "ungrouped")
+    }
 }
