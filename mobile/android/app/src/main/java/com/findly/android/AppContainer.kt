@@ -5,6 +5,7 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.util.Log
+import androidx.core.content.ContextCompat
 import androidx.room.Room
 import com.google.android.gms.location.LocationServices
 import com.google.firebase.auth.FirebaseAuth
@@ -52,6 +53,8 @@ import com.findly.android.push.RealPushTokenProvider
 import com.findly.android.pushmessages.GeofenceConfigChangedPushHandler
 import com.findly.android.pushmessages.GeofenceEventNotifier
 import com.findly.android.pushmessages.GeofenceEventPushHandler
+import com.findly.android.pushmessages.LocateNotifier
+import com.findly.android.pushmessages.LocateRequestHandoff
 import com.findly.android.pushmessages.LocateRequestPushHandler
 import com.findly.android.pushmessages.PushMessageDispatcher
 import com.findly.android.pushmessages.SettingsChangedPushHandler
@@ -66,9 +69,12 @@ import com.findly.android.queue.room.RoomGeofenceEventQueueStore
 import com.findly.android.queue.worker.DefaultForegroundServiceController
 import com.findly.android.queue.worker.FindlyWorkerFactory
 import com.findly.android.queue.worker.LastCaptureDateStore
+import com.findly.android.queue.worker.LocateForegroundService
+import com.findly.android.queue.worker.LocateRequestWorkEnqueuer
 import com.findly.android.queue.worker.LocationSyncRunner
 import com.findly.android.queue.worker.LocationSyncScheduler
 import com.findly.android.queue.worker.PresenceRequirementPolicy
+import com.findly.android.queue.worker.PresenceServiceState
 import com.findly.android.queue.worker.ScheduleRebuilder
 import com.findly.android.queue.worker.SettingsPollScheduler
 import com.findly.android.queue.worker.SharedPreferencesLastCaptureDateStore
@@ -80,6 +86,7 @@ import com.findly.android.ui.settings.ExportArtifactCleaner
 import com.findly.android.ui.settings.ExportFileWriter
 import com.findly.android.ui.settings.LocalStateWiper
 import java.time.LocalDate
+import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
@@ -466,10 +473,98 @@ class AppContainer(context: Context) {
         return SettingsPoller(findlyApiClient, deviceId, deviceSettingsCoordinator)
     }
 
+    /** specs/009-device-runtime.md §5.1: the `LOCATE_REQUEST` capture-and-fulfil logic, shared
+     * verbatim by all three of A39's handoff branches — `pushMessageDispatcher`'s direct-dispatch
+     * routing (kept as-is for forward compatibility/tests, though `FindlyMessagingService` no
+     * longer reaches this type through it, see its doc), [LocateForegroundService],
+     * [com.findly.android.queue.worker.LocateRequestWorker] (via [workerFactory]), and the
+     * §5.1-option-3 "presence service captures directly" branch below. Hoisted to its own property
+     * (previously constructed inline inside `pushMessageDispatcher`) so every caller shares one
+     * instance instead of duplicating its construction. */
+    val locateRequestPushHandler: LocateRequestPushHandler = LocateRequestPushHandler(
+        locationCapturer = locationCapturer,
+        locateApi = findlyApiClient,
+        deviceIdProvider = {
+            (authProvider.authState.value as? AuthState.SignedIn)?.uid?.let { uid ->
+                deviceRegistrar.deviceIdFor(uid)
+            }
+        },
+    )
+
     /** Registered with WorkManager via `FindlyApplication`'s `Configuration.Provider`. */
     val workerFactory = FindlyWorkerFactory(
         locationSyncRunnerProvider = ::locationSyncRunnerOrNull,
         settingsPollerProvider = ::settingsPollerOrNull,
+        locateRequestPushHandlerProvider = { locateRequestPushHandler },
+    )
+
+    /** specs/009-device-runtime.md §5.1: the notifier shared by all three `LOCATE_REQUEST` handoff
+     * branches (A39 review, finding 1) — see [LocateNotifier]'s own doc for why every branch must
+     * post it, not just the foreground-service one. */
+    private val locateNotifier = LocateNotifier(context)
+
+    /** Not private (A39 review, finding 3): [LocateForegroundService] enqueues onto this directly
+     * as its own fallback when `startForeground` itself throws. */
+    val locateRequestWorkEnqueuer = LocateRequestWorkEnqueuer(context)
+
+    /** specs/009-device-runtime.md §5.1 "Android execution model", option 2: starts the
+     * short-lived `FOREGROUND_SERVICE_LOCATION` service, handing off the raw push `data` as string
+     * `Intent` extras (small, ~3 keys — no need for a `Data`/JSON envelope). */
+    private val locateForegroundServiceStarter: (Map<String, String>) -> Unit = { data ->
+        try {
+            val intent = Intent(context, LocateForegroundService::class.java)
+            data.forEach { (key, value) -> intent.putExtra(key, value) }
+            ContextCompat.startForegroundService(context, intent)
+        } catch (e: Exception) {
+            // Code-review fix (finding 4, A39 review, specs/009 §5.1 amended): a refused
+            // startForegroundService (API 31+, lost the background-start exemption between the
+            // handoff's own check and this call) used to be silently swallowed by
+            // applicationScope's own top-level exception handler, with nothing left to capture the
+            // locate at all. The amended spec makes option 1 an explicit fallback chain: fall
+            // through to the expedited-work enqueuer instead of dropping the request.
+            locateRequestWorkEnqueuer.enqueue(data)
+        }
+    }
+
+    /** specs/009 §5.1: counts (never logs the message itself) how many times FCM has demoted this
+     * app's `LOCATE_REQUEST` priority — "the single most useful field diagnostic for this whole
+     * batch" (docs/security-review-checklist.md: counts and error codes only). */
+    private val locateDemotionCount = AtomicInteger(0)
+
+    /** specs/009 §5.1's three-way handoff — `FindlyMessagingService` calls [LocateRequestHandoff.handle]
+     * and returns immediately; this instance wires the pure [com.findly.android.pushmessages.LocateHandoffPolicy]
+     * decision to the three real Android side effects (and to [locateRequestPushHandler] directly
+     * for the "presence already running" branch, §5.1 option 3 — no second service, no duplicated
+     * capture logic). */
+    val locateRequestHandoff: LocateRequestHandoff = LocateRequestHandoff(
+        scope = applicationScope,
+        backgroundLocationGranted = { backgroundLocationPermissionChecker.isGranted() },
+        presenceServiceRunning = { PresenceServiceState.isRunning },
+        startForegroundServiceCapture = locateForegroundServiceStarter,
+        enqueueExpeditedWork = { data -> locateRequestWorkEnqueuer.enqueue(data) },
+        // Code-review fix (finding 1, A39 review, specs/009 §5.1 amended): this branch used to
+        // capture without ever posting the findly_locate notification - the exact "silent locate"
+        // the amended spec's opening MUST forbids. Also (finding 9): this still runs on
+        // applicationScope rather than inside LocationForegroundService itself - the spec's "MAY",
+        // not "MUST" - kept as-is; equivalent only for as long as that service happens to stay
+        // alive, since nothing here re-foregrounds it if it doesn't. Risk accepted, not addressed
+        // this round.
+        // A39's final round, finding 1 (Major): post/cancel now take the raw `data` map so
+        // LocateNotifier can derive a per-requestId notification id (LocateNotificationId) instead
+        // of a single global one - two overlapping LOCATE_REQUESTs no longer share a slot that
+        // one finishing first could silently cancel out from under the other.
+        capturePresenceDirect = { data ->
+            val notification = locateNotifier.buildNotification(data)
+            locateNotifier.post(data, notification)
+            try {
+                locateRequestPushHandler.handle(data)
+            } finally {
+                locateNotifier.cancel(data)
+            }
+        },
+        onDemotionDetected = {
+            Log.i("FindlyPush", "LOCATE_REQUEST demoted priority (count=${locateDemotionCount.incrementAndGet()})")
+        },
     )
 
     /** specs/009 §4: "re-check settings... on every app foreground" — `MainActivity`/
@@ -596,20 +691,18 @@ class AppContainer(context: Context) {
 
     /** A9 (specs/009-device-runtime.md §5): routes every FCM data message to its 001 §8 handler.
      * `FindlyMessagingService` (the real `FirebaseMessagingService`) is this class's one
-     * production caller. [locationCapturer] and [deviceSettingsCoordinator] are A10's real
-     * implementations of A9's placeholder seams (`UnimplementedLocationCapturer`/
-     * `ScheduleRebuilder`'s TODO body); A11 wires [geofenceConfigSyncCoordinator] into
-     * `GEOFENCE_CONFIG_CHANGED` the same way. */
+     * production caller for the three types below — since A39, `LOCATE_REQUEST` is intercepted
+     * *before* reaching this dispatcher (`FindlyMessagingService`'s own doc explains why: this
+     * class's `dispatch` is a `suspend` fun the caller `runBlocking`s on, exactly what specs/009
+     * §5.1 forbids for a `LOCATE_REQUEST`). [locateRequestHandler] is still wired here (sharing
+     * the same hoisted [locateRequestPushHandler] instance every A39 handoff branch uses) so this
+     * dispatcher's own routing stays correct and independently testable even though production
+     * code no longer reaches it through this path for that one type. [locationCapturer] and
+     * [deviceSettingsCoordinator] are A10's real implementations of A9's placeholder seams
+     * (`UnimplementedLocationCapturer`/`ScheduleRebuilder`'s TODO body); A11 wires
+     * [geofenceConfigSyncCoordinator] into `GEOFENCE_CONFIG_CHANGED` the same way. */
     val pushMessageDispatcher: PushMessageDispatcher = PushMessageDispatcher(
-        locateRequestHandler = LocateRequestPushHandler(
-            locationCapturer = locationCapturer,
-            locateApi = findlyApiClient,
-            deviceIdProvider = {
-                (authProvider.authState.value as? AuthState.SignedIn)?.uid?.let { uid ->
-                    deviceRegistrar.deviceIdFor(uid)
-                }
-            },
-        ),
+        locateRequestHandler = locateRequestPushHandler,
         settingsChangedHandler = SettingsChangedPushHandler(
             // specs/009 §3.5 path 1 - the same DeviceSettingsCoordinator.applySettings entry
             // point every other settings-arrival path uses, so SETTINGS_CHANGED gets the full

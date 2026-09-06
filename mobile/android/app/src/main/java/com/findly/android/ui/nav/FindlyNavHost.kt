@@ -421,7 +421,8 @@ fun FindlyNavHost(
 
         composable(Destinations.Locate.route) {
             val target = pendingLocateTarget
-            val locateViewModel: LocateViewModel = viewModel(factory = LocateViewModelFactory(container.findlyApiClient))
+            val locateViewModel: LocateViewModel =
+                viewModel(factory = LocateViewModelFactory(container.findlyApiClient, container.findlyApiClient))
             LocateRoute(
                 viewModel = locateViewModel,
                 targetUserId = target?.first.orEmpty(),

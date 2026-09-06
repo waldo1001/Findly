@@ -8,6 +8,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
 import com.findly.android.ui.designsystem.FindlyTheme
@@ -21,6 +24,8 @@ import com.findly.android.ui.designsystem.components.FindlyStatusChip
 import com.findly.android.ui.designsystem.components.FindlyStatusTone
 import com.findly.android.ui.designsystem.components.FindlyTopBar
 import com.findly.android.ui.onboarding.OnboardingVariant
+import java.time.Instant
+import kotlinx.coroutines.delay
 
 /**
  * The A2 "locate now" screen (001-api-contract.md §6, specs/003-android-client.md §12's `Locate`
@@ -60,6 +65,18 @@ fun LocateScreen(
         if (state is LocateUiState.RouteToOnboarding) onRouteToOnboarding(state.variant)
     }
 
+    // Nit fix (A39 review): LocateAgeCaption.forRecordedAt's default `now` is only re-evaluated
+    // when this composable itself recomposes - without a periodic trigger, a LATE caption like
+    // "1 minute ago" would freeze forever instead of advancing to "2 minutes ago". Ticks once a
+    // minute, matching the caption's own granularity - no more frequently needed.
+    var ageCaptionNow by remember { mutableStateOf(Instant.now()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(60_000)
+            ageCaptionNow = Instant.now()
+        }
+    }
+
     Column(modifier = modifier.fillMaxSize()) {
         FindlyTopBar(title = "Locate $targetDisplayName")
 
@@ -95,10 +112,17 @@ fun LocateScreen(
                 }
 
                 is LocateUiState.Terminal -> {
-                    val (label, tone) = when (state.status) {
-                        "fulfilled" -> "Located" to FindlyStatusTone.Success
-                        "pushFailed" -> "Couldn't reach the device — showing last known" to FindlyStatusTone.Warning
-                        else -> "Request expired" to FindlyStatusTone.Neutral
+                    // specs/009-device-runtime.md §5.1 "Requester side": the UI states are
+                    // lastKnown -> updating -> (fresh | late | unreachable), with late rendered
+                    // exactly like fresh plus an age caption.
+                    val (label, tone) = when (state.outcome) {
+                        LocateOutcome.FRESH -> "Located" to FindlyStatusTone.Success
+                        LocateOutcome.LATE -> "Located" to FindlyStatusTone.Success
+                        LocateOutcome.UNREACHABLE -> if (state.status == "pushFailed") {
+                            "Couldn't reach the device — showing last known" to FindlyStatusTone.Warning
+                        } else {
+                            "Request expired — showing last known" to FindlyStatusTone.Neutral
+                        }
                     }
                     FindlyStatusChip(label = label, tone = tone)
 
@@ -107,7 +131,11 @@ fun LocateScreen(
                         FindlyCard {
                             FindlyListRow(
                                 title = "Location",
-                                subtitle = "${point.first}, ${point.second}",
+                                subtitle = if (state.outcome == LocateOutcome.LATE && state.fix != null) {
+                                    "${point.first}, ${point.second} · ${LocateAgeCaption.forRecordedAt(state.fix.recordedAt, ageCaptionNow)}"
+                                } else {
+                                    "${point.first}, ${point.second}"
+                                },
                             )
                         }
                     }
@@ -127,6 +155,7 @@ private fun LocateScreenLightPreview() {
             state = LocateUiState.Terminal(
                 requestId = "lr_preview",
                 status = "fulfilled",
+                outcome = LocateOutcome.FRESH,
                 fix = LocateFixUi("d1", 51.0544, 3.7170, 4.8, "2026-07-19T09:05:12Z", 77),
                 lastKnown = null,
             ),

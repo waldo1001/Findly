@@ -27,6 +27,7 @@ class FakeLocateApi : LocateApi {
             status = "pending",
             targetUserId = "u2",
             targetDeviceId = "device-2",
+            createdAt = "2026-07-19T09:05:12Z",
             expiresAt = "2026-07-19T09:06:12Z",
             lastKnown = null,
         ),
