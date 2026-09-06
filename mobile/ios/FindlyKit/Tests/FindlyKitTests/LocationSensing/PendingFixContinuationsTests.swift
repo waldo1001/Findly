@@ -498,6 +498,87 @@ struct PendingFixContinuationsTests {
         }
     }
 
+    // MARK: - I52 review round 2, finding 3 — resumeAllIfAcceptableAndAct: the presence-aware
+    // counterpart to resumeAllAndAct. Before draining, it consults `isAcceptable` with the highest
+    // tier among currently pending callers; when that returns false, the registry is left
+    // COMPLETELY untouched - no drain, no action, no resume - so the still-pending caller is
+    // resolved later by its own timeout or a subsequent, better delivery (specs/009 §1.1/001 §6.3).
+
+    @Test func resumeAllIfAcceptableAndAct_whenAcceptable_drainsAndResumesExactlyLikeResumeAllAndAct() async throws {
+        let registry = PendingFixContinuations()
+        let task = Task<LocationFix, Error> {
+            try await withCheckedThrowingContinuation { continuation in
+                registry.register(source: .periodic, continuation: continuation)
+            }
+        }
+        while registry.count < 1 { await Task.yield() }
+
+        var actionRan = false
+        let resumed = registry.resumeAllIfAcceptableAndAct(
+            isAcceptable: { _ in true },
+            makeFix: { makeFix(source: $0) },
+            ifDrained: { actionRan = true }
+        )
+
+        #expect(resumed)
+        #expect(actionRan)
+        let fix = try await task.value
+        #expect(fix.source == .periodic)
+        #expect(registry.count == 0)
+    }
+
+    @Test func resumeAllIfAcceptableAndAct_whenNotAcceptable_leavesTheRegistryEntirelyUntouched() async throws {
+        // The exact scenario finding 3 names: a .locate caller pending, a coarse (presence-session)
+        // delivery arrives. The caller must stay pending - not resumed with the coarse fix, and not
+        // silently dropped either - so its own timeout or a later, better delivery resolves it.
+        let registry = PendingFixContinuations()
+        var pendingId: PendingFixContinuations.ID?
+        let task = Task<LocationFix, Error> {
+            try await withCheckedThrowingContinuation { continuation in
+                pendingId = registry.register(source: .locate, continuation: continuation).id
+            }
+        }
+        while registry.count < 1 { await Task.yield() }
+
+        var isAcceptableWasCalledWithHighestTier: LocationAccuracyTier?
+        var actionRan = false
+        let resumed = registry.resumeAllIfAcceptableAndAct(
+            isAcceptable: { highestPendingTier in
+                isAcceptableWasCalledWithHighestTier = highestPendingTier
+                return false
+            },
+            makeFix: { source in
+                Issue.record("must not be called - the delivery was rejected before any fix was built")
+                return makeFix(source: source)
+            },
+            ifDrained: { actionRan = true }
+        )
+
+        #expect(!resumed)
+        #expect(!actionRan)
+        #expect(isAcceptableWasCalledWithHighestTier == .high)
+        #expect(registry.count == 1, "the pending .locate caller must remain pending, not be silently dropped")
+
+        // Clean up the still-pending continuation so the test doesn't leak a hung Task.
+        _ = registry.timeOut(id: pendingId!, error: LocationProvidingError.timedOut)
+        _ = try? await task.value
+    }
+
+    @Test func resumeAllIfAcceptableAndAct_onEmptyRegistry_returnsFalseAndNeverConsultsIsAcceptable() {
+        let registry = PendingFixContinuations()
+
+        let resumed = registry.resumeAllIfAcceptableAndAct(
+            isAcceptable: { _ in
+                Issue.record("must not be called - nothing is pending, there is no tier to gate on")
+                return true
+            },
+            makeFix: { makeFix(source: $0) },
+            ifDrained: { Issue.record("must not run - nothing was pending") }
+        )
+
+        #expect(!resumed)
+    }
+
     @Test func resumeAllAndAct_serializesItsActionAgainstAConcurrentRegisterAndActCall() {
         // The exact concurrency property registerAndAct/timeOutAndAct already prove for each
         // other, extended to resumeAllAndAct: a delivery draining the registry and a brand-new
