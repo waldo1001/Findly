@@ -121,9 +121,37 @@ public final class SystemLocationProvider: NSObject, LocationProviding, SystemLo
     /// when presence is not currently active; every accuracy-drain decision
     /// (`PresenceAccuracyPolicy.drainAction`) reads `isPresenceActive` below rather than a second,
     /// separately-maintained flag, so the two can never drift apart.
+    ///
+    /// **I52 review round 2, finding 1 (Blocking), sub-defects (b)/(c).** This property (and
+    /// `presenceIntervalMinutes`/`preserved*` below) is read and written ONLY from `startPresence`/
+    /// `stopPresence`, and both of those now enforce main-thread execution before touching anything
+    /// (see their own docs) — so these are effectively main-thread-confined, never touched from the
+    /// actor executor that caused the original bug. `Timer.invalidate()` is Apple-documented as
+    /// needing to run on the thread that installed the timer; guaranteeing `stopPresence()` always
+    /// runs on Main is what makes that true here, since `startPresence` always installs on Main too.
     private var presenceTimer: Timer?
 
+    /// specs/009 §1.3/§3.5 (I52 review round 2, finding 2, Major) — the interval `presenceTimer`
+    /// was actually built with. Previously `startPresence` only ever checked `presenceTimer == nil`,
+    /// so ANY running session satisfied ANY requested interval — switching 30 → 5 left the timer at
+    /// 1800 seconds until relaunch, even though the parent/UI/cached settings all agreed on 5. This
+    /// is what lets `startPresence` tell "idempotent no-op" (an unchanged interval — specs/009 §1.3)
+    /// apart from "the schedule must be rebuilt immediately" (a changed interval while already live
+    /// — specs/009 §3.5).
+    private var presenceIntervalMinutes: Int?
+
     private var isPresenceActive: Bool { presenceTimer != nil }
+
+    /// specs/009 §1.3/§3.4 (I52 review round 2, finding 6, Minor) — `startPresence` overwrites
+    /// `distanceFilter`/`pausesLocationUpdatesAutomatically`/`activityType` on the ONE
+    /// `CLLocationManager` this class shares with every one-shot `requestSingleFix` call;
+    /// `stopPresence` restores whatever they were immediately beforehand (captured here) rather
+    /// than a hardcoded guess at CoreLocation's own defaults — safe regardless of whether some
+    /// future caller ever configures the manager differently before presence first starts. `nil`
+    /// exactly when presence is not active (mirrors `presenceTimer`/`presenceIntervalMinutes`).
+    private var preservedDistanceFilter: CLLocationDistance?
+    private var preservedPausesLocationUpdatesAutomatically: Bool?
+    private var preservedActivityType: CLActivityType?
 
     /// specs/009 §3.4 "Presence session": `kCLLocationAccuracyThreeKilometers` — kilometre
     /// accuracy is cell/Wi-Fi positioning only, no GPS, which is the entire point of the standing
@@ -293,12 +321,47 @@ public final class SystemLocationProvider: NSObject, LocationProviding, SystemLo
     /// `LocationRuntimeContainer`) is the sole gate on whether/when this is called — this method
     /// does not re-check authorization or tracking state itself.
     ///
-    /// **Idempotent by construction** (specs/009 §1.3): a second call while `presenceTimer` is
-    /// already non-nil is a no-op, so re-establishing presence on every foreground/cold-start/
-    /// resume never restarts an already-running session (which would otherwise reset its own
-    /// cadence timer's phase for no reason) and never leaks a second `Timer`.
+    /// **Idempotent by construction** (specs/009 §1.3): a second call at the SAME interval while
+    /// `presenceTimer` is already active is a no-op, so re-establishing presence on every
+    /// foreground/cold-start/resume never restarts an already-running session (which would
+    /// otherwise reset its own cadence timer's phase for no reason) and never leaks a second
+    /// `Timer`. A second call at a DIFFERENT interval while already active rebuilds immediately
+    /// (specs/009 §3.5, I52 review round 2, finding 2) — see `presenceIntervalMinutes`'s own doc.
+    ///
+    /// **I52 review round 2, finding 1 (Blocking), defense-in-depth.** The documented reproduction
+    /// (a settings-arrival call running on `DeviceSettingsCoordinator`'s own actor executor) is
+    /// fixed at its true origin, the `LocationRuntimeContainer`/`DeviceSettingsCoordinator` closure
+    /// boundary (see that fix's own commit — the closure is now genuinely `async`, forcing a real
+    /// actor hop). This `Thread.isMainThread` guard is added here too, on this method itself,
+    /// because `LocationProviding` is a protocol other, currently-hypothetical callers could reach
+    /// this same way — making "main-bound" a property of `startPresence` itself, not only of
+    /// today's one call path. `Timer(timeInterval:repeats:)` (the NON-scheduling initializer) plus
+    /// exactly one `RunLoop.main.add(_:forMode:)` below replaces `Timer.scheduledTimer`, which
+    /// schedules on whatever run loop is CURRENT at call time — ambiguous, and the original root
+    /// cause once that current run loop wasn't Main's. This way there is exactly one, unambiguous
+    /// registration, always on Main, in `.common` mode.
     public func startPresence(syncIntervalMinutes: Int, onTick: @escaping () -> Void) {
-        guard presenceTimer == nil else { return }
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { [weak self] in
+                self?.startPresence(syncIntervalMinutes: syncIntervalMinutes, onTick: onTick)
+            }
+            return
+        }
+
+        if presenceTimer != nil {
+            // I52 review round 2, finding 2 (Major) — idempotent no-op ONLY when the interval is
+            // unchanged; a genuinely different interval must tear down and rebuild immediately,
+            // never silently keep ticking at the old cadence.
+            guard presenceIntervalMinutes != syncIntervalMinutes else { return }
+            stopPresence()
+        }
+
+        // I52 review round 2, finding 6 (Minor) — capture whatever these were set to immediately
+        // before overwriting them, so `stopPresence()` can restore them exactly rather than
+        // guessing at CoreLocation's own defaults.
+        preservedDistanceFilter = manager.distanceFilter
+        preservedPausesLocationUpdatesAutomatically = manager.pausesLocationUpdatesAutomatically
+        preservedActivityType = manager.activityType
 
         manager.desiredAccuracy = Self.presenceAccuracy
         manager.distanceFilter = 500
@@ -312,24 +375,63 @@ public final class SystemLocationProvider: NSObject, LocationProviding, SystemLo
         manager.showsBackgroundLocationIndicator = false
         manager.startUpdatingLocation()
 
-        let timer = Timer.scheduledTimer(withTimeInterval: TimeInterval(syncIntervalMinutes * 60), repeats: true) { _ in
+        let timer = Timer(timeInterval: TimeInterval(syncIntervalMinutes * 60), repeats: true) { _ in
             onTick()
         }
-        // `Timer.scheduledTimer` schedules on the current run loop in the default mode, which a
-        // `UIScrollView`/similar can starve during user interaction — `.common` keeps the cadence
-        // ticking regardless of what else the main run loop is doing.
+        // The non-scheduling initializer above registers nowhere on its own — this is the single,
+        // explicit, unambiguous registration, always on Main (guaranteed by the guard at the top of
+        // this method), in `.common` mode so a `UIScrollView`/similar can't starve it.
         RunLoop.main.add(timer, forMode: .common)
         presenceTimer = timer
+        presenceIntervalMinutes = syncIntervalMinutes
     }
 
     /// **Idempotent** (specs/009 §1.3's implicit counterpart to "establishing presence is
     /// idempotent" — stopping an already-stopped presence must equally be a safe no-op, since
     /// every lifecycle path in `LocationRuntimeContainer` calls this unconditionally as part of
     /// `PresencePolicy` reconciliation, whether or not presence happened to be running).
+    ///
+    /// **I52 review round 2, finding 1 (Blocking), defense-in-depth** — same `Thread.isMainThread`
+    /// guard as `startPresence` (see its doc), and for the same reason: Apple documents
+    /// `Timer.invalidate()` as needing to run on the thread that installed the timer, which this
+    /// guarantees here since `startPresence` always installs on Main too.
     public func stopPresence() {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { [weak self] in self?.stopPresence() }
+            return
+        }
+
         presenceTimer?.invalidate()
         presenceTimer = nil
-        manager.stopUpdatingLocation()
+        presenceIntervalMinutes = nil
+
+        // I52 review round 2, finding 6 (Minor) — restore whatever these were before
+        // `startPresence` overwrote them, so a stopped presence session leaves no trace on the
+        // shared manager's configuration for the next one-shot capture.
+        if let distanceFilter = preservedDistanceFilter { manager.distanceFilter = distanceFilter }
+        if let pauses = preservedPausesLocationUpdatesAutomatically { manager.pausesLocationUpdatesAutomatically = pauses }
+        if let activityType = preservedActivityType { manager.activityType = activityType }
+        preservedDistanceFilter = nil
+        preservedPausesLocationUpdatesAutomatically = nil
+        preservedActivityType = nil
+
+        // I52 review round 2, finding 6 (Minor) — `stopUpdatingLocation()` ALSO cancels any
+        // in-flight `requestLocation()` (this manager is shared between the two). Calling it
+        // unconditionally used to silently cancel a locate racing a settings change that stops
+        // presence, resolving it only via its own timeout. Only stop the manager when nothing is
+        // currently pending; a still-pending caller's own eventual delivery/timeout drains through
+        // `applyDrainAction()`, which — now that `isPresenceActive` reads false — correctly calls
+        // `.stopUpdating` itself at that point.
+        //
+        // Deliberately NOT the reviewer's suggested monotonic generation counter, which would also
+        // fix this file's OTHER finding-6 half (a stale delivery arriving after a timeout while
+        // presence is active still gets mislabelled `source: "periodic"`, I50 fix 8's regression
+        // resurfacing) — that touches `PendingFixContinuations`' register/resume machinery for
+        // every caller, not just this path, which is too invasive for this round. Deferred; see
+        // this task's report for the reasoning and the residual gap this leaves.
+        if pendingFixes.count == 0 {
+            manager.stopUpdatingLocation()
+        }
     }
 
     private static func clAccuracy(for tier: LocationAccuracyTier) -> CLLocationAccuracy {
