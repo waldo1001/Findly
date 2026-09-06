@@ -22,6 +22,7 @@ import type {
 } from "../../ports/repositories";
 import type { FixLine, HistoryStore } from "../../ports/historyStore";
 import { getFeatures, type Features } from "../plan";
+import { shouldRefreshLastSeen } from "../device/lastSeenPolicy";
 
 // specs/001 §6.3 (amended 2026-09-06) — a fulfil received within this many ms after
 // expiresAt is still accepted (late:true) instead of throwing LOCATE_REQUEST_EXPIRED.
@@ -124,6 +125,12 @@ export async function fulfillLocateRequest(
   const expiresAtMs = new Date(record.expiresAt).getTime();
   const late = nowMs > expiresAtMs;
   const withinGrace = nowMs <= expiresAtMs + GRACE_MS;
+
+  // specs/001 §4.2/§6.3 (amended 2026-09-06) — every device-originated call refreshes
+  // lastSeenAt, write-skipped to at most once per minute (002 §2.4).
+  if (shouldRefreshLastSeen(device.lastSeenAt, now)) {
+    await deps.deviceRepo.putDevice(device.ownerUserId, { ...device, lastSeenAt: now.toISOString() });
+  }
 
   const inserted = await deps.idempotencyRepo.tryInsertFixMarker(record.targetDeviceId, body.fix.fixId, receivedAt);
   if (inserted) {

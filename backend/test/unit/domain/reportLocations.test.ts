@@ -1153,4 +1153,27 @@ describe("domain/location/reportLocations", () => {
       // every other test asserting presence only when a membership was actually seeded.
     });
   });
+
+  describe("lastSeenAt refresh (specs/001 §4.2 amended 2026-09-06, 002 §2.4 write-skip)", () => {
+    it("refreshes the reporting device's lastSeenAt when it is stale (well over a minute old)", async () => {
+      const deps = buildDeps();
+      seedDevice(deps, { lastSeenAt: "2026-07-01T00:00:00Z" }); // far older than NOW
+
+      await reportLocations(baseInput(), deps);
+
+      const stored = await deps.deviceRepo.getDevice(USER_ID, DEVICE_ID);
+      expect(stored?.lastSeenAt).toBe(new Date(NOW).toISOString());
+    });
+
+    it("skips the lastSeenAt write when the device was seen less than a minute ago (write-skip)", async () => {
+      const deps = buildDeps();
+      const recentlySeen = new Date(new Date(NOW).getTime() - 30_000).toISOString(); // 30s ago
+      seedDevice(deps, { lastSeenAt: recentlySeen });
+
+      await reportLocations(baseInput(), deps);
+
+      const stored = await deps.deviceRepo.getDevice(USER_ID, DEVICE_ID);
+      expect(stored?.lastSeenAt).toBe(recentlySeen); // untouched
+    });
+  });
 });

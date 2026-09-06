@@ -579,4 +579,29 @@ describe("domain/geofence/reportGeofenceEvents", () => {
 
     expect(geofenceEventsCalls).toBe(0);
   });
+
+  describe("lastSeenAt refresh (specs/001 §4.2 amended 2026-09-06, 002 §2.4 write-skip)", () => {
+    it("refreshes the reporting device's lastSeenAt when it is stale (well over a minute old)", async () => {
+      const deps = buildDeps();
+      await seedFamily(deps);
+      seedReporterDevice(deps, { lastSeenAt: "2026-07-01T00:00:00Z" });
+
+      await reportGeofenceEvents(baseInput(), deps);
+
+      const stored = await deps.deviceRepo.getDevice(REPORTER_UID, DEVICE_ID);
+      expect(stored?.lastSeenAt).toBe(new Date(NOW).toISOString());
+    });
+
+    it("skips the lastSeenAt write when the device was seen less than a minute ago (write-skip)", async () => {
+      const deps = buildDeps();
+      await seedFamily(deps);
+      const recentlySeen = new Date(new Date(NOW).getTime() - 30_000).toISOString();
+      seedReporterDevice(deps, { lastSeenAt: recentlySeen });
+
+      await reportGeofenceEvents(baseInput(), deps);
+
+      const stored = await deps.deviceRepo.getDevice(REPORTER_UID, DEVICE_ID);
+      expect(stored?.lastSeenAt).toBe(recentlySeen);
+    });
+  });
 });

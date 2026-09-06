@@ -32,6 +32,7 @@ import type { FixLine, HistoryStore } from "../../ports/historyStore";
 import type { GeofenceConfigRepo } from "../../ports/geofenceConfig";
 import { getFeatures, type Features } from "../plan";
 import { fanOutLocationToActiveGroups } from "../group/groupLocationFanout";
+import { shouldRefreshLastSeen } from "../device/lastSeenPolicy";
 
 const MAX_BATCH_SIZE = 100;
 const CLOCK_SKEW_TOLERANCE_MS = 5 * 60 * 1000;
@@ -136,6 +137,14 @@ export async function reportLocations(
     throw new AppError("DEVICE_NOT_FOUND", "X-Device-Id is not registered to the calling user");
   }
 
+  const now = deps.clock.now();
+
+  // specs/001 §4.2 (amended 2026-09-06) — every device-originated call refreshes
+  // lastSeenAt, write-skipped to at most once per minute (002 §2.4).
+  if (shouldRefreshLastSeen(device.lastSeenAt, now)) {
+    await deps.deviceRepo.putDevice(input.uid, { ...device, lastSeenAt: now.toISOString() });
+  }
+
   const deviceSettings: DeviceSettingsSnapshot = {
     syncIntervalMinutes: device.syncIntervalMinutes,
     trackingEnabled: device.trackingEnabled,
@@ -154,7 +163,6 @@ export async function reportLocations(
 
   const body = parseOrThrow(reportLocationsRequestSchema, input.body);
 
-  const now = deps.clock.now();
   const maxAllowedMs = now.getTime() + CLOCK_SKEW_TOLERANCE_MS;
   const skewFields: string[] = [];
   body.fixes.forEach((fix, index) => {

@@ -515,4 +515,28 @@ describe("domain/locate/fulfillLocateRequest", () => {
     expect(result.status).toBe("fulfilled");
   });
 
+  describe("lastSeenAt refresh (specs/001 §4.2/§6.3 amended 2026-09-06, 002 §2.4 write-skip)", () => {
+    it("refreshes the fulfilling device's lastSeenAt when it is stale (well over a minute old)", async () => {
+      const deps = buildDeps();
+      deps.deviceRepo.seed(TARGET_UID, device({ lastSeenAt: "2026-07-01T00:00:00Z" }));
+      deps.locateRequestRepo.seed(record({ expiresAt: "2026-07-19T09:11:00Z" }));
+
+      await fulfillLocateRequest(baseInput(), deps);
+
+      const stored = await deps.deviceRepo.getDevice(TARGET_UID, TARGET_DEVICE_ID);
+      expect(stored?.lastSeenAt).toBe(new Date(NOW).toISOString());
+    });
+
+    it("skips the lastSeenAt write when the device was seen less than a minute ago (write-skip)", async () => {
+      const deps = buildDeps();
+      const recentlySeen = new Date(new Date(NOW).getTime() - 30_000).toISOString();
+      deps.deviceRepo.seed(TARGET_UID, device({ lastSeenAt: recentlySeen }));
+      deps.locateRequestRepo.seed(record({ expiresAt: "2026-07-19T09:11:00Z" }));
+
+      await fulfillLocateRequest(baseInput(), deps);
+
+      const stored = await deps.deviceRepo.getDevice(TARGET_UID, TARGET_DEVICE_ID);
+      expect(stored?.lastSeenAt).toBe(recentlySeen);
+    });
+  });
 });
