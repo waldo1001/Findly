@@ -63,14 +63,29 @@ class BatteryOptimizationPromptPolicyTest {
 
     @Test
     fun `offers on a later session once the same-session flag has cleared`() {
-        // Simulates: user granted background permission last session (battery prompt withheld
-        // that time), then reopened the app - a fresh process means a fresh
-        // backgroundPermissionGrantedThisSession = false.
+        // Code-review fix (A41 round 2, finding 7): this used to be byte-identical to "offers the
+        // prompt when presence is required, unanswered, and background permission was not just
+        // granted this session" above - zero added coverage. A real two-step assertion over a
+        // mutable flag models the transition it claims to document: withheld while
+        // AppContainer.backgroundLocationPermissionGrantedThisSession is still true from last
+        // granting the OS prompt this session, then offered once a fresh process resets that
+        // in-memory-only flag to false (its own doc: "MUST reset to false on every cold start").
+        var backgroundPermissionGrantedThisSession = true
+        assertFalse(
+            BatteryOptimizationPromptPolicy.shouldOffer(
+                presenceRequired = true,
+                alreadyAnswered = false,
+                backgroundPermissionGrantedThisSession = backgroundPermissionGrantedThisSession,
+            ),
+        )
+
+        // Process restarts.
+        backgroundPermissionGrantedThisSession = false
         assertTrue(
             BatteryOptimizationPromptPolicy.shouldOffer(
                 presenceRequired = true,
                 alreadyAnswered = false,
-                backgroundPermissionGrantedThisSession = false,
+                backgroundPermissionGrantedThisSession = backgroundPermissionGrantedThisSession,
             ),
         )
     }
