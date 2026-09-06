@@ -18,6 +18,12 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
 
+    <!-- A40 (specs/009-device-runtime.md §3.2 "Restart and recovery"): lets
+         BootCompletedReceiver restart the foreground presence service after a reboot / app
+         update, one of the explicit Android start-from-background exemptions for a location
+         foreground service (alongside a high-priority FCM message, §5.1). -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
     <!-- Geofence / locate / settings push notifications (001-api-contract.md §8) -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
@@ -155,6 +161,20 @@
         <receiver
             android:name=".location.geofence.GeofenceTransitionReceiver"
             android:exported="false" />
+
+        <!-- A40 (specs/009-device-runtime.md §3.2 "Restart and recovery"): re-applies the cached
+             schedule (starting the foreground service again where the cache calls for it) after a
+             reboot or an app update - both broadcasts are explicit Android start-from-background
+             exemptions for a location foreground service, hence exported="true": these are
+             protected system broadcasts only the OS itself can send. -->
+        <receiver
+            android:name=".location.settings.BootCompletedReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
 
         <!-- specs/003-android-client.md §12.4 / 001-api-contract.md §13.1: the export share-sheet
              handoff needs a content:// URI for the downloaded file (ExportFileWriter.kt). Only
