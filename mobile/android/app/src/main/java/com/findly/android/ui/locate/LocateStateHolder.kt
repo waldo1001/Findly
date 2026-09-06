@@ -10,6 +10,7 @@ import com.findly.android.network.ports.LocateApi
 import com.findly.android.network.ports.LocationsApi
 import com.findly.android.network.userMessage
 import com.findly.android.ui.onboarding.ProfileDeadEndRouting
+import java.time.Duration
 import java.time.Instant
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -83,22 +84,25 @@ class LocateStateHolder(
             return
         }
         _state.value = LocateUiState.Polling(dto.requestId, lastKnown, dto.expiresAt)
-        pollUntilTerminal(dto.requestId, dto.targetDeviceId, dto.createdAt, dto.expiresAt)
+        // Code-review fix (finding 6, A39 review, specs/009 §5.1 amended): the poll timeout is
+        // captured once here, right as the create response is received - see pollWindowFor's doc.
+        val receivedAt = now()
+        val pollWindow = pollWindowFor(dto.createdAt, dto.expiresAt)
+        pollUntilTerminal(dto.requestId, dto.targetDeviceId, dto.createdAt, receivedAt, pollWindow)
     }
 
     private suspend fun pollUntilTerminal(
         requestId: String,
         targetDeviceId: String,
         createdAt: String,
-        initialExpiresAt: String,
+        receivedAt: Instant,
+        pollWindow: Duration?,
     ) {
-        var expiresAt = initialExpiresAt
         while (true) {
             delay(pollIntervalMillis)
             when (val result = locateApi.getLocateRequest(requestId)) {
                 is ApiResult.Success -> {
                     val dto = result.data
-                    expiresAt = dto.expiresAt
                     val lastKnown = (_state.value as? LocateUiState.Polling)?.lastKnown
                     when {
                         dto.status == "fulfilled" -> {
@@ -112,7 +116,7 @@ class LocateStateHolder(
                             return
                         }
 
-                        dto.status in NON_FULFILLED_TERMINAL_STATUSES || hasReachedExpiry(expiresAt) -> {
+                        dto.status in NON_FULFILLED_TERMINAL_STATUSES || hasElapsedPollWindow(receivedAt, pollWindow) -> {
                             _state.value = resolveViaFallback(dto.requestId, targetDeviceId, createdAt, lastKnown, statusOverride = dto.status)
                             return
                         }
@@ -131,9 +135,26 @@ class LocateStateHolder(
         }
     }
 
-    private fun hasReachedExpiry(expiresAt: String): Boolean {
-        val expiry = parseInstantOrNull(expiresAt) ?: return false
-        return !now().isBefore(expiry)
+    /** specs/009 §5.1 (amended 2026-09-06, A39's review, finding 6): the poll timeout is the
+     * server-computed window between its own `createdAt`/`expiresAt` pair — never compared as an
+     * absolute instant against [now]. A client clock that runs slow is harmless (the server's own
+     * lazy expiry already resolves to a terminal "expired" first); one that runs fast used to
+     * satisfy `now() >= expiresAt` on the very first poll tick and report UNREACHABLE before the
+     * target could possibly have answered. Returns `null` (never expires locally) if either
+     * timestamp fails to parse — the loop then only ever ends via an explicit terminal status or a
+     * poll failure, same as before this fix for a malformed response. */
+    private fun pollWindowFor(createdAt: String, expiresAt: String): Duration? {
+        val created = parseInstantOrNull(createdAt) ?: return null
+        val expires = parseInstantOrNull(expiresAt) ?: return null
+        val window = Duration.between(created, expires)
+        return window.takeIf { !it.isNegative }
+    }
+
+    /** Both readings come from the same [now] clock, so a constant skew in that clock cancels out
+     * of this subtraction — only the *locally elapsed* duration since [receivedAt] matters. */
+    private fun hasElapsedPollWindow(receivedAt: Instant, pollWindow: Duration?): Boolean {
+        if (pollWindow == null) return false
+        return Duration.between(receivedAt, now()) >= pollWindow
     }
 
     /** specs/009 §5.1 "Requester side": the one-shot `GET /locations/latest` check performed
@@ -155,13 +176,20 @@ class LocateStateHolder(
             ?.members?.asSequence()?.flatMap { it.devices.asSequence() }
             ?.firstOrNull { it.deviceId == targetDeviceId }
         val recordedAt = device?.recordedAt?.let(::parseInstantOrNull)
+        // Code-review fix (finding 13, A39 review): the outcome must not be fixed at LATE off
+        // recordedAt alone - toFixUi() (below) returns null when lat/lon are absent, which used to
+        // still produce Terminal(outcome = LATE, fix = null); the screen then falls back to
+        // lastKnown and silently drops the age caption, showing a stale position under a "Located"
+        // chip. Computing the fix first and requiring it non-null keeps LATE and a usable fix in
+        // lockstep.
+        val fix = device?.toFixUi()
 
-        return if (createdAtInstant != null && recordedAt != null && recordedAt.isAfter(createdAtInstant)) {
+        return if (createdAtInstant != null && recordedAt != null && recordedAt.isAfter(createdAtInstant) && fix != null) {
             LocateUiState.Terminal(
                 requestId = requestId,
                 status = statusOverride,
                 outcome = LocateOutcome.LATE,
-                fix = device.toFixUi(),
+                fix = fix,
                 lastKnown = lastKnown,
             )
         } else {

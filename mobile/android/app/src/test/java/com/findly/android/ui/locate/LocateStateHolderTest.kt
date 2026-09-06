@@ -348,19 +348,141 @@ class LocateStateHolderTest {
         assertNull(state.fix)
     }
 
+    // specs/009-device-runtime.md §5.1 (amended 2026-09-06, A39's review, finding 6): the poll
+    // timeout must be measured as a *locally elapsed* duration from receipt of the create
+    // response, using the server-computed window (createdAt..expiresAt) - never by comparing
+    // `now()` directly against the absolute `expiresAt` instant. A device whose clock runs fast
+    // previously satisfied that absolute comparison on the very first poll tick and reported
+    // UNREACHABLE before the target could possibly have answered. The two tests below replace the
+    // old (buggy) "now() reaching expiresAt stops polling" test, which encoded exactly that bug.
+
     @Test
-    fun `a pending response reaching expiresAt by wall clock stops polling and falls back`() = runTest {
+    fun `a skewed absolute clock reading does not shorten the poll window`() = runTest {
         val locationsApi = FakeLocationsApi().apply {
             getLatestLocationsResult = ApiResult.Success(LatestLocationsResponseDto(members = emptyList()), features = defaultFeatures())
         }
         val api = FakeLocateApi().apply {
             createLocateRequestResult = createResult()
-            // Server keeps reporting "pending" (e.g. hasn't been polled again server-side to lazily
-            // flip to expired) - the client's own now() reaching expiresAt must still stop the loop.
             pollResults.add(pendingResponse())
         }
-        // now() is fixed at exactly expiresAt for the poll tick.
-        val holder = holder(api, locationsApi, nowIso = expiresAt)
+        // now() is pinned hours past expiresAt and never advances in this fixed-clock fixture -
+        // the OLD implementation compared this absolute reading straight against expiresAt and
+        // would have declared UNREACHABLE on the very first tick below.
+        val holder = holder(api, locationsApi, nowIso = "2026-07-19T11:00:00Z")
+
+        holder.requestLocate(targetUserId = "u2")
+        runCurrent()
+
+        advanceTimeBy(2000); runCurrent()
+        assertTrue("a skewed clock reading must not cut the 60s window short", holder.state.value is LocateUiState.Polling)
+        assertEquals(1, api.getLocateRequestCalls.size)
+
+        advanceTimeBy(2000); runCurrent()
+        assertTrue("still well within the 60s window", holder.state.value is LocateUiState.Polling)
+        assertEquals(2, api.getLocateRequestCalls.size)
+        assertEquals(0, locationsApi.getLatestLocationsCallCount)
+    }
+
+    @Test
+    fun `the poll window still ends after its full locally-elapsed duration, immune to a skewed absolute clock`() = runTest {
+        val locationsApi = FakeLocationsApi().apply {
+            getLatestLocationsResult = ApiResult.Success(LatestLocationsResponseDto(members = emptyList()), features = defaultFeatures())
+        }
+        val api = FakeLocateApi().apply {
+            createLocateRequestResult = createResult()
+            pollResults.add(pendingResponse())
+        }
+        // A constant multi-hour forward skew, but ticking at the real rate from there
+        // (testScheduler.currentTime tracks true virtual elapsed time) - Duration.between(receivedAt,
+        // now()) cancels the skew, so the fallback fires only once the server-computed 60s window
+        // (createdAt..expiresAt, from the fixtures above) has truly elapsed - not immediately off
+        // the skewed absolute reading.
+        val holder = LocateStateHolder(
+            api,
+            locationsApi,
+            backgroundScope,
+            pollIntervalMillis = 2000L,
+            now = { Instant.parse("2026-07-19T11:00:00Z").plusMillis(testScheduler.currentTime) },
+        )
+
+        holder.requestLocate(targetUserId = "u2")
+        runCurrent()
+
+        // 29 ticks (58s of the 60s window) - must still be polling.
+        repeat(29) {
+            advanceTimeBy(2000); runCurrent()
+        }
+        assertTrue("58s elapsed of a 60s window - must still be polling", holder.state.value is LocateUiState.Polling)
+        assertEquals(29, api.getLocateRequestCalls.size)
+
+        // 30th tick (60s) - the window has now fully elapsed locally.
+        advanceTimeBy(2000); runCurrent()
+        val state = holder.state.value
+        assertTrue(state is LocateUiState.Terminal)
+        assertEquals(LocateOutcome.UNREACHABLE, (state as LocateUiState.Terminal).outcome)
+        assertEquals(30, api.getLocateRequestCalls.size)
+        assertEquals(1, locationsApi.getLatestLocationsCallCount)
+
+        // No further polling after the fallback resolved.
+        advanceTimeBy(10_000); runCurrent()
+        assertEquals(30, api.getLocateRequestCalls.size)
+    }
+
+    // specs/009-device-runtime.md §5.1 "Requester side" fallback device-selection (finding 12,
+    // A39's review): every existing fallback test above uses an empty member list or a single
+    // device, so `firstOrNull { it.deviceId == targetDeviceId }` never had to discriminate between
+    // devices. This adds a decoy device (a different member) with a *newer* recordedAt than the
+    // target device's own — proving the filter selects strictly by deviceId, not by "any newer
+    // report".
+
+    @Test
+    fun `the fallback discriminates the target device from a decoy with a newer recordedAt`() = runTest {
+        val locationsApi = FakeLocationsApi().apply {
+            getLatestLocationsResult = ApiResult.Success(
+                LatestLocationsResponseDto(
+                    members = listOf(
+                        // The decoy: a different member/device reporting *after* createdAt - if the
+                        // fallback picked "any device with a newer recordedAt" instead of filtering
+                        // by deviceId first, it would wrongly surface this device's position.
+                        LatestMemberDto(
+                            userId = "u3", displayName = "Decoy",
+                            devices = listOf(
+                                LatestDeviceDto(
+                                    deviceId = "d3", deviceName = "Decoy phone", lat = 52.0, lon = 4.0,
+                                    accuracyM = 5.0, recordedAt = "2026-07-19T09:07:00Z", receivedAt = "2026-07-19T09:07:01Z",
+                                    batteryPct = 90, source = "periodic", trackingEnabled = true, syncIntervalMinutes = 15,
+                                    isStale = false,
+                                ),
+                            ),
+                        ),
+                        // The actual target device: recordedAt is *not* newer than createdAt, so
+                        // this must still resolve UNREACHABLE.
+                        LatestMemberDto(
+                            userId = "u2", displayName = "Noor",
+                            devices = listOf(
+                                LatestDeviceDto(
+                                    deviceId = "d2", deviceName = "Pixel", lat = 51.0, lon = 3.7,
+                                    accuracyM = 10.0, recordedAt = "2026-07-19T08:50:00Z", receivedAt = "2026-07-19T08:50:01Z",
+                                    batteryPct = 40, source = "periodic", trackingEnabled = true, syncIntervalMinutes = 15,
+                                    isStale = true,
+                                ),
+                            ),
+                        ),
+                    ),
+                ),
+                features = defaultFeatures(),
+            )
+        }
+        val api = FakeLocateApi().apply {
+            createLocateRequestResult = createResult()
+            pollResults.add(
+                ApiResult.Success(
+                    LocateRequestStatusResponseDto("lr_1", "expired", createdAt, expiresAt, fulfilledAt = null, late = false, fix = null),
+                    features = defaultFeatures(),
+                ),
+            )
+        }
+        val holder = holder(api, locationsApi)
 
         holder.requestLocate(targetUserId = "u2")
         runCurrent()
@@ -370,12 +492,56 @@ class LocateStateHolderTest {
         assertTrue(state is LocateUiState.Terminal)
         state as LocateUiState.Terminal
         assertEquals(LocateOutcome.UNREACHABLE, state.outcome)
-        assertEquals(1, api.getLocateRequestCalls.size)
-        assertEquals(1, locationsApi.getLatestLocationsCallCount)
+        assertNull(state.fix)
+    }
 
-        // No further polling after the fallback resolved.
-        advanceTimeBy(10_000); runCurrent()
-        assertEquals(1, api.getLocateRequestCalls.size)
+    // specs/009-device-runtime.md §5.1 fallback LATE-with-a-null-fix (finding 13, A39's review):
+    // the outcome must not be fixed at LATE off `recordedAt` alone when the resulting fix itself
+    // is null (lat/lon absent) - that used to produce Terminal(outcome = LATE, fix = null), which
+    // the screen renders as a stale lastKnown position under a "Located" chip.
+
+    @Test
+    fun `a newer recordedAt with no lat-lon does not surface LATE with a null fix`() = runTest {
+        val locationsApi = FakeLocationsApi().apply {
+            getLatestLocationsResult = ApiResult.Success(
+                LatestLocationsResponseDto(
+                    members = listOf(
+                        LatestMemberDto(
+                            userId = "u2", displayName = "Noor",
+                            devices = listOf(
+                                LatestDeviceDto(
+                                    deviceId = "d2", deviceName = "Pixel", lat = null, lon = null,
+                                    accuracyM = null, recordedAt = "2026-07-19T09:06:00Z", receivedAt = "2026-07-19T09:06:01Z",
+                                    batteryPct = 40, source = "periodic", trackingEnabled = true, syncIntervalMinutes = 15,
+                                    isStale = false,
+                                ),
+                            ),
+                        ),
+                    ),
+                ),
+                features = defaultFeatures(),
+            )
+        }
+        val api = FakeLocateApi().apply {
+            createLocateRequestResult = createResult()
+            pollResults.add(
+                ApiResult.Success(
+                    LocateRequestStatusResponseDto("lr_1", "pushFailed", createdAt, expiresAt, fulfilledAt = null, late = false, fix = null),
+                    features = defaultFeatures(),
+                ),
+            )
+        }
+        val holder = holder(api, locationsApi)
+
+        holder.requestLocate(targetUserId = "u2")
+        runCurrent()
+        advanceTimeBy(2000); runCurrent()
+
+        val state = holder.state.value
+        assertTrue(state is LocateUiState.Terminal)
+        state as LocateUiState.Terminal
+        assertEquals(LocateOutcome.UNREACHABLE, state.outcome)
+        assertNull(state.fix)
     }
 
     @Test
