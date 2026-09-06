@@ -1,6 +1,7 @@
 package com.findly.android.pushmessages
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Test
 
 /** 001-api-contract.md section 8.1's normative title template, rendered on-device from
@@ -61,6 +62,45 @@ class LocateNotificationTitleTest {
         assertEquals("$thirtyChars is locating you", LocateNotificationTitle.forRequester(thirtyOneChars))
         // The boundary itself (exactly 30) must not be truncated further.
         assertEquals("$thirtyChars is locating you", LocateNotificationTitle.forRequester(thirtyChars))
+    }
+
+    // specs/009-device-runtime.md section 9 (amended 2026-09-06 - A39's final round, finding 3):
+    // `take(30)` counts UTF-16 code units, not characters. A name of 29 BMP characters followed by
+    // an emoji is 31 UTF-16 units (29 + 2 for the surrogate pair), so the old clamp kept the
+    // emoji's lone high surrogate and dropped its low surrogate - an unpaired surrogate that
+    // renders as a replacement glyph. The existing emoji test above uses a short name (well under
+    // 30) and the existing boundary test uses plain ASCII, so neither combination ever exercised
+    // this. The fix must clamp on code points, so the boundary case below keeps the emoji whole.
+
+    @Test
+    fun `clamping at the boundary does not split a trailing emoji's surrogate pair`() {
+        val twentyNineChars = "A".repeat(29)
+        // U+1F389 (party popper), written as its UTF-16 surrogate pair (same character as the
+        // "leaves an emoji ... untouched" test above) - 29 chars + 1 emoji = 30 code points but
+        // 31 UTF-16 units.
+        val emoji = "\uD83C\uDF89"
+        val nameWithTrailingEmoji = twentyNineChars + emoji
+        val title = LocateNotificationTitle.forRequester(nameWithTrailingEmoji)
+
+        assertEquals("$twentyNineChars$emoji is locating you", title)
+        assertFalse("title must not contain an unpaired (lone) surrogate", title.hasUnpairedSurrogate())
+    }
+
+    private fun String.hasUnpairedSurrogate(): Boolean {
+        var i = 0
+        while (i < length) {
+            val ch = this[i]
+            when {
+                Character.isHighSurrogate(ch) -> {
+                    val hasLow = i + 1 < length && Character.isLowSurrogate(this[i + 1])
+                    if (!hasLow) return true
+                    i += 2
+                }
+                Character.isLowSurrogate(ch) -> return true // a low surrogate with no preceding high one
+                else -> i += 1
+            }
+        }
+        return false
     }
 
     // specs/009-device-runtime.md section 5.1: requestedByName may be absent from the push data
