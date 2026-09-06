@@ -364,6 +364,18 @@ struct FindlyApp: App {
         PushRuntimeContainerHolder.shared.container = pushRuntimeContainer
         deviceRegistrationService.observePushTokenRefreshes(FirebasePushTokenProvider.shared)
 
+        // specs/009-device-runtime.md §7 (I50 fix 4, amended 2026-09-06) — "the latter [notification
+        // authorization] MUST actually be issued on first sign-in". Nothing in the shipped client
+        // ever called `UNUserNotificationCenter.requestAuthorization` at all, so no geofence alert
+        // and no locate alert could ever display on iOS. `NotificationAuthorizationCoordinator`
+        // owns "once per install, never re-prompt" itself, so calling it from the same closure that
+        // already runs on both the cold-launch-already-signed-in path and RootView's interactive
+        // sign-in completion is safe.
+        let notificationAuthorizationCoordinator = NotificationAuthorizationCoordinator(
+            requester: SystemNotificationAuthorizationRequester(),
+            stateStore: UserDefaultsNotificationAuthorizationStateStore()
+        )
+
         // specs/004-ios-client.md §5's remaining two triggers (first launch after sign-in, every
         // app update) + specs/004 §1.1's "push-registration callbacks" allowance:
         // `UIApplication.registerForRemoteNotifications()` starts the APNs handshake that
@@ -382,6 +394,7 @@ struct FindlyApp: App {
             guard authProvider?.currentUserId != nil else { return }
             UIApplication.shared.registerForRemoteNotifications()
             await deviceRegistrationService.registerOnLaunchIfNeeded()
+            await notificationAuthorizationCoordinator.requestOnFirstSignInIfNeeded()
         }
         self.onSignedIn = onSignedInClosure
         // specs/004 §2.6: NOT fired from here any more. This closure reads `currentUserId`, i.e.
