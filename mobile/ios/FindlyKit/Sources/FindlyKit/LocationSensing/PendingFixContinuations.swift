@@ -27,19 +27,33 @@ public final class PendingFixContinuations: @unchecked Sendable {
 
     public init() {}
 
-    /// Registers `continuation` under a fresh id for `source`. `isFirst` tells the caller whether
-    /// this registration is the ONLY thing currently waiting — i.e. whether it must actually call
-    /// `CLLocationManager.requestLocation()` (CoreLocation permits only one in-flight request at a
-    /// time; a caller joining an already-in-flight request rides along and is resumed by the same
-    /// eventual platform callback via `resumeAll`, at no extra GPS cost).
+    /// Registers `continuation` under a fresh id for `source`. `needsPlatformRequest` tells the
+    /// caller whether it must actually call `CLLocationManager.requestLocation()` (CoreLocation
+    /// permits only one in-flight request at a time; a caller riding along on an already-in-flight
+    /// request is resumed by the same eventual platform callback via `resumeAll`, at no extra GPS
+    /// cost).
+    ///
+    /// **Tier-aware, not just `pending.isEmpty` (I50 fix 1, Blocking).** The registry used to treat
+    /// "is anything else pending" as the only question, which meant a `.locate` (high-accuracy)
+    /// caller joining an in-flight `.periodic` (balanced-accuracy) request never got its own
+    /// `requestLocation()` re-issue — it rode along and was eventually resumed with the balanced
+    /// fix, mistagged `source: "locate"` (specs/009 §1.1's accuracy table, specs/001 §6.3's locate
+    /// fulfil). `needsPlatformRequest` is now `true` whenever `source`'s tier is STRICTLY HIGHER
+    /// than every tier already pending — i.e. this caller's accuracy need is not already being
+    /// satisfied by what's in flight — and `false` otherwise (an equal-or-lower-tier joiner rides
+    /// along exactly as before; a balanced caller receiving a high-accuracy fix costs nothing
+    /// extra). `SystemLocationProvider.awaitNextLocation` uses this same signal to decide whether to
+    /// raise `desiredAccuracy` (I50 fix 2) — see that call site's doc.
     @discardableResult
-    public func register(source: FixSource, continuation: CheckedContinuation<LocationFix, Error>) -> (id: ID, isFirst: Bool) {
+    public func register(source: FixSource, continuation: CheckedContinuation<LocationFix, Error>) -> (id: ID, needsPlatformRequest: Bool) {
         lock.lock()
         defer { lock.unlock() }
-        let isFirst = pending.isEmpty
+        let newTier = FixAccuracyPolicy.tier(for: source)
+        let highestPendingTier = pending.values.map { FixAccuracyPolicy.tier(for: $0.source) }.max()
+        let needsPlatformRequest = highestPendingTier.map { newTier > $0 } ?? true
         let id = ID()
         pending[id] = (source, continuation)
-        return (id, isFirst)
+        return (id, needsPlatformRequest)
     }
 
     /// A single caller's own timeout (specs/009 §1.1: "no fix is better than a burned battery") —
@@ -47,11 +61,24 @@ public final class PendingFixContinuations: @unchecked Sendable {
     /// so it can still be satisfied by the real platform answer (or its own, independent timeout).
     /// A no-op if `id` already resumed via `resumeAll`/`failAll`/an earlier `timeOut` call — the
     /// exact race a leaked/double-resumed continuation used to hit.
-    public func timeOut(id: ID, error: Error) {
+    ///
+    /// Returns whether THIS call is what just emptied the registry (I50 fix 8, Minor) — `true` only
+    /// when `id` was actually still pending and removing it left nothing behind. Nothing previously
+    /// cancelled CoreLocation's still in-flight `requestLocation()` once every caller gave up, so
+    /// the eventual delivery fell through to `SystemLocationProvider`'s significant-location-change
+    /// hint path mislabeled `source: "periodic"` regardless of what had actually triggered the
+    /// request. `SystemLocationProvider.awaitNextLocation` uses `true` here as the signal to call
+    /// `manager.stopUpdatingLocation()` (CoreLocation's documented way to cancel a `requestLocation()`
+    /// in flight) — never on a no-op call (already resumed, or another caller is still waiting), so
+    /// a still-live request is never torn out from under a still-pending sibling.
+    @discardableResult
+    public func timeOut(id: ID, error: Error) -> Bool {
         lock.lock()
         let entry = pending.removeValue(forKey: id)
+        let isNowEmpty = entry != nil && pending.isEmpty
         lock.unlock()
         entry?.continuation.resume(throwing: error)
+        return isNowEmpty
     }
 
     /// CoreLocation delivered one location for however many callers are currently waiting on the

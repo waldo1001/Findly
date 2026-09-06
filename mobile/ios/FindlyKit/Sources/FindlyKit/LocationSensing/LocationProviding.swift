@@ -169,30 +169,52 @@ public final class SystemLocationProvider: NSObject, LocationProviding, SystemLo
         // all if we already know it will fail.
         guard isAuthorized else { throw LocationProvidingError.permissionDenied }
 
-        manager.desiredAccuracy = Self.clAccuracy(for: FixAccuracyPolicy.tier(for: source))
         return try await awaitNextLocation(source: source)
     }
 
     /// Bridges `CLLocationManagerDelegate`'s callback-based `requestLocation()` to `async/await`
     /// via a checked continuation, registered in `pendingFixes` (specs/009 §3.4, I50 fix 5) rather
-    /// than a single property. `CLLocationManager.requestLocation()` itself is called only when
-    /// this is the FIRST currently-pending caller (`isFirst`) — CoreLocation permits only one
-    /// in-flight request; a caller joining an already-in-flight one rides along and is resumed by
-    /// the same eventual delegate callback via `pendingFixes.resumeAll`, at no extra GPS cost.
-    /// Each call schedules its OWN independent timeout (its `FixAccuracyPolicy` tier's own value —
+    /// than a single property. `CLLocationManager.requestLocation()` itself is (re-)issued only
+    /// when `pendingFixes.register` reports `needsPlatformRequest` — a caller joining an
+    /// already-in-flight request AT AN EQUAL OR LOWER ACCURACY TIER rides along and is resumed by
+    /// the same eventual delegate callback via `pendingFixes.resumeAll`, at no extra GPS cost. Each
+    /// call schedules its OWN independent timeout (its `FixAccuracyPolicy` tier's own value —
     /// `geofence`'s 15 s vs. everything else's 30 s), so one caller giving up does not disturb any
     /// other concurrently-pending caller (specs/009 §1.1: "no fix is better than a burned
     /// battery" — applies per caller, not globally).
+    ///
+    /// **I50 fixes 1+2 (Blocking + Major).** `desiredAccuracy` used to be set unconditionally on
+    /// every call, before this method even knew whether it would actually issue a request — so (a)
+    /// a `.locate` joining an in-flight `.periodic` never got CoreLocation to raise its accuracy at
+    /// all (the write happened, but with no fresh `requestLocation()` to apply it to, and the
+    /// eventual balanced-accuracy delivery was resumed as the mistagged `.locate` result), and (b)
+    /// a `.periodic` arriving during an in-flight `.locate` LOWERED the shared manager's accuracy
+    /// mid-flight, degrading the running high-accuracy request. Setting `desiredAccuracy` ONLY on
+    /// the branch that actually (re-)issues the request — using the seam `register` already
+    /// computed (`needsPlatformRequest` is true exactly when this caller's tier is strictly higher
+    /// than everything already pending) — fixes both: the manager is only ever raised, never
+    /// lowered, while any caller is pending, and a genuinely higher-tier joiner does get its own
+    /// fresh, correctly-accurate `requestLocation()`.
     private func awaitNextLocation(source: FixSource) async throws -> LocationFix {
         let timeout = FixAccuracyPolicy.timeout(for: source)
         return try await withCheckedThrowingContinuation { continuation in
-            let (id, isFirst) = pendingFixes.register(source: source, continuation: continuation)
-            if isFirst {
+            let (id, needsPlatformRequest) = pendingFixes.register(source: source, continuation: continuation)
+            if needsPlatformRequest {
+                manager.desiredAccuracy = Self.clAccuracy(for: FixAccuracyPolicy.tier(for: source))
                 manager.requestLocation()
             }
             Task { [weak self] in
                 try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
-                self?.pendingFixes.timeOut(id: id, error: LocationProvidingError.timedOut)
+                guard let self else { return }
+                // I50 fix 8 (Minor) — every pending caller (this one included) has now timed out;
+                // nothing is left waiting on CoreLocation's in-flight request, so cancel it rather
+                // than let a stray late delivery fall through to the significant-location-change
+                // hint path mislabeled `source: "periodic"` (specs/001 §5.1's `source` is meant to
+                // say what actually triggered the capture). `stopUpdatingLocation()` is
+                // CoreLocation's documented way to cancel a `requestLocation()` still in flight.
+                if self.pendingFixes.timeOut(id: id, error: LocationProvidingError.timedOut) {
+                    self.manager.stopUpdatingLocation()
+                }
             }
         }
     }
