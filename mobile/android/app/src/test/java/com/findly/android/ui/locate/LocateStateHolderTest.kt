@@ -428,6 +428,57 @@ class LocateStateHolderTest {
         assertEquals(30, api.getLocateRequestCalls.size)
     }
 
+    // specs/009-device-runtime.md §5.1 (amended 2026-09-06, A39's final round, finding 2): a
+    // zero-length poll window (`createdAt == expiresAt`) is malformed data, not a legitimately
+    // already-expired request — `takeIf { !it.isNegative }` let `Duration.ZERO` through, so
+    // `hasElapsedPollWindow` was satisfied on the very first poll tick and reported UNREACHABLE
+    // before the target could possibly have answered, reintroducing the instant-UNREACHABLE bug
+    // finding 6 fixed, from the malformed-data direction instead of the clock-skew one. A
+    // malformed window must behave like an unparseable one: never expires locally.
+
+    @Test
+    fun `a zero-length poll window is treated as malformed and never expires the poll locally`() = runTest {
+        val zeroWindowCreatedAt = "2026-07-19T09:05:12Z"
+        val zeroWindowExpiresAt = "2026-07-19T09:05:12Z" // createdAt == expiresAt: malformed, not "already expired"
+        val locationsApi = FakeLocationsApi()
+        val api = FakeLocateApi().apply {
+            createLocateRequestResult = ApiResult.Success(
+                LocateRequestDto(
+                    requestId = "lr_1",
+                    status = "pending",
+                    targetUserId = "u2",
+                    targetDeviceId = "d2",
+                    createdAt = zeroWindowCreatedAt,
+                    expiresAt = zeroWindowExpiresAt,
+                    lastKnown = null,
+                ),
+                features = defaultFeatures(),
+            )
+            pollResults.add(
+                ApiResult.Success(
+                    LocateRequestStatusResponseDto(
+                        "lr_1", "pending", zeroWindowCreatedAt, zeroWindowExpiresAt,
+                        fulfilledAt = null, late = false, fix = null,
+                    ),
+                    features = defaultFeatures(),
+                ),
+            )
+        }
+        val holder = holder(api, locationsApi, nowIso = zeroWindowCreatedAt)
+
+        holder.requestLocate(targetUserId = "u2")
+        runCurrent()
+
+        // The very first poll tick used to trip `hasElapsedPollWindow` immediately against a
+        // Duration.ZERO window and jump straight to the UNREACHABLE fallback.
+        advanceTimeBy(2000); runCurrent()
+        assertTrue(
+            "a zero-length window must be treated as malformed (never expires locally), not as already elapsed",
+            holder.state.value is LocateUiState.Polling,
+        )
+        assertEquals(0, locationsApi.getLatestLocationsCallCount)
+    }
+
     // specs/009-device-runtime.md §5.1 "Requester side" fallback device-selection (finding 12,
     // A39's review): every existing fallback test above uses an empty member list or a single
     // device, so `firstOrNull { it.deviceId == targetDeviceId }` never had to discriminate between
