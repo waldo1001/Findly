@@ -53,6 +53,7 @@ import com.findly.android.push.RealPushTokenProvider
 import com.findly.android.pushmessages.GeofenceConfigChangedPushHandler
 import com.findly.android.pushmessages.GeofenceEventNotifier
 import com.findly.android.pushmessages.GeofenceEventPushHandler
+import com.findly.android.pushmessages.LocateNotifier
 import com.findly.android.pushmessages.LocateRequestHandoff
 import com.findly.android.pushmessages.LocateRequestPushHandler
 import com.findly.android.pushmessages.PushMessageDispatcher
@@ -497,16 +498,33 @@ class AppContainer(context: Context) {
         locateRequestPushHandlerProvider = { locateRequestPushHandler },
     )
 
+    /** specs/009-device-runtime.md §5.1: the notifier shared by all three `LOCATE_REQUEST` handoff
+     * branches (A39 review, finding 1) — see [LocateNotifier]'s own doc for why every branch must
+     * post it, not just the foreground-service one. */
+    private val locateNotifier = LocateNotifier(context)
+
+    /** Not private (A39 review, finding 3): [LocateForegroundService] enqueues onto this directly
+     * as its own fallback when `startForeground` itself throws. */
+    val locateRequestWorkEnqueuer = LocateRequestWorkEnqueuer(context)
+
     /** specs/009-device-runtime.md §5.1 "Android execution model", option 2: starts the
      * short-lived `FOREGROUND_SERVICE_LOCATION` service, handing off the raw push `data` as string
      * `Intent` extras (small, ~3 keys — no need for a `Data`/JSON envelope). */
     private val locateForegroundServiceStarter: (Map<String, String>) -> Unit = { data ->
-        val intent = Intent(context, LocateForegroundService::class.java)
-        data.forEach { (key, value) -> intent.putExtra(key, value) }
-        ContextCompat.startForegroundService(context, intent)
+        try {
+            val intent = Intent(context, LocateForegroundService::class.java)
+            data.forEach { (key, value) -> intent.putExtra(key, value) }
+            ContextCompat.startForegroundService(context, intent)
+        } catch (e: Exception) {
+            // Code-review fix (finding 4, A39 review, specs/009 §5.1 amended): a refused
+            // startForegroundService (API 31+, lost the background-start exemption between the
+            // handoff's own check and this call) used to be silently swallowed by
+            // applicationScope's own top-level exception handler, with nothing left to capture the
+            // locate at all. The amended spec makes option 1 an explicit fallback chain: fall
+            // through to the expedited-work enqueuer instead of dropping the request.
+            locateRequestWorkEnqueuer.enqueue(data)
+        }
     }
-
-    private val locateRequestWorkEnqueuer = LocateRequestWorkEnqueuer(context)
 
     /** specs/009 §5.1: counts (never logs the message itself) how many times FCM has demoted this
      * app's `LOCATE_REQUEST` priority — "the single most useful field diagnostic for this whole
@@ -524,7 +542,22 @@ class AppContainer(context: Context) {
         presenceServiceRunning = { PresenceServiceState.isRunning },
         startForegroundServiceCapture = locateForegroundServiceStarter,
         enqueueExpeditedWork = { data -> locateRequestWorkEnqueuer.enqueue(data) },
-        capturePresenceDirect = { data -> locateRequestPushHandler.handle(data) },
+        // Code-review fix (finding 1, A39 review, specs/009 §5.1 amended): this branch used to
+        // capture without ever posting the findly_locate notification - the exact "silent locate"
+        // the amended spec's opening MUST forbids. Also (finding 9): this still runs on
+        // applicationScope rather than inside LocationForegroundService itself - the spec's "MAY",
+        // not "MUST" - kept as-is; equivalent only for as long as that service happens to stay
+        // alive, since nothing here re-foregrounds it if it doesn't. Risk accepted, not addressed
+        // this round.
+        capturePresenceDirect = { data ->
+            val notification = locateNotifier.buildNotification(data)
+            locateNotifier.post(notification)
+            try {
+                locateRequestPushHandler.handle(data)
+            } finally {
+                locateNotifier.cancel()
+            }
+        },
         onDemotionDetected = {
             Log.i("FindlyPush", "LOCATE_REQUEST demoted priority (count=${locateDemotionCount.incrementAndGet()})")
         },
