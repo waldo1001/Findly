@@ -95,10 +95,17 @@ fun LocateScreen(
                 }
 
                 is LocateUiState.Terminal -> {
-                    val (label, tone) = when (state.status) {
-                        "fulfilled" -> "Located" to FindlyStatusTone.Success
-                        "pushFailed" -> "Couldn't reach the device — showing last known" to FindlyStatusTone.Warning
-                        else -> "Request expired" to FindlyStatusTone.Neutral
+                    // specs/009-device-runtime.md §5.1 "Requester side": the UI states are
+                    // lastKnown -> updating -> (fresh | late | unreachable), with late rendered
+                    // exactly like fresh plus an age caption.
+                    val (label, tone) = when (state.outcome) {
+                        LocateOutcome.FRESH -> "Located" to FindlyStatusTone.Success
+                        LocateOutcome.LATE -> "Located" to FindlyStatusTone.Success
+                        LocateOutcome.UNREACHABLE -> if (state.status == "pushFailed") {
+                            "Couldn't reach the device — showing last known" to FindlyStatusTone.Warning
+                        } else {
+                            "Request expired — showing last known" to FindlyStatusTone.Neutral
+                        }
                     }
                     FindlyStatusChip(label = label, tone = tone)
 
@@ -107,7 +114,11 @@ fun LocateScreen(
                         FindlyCard {
                             FindlyListRow(
                                 title = "Location",
-                                subtitle = "${point.first}, ${point.second}",
+                                subtitle = if (state.outcome == LocateOutcome.LATE && state.fix != null) {
+                                    "${point.first}, ${point.second} · ${LocateAgeCaption.forRecordedAt(state.fix.recordedAt)}"
+                                } else {
+                                    "${point.first}, ${point.second}"
+                                },
                             )
                         }
                     }
@@ -127,6 +138,7 @@ private fun LocateScreenLightPreview() {
             state = LocateUiState.Terminal(
                 requestId = "lr_preview",
                 status = "fulfilled",
+                outcome = LocateOutcome.FRESH,
                 fix = LocateFixUi("d1", 51.0544, 3.7170, 4.8, "2026-07-19T09:05:12Z", 77),
                 lastKnown = null,
             ),
