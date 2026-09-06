@@ -99,9 +99,6 @@ class LocationForegroundService : Service() {
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
-        // A39 (specs/009 §5.1 option 3): lets a concurrent LOCATE_REQUEST reuse this already-
-        // foregrounded location service instead of starting a second one.
-        PresenceServiceState.isRunning = true
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -152,7 +149,13 @@ class LocationForegroundService : Service() {
                     // rather than a lock, is what keeps its cancel-then-reassign race-free.
                     is ServiceRestartDecision.StartWithInterval ->
                         withContext(Dispatchers.Main) { runCycle(decision.syncIntervalMinutes, attempt = 1) }
-                    ServiceRestartDecision.Stop -> stopSelf()
+                    ServiceRestartDecision.Stop -> {
+                        // Code-review fix (finding 8, A39 review): explicit, defensive clear before
+                        // stopSelf() - see PresenceServiceState.isRunning's own doc below for why
+                        // it is set only in runCycle() now, never in onCreate().
+                        PresenceServiceState.isRunning = false
+                        stopSelf()
+                    }
                 }
             }
         }
@@ -170,6 +173,11 @@ class LocationForegroundService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     private fun runCycle(syncIntervalMinutes: Int, attempt: Int) {
+        // Code-review fix (finding 8, A39 review): set only here, where the service actually
+        // commits to running a cycle - every runCycle() call is reached strictly after
+        // onStartCommand's own unconditional startForeground() above. See
+        // PresenceServiceState.isRunning's own doc for why onCreate() no longer sets this.
+        PresenceServiceState.isRunning = true
         // Code-review fix (finding 6, post-A40 review): cancel any still-running cycle before
         // replacing cycleJob - without this, an ACTION_TICK arriving mid-cycle (or the finding-4
         // fresh-cycle path above) could leave two concurrent runOnce()s in flight.
