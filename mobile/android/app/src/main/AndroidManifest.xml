@@ -160,6 +160,16 @@
             android:exported="false"
             android:foregroundServiceType="location" />
 
+        <!-- A39 (specs/009-device-runtime.md §5.1): the short-lived LOCATE_REQUEST foreground
+             service — started only from FindlyMessagingService's LocateRequestHandoff on a
+             non-demoted (PRIORITY_HIGH) message with ACCESS_BACKGROUND_LOCATION granted (an
+             explicit Android 12+ start-from-background exemption for a high-priority FCM
+             message). Hard-capped at 45s and never START_STICKY - not exported. -->
+        <service
+            android:name=".queue.worker.LocateForegroundService"
+            android:exported="false"
+            android:foregroundServiceType="location" />
+
         <!-- A11 (specs/009-device-runtime.md §6.3): GeofencingClient's transition callback
              target. Fired only via the PendingIntent GeofencingClientManager registers with every
              addGeofences call (AppContainer) - exported="false" is safe because delivery goes

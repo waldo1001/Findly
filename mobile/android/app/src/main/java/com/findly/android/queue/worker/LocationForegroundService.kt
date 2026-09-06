@@ -99,6 +99,9 @@ class LocationForegroundService : Service() {
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
+        // A39 (specs/009 §5.1 option 3): lets a concurrent LOCATE_REQUEST reuse this already-
+        // foregrounded location service instead of starting a second one.
+        PresenceServiceState.isRunning = true
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -157,6 +160,7 @@ class LocationForegroundService : Service() {
     }
 
     override fun onDestroy() {
+        PresenceServiceState.isRunning = false
         cycleJob?.cancel()
         serviceScope.cancel()
         cancelPendingTick()
