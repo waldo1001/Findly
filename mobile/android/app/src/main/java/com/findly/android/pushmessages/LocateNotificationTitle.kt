@@ -36,6 +36,18 @@ object LocateNotificationTitle {
         val withoutBidi = name.filterNot { it in BIDI_CONTROLS }
         val withoutControls = withoutBidi.map { ch -> if (ch.isISOControl()) ' ' else ch }.joinToString("")
         val collapsed = withoutControls.replace(Regex(" +"), " ").trim()
-        return collapsed.take(MAX_NAME_LENGTH)
+        return clampToCodePoints(collapsed, MAX_NAME_LENGTH)
+    }
+
+    /** specs/009 section 9 (amended 2026-09-06 - A39's final round, finding 3): `String.take(n)`
+     * counts UTF-16 code units, not characters, so a name whose 30th unit lands on the high
+     * surrogate of a supplementary-plane character (e.g. most emoji) used to split it in half,
+     * leaving an unpaired surrogate that renders as a replacement glyph. Clamping by code point
+     * (via [String.offsetByCodePoints], which always lands on a character boundary) instead of by
+     * UTF-16 unit keeps a multi-unit character whole even right at the boundary. */
+    private fun clampToCodePoints(value: String, maxCodePoints: Int): String {
+        if (value.codePointCount(0, value.length) <= maxCodePoints) return value
+        val cutIndex = value.offsetByCodePoints(0, maxCodePoints)
+        return value.substring(0, cutIndex)
     }
 }
