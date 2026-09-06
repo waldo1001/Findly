@@ -122,13 +122,26 @@ public final class SystemLocationProvider: NSObject, LocationProviding, SystemLo
     /// (`PresenceAccuracyPolicy.drainAction`) reads `isPresenceActive` below rather than a second,
     /// separately-maintained flag, so the two can never drift apart.
     ///
-    /// **I52 review round 2, finding 1 (Blocking), sub-defects (b)/(c).** This property (and
-    /// `presenceIntervalMinutes`/`preserved*` below) is read and written ONLY from `startPresence`/
-    /// `stopPresence`, and both of those now enforce main-thread execution before touching anything
-    /// (see their own docs) — so these are effectively main-thread-confined, never touched from the
-    /// actor executor that caused the original bug. `Timer.invalidate()` is Apple-documented as
-    /// needing to run on the thread that installed the timer; guaranteeing `stopPresence()` always
-    /// runs on Main is what makes that true here, since `startPresence` always installs on Main too.
+    /// **I52 review round 3 finding (Major) — corrects a false claim from round 2.** This property
+    /// is NOT read and written only from `startPresence`/`stopPresence`: `isPresenceActive` below
+    /// reads it too, and `isPresenceActive` is consulted inside `applyDrainAction()`, which has
+    /// THREE callers, not two — `didUpdateLocations` and `didFailWithError` (both
+    /// `CLLocationManagerDelegate` callbacks, main-bound because CoreLocation delivers them on
+    /// whatever thread created `manager`, which is always Main here), AND the per-caller timeout
+    /// `Task {}` inside `awaitNextLocation`, which fires after a `Task.sleep` and inherits NO
+    /// isolation, because `SystemLocationProvider` is a plain `NSObject` subclass — not `@MainActor`,
+    /// not an actor. That third path really did run `applyDrainAction()`'s body (and therefore this
+    /// property's read) on an arbitrary cooperative-pool thread, concurrently with
+    /// `startPresence`/`stopPresence` mutating the same manager on Main — a genuine data race the
+    /// round-2 wording above overstated away instead of covering. The reviewer's probe demonstrated
+    /// the contrast directly: the same `Task {}`-after-sleep shape stays on Main when the host type
+    /// is `@MainActor`, and lands on an arbitrary thread when it is a plain class like this one, even
+    /// when the enclosing method was itself called from Main. Confinement is maintained not by "only
+    /// two methods touch this" but by an explicit `Thread.isMainThread` guard +
+    /// `DispatchQueue.main.async` re-entry at EVERY entry point that can reach this property —
+    /// `startPresence`, `stopPresence`, and now `applyDrainAction()` too (see its own doc).
+    /// `Timer.invalidate()` is Apple-documented as needing to run on the thread that installed the
+    /// timer; these three guards together are what actually make that true here.
     private var presenceTimer: Timer?
 
     /// specs/009 §1.3/§3.5 (I52 review round 2, finding 2, Major) — the interval `presenceTimer`
@@ -446,7 +459,22 @@ public final class SystemLocationProvider: NSObject, LocationProviding, SystemLo
     /// failure) uses to act on `PresenceAccuracyPolicy.drainAction`. Reading `isPresenceActive`
     /// fresh here — rather than each call site re-deriving it — is what keeps the decision correct
     /// even though the three call sites run at different points in this class's lifecycle.
+    ///
+    /// **I52 review round 3 finding (Major).** Two of those three call sites — `didUpdateLocations`
+    /// and `didFailWithError` — are `CLLocationManagerDelegate` callbacks and therefore main-bound
+    /// (CoreLocation delivers them on the thread that created `manager`, which is Main here). The
+    /// third, the per-caller timeout `Task {}` in `awaitNextLocation`, fires after a `Task.sleep`
+    /// and inherits no isolation, since this class is a plain `NSObject` subclass rather than
+    /// `@MainActor` or an actor — so it can and did run this method's body (reading
+    /// `isPresenceActive`/`presenceTimer` and mutating `manager`) on an arbitrary cooperative-pool
+    /// thread, concurrently with `startPresence`/`stopPresence` doing the same on Main. Same
+    /// `Thread.isMainThread` guard + `DispatchQueue.main.async` re-entry those two already use,
+    /// added here too, so all three callers converge on Main before touching anything.
     private func applyDrainAction() {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { [weak self] in self?.applyDrainAction() }
+            return
+        }
         switch PresenceAccuracyPolicy.drainAction(presenceActive: isPresenceActive) {
         case .stopUpdating:
             manager.stopUpdatingLocation()
