@@ -64,12 +64,11 @@ import com.findly.android.queue.room.MIGRATION_1_2
 import com.findly.android.queue.room.RoomFixQueueStore
 import com.findly.android.queue.room.RoomGeofenceEventQueueStore
 import com.findly.android.queue.worker.DefaultForegroundServiceController
-import com.findly.android.queue.worker.EffectiveSyncStrategySelector
-import com.findly.android.queue.worker.SyncStrategy
 import com.findly.android.queue.worker.FindlyWorkerFactory
 import com.findly.android.queue.worker.LastCaptureDateStore
 import com.findly.android.queue.worker.LocationSyncRunner
 import com.findly.android.queue.worker.LocationSyncScheduler
+import com.findly.android.queue.worker.PresenceRequirementPolicy
 import com.findly.android.queue.worker.ScheduleRebuilder
 import com.findly.android.queue.worker.SettingsPollScheduler
 import com.findly.android.queue.worker.SharedPreferencesLastCaptureDateStore
@@ -328,17 +327,22 @@ class AppContainer(context: Context) {
     }
 
     /** A41 (specs/009 §3.2/§7, 000 §D19): whether presence is *currently* the effective sync
-     * strategy for this device — the same [com.findly.android.queue.worker.EffectiveSyncStrategySelector]
-     * check [syncScheduler] itself uses, restated here (rather than re-derived by the caller) so
-     * [com.findly.android.MainActivity]'s battery-prompt gating and the scheduler can never drift
-     * on what "presence required" means. A paused device has no presence regardless of interval. */
-    suspend fun presenceCurrentlyRequired(backgroundLocationGranted: Boolean): Boolean {
-        val cached = deviceSettingsStateStore.current() ?: return false
-        if (!cached.trackingEnabled) return false
-        return EffectiveSyncStrategySelector.strategyFor(
-            cached.syncIntervalMinutes,
-            backgroundLocationGranted,
-        ) is SyncStrategy.ForegroundService
+     * strategy for this device — the decision itself now lives in the tested
+     * [com.findly.android.queue.worker.PresenceRequirementPolicy] (code-review fix, A41 round 2
+     * finding 8; this method is left with only the two reads). Code-review fix (A41 round 2,
+     * finding 2): no longer takes a `backgroundLocationGranted` parameter — it used to be fed
+     * `permissionState.authorization == LocationAuthorization.ALWAYS` from
+     * [com.findly.android.MainActivity], a *different* notion of "granted" than
+     * [backgroundLocationPermissionChecker] (that resolver is undefined pre-API 29 for
+     * `ACCESS_BACKGROUND_LOCATION` and always resolved `WHEN_IN_USE` there, so the automatic
+     * battery offer could never fire on API 26-28 even while presence was genuinely running).
+     * Reading [backgroundLocationPermissionChecker] here directly — the same instance
+     * [syncScheduler] itself reads — makes the two definitions structurally identical instead of
+     * merely intended to match. */
+    suspend fun presenceCurrentlyRequired(): Boolean {
+        val cached = deviceSettingsStateStore.current()
+        val granted = backgroundLocationPermissionChecker.isGranted()
+        return PresenceRequirementPolicy.decide(cached, granted)
     }
 
     /** A41 (specs/010 §4.2): this app instance's own registered `deviceId`, for

@@ -250,13 +250,16 @@ class MainActivity : ComponentActivity() {
                 // A41 (specs/009 §3.2/§7, 000 §D19): the once-per-install battery-optimisation
                 // offer - also gated on no disclosure being on screen, and on a fresh suspend read
                 // of whether presence is *currently* the effective sync strategy (interval <= 30
-                // AND background permission granted, container.presenceCurrentlyRequired's exact
-                // EffectiveSyncStrategySelector check).
+                // AND background permission granted). Code-review fix (A41 round 2, finding 2):
+                // container.presenceCurrentlyRequired() now takes no parameter and reads the same
+                // AndroidBackgroundLocationPermissionChecker the scheduler uses, instead of being
+                // fed permissionState.authorization == ALWAYS - that reader was undefined pre-API
+                // 29 for ACCESS_BACKGROUND_LOCATION and always resolved WHEN_IN_USE there, so this
+                // offer could never fire on API 26-28, exactly the Doze-afflicted population the
+                // exemption exists for.
                 var presenceRequiredForBattery by remember { mutableStateOf(false) }
-                LaunchedEffect(epoch, permissionState.authorization) {
-                    presenceRequiredForBattery = container.presenceCurrentlyRequired(
-                        backgroundLocationGranted = permissionState.authorization == LocationAuthorization.ALWAYS,
-                    )
+                LaunchedEffect(epoch) {
+                    presenceRequiredForBattery = container.presenceCurrentlyRequired()
                 }
                 if (BatteryOptimizationPromptPolicy.shouldOffer(
                         presenceRequired = presenceRequiredForBattery,
