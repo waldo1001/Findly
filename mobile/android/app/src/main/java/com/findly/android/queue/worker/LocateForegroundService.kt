@@ -4,6 +4,7 @@ import android.content.Intent
 import android.os.IBinder
 import android.util.Log
 import android.app.Service
+import androidx.core.app.NotificationManagerCompat
 import com.findly.android.FindlyApplication
 import com.findly.android.pushmessages.LocateNotifier
 import kotlinx.coroutines.CoroutineExceptionHandler
@@ -47,6 +48,23 @@ import kotlinx.coroutines.launch
  * this start's own `startId`, so a second `LOCATE_REQUEST` arriving while the first is still in
  * flight can no longer have its capture killed mid-way by the first's orphaned timeout — Android
  * only honours `stopSelf(startId)` once no more recent start has been delivered.
+ *
+ * **A39's final round, finding 1 (Major):** this service is a singleton — a second
+ * `LOCATE_REQUEST` landing on this branch while the first is still in flight re-delivers via
+ * [onStartCommand] on the *same* instance, not a new one. The notification id passed to
+ * `startForeground` is now derived per request ([LocateNotifier.notificationIdFor]) instead of a
+ * single global constant, so two overlapping requests here show two distinct notifications
+ * instead of one overwriting the other. [finish] cancels only its own request's notification id
+ * explicitly, and detaches from the foreground state (`STOP_FOREGROUND_DETACH`, which — unlike the
+ * previous `STOP_FOREGROUND_REMOVE` — never touches a notification) rather than relying on
+ * `stopForeground`'s single "current" notification, which is Android's own OS-level foreground
+ * bookkeeping for the *service*, not per request; that call is a no-op for a request that isn't
+ * the one Android currently associates with this service's foreground state, whichever that is.
+ * A literal double-overlap on this exact branch for the exact same device is therefore no longer
+ * able to remove the *other* request's notification — the failure this finding exists to fix —
+ * though the service may drop its formal OS foreground designation as soon as the first of the two
+ * finishes, a few seconds early for the second; that residual is reported, not fixed, in this
+ * round (see the A39 final-round report).
  */
 class LocateForegroundService : Service() {
 
@@ -68,9 +86,10 @@ class LocateForegroundService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val data = intent.toDataMap()
         val notification = notifier.buildNotification(data)
+        val notificationId = notifier.notificationIdFor(data)
 
         try {
-            startForeground(NOTIFICATION_ID, notification)
+            startForeground(notificationId, notification)
         } catch (e: Exception) {
             // Code-review fix (finding 3): fall through to the expedited-work fallback rather than
             // dropping the request outright - same fallback chain finding 4's handoff-layer guard
@@ -82,7 +101,7 @@ class LocateForegroundService : Service() {
 
         timeoutJob = serviceScope.launch {
             kotlinx.coroutines.delay(HARD_CAP_MILLIS)
-            finish(startId)
+            finish(startId, notificationId)
         }
 
         serviceScope.launch {
@@ -90,7 +109,7 @@ class LocateForegroundService : Service() {
                 val container = (application as FindlyApplication).container
                 container.locateRequestPushHandler.handle(data)
             } finally {
-                finish(startId)
+                finish(startId, notificationId)
             }
         }
 
@@ -99,10 +118,16 @@ class LocateForegroundService : Service() {
 
     /** Idempotent — the timeout coroutine and the capture coroutine race to call this first;
      * `stopSelf(startId)` on an already-stopping service, or one superseded by a newer start, is a
-     * safe no-op (see class doc, finding 7). */
-    private fun finish(startId: Int) {
+     * safe no-op (see class doc, finding 7). [notificationId] is this call's own request's id
+     * (finding 1, A39's final round): cancelling it explicitly, instead of the previous
+     * `stopForeground(STOP_FOREGROUND_REMOVE)`, never removes a *different* still-in-flight
+     * request's notification merely because Android currently associates it with this service's
+     * foreground state — `STOP_FOREGROUND_DETACH` relinquishes that state without touching any
+     * notification's content. */
+    private fun finish(startId: Int, notificationId: Int) {
         timeoutJob?.cancel()
-        stopForeground(STOP_FOREGROUND_REMOVE)
+        NotificationManagerCompat.from(this).cancel(notificationId)
+        stopForeground(STOP_FOREGROUND_DETACH)
         stopSelf(startId)
     }
 
@@ -120,7 +145,6 @@ class LocateForegroundService : Service() {
 
     companion object {
         private const val TAG = "LocateForegroundService"
-        private const val NOTIFICATION_ID = LocateNotifier.NOTIFICATION_ID
         private const val HARD_CAP_MILLIS = 45_000L
     }
 }

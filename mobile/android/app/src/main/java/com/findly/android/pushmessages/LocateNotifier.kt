@@ -25,11 +25,19 @@ import com.findly.android.R
  * foreground-service branch instead passes [buildNotification]'s result straight to
  * `startForeground`, and the expedited-work branch passes it to `getForegroundInfo()` — both of
  * those already "post" via the OS's own foreground-service machinery, so they must not also call
- * [post] (harmless double-post of the same notification ID, but pointless).
+ * [post].
+ *
+ * **Per-request notification id (amended 2026-09-06, A39's final round, finding 1 — Major):** the
+ * id is no longer a single global constant. [notificationIdFor] derives it from `requestId` (see
+ * [LocateNotificationId]) so two requests in flight at once — landing in different branches, or
+ * even the same branch twice — never share a slot; finishing one request's capture can then never
+ * remove a different request's still-active notification. [post] and [cancel] take the raw push
+ * `data` map and derive the id themselves so every caller of a given request agrees on it; the
+ * `startForeground`/`getForegroundInfo` callers derive it the same way via [notificationIdFor].
  *
  * Thin, untested Android-framework glue by design (same bucket as [GeofenceEventNotifier]) — the
- * *decidable* part of what it does ([LocateNotificationTitle], including the sanitiser and the
- * missing-`requestedByName` fallback) is pure, tested Kotlin.
+ * *decidable* part of what it does ([LocateNotificationTitle] and [LocateNotificationId]) is pure,
+ * tested Kotlin.
  */
 class LocateNotifier(private val context: Context) {
 
@@ -44,19 +52,27 @@ class LocateNotifier(private val context: Context) {
             .build()
     }
 
+    /** The per-request notification id for this push `data` map — see [LocateNotificationId] and
+     * the class doc's "Per-request notification id" note (finding 1). Used directly by
+     * [com.findly.android.queue.worker.LocateForegroundService]'s `startForeground` and
+     * [com.findly.android.queue.worker.LocateRequestWorker.getForegroundInfo], and internally by
+     * [post]/[cancel]. */
+    fun notificationIdFor(data: Map<String, String>): Int =
+        LocateNotificationId.forRequestId(data["requestId"].orEmpty())
+
     /** Used by the presence-reuse direct-capture branch only — the other two branches post via
      * their own OS-level foreground-service API instead (see class doc). */
-    fun post(notification: Notification) {
+    fun post(data: Map<String, String>, notification: Notification) {
         try {
-            NotificationManagerCompat.from(context).notify(NOTIFICATION_ID, notification)
+            NotificationManagerCompat.from(context).notify(notificationIdFor(data), notification)
         } catch (e: SecurityException) {
             // POST_NOTIFICATIONS not granted (specs/003-android-client.md §11 point 4) - drop
             // silently, same as every other best-effort notification path in 009 §5.
         }
     }
 
-    fun cancel() {
-        NotificationManagerCompat.from(context).cancel(NOTIFICATION_ID)
+    fun cancel(data: Map<String, String>) {
+        NotificationManagerCompat.from(context).cancel(notificationIdFor(data))
     }
 
     private fun ensureChannel() {
@@ -73,6 +89,5 @@ class LocateNotifier(private val context: Context) {
          * DEFAULT...)". */
         const val CHANNEL_ID = "findly_locate"
         private const val CHANNEL_NAME = "Locate requests"
-        const val NOTIFICATION_ID = 2001
     }
 }

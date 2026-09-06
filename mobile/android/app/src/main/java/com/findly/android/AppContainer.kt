@@ -549,13 +549,17 @@ class AppContainer(context: Context) {
         // not "MUST" - kept as-is; equivalent only for as long as that service happens to stay
         // alive, since nothing here re-foregrounds it if it doesn't. Risk accepted, not addressed
         // this round.
+        // A39's final round, finding 1 (Major): post/cancel now take the raw `data` map so
+        // LocateNotifier can derive a per-requestId notification id (LocateNotificationId) instead
+        // of a single global one - two overlapping LOCATE_REQUESTs no longer share a slot that
+        // one finishing first could silently cancel out from under the other.
         capturePresenceDirect = { data ->
             val notification = locateNotifier.buildNotification(data)
-            locateNotifier.post(notification)
+            locateNotifier.post(data, notification)
             try {
                 locateRequestPushHandler.handle(data)
             } finally {
-                locateNotifier.cancel()
+                locateNotifier.cancel(data)
             }
         },
         onDemotionDetected = {

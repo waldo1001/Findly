@@ -23,6 +23,12 @@ import com.findly.android.pushmessages.LocateRequestPushHandler
  * background permission never captured at all on Android 8-11. Builds its notification via the
  * same shared [LocateNotifier] the other two handoff branches use (finding 1), so this branch also
  * renders the "X is locating you" title instead of posting nothing.
+ *
+ * **A39's final round, finding 1 (Major):** the foreground notification id is derived per request
+ * via [LocateNotifier.notificationIdFor] rather than a single global constant — each `WorkRequest`
+ * gets its own `CoroutineWorker` instance, so this branch never shared a slot with a sibling
+ * anyway, but the id must still match what [LocateNotifier.post]/`cancel` and the foreground
+ * service derive for the same `requestId`.
  */
 class LocateRequestWorker(
     context: Context,
@@ -41,11 +47,13 @@ class LocateRequestWorker(
     }
 
     override suspend fun getForegroundInfo(): ForegroundInfo {
-        val notification = notifier.buildNotification(inputData.toStringMap())
+        val data = inputData.toStringMap()
+        val notification = notifier.buildNotification(data)
+        val notificationId = notifier.notificationIdFor(data)
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            ForegroundInfo(LocateNotifier.NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
+            ForegroundInfo(notificationId, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
         } else {
-            ForegroundInfo(LocateNotifier.NOTIFICATION_ID, notification)
+            ForegroundInfo(notificationId, notification)
         }
     }
 
