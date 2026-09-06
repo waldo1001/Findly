@@ -81,17 +81,16 @@ public final class LocationSyncRunner {
     }
 
     private func maybeCapturePeriodicFix() async {
-        let interval = currentSyncIntervalMinutes()
-        let shouldCapture = SyncTriggerPolicy.shouldCapture(
-            syncIntervalMinutes: interval, lastQueuedFixAt: lastQueuedFixAtStore.lastQueuedFixAt(), now: now()
-        )
-        guard shouldCapture else { return }
-        // FixCaptureCoordinator applies its own §1.2 suppression (paused/permission/debounce) -
-        // a nil result here just means nothing was queued, which is fine to treat as "no update
-        // to lastQueuedFixAt" (the next trigger will re-evaluate the same 0.8 threshold).
-        if await captureCoordinator.captureAndQueue(source: .periodic) != nil {
-            lastQueuedFixAtStore.recordQueuedFixAt(now())
-        }
+        // I50 review 2nd round, Minor — `FixCaptureCoordinator.captureAndQueue` now applies this
+        // exact §3.4 × 0.8 elapsed-time gate itself for every `.periodic` caller (I50 fix 6),
+        // including this one, and records `lastQueuedFixAt` on every successful enqueue. This used
+        // to re-check the identical predicate against the same store here first, and record here
+        // too - two copies of one rule, evaluated moments apart with near-identical timestamps.
+        // Harmless (elapsed time only grows, so it could never flip a legitimate pass into a drop),
+        // but redundant. The coordinator is the one seam every `.periodic` caller goes through
+        // (`FixCaptureCoordinator`'s own doc), so it now owns the rule alone; a nil result here just
+        // means nothing was queued (gated, paused, permission-absent, or debounced).
+        _ = await captureCoordinator.captureAndQueue(source: .periodic)
     }
 
     private func drainQueue() async -> RunResult {
