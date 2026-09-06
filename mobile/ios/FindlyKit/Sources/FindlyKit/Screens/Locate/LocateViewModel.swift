@@ -156,7 +156,15 @@ public final class LocateViewModel: ObservableObject {
                         // through so `.unreachable` can tell "couldn't reach the device" (pushFailed)
                         // apart from "request expired" (everything else, incl. a fixless "fulfilled"
                         // and a purely local-window timeout the server never actually confirmed).
-                        let triggerStatus: LocateStatus = (data.status == .expired || data.status == .pushFailed) ? data.status : .expired
+                        //
+                        // I51 re-review fix (Minor, finding 1): `.pending` is the only status that can
+                        // reach this line through the window-elapsed path alone — `fulfilled`, `expired`
+                        // and `pushFailed` either return above or are themselves the trigger. Defaulting
+                        // to `.expired` for anything but `.pending` fabricated a status the wire never
+                        // sent (e.g. a fixless `fulfilled` became `.expired`, falsely claiming the server
+                        // never answered). Only the genuine local timeout gets defaulted now; every
+                        // wire-supplied status is carried through untouched.
+                        let triggerStatus: LocateStatus = data.status == .pending ? .expired : data.status
                         await self.resolveViaFallback(targetDeviceId: targetDeviceId, createdAt: createdAt, wireStatus: triggerStatus)
                         return
                     }
