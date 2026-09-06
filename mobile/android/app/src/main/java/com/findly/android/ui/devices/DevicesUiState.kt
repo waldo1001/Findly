@@ -25,6 +25,11 @@ data class DeviceCardUi(
     val renameDraft: String = deviceName,
     val isMutating: Boolean = false,
     val error: String? = null,
+    /** True for the one card representing the device this app instance is running on (matched
+     * against [DevicesStateHolder]'s `localDeviceId`) — specs/010-app-shell-and-screen-ux.md §4.2's
+     * "Battery settings" action and vendor-OEM link (009 §3.2) are Android-runtime-local settings,
+     * so they only make sense on this card, never a family member's remote device. */
+    val isThisDevice: Boolean = false,
 )
 
 /**

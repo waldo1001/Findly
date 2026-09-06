@@ -57,6 +57,37 @@ class DevicesStateHolderTest {
     }
 
     @Test
+    fun `the card whose deviceId matches localDeviceId is marked isThisDevice, others are not`() = runTest {
+        val devicesApi = FakeDevicesApi().apply {
+            listDevicesResult = ApiResult.Success(
+                ListDevicesResponseDto(listOf(familyDevice(id = "d1"), familyDevice(id = "d2"))),
+                defaultFeatures(minSyncIntervalMinutes = 15),
+            )
+        }
+        val holder = DevicesStateHolder(devicesApi, isParent = true, scope = backgroundScope, localDeviceId = "d2")
+        runCurrent()
+
+        val state = holder.state.value as DevicesUiState.Content
+        assertTrue(state.devices.single { it.deviceId == "d2" }.isThisDevice)
+        assertTrue(!state.devices.single { it.deviceId == "d1" }.isThisDevice)
+    }
+
+    @Test
+    fun `a null localDeviceId marks no card as isThisDevice`() = runTest {
+        val devicesApi = FakeDevicesApi().apply {
+            listDevicesResult = ApiResult.Success(
+                ListDevicesResponseDto(listOf(familyDevice(id = "d1"))),
+                defaultFeatures(minSyncIntervalMinutes = 15),
+            )
+        }
+        val holder = DevicesStateHolder(devicesApi, isParent = true, scope = backgroundScope, localDeviceId = null)
+        runCurrent()
+
+        val state = holder.state.value as DevicesUiState.Content
+        assertTrue(!state.devices.single().isThisDevice)
+    }
+
+    @Test
     fun `a confirmed PROFILE_NOT_FOUND routes to Onboarding profile-less`() = runTest {
         val devicesApi = FakeDevicesApi().apply {
             listDevicesResult = ApiResult.Failure(ApiError.ProfileNotFound("no profile", "r_1"))

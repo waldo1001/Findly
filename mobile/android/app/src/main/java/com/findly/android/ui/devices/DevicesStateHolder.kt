@@ -40,6 +40,10 @@ class DevicesStateHolder(
     private val devicesApi: DevicesApi,
     val isParent: Boolean,
     scope: CoroutineScope,
+    /** A41 (specs/010 §4.2): this app instance's own registered `deviceId` — `null` only for a
+     * caller that genuinely cannot resolve it yet (mirrors `AppContainer`'s own nullable
+     * `deviceIdFor` seam). Marks exactly one card [DeviceCardUi.isThisDevice] when it matches. */
+    private val localDeviceId: String? = null,
 ) {
     private val _state = MutableStateFlow<DevicesUiState>(DevicesUiState.Loading)
     val state: StateFlow<DevicesUiState> = _state.asStateFlow()
@@ -64,7 +68,7 @@ class DevicesStateHolder(
             }
             is ApiResult.Success -> {
                 _state.value = DevicesUiState.Content(
-                    devices = result.data.devices.map { it.toCardUi() },
+                    devices = result.data.devices.map { it.toCardUi(isThisDevice = it.deviceId == localDeviceId) },
                     limits = result.features?.limits,
                 )
             }
@@ -130,7 +134,7 @@ class DevicesStateHolder(
     }
 }
 
-private fun FamilyDeviceDto.toCardUi(): DeviceCardUi = DeviceCardUi(
+private fun FamilyDeviceDto.toCardUi(isThisDevice: Boolean): DeviceCardUi = DeviceCardUi(
     deviceId = deviceId,
     deviceName = deviceName,
     model = model,
@@ -141,4 +145,5 @@ private fun FamilyDeviceDto.toCardUi(): DeviceCardUi = DeviceCardUi(
     ownerDisplayName = ownerDisplayName,
     lastSeenAt = lastSeenAt,
     renameDraft = deviceName,
+    isThisDevice = isThisDevice,
 )
