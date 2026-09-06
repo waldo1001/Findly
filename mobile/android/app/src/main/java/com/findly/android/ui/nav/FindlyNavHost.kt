@@ -92,6 +92,7 @@ import com.findly.android.ui.settings.PrivacyViewModelFactory
 import com.findly.android.ui.signin.SignInRoute
 import com.findly.android.ui.signin.SignInViewModel
 import com.findly.android.ui.signin.SignInViewModelFactory
+import com.findly.android.util.startActivitySafely
 import kotlinx.coroutines.launch
 
 /**
@@ -439,8 +440,17 @@ fun FindlyNavHost(
             // the retired SettingsStateHolder's own family probe).
             val launchState by launchGateViewModel.state.collectAsState()
             val isParent = (launchState as? LaunchUiState.Ready)?.familyHeader?.isParent ?: false
+            // Code-review fix (A41 round 2, finding 9): resolved per-load (a () -> String?
+            // supplier) rather than snapshotted once when this viewModel(factory = ...) call
+            // first runs. container.localDeviceIdOrNull() can resolve null mid sign-out/sign-in
+            // (auth state not yet SignedIn) - a plain snapshot would then cache null for this
+            // ViewModel's whole lifetime and no card would ever be marked isThisDevice on this
+            // screen visit, even after sign-in completes. DevicesStateHolder now calls the
+            // supplier fresh on every load().
             val devicesViewModel: DevicesViewModel = viewModel(
-                factory = DevicesViewModelFactory(container.findlyApiClient, isParent, container.localDeviceIdOrNull()),
+                factory = DevicesViewModelFactory(container.findlyApiClient, isParent) {
+                    container.localDeviceIdOrNull()
+                },
             )
             // A41 (specs/010 §4.2, specs/009 §3.2): Android-runtime-local settings (which OS
             // dialog/settings page to open, whether this OEM needs the dontkillmyapp.com link) -
@@ -454,21 +464,28 @@ fun FindlyNavHost(
                 onOpenBatterySettings = {
                     when (BatterySettingsActionPolicy.actionFor(container.batteryOptimizationPromptStore.hasAnswered())) {
                         BatterySettingsAction.OfferPrompt -> {
-                            container.batteryOptimizationPromptStore.recordAnswered()
-                            context.startActivity(
-                                Intent(
-                                    Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
-                                    Uri.fromParts("package", context.packageName, null),
-                                ),
-                            )
+                            // Code-review fix (A41 round 2, finding 4): this used to
+                            // recordAnswered() and launch the system intent directly - a bare OS
+                            // dialog with no rationale, and the once-per-install automatic offer
+                            // permanently suppressed before it ever explained anything (009 §3.2:
+                            // "explain AND offer"). Now raises the same rationale dialog
+                            // MainActivity shows for the automatic offer; only that dialog's own
+                            // onContinue/onNotNow record the answer.
+                            container.requestBatteryRationaleDialog()
                         }
                         BatterySettingsAction.OpenSystemBatterySettings -> {
-                            context.startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+                            // Code-review fix (A41 round 2, finding 5): guarded - not every
+                            // device resolves this intent (009 §3.2 "Declining is not fatal").
+                            context.startActivitySafely(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
                         }
                     }
                 },
                 vendorLinkUrl = BatteryOptimizationOemPolicy.vendorLinkUrl(Build.MANUFACTURER),
-                onOpenVendorLink = { url -> context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) },
+                onOpenVendorLink = { url ->
+                    // Code-review fix (A41 round 2, finding 5): guarded, no-op fallback - a
+                    // broken vendor link has no sensible "open app settings" fallback.
+                    context.startActivitySafely(Intent(Intent.ACTION_VIEW, Uri.parse(url)), fallback = null)
+                },
             )
         }
 

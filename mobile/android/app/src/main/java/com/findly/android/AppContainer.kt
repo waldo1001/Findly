@@ -85,6 +85,9 @@ import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
 /**
@@ -308,6 +311,27 @@ class AppContainer(context: Context) {
      * settings" action (010 §4.2). */
     val batteryOptimizationPromptStore: BatteryOptimizationPromptStore =
         SharedPreferencesBatteryOptimizationPromptStore(context)
+
+    /** Code-review fix (A41 round 2, finding 4): shared signal so the Devices screen's
+     * user-initiated "Battery settings" tap ([com.findly.android.ui.nav.FindlyNavHost],
+     * `BatterySettingsActionPolicy.OfferPrompt`) raises the **same** rationale dialog
+     * [com.findly.android.MainActivity] already owns for the once-per-install automatic offer
+     * (`BatteryOptimizationRationaleDialog`), rather than skipping straight to the OS prompt and
+     * recording an answer before the user has seen any explanation (009 §3.2: "explain **and**
+     * offer"). `MainActivity` shows the dialog when either its own
+     * `BatteryOptimizationPromptPolicy.shouldOffer` condition or this flag is true; the dialog's
+     * own `onContinue`/`onNotNow` callbacks are the only place that both records the answer and
+     * calls [consumeBatteryRationaleDialogRequest]. */
+    private val _batteryRationaleDialogRequested = MutableStateFlow(false)
+    val batteryRationaleDialogRequested: StateFlow<Boolean> = _batteryRationaleDialogRequested.asStateFlow()
+
+    fun requestBatteryRationaleDialog() {
+        _batteryRationaleDialogRequested.value = true
+    }
+
+    fun consumeBatteryRationaleDialogRequest() {
+        _batteryRationaleDialogRequested.value = false
+    }
 
     /**
      * A41 (specs/009 §7: "never... in the same session as the OS location prompt"): true only for

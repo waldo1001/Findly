@@ -42,8 +42,13 @@ class DevicesStateHolder(
     scope: CoroutineScope,
     /** A41 (specs/010 §4.2): this app instance's own registered `deviceId` — `null` only for a
      * caller that genuinely cannot resolve it yet (mirrors `AppContainer`'s own nullable
-     * `deviceIdFor` seam). Marks exactly one card [DeviceCardUi.isThisDevice] when it matches. */
-    private val localDeviceId: String? = null,
+     * `deviceIdFor` seam). Marks exactly one card [DeviceCardUi.isThisDevice] when it matches.
+     * Code-review fix (A41 round 2, finding 9): a supplier, called fresh from every [load] rather
+     * than a value captured once at construction — `container.localDeviceIdOrNull()` can resolve
+     * `null` mid sign-out/sign-in (auth state not yet `SignedIn`), and a plain snapshot would then
+     * cache `null` for this whole `ViewModel`'s lifetime, never marking a card even after sign-in
+     * completes and a later [load] re-runs. */
+    private val localDeviceId: () -> String? = { null },
 ) {
     private val _state = MutableStateFlow<DevicesUiState>(DevicesUiState.Loading)
     val state: StateFlow<DevicesUiState> = _state.asStateFlow()
@@ -67,8 +72,10 @@ class DevicesStateHolder(
                 }
             }
             is ApiResult.Success -> {
+                // Resolved fresh on every load() (finding 9) - see localDeviceId's own doc.
+                val currentLocalDeviceId = localDeviceId()
                 _state.value = DevicesUiState.Content(
-                    devices = result.data.devices.map { it.toCardUi(isThisDevice = it.deviceId == localDeviceId) },
+                    devices = result.data.devices.map { it.toCardUi(isThisDevice = it.deviceId == currentLocalDeviceId) },
                     limits = result.features?.limits,
                 )
             }

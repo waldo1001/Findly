@@ -11,6 +11,7 @@ import android.provider.Settings
 import androidx.compose.foundation.layout.Column
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -30,6 +31,7 @@ import com.findly.android.location.PermissionFlowStep
 import com.findly.android.location.battery.BatteryOptimizationPromptPolicy
 import com.findly.android.ui.designsystem.components.FindlyPermissionBanner
 import com.findly.android.ui.permissions.BatteryOptimizationRationaleDialog
+import com.findly.android.util.startActivitySafely
 import com.findly.android.ui.permissions.PermissionDisclosureScreen
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Box
@@ -261,16 +263,25 @@ class MainActivity : ComponentActivity() {
                 LaunchedEffect(epoch) {
                     presenceRequiredForBattery = container.presenceCurrentlyRequired()
                 }
+                // Code-review fix (A41 round 2, finding 4): also shown when the Devices screen's
+                // user-initiated "Battery settings" tap requested it (FindlyNavHost,
+                // BatterySettingsActionPolicy.OfferPrompt) - that tap no longer skips straight to
+                // the OS prompt; it raises this exact dialog instead (009 §3.2: "explain AND
+                // offer").
+                val batteryRationaleDialogRequested by container.batteryRationaleDialogRequested.collectAsState()
                 if (BatteryOptimizationPromptPolicy.shouldOffer(
                         presenceRequired = presenceRequiredForBattery,
                         alreadyAnswered = container.batteryOptimizationPromptStore.hasAnswered(),
                         backgroundPermissionGrantedThisSession = container.backgroundLocationPermissionGrantedThisSession,
-                    )
+                    ) || batteryRationaleDialogRequested
                 ) {
                     BatteryOptimizationRationaleDialog(
                         onContinue = {
                             container.batteryOptimizationPromptStore.recordAnswered()
-                            startActivity(
+                            container.consumeBatteryRationaleDialogRequest()
+                            // Code-review fix (A41 round 2, finding 5): guarded - not every
+                            // device resolves this intent (009 §3.2 "Declining is not fatal").
+                            startActivitySafely(
                                 Intent(
                                     Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
                                     Uri.fromParts("package", packageName, null),
@@ -280,6 +291,7 @@ class MainActivity : ComponentActivity() {
                         },
                         onNotNow = {
                             container.batteryOptimizationPromptStore.recordAnswered()
+                            container.consumeBatteryRationaleDialogRequest()
                             permissionEpoch.intValue++
                         },
                     )
