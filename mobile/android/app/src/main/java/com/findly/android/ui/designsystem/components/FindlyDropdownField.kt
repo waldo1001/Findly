@@ -38,13 +38,29 @@ import com.findly.android.ui.designsystem.token.TextFieldDisabledText
  * "Values below `features.limits.minSyncIntervalMinutes` render disabled with the limit as the
  * reason" — while still *presenting* every allowed value (010 §9: the server remains the sole
  * source of truth for validation; this is presentation only, never the only guard).
+ *
+ * [groupLabel]/[groupDescription] let a caller section the menu under a caption (010 §4.2,
+ * amended 2026-09-06, 000 §D19: the sync-interval field's "Live"/"Battery saver" captions) —
+ * `null` for a caller with no grouping concept, in which case [FindlyDropdownField] renders no
+ * section headers and [closedFieldText] returns the plain [label].
  */
 data class FindlyDropdownOption<T>(
     val value: T,
     val label: String,
     val enabled: Boolean = true,
     val disabledReason: String? = null,
+    val groupLabel: String? = null,
+    val groupDescription: String? = null,
 )
+
+/**
+ * The closed field's display text for one option (010 §4.2: "the closed field shows the group
+ * name after the value", e.g. `15 min · Live`) — a plain function (no Compose types in its
+ * signature) so the exact format is unit-testable without a Compose test harness (this repo has
+ * none, backlog row A38).
+ */
+fun <T> FindlyDropdownOption<T>.closedFieldText(): String =
+    if (groupLabel != null) "$label · $groupLabel" else label
 
 /**
  * A labeled single-select exposed dropdown (specs/010-app-shell-and-screen-ux.md §1.2/§4.2, added
@@ -84,7 +100,7 @@ fun <T> FindlyDropdownField(
     var expanded by remember { mutableStateOf(false) }
     val colors = FindlyTheme.colors
     val shape = RoundedCornerShape(FindlyTheme.corner.md)
-    val selectedLabel = options.firstOrNull { it.value == selected }?.label.orEmpty()
+    val selectedLabel = options.firstOrNull { it.value == selected }?.closedFieldText().orEmpty()
 
     val fill: Color
     val borderColor: Color
@@ -139,7 +155,30 @@ fun <T> FindlyDropdownField(
                 onDismissRequest = { expanded = false },
                 containerColor = colors.surface,
             ) {
+                var previousGroupLabel: String? = null
                 options.forEach { option ->
+                    // 010 §4.2 (amended 2026-09-06): "the menu groups the values under two
+                    // captions" — a header renders once, before the first option of each new
+                    // group; an ungrouped list (groupLabel == null everywhere) renders no headers
+                    // at all.
+                    if (option.groupLabel != null && option.groupLabel != previousGroupLabel) {
+                        Column(modifier = Modifier.padding(horizontal = FindlyTheme.spacing.sm, vertical = FindlyTheme.spacing.xs)) {
+                            Text(
+                                text = option.groupLabel,
+                                color = colors.subtleText,
+                                style = FindlyTheme.typography.labelSmall,
+                            )
+                            if (option.groupDescription != null) {
+                                Text(
+                                    text = option.groupDescription,
+                                    color = colors.subtleText,
+                                    style = FindlyTheme.typography.labelSmall,
+                                )
+                            }
+                        }
+                    }
+                    previousGroupLabel = option.groupLabel
+
                     DropdownMenuItem(
                         text = {
                             Column {
