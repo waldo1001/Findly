@@ -160,6 +160,57 @@ struct LocateViewModelTests {
         #expect(viewModel.resolvedPosition?.lat == 51.06)
     }
 
+    /// I51 review fix (Low, security, finding 6): `resolveViaFallback` filters the family-wide
+    /// `/locations/latest` response to the target `deviceId` — but every other fallback test above
+    /// supplies exactly one member with one matching device, so nothing would catch that filter
+    /// being loosened (e.g. to "first device with a newer recordedAt" or "any device on the target
+    /// member"). This pins cross-member AND cross-device isolation: a second family member with a
+    /// much newer position, plus a second, non-target device on the TARGET's own member also with a
+    /// newer position, must both be ignored — only the exact target device's own position may
+    /// surface.
+    @Test func requestLocate_fallbackFiltersByExactDeviceId_ignoresOtherMembersAndSiblingDevices() async throws {
+        let api = FakeAPIClient()
+        api.createLocateRequestHandler = { _ in
+            TestFeatures.envelope(CreateLocateRequestResponse(
+                requestId: "lr_1", status: .pending, targetUserId: "u2", targetDeviceId: "d2",
+                createdAt: "2026-07-19T09:05:12Z", expiresAt: "2026-07-19T09:05:16Z", lastKnown: nil
+            ))
+        }
+        api.pollLocateRequestHandler = { _ in
+            TestFeatures.envelope(PollLocateRequestResponse(
+                requestId: "lr_1", status: .pending, createdAt: "2026-07-19T09:05:12Z",
+                expiresAt: "2026-07-19T09:05:16Z", fulfilledAt: nil, late: false, fix: nil
+            ))
+        }
+        api.getLatestLocationsHandler = {
+            TestFeatures.envelope(LatestLocationsResponse(members: [
+                // A different family member entirely, with a much newer recordedAt — must never
+                // leak into the target's own answer.
+                MemberLocations(userId: "u3", displayName: "Ravi", devices: [
+                    DeviceLocation(deviceId: "d3", deviceName: "Ravi's phone", lat: 52.0, lon: 4.0, accuracyM: 5.0, recordedAt: "2026-07-19T09:59:00Z", receivedAt: "2026-07-19T09:59:01Z", batteryPct: 90, source: .periodic, trackingEnabled: true, syncIntervalMinutes: 15, isStale: false)
+                ]),
+                // The target's own member, but a SECOND, non-target device on that same member —
+                // also with a newer recordedAt than the actual target device below. Must not
+                // surface either.
+                MemberLocations(userId: "u2", displayName: "Noor", devices: [
+                    DeviceLocation(deviceId: "d2-other", deviceName: "Noor's tablet", lat: 53.0, lon: 5.0, accuracyM: 5.0, recordedAt: "2026-07-19T09:58:00Z", receivedAt: "2026-07-19T09:58:01Z", batteryPct: 80, source: .periodic, trackingEnabled: true, syncIntervalMinutes: 15, isStale: false),
+                    DeviceLocation(deviceId: "d2", deviceName: "Noor's phone", lat: 51.06, lon: 3.72, accuracyM: 8.0, recordedAt: "2026-07-19T09:10:00Z", receivedAt: "2026-07-19T09:10:01Z", batteryPct: 40, source: .periodic, trackingEnabled: true, syncIntervalMinutes: 15, isStale: false)
+                ])
+            ]))
+        }
+        let clock = SteppingClock(start: parseDate("2026-07-19T09:05:12Z"))
+        let gate = SleepGate()
+        let viewModel = LocateViewModel(apiClient: api, now: clock.now, sleep: { _ in await gate.wait() })
+
+        await viewModel.requestLocate(target: .user("u2"))
+        clock.advance(by: 10) // past the 4s window
+        await gate.release()
+        try await waitUntil { viewModel.status == .late }
+
+        #expect(viewModel.resolvedPosition?.lat == 51.06, "only the target device's own position may surface, never another member's or a sibling device's newer position")
+        #expect(viewModel.resolvedPosition?.recordedAt == "2026-07-19T09:10:00Z")
+    }
+
     @Test func requestLocate_pollWindowElapses_fallbackFindsNoNewerPosition_rendersUnreachable() async throws {
         let api = FakeAPIClient()
         api.createLocateRequestHandler = { _ in
