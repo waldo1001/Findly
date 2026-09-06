@@ -46,6 +46,9 @@ public struct CreateLocateRequestResponse: Decodable, Equatable {
     public let status: LocateStatus
     public let targetUserId: String
     public let targetDeviceId: String
+    /// specs/001 §6.1 (amended 2026-09-06, B26) — "new (2026-09-06) so the requester can compare it
+    /// with `/locations/latest`'s `recordedAt` after expiry (009 §5.1 'late' state)".
+    public let createdAt: String
     public let expiresAt: String
     public let lastKnown: LastKnownFix?
 }
@@ -68,7 +71,14 @@ public struct FulfilledFix: Decodable, Equatable {
 public struct PollLocateRequestResponse: Decodable, Equatable {
     public let requestId: String
     public let status: LocateStatus
+    public let createdAt: String
     public let expiresAt: String
+    /// specs/001 §6.2 (amended 2026-09-06, B26) — set when fulfilled (server receive time of the
+    /// fulfil).
+    public let fulfilledAt: String?
+    /// specs/001 §6.2 (amended 2026-09-06, B26) — "fulfilled after expiresAt (§6.3 grace) — render
+    /// like fresh, with an age caption" (009 §5.1 "Requester side").
+    public let late: Bool
     public let fix: FulfilledFix?
 }
 

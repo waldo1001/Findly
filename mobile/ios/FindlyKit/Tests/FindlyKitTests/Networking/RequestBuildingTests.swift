@@ -230,7 +230,7 @@ struct RequestBuildingTests {
             #expect(body["targetDeviceId"] == nil, "exactly one of targetUserId|targetDeviceId")
             return (jsonResponse(url: request.url!, status: 201), envelopeJSON(data: """
             { "requestId": "lr_x", "status": "pending", "targetUserId": "u2", "targetDeviceId": "dev2",
-              "expiresAt": "2026-07-19T09:06:12Z", "lastKnown": null }
+              "createdAt": "2026-07-19T09:05:12Z", "expiresAt": "2026-07-19T09:06:12Z", "lastKnown": null }
             """))
         }
         let envelope = try await client.createLocateRequest(target: .user("u2"))
@@ -243,7 +243,8 @@ struct RequestBuildingTests {
             #expect(request.httpMethod == "GET")
             #expect(request.url?.path == "/api/v1/locate-requests/lr_x")
             return (jsonResponse(url: request.url!, status: 200), envelopeJSON(data: """
-            { "requestId": "lr_x", "status": "pending", "expiresAt": "2026-07-19T09:06:12Z", "fix": null }
+            { "requestId": "lr_x", "status": "pending", "createdAt": "2026-07-19T09:05:12Z",
+              "expiresAt": "2026-07-19T09:06:12Z", "fulfilledAt": null, "late": false, "fix": null }
             """))
         }
         let envelope = try await client.pollLocateRequest(requestId: "lr_x")

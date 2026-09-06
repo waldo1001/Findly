@@ -79,13 +79,13 @@ public struct LocateScreen: View {
         case .pending:
             LoadingStateView(message: "Last known, updating…")
         case .fulfilled:
-            if let fix = viewModel.fulfilledFix {
+            if let position = viewModel.resolvedPosition {
                 FindlyCard {
                     VStack(alignment: .leading, spacing: theme.spacing.xs) {
                         Text("Found!")
                             .font(theme.typography.titleMedium.font)
                             .foregroundColor(theme.colors.onSurface)
-                        Text("\(fix.lat), \(fix.lon)")
+                        Text("\(position.lat), \(position.lon)")
                             .font(theme.typography.bodyMedium.font)
                             .foregroundColor(theme.colors.onSurface.opacity(0.7))
                     }
@@ -93,10 +93,28 @@ public struct LocateScreen: View {
             } else {
                 StatusChip("Live", kind: .online)
             }
-        case .pushFailed:
+        case .late:
+            // specs/009 §5.1 "Requester side": rendered exactly like `.fulfilled` plus an age
+            // caption.
+            if let position = viewModel.resolvedPosition {
+                FindlyCard {
+                    VStack(alignment: .leading, spacing: theme.spacing.xs) {
+                        Text("Found!")
+                            .font(theme.typography.titleMedium.font)
+                            .foregroundColor(theme.colors.onSurface)
+                        Text("\(position.lat), \(position.lon)")
+                            .font(theme.typography.bodyMedium.font)
+                            .foregroundColor(theme.colors.onSurface.opacity(0.7))
+                        Text(LocateAgeCaption.forRecordedAt(position.recordedAt))
+                            .font(theme.typography.labelSmall.font)
+                            .foregroundColor(theme.colors.onSurface.opacity(0.7))
+                    }
+                }
+            } else {
+                StatusChip("Live", kind: .online)
+            }
+        case .unreachable:
             StatusChip("Couldn't reach device — showing last known", kind: .stale)
-        case .expired:
-            StatusChip("Request expired", kind: .paused)
         case .failed(let message):
             ErrorStateView(message: message) {
                 Task { await viewModel.requestLocate(target: target) }
