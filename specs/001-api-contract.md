@@ -257,7 +257,7 @@ Open family: all members see all devices and their settings (only parents can ch
 { "devices": [ { /* §4.1 response object */, "ownerDisplayName": "Noor", "lastSeenAt": "2026-07-19T09:05:14Z" } ] }
 ```
 
-`lastSeenAt` = server receive time of the device's most recent authenticated call.
+`lastSeenAt` = server receive time of the device's most recent **device-originated** call — `POST /devices` (§4.1), `POST /locations` (§5.1), `POST /geofence-events` (§7.3) and `POST /locate-requests/{id}/fulfill` (§6.3) MUST all refresh it (write-skipped to once per minute, 002 §2.4). *(Amended 2026-09-06: the shipped backend refreshed it only on registration, so §6.1's "most-recently-seen" target choice could pick a member's old phone over the one actually reporting.)*
 
 ### 4.3 Update device settings — `PATCH /devices/{deviceId}`
 
@@ -332,7 +332,7 @@ One call returns the whole family (roster scan + per-member `Devices`/`LastKnown
 
 - Members with no registered devices are included with `"devices": []` — every member always appears on the map roster.
 - Devices with no report yet are included with `lat`/`lon`/`recordedAt`/`isStale` as `null` — the "no location yet" state, rendered identically by both apps.
-- `isStale` MUST be computed server-side as `now − recordedAt > 2 × syncIntervalMinutes` — defined here once so both apps render identically. Note: iOS cannot honor sub-15-minute intervals (000 §O2), so such devices will legitimately show `isStale: true` much of the time.
+- `isStale` MUST be computed server-side as `now − recordedAt > 2 × syncIntervalMinutes` — defined here once so both apps render identically. Note (amended 2026-09-06): devices on 60+ intervals, force-quit iOS apps, and phones in Low Power Mode will legitimately show `isStale: true` much of the time (000 §O2 as superseded by D19); devices on ≤ 30-minute intervals with background permission are expected to stay fresh (009 §1.3).
 
 ### 5.3 History — `GET /locations/history`
 
@@ -361,19 +361,24 @@ Design (000 §D4): requester polls; the instant answer is last-known.
 { "targetUserId": "u2" }
 ```
 
-- **Target resolution (ordered):** (1) candidates = the target user's devices with `trackingEnabled: true`; target has **no registered devices at all** → `404 DEVICE_NOT_FOUND`, devices exist but **none unpaused** → `403 TRACKING_PAUSED`. (2) Prefer candidates with a valid push token (`pushToken` present and not `pushInvalid`); within the preferred group pick the most-recently-seen. (3) If the chosen device still has no valid token, the request is created as `pushFailed` (§6.2) — the requester still gets last-known. With `targetDeviceId`, steps (2)–(3) apply to that single device (unknown id → `404 DEVICE_NOT_FOUND`; paused → `403 TRACKING_PAUSED`).
+- **Target resolution (ordered):** (1) candidates = the target user's devices with `trackingEnabled: true`; target has **no registered devices at all** → `404 DEVICE_NOT_FOUND`, devices exist but **none unpaused** → `403 TRACKING_PAUSED`. (2) Prefer candidates with a valid push token (`pushToken` present and not `pushInvalid`); within the preferred group pick the most-recently-seen (`lastSeenAt`, §4.2 — which every device-originated call now refreshes). (3) If the chosen device still has no valid token, the request is created as `pushFailed` (§6.2) — the requester still gets last-known. With `targetDeviceId`, steps (2)–(3) apply to that single device (unknown id → `404 DEVICE_NOT_FOUND`; paused → `403 TRACKING_PAUSED`).
 - Daily quota: `features.limits.locateRequestsPerDay` per family (UTC day) → `402 LIMIT_EXCEEDED`, `details.limit: "locateRequestsPerDay"`. Only `201`-created requests count toward the quota; coalesced `200`s do not.
 - **Coalescing:** if a `pending` request for the same target device exists, it is returned (`200`) instead of creating a new one.
+- **Expiry window (amended 2026-09-06):** `expiresAt = createdAt + 180 s`. The previous 60 s did not cover push latency plus a cold GPS fix on either platform; 180 s is the window the requester's UI polls (009 §5.1), and §6.3 additionally honours a fulfil up to 10 minutes after it.
+- **Push send failure (amended 2026-09-06):** a transport-level failure of the §8.1 send (OAuth exchange, FCM 5xx, network) MUST NOT fail the request — it is created with `status: "pushFailed"` exactly like an invalid token, **without** marking the device `pushInvalid` (the token is not known bad). The requester gets last-known and a `pushFailed` poll result. Only a genuine `UNREGISTERED`/`INVALID_ARGUMENT` token error sets `pushInvalid` (§8.5).
 
 ```json
 // 201 (created) / 200 (coalesced) → data
 { "requestId": "lr_8Xk2…", "status": "pending",
   "targetUserId": "u2", "targetDeviceId": "…",
-  "expiresAt": "2026-07-19T09:06:12Z",          // now + 60 s
+  "createdAt": "2026-07-19T09:05:12Z",
+  "expiresAt": "2026-07-19T09:08:12Z",          // createdAt + 180 s
   "lastKnown": {                                  // instant answer; null if never reported
     "deviceId": "…", "lat": 51.0543, "lon": 3.7174, "accuracyM": 15.0,
     "recordedAt": "2026-07-19T08:50:12Z" } }
 ```
+
+`createdAt` is new (2026-09-06) so the requester can compare it with `/locations/latest`'s `recordedAt` after expiry (009 §5.1 "late" state).
 
 Side effect: `LOCATE_REQUEST` push (§8.1) to the target device.
 
@@ -385,12 +390,15 @@ Only the requester may poll (`403 AUTH_FORBIDDEN` otherwise; unknown id → `404
 // 200 → data
 { "requestId": "lr_…",
   "status": "pending",        // "pending" | "fulfilled" | "expired" | "pushFailed"
+  "createdAt": "…",
   "expiresAt": "…",
+  "fulfilledAt": null,        // set when fulfilled (server receive time of the fulfil)
+  "late": false,              // fulfilled after expiresAt (§6.3 grace) — render like fresh, with an age caption
   "fix": null }               // §5.1 fix shape (+ deviceId) when fulfilled
 ```
 
-- Server marks `expired` lazily when polled past `expiresAt`.
-- `pushFailed` = FCM rejected the send (bad/unregistered token). UI: "couldn't reach the device — showing last known". The device is marked `pushInvalid` (§4.1).
+- Server marks `expired` lazily when polled past `expiresAt`. **`expired` is not final (amended 2026-09-06):** a §6.3 fulfil inside the grace window flips `expired → fulfilled` with `late: true`, so a client MAY keep polling past `expiresAt`; the normative client behaviour (009 §5.1) is to poll until `expiresAt`, then check `/locations/latest` once.
+- `pushFailed` = the §8.1 send did not succeed — a rejected token (device marked `pushInvalid`, §4.1) **or** a transport failure (device not marked, §6.1). UI: "couldn't reach the device — showing last known".
 
 ### 6.3 Fulfill — `POST /locate-requests/{requestId}/fulfill`
 
@@ -402,11 +410,13 @@ Called by the **target device** (`X-Device-Id` MUST equal the request's target, 
            "accuracyM": 4.8, "batteryPct": 77, "source": "locate" } }
 
 // 200 → data
-{ "status": "fulfilled" }
+{ "status": "fulfilled", "late": false }
 ```
 
-- Fulfilling past `expiresAt`: `410 LOCATE_REQUEST_EXPIRED` — but the fix is still stored (last-known + history); only the request status is expired. A device receiving a `LOCATE_REQUEST` push more than **10 minutes** past its `expiresAt` SHOULD ignore it (no GPS burn for a stale request); within that window it SHOULD still take the fix and fulfill.
-- Fulfill also updates last-known and appends to history exactly like a §5.1 report (idempotent on `fixId`).
+- **Grace window (amended 2026-09-06):** a fulfil received **within 10 minutes after `expiresAt`** is accepted as `200 { "status": "fulfilled", "late": true }` — the request row moves to `fulfilled` (from `pending` *or* an already lazily-`expired` state), `fixJson` and `fulfilledAt` are written, and the poll shows the fix. The previous rule (any fulfil past `expiresAt` → `410`) threw away answers that arrived seconds late and told the requester the phone had not responded when it had.
+- Fulfilling **more than 10 minutes** past `expiresAt`: `410 LOCATE_REQUEST_EXPIRED` — the fix is still stored (last-known + history); only the request status stays `expired`. A device receiving a `LOCATE_REQUEST` push more than **10 minutes** past its `expiresAt` SHOULD ignore it (no GPS burn for a stale request); within that window it MUST still take the fix and fulfil, even if `expiresAt` itself has passed (009 §5.1).
+- A second fulfil for an already-`fulfilled` request is idempotent on `fixId` (`200`, same `late` value); a different `fixId` on a fulfilled request is stored as history but does not replace `fixJson`.
+- Fulfill also updates last-known and appends to history exactly like a §5.1 report (idempotent on `fixId`), and refreshes the device's `lastSeenAt` (§4.2).
 - A paused target MAY still fulfill (the parent asked): `TRACKING_PAUSED` does **not** apply here. Rationale: pause stops *periodic* surveillance; an explicit locate is user-initiated and quota-limited.
 
 ---
@@ -489,18 +499,27 @@ Geofence name and coordinates are frozen into the event at write time (002 §3.2
 
 All pushes go through FCM v1 (`projects/<project>/messages:send`); FCM routes to APNs for iOS devices. Common rule: every message carries `data.type` as the discriminator; all `data` values are strings (FCM constraint — clients parse).
 
-### 8.1 `LOCATE_REQUEST` (to target device — high priority, data-only)
+### 8.1 `LOCATE_REQUEST` (to target device — high priority, **user-visible** on both platforms)
+
+*(Amended 2026-09-06 — 000 §D19, 009 §5.1. Previously data-only + silent on both platforms; that shape was demoted by FCM within a week of install and budgeted away by iOS, which is why locate failed almost always.)*
 
 ```json
 { "message": { "token": "<deviceToken>",
-  "android": { "priority": "high" },
-  "apns": { "headers": { "apns-priority": "5", "apns-push-type": "background" },
-            "payload": { "aps": { "content-available": 1 } } },
+  "android": { "priority": "high" },                       // DATA-ONLY on Android — the client posts the
+                                                            //   notification itself (009 §5.1); an FCM
+                                                            //   `notification` block would make the SDK
+                                                            //   display it and skip onMessageReceived
+  "apns": { "headers": { "apns-priority": "10", "apns-push-type": "alert" },
+            "payload": { "aps": { "alert": { "title": "Eric is locating you" },
+                                  "sound": "default",
+                                  "content-available": 1 } } },
   "data": { "type": "LOCATE_REQUEST", "requestId": "lr_…",
-            "requestedByName": "Eric", "expiresAt": "2026-07-19T09:06:12Z" } } }
+            "requestedByName": "Eric", "expiresAt": "2026-07-19T09:08:12Z" } } }
 ```
 
-iOS (000 §O1): the message above is the **v1-normative** send; on iOS it arrives as a budgeted/coalesced background push — best-effort by design. The reliable mechanism, once Apple grants the Location Push entitlement, is a **direct APNs send — not FCM** (FCM cannot address location push tokens): token-based `.p8` auth, topic `<bundleId>.location-query`, headers `apns-push-type: location`, `apns-priority: 10`, targeting the device's `locationPushToken` (§4.1, obtained via `CLLocationManager.startMonitoringLocationPushes`), carrying the same `data` fields in the APNs payload. That path adds one APNs key credential to the backend when it lands (tracked in 000 §O1); nothing about it is implemented in v1.
+Title template (normative, both platforms, English in v1 — 000 §O8): `"<requestedByName> is locating you"`. Android renders it on-device from `data.requestedByName`; iOS receives it server-composed in `aps.alert.title`, and the client suppresses the banner when it is already in the foreground (009 §5.1). The `content-available: 1` alongside the alert is what makes iOS invoke the background handler even when the user does not tap; `apns-priority: 10` is permitted because the push carries an alert.
+
+iOS (000 §O1): the message above reaches every state except a **force-quit** app. The reliable mechanism for that state, once Apple grants the Location Push entitlement, is a **direct APNs send — not FCM** (FCM cannot address location push tokens): token-based `.p8` auth, topic `<bundleId>.location-query`, headers `apns-push-type: location`, `apns-priority: 10`, targeting the device's `locationPushToken` (§4.1, obtained via `CLLocationManager.startMonitoringLocationPushes`), carrying the same `data` fields in the APNs payload. That path adds one APNs key credential to the backend when it lands (tracked in 000 §O1, backlog H11); nothing about it is implemented in v1.
 
 ### 8.2 `GEOFENCE_EVENT` (to all family devices except reporter — notification + data)
 
@@ -602,7 +621,7 @@ Shape (present in every success envelope):
 | 409 | `GROUP_ALREADY_MEMBER` | Join a group the caller is already in (§12.6) | — |
 | 409 | `GROUP_FULL` | Roster at the owner-plan `maxGroupMembers` cap (§12.6, §9) | `{ "max": 200 }` |
 | 410 | `INVITE_EXPIRED` | Code past `expiresAt` | — |
-| 410 | `LOCATE_REQUEST_EXPIRED` | Fulfill after expiry (§6.3 — fix still stored) | — |
+| 410 | `LOCATE_REQUEST_EXPIRED` | Fulfill more than 10 min after `expiresAt` (§6.3 — fix still stored; inside the grace window the fulfil is accepted as `late`) | — |
 | 410 | `GROUP_EXPIRED` | Operation on a group past its usable life for that path (matrix in 005 §2.3, §12) | — |
 | 400 | `INVITE_INVALID` | Unknown invite code | — |
 | 400 | `INVITE_ALREADY_USED` | Single-use code already consumed | — |

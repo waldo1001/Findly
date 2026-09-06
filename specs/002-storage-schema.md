@@ -80,9 +80,9 @@ Created at family creation with `free` (001 §3.1). Read per request (cache per 
 
 | PK | RK | Properties |
 |---|---|---|
-| `{familyId}` | `req:{requestId}` | `targetUserId`, `targetDeviceId`, `requestedBy`, `status` (`pending`\|`fulfilled`\|`expired`\|`pushFailed`), `createdAt`, `expiresAt`, `fixJson?` |
+| `{familyId}` | `req:{requestId}` | `targetUserId`, `targetDeviceId`, `requestedBy`, `status` (`pending`\|`fulfilled`\|`expired`\|`pushFailed`), `createdAt`, `expiresAt`, `fulfilledAt?`, `late?` (bool), `fixJson?` |
 
-Point read on poll (001 §6.2). Lazy expiry: a poll past `expiresAt` flips `pending → expired` in place. Coalescing (001 §6.1): partition scan filtered to `pending` + same `targetDeviceId` (tiny partitions — a family has at most a handful of rows here). Old rows are garbage — a cleanup timer function is a backlog item, not v1.
+Point read on poll (001 §6.2). Lazy expiry: a poll past `expiresAt` flips `pending → expired` in place; a fulfil inside 001 §6.3's 10-minute grace window flips `pending`/`expired → fulfilled` and sets `fulfilledAt` + `late` (amended 2026-09-06). Coalescing (001 §6.1): partition scan filtered to `pending` + same `targetDeviceId` (tiny partitions — a family has at most a handful of rows here). Old rows are garbage — a cleanup timer function is a backlog item, not v1.
 
 ### 2.8 `IdempotencyMarkers`
 
