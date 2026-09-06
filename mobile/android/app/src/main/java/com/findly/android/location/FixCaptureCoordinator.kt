@@ -48,6 +48,12 @@ class FixCaptureCoordinator(
     private val permissionState: LocationPermissionState,
     private val fixIdGenerator: () -> String = { UUID.randomUUID().toString() },
     private val now: () -> Instant = Instant::now,
+    /** A40 (specs/009 §1.1 "Accepting a recent cached position"): the caller's current
+     * `syncIntervalMinutes` — the bound for [LocationCapturer]'s `lastLocation` fallback on a
+     * `BALANCED` (`periodic`/`geofence`) capture. Defaults to a fixed value so tests that don't
+     * care about the fallback bound don't need to supply one; `AppContainer` wires the real
+     * cached-settings read. */
+    private val currentSyncIntervalMinutes: suspend () -> Int = { DEFAULT_SYNC_INTERVAL_MINUTES },
 ) {
     private var lastCaptured: Pair<CapturedFix, Instant>? = null
 
@@ -61,7 +67,11 @@ class FixCaptureCoordinator(
         if (pauseState.isPaused()) return null
         if (!permissionState.isGranted()) return null
 
-        val fix = hint ?: capturer.captureFix(accuracyFor(source), timeoutMillisFor(source)) ?: return null
+        val fix = hint ?: capturer.captureFix(
+            accuracyFor(source),
+            timeoutMillisFor(source),
+            maxCachedAgeMillisFor(source, currentSyncIntervalMinutes()),
+        ) ?: return null
 
         // Pause arriving mid-capture: drop, don't queue (009 §4).
         if (pauseState.isPaused()) return null
@@ -99,6 +109,18 @@ class FixCaptureCoordinator(
         val DEBOUNCE_WINDOW: Duration = Duration.ofSeconds(60)
         const val DEFAULT_TIMEOUT_MILLIS = 30_000L
         const val GEOFENCE_TIMEOUT_MILLIS = 15_000L
+        const val DEFAULT_SYNC_INTERVAL_MINUTES = 15
+        const val MILLIS_PER_MINUTE = 60_000L
+
+        /** A40 (specs/009 §1.1): only `BALANCED` sources (`periodic`/`geofence`) may ever fall
+         * back to a cached position; `HIGH` (`locate`/`manual`, via [accuracyFor]) "exist to
+         * produce a fresh fix" and get `0` here regardless of [syncIntervalMinutes] -
+         * [CapturePolicy.acceptsCachedFallback] also enforces this, so this is belt-and-braces,
+         * not the only guard. */
+        fun maxCachedAgeMillisFor(source: FixSource, syncIntervalMinutes: Int): Long = when (source) {
+            FixSource.Periodic, FixSource.Geofence -> syncIntervalMinutes * MILLIS_PER_MINUTE
+            FixSource.Manual, FixSource.Locate -> 0L
+        }
 
         /** §1.1's "Accuracy request" column. `Locate` never actually reaches this class in
          * practice — [com.findly.android.pushmessages.LocateRequestPushHandler] correctly
