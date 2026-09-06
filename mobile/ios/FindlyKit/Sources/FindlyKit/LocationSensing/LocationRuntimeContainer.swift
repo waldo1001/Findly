@@ -202,8 +202,13 @@ public final class LocationRuntimeContainer {
                 // Same authorization gate as `startMonitoringIfAuthorized()`, inlined: this
                 // closure is built inside `init` before all members exist, so it cannot call
                 // a method on `self`. Uses the same local captures the original call did.
-                let auth = locationProvider.authorization
-                if auth == .whenInUse || auth == .always {
+                //
+                // specs/009 §3.4 (I50 fix 3, amended 2026-09-06): significant-location-change
+                // monitoring (and visit monitoring, its §3.4 second cheap wake) needs Always —
+                // When-In-Use cannot wake a suspended app, so starting it there does nothing
+                // useful and only misleads the permission banner logic. Previously this accepted
+                // `.whenInUse` too.
+                if BackgroundLocationPolicy.shouldMonitorSignificantChangesAndVisits(for: locationProvider.authorization) {
                     locationProvider.startBackgroundMonitoring(coordinator: captureCoordinator)
                 }
                 backgroundScheduler.scheduleNextSync()
@@ -282,8 +287,10 @@ public final class LocationRuntimeContainer {
     /// gate is what makes "no prompt before the explanation" a property of this type rather than
     /// something each caller has to remember.
     private func startMonitoringIfAuthorized() {
-        let auth = locationProvider.authorization
-        guard auth == .whenInUse || auth == .always else { return }
+        // specs/009 §3.4 (I50 fix 3, amended 2026-09-06) — Always-only; see
+        // `BackgroundLocationPolicy.shouldMonitorSignificantChangesAndVisits`'s doc. Previously
+        // this accepted `.whenInUse` too, which cannot wake a suspended app.
+        guard BackgroundLocationPolicy.shouldMonitorSignificantChangesAndVisits(for: locationProvider.authorization) else { return }
         locationProvider.startBackgroundMonitoring(coordinator: captureCoordinator)
     }
 
