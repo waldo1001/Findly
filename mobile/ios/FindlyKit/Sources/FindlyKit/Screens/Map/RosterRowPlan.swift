@@ -20,13 +20,17 @@ import Foundation
 /// change both consumers see automatically, because both consume this type's output rather than
 /// their own copy of the logic that produces it.
 public struct RosterRowPlan: Equatable {
-    public struct Row: Equatable {
+    public struct Row: Equatable, Identifiable {
         /// `nil` for the synthetic "no devices registered" row shown when a member has no devices.
         public let device: DeviceLocation?
         /// The first row in a member's block shows the member's own display name as its title;
         /// subsequent device rows show that device's own name instead (`LiveMapScreen.memberRow`'s
         /// pre-I48 `index == 0` check).
         public let isFirst: Bool
+        /// Stable `ForEach` identity — the device's own id for a device row, matching the pre-I48
+        /// `\.element.deviceId`, or a fixed sentinel for the synthetic "no devices" row (there is
+        /// at most one of those per member, so a constant is unambiguous).
+        public var id: String { device?.deviceId ?? "no-devices" }
     }
 
     public let rows: [Row]
