@@ -120,9 +120,54 @@ final class FirebaseAuthProvider: AuthProviding {
     /// launch route. Touching `Auth` before configuration is a hard crash, so the earliest caller
     /// configures and the delegate's later call becomes a no-op. Ordering between the two is
     /// therefore no longer load-bearing.
+    ///
+    /// I47 (docs/implementation-handoff.md): `FirebaseApp.configure()` has no plist-format
+    /// validation of its own — a malformed `API_KEY` raises **inside Firebase itself**
+    /// (`+[FIRInstallations validateAPIKey:]`) as an uncaught `NSException`, aborting the process
+    /// with `SIGABRT` before a single pixel renders, on a stack that is entirely Firebase
+    /// internals and never names `GoogleService-Info.plist` as the cause. Three consecutive
+    /// agents (I39, I45, I46) hit exactly this crash against the CI placeholder plist and
+    /// misdiagnosed it as a Simulator/automation limitation. `validateGoogleServiceInfoPlistOrFail()`
+    /// runs first so a broken plist is still a crash (fail-fast on a genuinely broken config is
+    /// correct) but the crash now names the actual file and the actual problem.
     static func configureFirebaseIfNeeded() {
         if FirebaseApp.app() == nil {
+            validateGoogleServiceInfoPlistOrFail()
             FirebaseApp.configure()
+        }
+    }
+
+    /// I47 — reproduces `+[FIRInstallations validateAPIKey:]`'s own format check
+    /// (`FirebaseAPIKeyValidator`, FindlyKit) against the bundled `GoogleService-Info.plist`
+    /// *before* `FirebaseApp.configure()` reaches Firebase's internals, and fails with a message
+    /// that names the file and exactly what is wrong with it. Deliberately `fatalError` rather
+    /// than swallowing the error and continuing: a genuinely broken Firebase config cannot serve
+    /// requests either way, and silently limping on would trade one opaque failure mode for
+    /// another (e.g. every subsequent Firebase call throwing `notConfigured` with no clue why).
+    private static func validateGoogleServiceInfoPlistOrFail() {
+        guard let plistURL = Bundle.main.url(forResource: "GoogleService-Info", withExtension: "plist") else {
+            fatalError(
+                "GoogleService-Info.plist was not found in the app bundle — Firebase cannot be " +
+                "configured. See specs/004-ios-client.md §8: the file must be present (real, " +
+                "developer-machine-only) or provided by CI before this target builds/runs."
+            )
+        }
+        guard let plist = NSDictionary(contentsOf: plistURL) else {
+            fatalError(
+                "GoogleService-Info.plist at \(plistURL.path) could not be parsed as a property " +
+                "list — the file is corrupt or not a plist. Download a fresh copy from the " +
+                "Firebase console (specs/004-ios-client.md §8)."
+            )
+        }
+        let apiKey = plist["API_KEY"] as? String
+        let issues = FirebaseAPIKeyValidator.issues(with: apiKey)
+        guard issues.isEmpty else {
+            fatalError(
+                "GoogleService-Info.plist at \(plistURL.path) has an invalid API_KEY: " +
+                "\(issues.joined(separator: "; ")). This is not a Simulator/automation " +
+                "limitation — download a fresh copy from the Firebase console " +
+                "(specs/004-ios-client.md §8)."
+            )
         }
     }
 
