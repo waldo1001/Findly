@@ -86,4 +86,18 @@ public final class SwiftUIRenderingHarness<Content: View> {
         hostingController.view.layoutSubtreeIfNeeded()
         #endif
     }
+
+    /// I48 (specs/010 §3.1 part 3) — the content's own ideal size for a proposed width, via
+    /// `UIHostingController`/`NSHostingController`'s `sizeThatFits(in:)` (iOS 16 / macOS 13, i.e.
+    /// exactly this package's platform minimums — no coincidence, they were the versions that added
+    /// this entry point). Still real layout through the real hosting controller, same as `init`/
+    /// `update` above — just reading the size that layout settled on instead of only rendering into
+    /// a fixed frame. Used to measure whether a design-system component that legitimately varies
+    /// its own height (e.g. `FindlyListRow`'s `.frame(minHeight:)`, not a fixed height) actually
+    /// grows past the value some OTHER piece of pure arithmetic assumes for it — the kind of claim
+    /// this harness's own header doc says NOT to take on faith ("no reference images, no pixel/
+    /// snapshot diffing" — but a scalar height read off real layout is neither of those).
+    public func sizeThatFits(width: CGFloat) -> CGSize {
+        hostingController.sizeThatFits(in: CGSize(width: width, height: .greatestFiniteMagnitude))
+    }
 }
