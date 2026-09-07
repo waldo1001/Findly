@@ -284,6 +284,41 @@ describe("domain/geofence/reportGeofenceEvents", () => {
     expect((await deps.deviceRepo.getDevice(OTHER_UID, OTHER_DEVICE_ID))?.pushInvalid).toBe(false);
   });
 
+  it("re-normalizes a hostile pre-existing stored displayName AND geofenceName when composing the GEOFENCE_EVENT title (specs/001 §1.4, B29 review finding 5)", async () => {
+    const deps = buildDeps();
+    await deps.familyRepo.createFamily({
+      familyId: FAMILY_ID,
+      familyName: "Wauters",
+      createdBy: REPORTER_UID,
+      createdAt: "2026-07-01T00:00:00Z",
+    });
+    await deps.familyRepo.addMember(FAMILY_ID, {
+      userId: OTHER_UID,
+      role: "parent",
+      displayName: "Eric",
+      joinedAt: "2026-07-01T00:00:00Z",
+    });
+    // Hostile value stored directly (bypassing the schema-level normalizer entirely) — this
+    // simulates a displayName written BEFORE B29's write-time normalizer shipped, which the
+    // write-time fix alone cannot clean since it is not retroactive.
+    await deps.familyRepo.addMember(FAMILY_ID, {
+      userId: REPORTER_UID,
+      role: "member",
+      displayName: "Noor\u202Etsohg",
+      joinedAt: "2026-07-01T00:00:00Z",
+    });
+    seedReporterDevice(deps, { pushToken: "fcm-token-reporter" });
+    seedOtherDevice(deps);
+    // Same for geofenceName — a config document written before B29's schema-level bound.
+    const hostileGeofence = { ...HOME_GEOFENCE, name: "Ho\u202Eme" };
+    deps.geofenceConfigRepo.seedConfig(FAMILY_ID, { version: 1, geofences: [hostileGeofence] }, '"cfg-etag"');
+
+    await reportGeofenceEvents(baseInput({ body: { events: [event({ transition: "enter" })] } }), deps);
+
+    expect(deps.pushSender.sent).toHaveLength(1);
+    expectNotificationTitle(deps.pushSender.sent[0]!, "GEOFENCE_EVENT", "Noortsohg arrived at Home");
+  });
+
   it("falls back to the reporter's uid as displayName when they're not in the family roster", async () => {
     const deps = buildDeps();
     await deps.familyRepo.createFamily({
