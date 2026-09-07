@@ -103,16 +103,26 @@ jobs:
           echo "Selecting $XCODE_APP"
           sudo xcode-select -s "$XCODE_APP/Contents/Developer"
           xcodebuild -version
-      # The google-services Firebase SPM plugin (FirebaseAuthProvider, specs/004 §4.1) needs
-      # mobile/ios/GoogleService-Info.plist to exist at build time once the real Firebase SPM
-      # dependency lands (H1 follow-up); today's project has no Firebase package dependency yet,
-      # so this file isn't actually consumed by the build below, but the placeholder is added now
-      # (mirroring android.yml's "generate placeholder google-services.json" step) so this job
-      # doesn't silently start depending on an untracked, gitignored file the moment that
-      # dependency is added. Obviously-fake throughout (docs/security-review-checklist.md §1 —
-      # no `AIza…`-prefixed key, which the checklist's own secret-scan grep matches); this file
-      # never authenticates against anything real. The real file (gitignored, developer-machine
-      # only) has the actual `com.findly.ios` / `findly-71f7b` project values.
+      # The Firebase SPM packages (FirebaseCore/FirebaseAuth/FirebaseMessaging,
+      # specs/004 §4.1, mobile/ios/project.yml) are linked into the Findly target, so
+      # mobile/ios/GoogleService-Info.plist IS consumed by the build below (mirroring android.yml's
+      # "generate placeholder google-services.json" step) — this job doesn't silently depend on an
+      # untracked, gitignored file. Obviously-fake throughout (docs/security-review-checklist.md
+      # §1 — no `AIza…`-prefixed key, which the checklist's own secret-scan grep matches); this
+      # file never authenticates against anything real. The real file (gitignored,
+      # developer-machine only) has the actual `com.findly.ios` / `findly-71f7b` project values.
+      #
+      # I47 (docs/implementation-handoff.md): the API_KEY below MUST be format-valid — 39
+      # characters, starting with "A", base64-URL-safe charset — because `FirebaseAuthProvider`
+      # now validates that format itself (`FirebaseAPIKeyValidator`, FindlyKit) before calling
+      # `FirebaseApp.configure()`, and Firebase's OWN internals (`+[FIRInstallations
+      # validateAPIKey:]`) enforce the identical format and previously SIGABRT'd on this exact
+      # placeholder — the earlier literal here was 34 characters and didn't start with "A". A
+      # format-invalid key meant this placeholder build compiled but could never actually launch,
+      # which is precisely what let three consecutive agents (I39, I45, I46) misdiagnose the crash
+      # as a Simulator/automation limitation. The value below satisfies the format while spelling
+      # out "FAKE...NOT REAL...DO NOT USE" in its own characters, so it can never be mistaken for a
+      # live credential — it must never work against any real Firebase project.
       - name: write GoogleService-Info.plist (real when available, placeholder otherwise)
         env:
           IOS_GOOGLE_SERVICE_INFO_PLIST: ${{ secrets.IOS_GOOGLE_SERVICE_INFO_PLIST }}
@@ -139,7 +149,7 @@ jobs:
           <plist version="1.0">
           <dict>
             <key>API_KEY</key>
-            <string>CI-PLACEHOLDER-NOT-A-REAL-API-KEY</string>
+            <string>AFAKE-NOT-REAL-KEY-DO-NOT-USE-IN-PROD00</string>
             <key>GCM_SENDER_ID</key>
             <string>000000000000</string>
             <key>PLIST_VERSION</key>
