@@ -1,6 +1,8 @@
 package com.findly.android.push
 
 import com.findly.android.FindlyApplication
+import com.findly.android.pushmessages.PushMessageLane
+import com.findly.android.pushmessages.PushMessageLanePolicy
 import com.findly.android.pushmessages.PushMessageType
 import com.findly.android.pushmessages.PushPriorityDemotion
 import com.google.firebase.messaging.FirebaseMessagingService
@@ -12,7 +14,8 @@ import kotlinx.coroutines.runBlocking
  * The real FCM entry point (specs/003-android-client.md §9; specs/009-device-runtime.md §5). Kept
  * thin and untestable-by-design — same category as `queue/worker/LocationSyncWorker` (003
  * §10.5) — all real logic lives in unit-tested plain Kotlin classes
- * ([com.findly.android.pushmessages.PushMessageDispatcher] and its four per-type handlers,
+ * ([com.findly.android.pushmessages.PushMessageLanePolicy],
+ * [com.findly.android.pushmessages.PushMessageDispatcher] and its two per-type handlers,
  * [com.findly.android.pushmessages.LocateRequestHandoff], [RealPushTokenProvider]'s listener
  * bookkeeping) that this class only invokes.
  *
@@ -44,9 +47,17 @@ import kotlinx.coroutines.runBlocking
  * `LOCATE_REQUEST`, there is no priority/permission/presence-service decision to make first, so a
  * synchronous, immediately-returning `WorkManager.enqueue()` call is the whole handoff.
  *
- * The remaining two types (`SETTINGS_CHANGED`, `GEOFENCE_EVENT`) keep their existing in-callback
- * `runBlocking` dispatch — both are cheap, pure in-memory work (a schedule rebuild, or posting a
- * local notification) with no I/O, independently verified safe by both A39's and A43's reviewers.
+ * The remaining types (`SETTINGS_CHANGED`, `GEOFENCE_EVENT`, and any unknown/reserved/missing
+ * type) keep the in-callback `runBlocking` dispatch — all are cheap, pure in-memory work (a
+ * schedule rebuild, posting a local notification, or a no-op) with no I/O, independently verified
+ * safe by both A39's and A43's reviewers.
+ *
+ * **A47 — which lane a push type takes is now [com.findly.android.pushmessages.PushMessageLanePolicy],
+ * not an inline `if`/`if`/fallthrough here.** The three branches below only *carry out* whichever
+ * [PushMessageLane] the policy returns; `dispatch(` is never reached for `LOCATE_REQUEST` or
+ * `GEOFENCE_CONFIG_CHANGED` (verified: this `when`'s `Dispatcher` branch is `dispatch`'s only
+ * production call site), so `PushMessageDispatcher` no longer carries handlers for either type —
+ * see its own doc.
  */
 class FindlyMessagingService : FirebaseMessagingService() {
 
@@ -59,20 +70,18 @@ class FindlyMessagingService : FirebaseMessagingService() {
     override fun onMessageReceived(message: RemoteMessage) {
         val type = PushMessageType.from(message.data)
 
-        if (type is PushMessageType.LocateRequest) {
-            val isHighPriority = message.priority == RemoteMessage.PRIORITY_HIGH
-            val wasDemoted = PushPriorityDemotion.wasDemoted(message.priority, message.originalPriority)
-            container.locateRequestHandoff.handle(message.data, isHighPriority, wasDemoted)
-            return
-        }
+        when (PushMessageLanePolicy.decide(type)) {
+            PushMessageLane.LocateHandoff -> {
+                val isHighPriority = message.priority == RemoteMessage.PRIORITY_HIGH
+                val wasDemoted = PushPriorityDemotion.wasDemoted(message.priority, message.originalPriority)
+                container.locateRequestHandoff.handle(message.data, isHighPriority, wasDemoted)
+            }
 
-        if (type is PushMessageType.GeofenceConfigChanged) {
-            container.geofenceConfigSyncWorkEnqueuer.enqueue()
-            return
-        }
+            PushMessageLane.ExpeditedGeofenceConfigSync -> container.geofenceConfigSyncWorkEnqueuer.enqueue()
 
-        runBlocking(Dispatchers.IO) {
-            container.pushMessageDispatcher.dispatch(message.data)
+            PushMessageLane.Dispatcher -> runBlocking(Dispatchers.IO) {
+                container.pushMessageDispatcher.dispatch(message.data)
+            }
         }
     }
 }
