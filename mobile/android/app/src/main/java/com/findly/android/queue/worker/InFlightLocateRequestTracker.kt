@@ -2,6 +2,8 @@ package com.findly.android.queue.worker
 
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicReference
+import kotlinx.coroutines.Job
 
 /**
  * docs/implementation-handoff.md A44 (specs/009-device-runtime.md §5.1): [LocateForegroundService]
@@ -37,6 +39,23 @@ import java.util.concurrent.atomic.AtomicInteger
  * `stopForeground(STOP_FOREGROUND_DETACH)` unconditionally, with no dependency on `startId`
  * recency at all, so the OS foreground *designation* could still be dropped by the first
  * completion even though the process itself correctly stayed alive.
+ *
+ * **A48 (docs/implementation-handoff.md; found by A44, reported rather than folded in):**
+ * [LocateForegroundService.timeoutJob] used to be a single `@Volatile` field on the *service*,
+ * shared by every request, not a per-request value. A second request's `onStartCommand` running
+ * while a first was still in flight overwrote that field with the second request's own timeout
+ * `Job`; a later `finish()` for the *first* request then cancelled whichever job the field
+ * currently held — which could be the *second* request's still-legitimately-running 45s hard cap.
+ * Consequence: the timeout cap could be applied to the wrong request, entirely independent of the
+ * in-flight-count/foreground-designation bug A44 fixed above. The fix follows the same shape as
+ * [inFlightCount]: [RequestToken] already exists one-per-request, so the timeout `Job` is stored
+ * on it ([RequestToken.timeoutJob], via [attachTimeoutJob]) rather than in a second parallel
+ * per-service field. [finish] then cancels only the calling token's own job, which is correct *by
+ * construction* — there is no shared field left for a different request's completion to reach.
+ * [RequestToken.timeoutJob] is an [AtomicReference] for the same reason [inFlightCount] is an
+ * [AtomicInteger]: [attachTimeoutJob] is written from the main thread ([LocateForegroundService
+ * .onStartCommand]) while [finish] reads and cancels it from `Dispatchers.Default` worker threads,
+ * for potentially many overlapping requests, at once.
  */
 class InFlightLocateRequestTracker {
     private val inFlightCount = AtomicInteger(0)
@@ -51,11 +70,30 @@ class InFlightLocateRequestTracker {
         return RequestToken()
     }
 
+    /** A48: associates [job] — this request's own 45s hard-cap timeout coroutine — with [token],
+     * so a later [finish] call for a *different* overlapping request's token can never reach it.
+     * Call once, synchronously, immediately after launching the timeout coroutine and before
+     * launching the capture coroutine that shares [token] — [LocateForegroundService
+     * .onStartCommand] does both on the calling (main) thread with no suspension in between, so
+     * the write is guaranteed to land before either coroutine's body could possibly call [finish]
+     * for this token. [AtomicReference.set] gives the required cross-thread visibility for that
+     * write to be seen correctly by whichever worker thread calls [finish] later. */
+    fun attachTimeoutJob(token: RequestToken, job: Job) {
+        token.timeoutJob.set(job)
+    }
+
     /** Returns `true` exactly once per [RequestToken] — the call that brought the shared in-flight
      * count to zero, i.e. this was the very last of all currently in-flight requests to complete.
      * Returns `false` on every other call, including a repeat call for a token that already
-     * reported `true` (or `false`) once. */
+     * reported `true` (or `false`) once.
+     *
+     * A48: also cancels [token]'s own attached timeout job, every time this is called (not only
+     * the first) — `Job.cancel()` is idempotent and safe to call from multiple threads, and the
+     * documented timeout-vs-capture race means either coroutine can be the one that gets here
+     * first for a given token. Cancelling here can never affect a *different* token's job: there
+     * is no shared field to race on any more, only this token's own [RequestToken.timeoutJob]. */
     fun finish(token: RequestToken): Boolean {
+        token.timeoutJob.get()?.cancel()
         if (!token.alreadyFinished.compareAndSet(false, true)) return false
         return inFlightCount.decrementAndGet() == 0
     }
@@ -63,5 +101,10 @@ class InFlightLocateRequestTracker {
     /** Opaque per-request handle; only [InFlightLocateRequestTracker] reads its internals. */
     class RequestToken {
         internal val alreadyFinished = AtomicBoolean(false)
+
+        /** A48: this request's own 45s hard-cap timeout [Job], set once via [attachTimeoutJob].
+         * `null` until then (or if a request never gets one attached, defensively — [finish] must
+         * not fail just because this happens to still be unset). */
+        internal val timeoutJob = AtomicReference<Job?>(null)
     }
 }
