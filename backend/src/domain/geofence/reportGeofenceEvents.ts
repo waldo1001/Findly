@@ -212,6 +212,13 @@ export async function reportGeofenceEvents(
         familyDevices = await listDevicesForMembers(members, deps.deviceRepo);
       }
       const title = titleFor(displayName, matched.name, event.transition);
+      // B34: data.displayName and data.geofenceName must carry the SAME
+      // normalized/placeholder-substituted values as the title beside them (titleFor), not
+      // the raw stored values — Android is data-only (009 §5.1) and builds its own title
+      // from this map, so on that leg the client sanitiser was otherwise the sole defence
+      // against a hostile stored name/geofence name.
+      const normalizedDisplayName = normalizeDisplayTextOrFallback(displayName, EMPTY_DISPLAY_NAME_FALLBACK);
+      const normalizedGeofenceName = normalizeDisplayTextOrFallback(matched.name, EMPTY_GEOFENCE_NAME_FALLBACK);
       for (const target of familyDevices) {
         if (target.deviceId === deviceId) continue; // never notify the reporting device (§8.2)
         if (!target.pushToken || target.pushInvalid) continue;
@@ -223,9 +230,9 @@ export async function reportGeofenceEvents(
             data: {
               type: "GEOFENCE_EVENT",
               userId: input.uid,
-              displayName,
+              displayName: normalizedDisplayName,
               geofenceId: event.geofenceId,
-              geofenceName: matched.name,
+              geofenceName: normalizedGeofenceName,
               transition: event.transition,
               recordedAt: event.recordedAt,
             },
