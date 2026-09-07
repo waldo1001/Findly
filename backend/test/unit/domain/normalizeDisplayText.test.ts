@@ -4,7 +4,7 @@
 // wires it into the zod schemas and is covered separately (test/unit/http/validate.test.ts).
 
 import { describe, expect, it } from "vitest";
-import { normalizeDisplayText } from "../../../src/domain/text/normalizeDisplayText";
+import { normalizeDisplayText, normalizeDisplayTextOrFallback } from "../../../src/domain/text/normalizeDisplayText";
 
 describe("domain/text/normalizeDisplayText", () => {
   it("leaves an ordinary name untouched", () => {
@@ -112,5 +112,27 @@ describe("domain/text/normalizeDisplayText", () => {
   it("is idempotent: normalizing an already-normalized value is a no-op", () => {
     const once = normalizeDisplayText("Eric\u202E van\u0007 Berg  ");
     expect(normalizeDisplayText(once)).toBe(once);
+  });
+});
+
+describe("domain/text/normalizeDisplayTextOrFallback", () => {
+  it("returns the normalized value unchanged when it is non-empty", () => {
+    expect(normalizeDisplayTextOrFallback("Eric", "Someone")).toBe("Eric");
+  });
+
+  it("still strips forbidden characters from a value that remains non-empty after normalization", () => {
+    expect(normalizeDisplayTextOrFallback("Noor\u202Etsohg", "Someone")).toBe("Noortsohg");
+  });
+
+  it("substitutes the fallback when the raw value normalizes to the empty string (specs/001 \u00a71.4)", () => {
+    expect(normalizeDisplayTextOrFallback("\u202E\u2066", "Someone")).toBe("Someone");
+  });
+
+  it("substitutes the fallback for a value that is only whitespace around stripped controls", () => {
+    expect(normalizeDisplayTextOrFallback("  \u202E  ", "a place")).toBe("a place");
+  });
+
+  it("does not substitute the fallback for a merely partially-hostile value", () => {
+    expect(normalizeDisplayTextOrFallback("Ho\u202Eme", "a place")).toBe("Home");
   });
 });
