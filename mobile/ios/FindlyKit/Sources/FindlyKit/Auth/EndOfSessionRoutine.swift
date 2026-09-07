@@ -35,20 +35,31 @@ import Foundation
 /// available.
 @MainActor
 public enum EndOfSessionRoutine {
-    /// The two axes every existing session-ending path disagrees on, isolated here as named,
-    /// documented booleans rather than each call site copy-pasting its own subset of the four
-    /// calls. Every `false` below is a DELIBERATE, reviewed exception — not an oversight; a new
-    /// call site that wants to set either MUST justify it in a comment at that call site, the way
-    /// the two existing exceptions already do.
+    /// Two axes, isolated here as named, documented booleans rather than each call site
+    /// copy-pasting its own subset of the four calls. Every `false` below is a DELIBERATE, reviewed
+    /// exception — not an oversight; a new call site that wants to set either MUST justify it in a
+    /// comment at that call site, the way the existing exception already does.
     public struct Options {
-        /// `false` only for `DeleteAccountViewModel.signOutForRetry()` (I25 review): the backend
-        /// account is already gone, but a SAME-uid sign-in is the very next expected step (the user
-        /// retries the delete from `.firebaseDeleteFailed`) — `deviceIdProvider`/
-        /// `exportArtifactStore` are plain values whose stale read under that same uid is harmless
-        /// (a stale deviceId just re-registers under the same UUID; a stale export artifact just
-        /// gets overwritten), so clearing them is deferred to the point the deletion is actually
-        /// confirmed complete (`wipeLocalStateAndComplete()`). Every other path defaults this
-        /// `true`.
+        /// **As of I44 (specs/008 §3.1), no call site in the app target passes `false` here — every
+        /// path clears both.** Previously `false` for `DeleteAccountViewModel.signOutForRetry()`
+        /// (I25 review): the reasoning was that the backend account is already gone, but a SAME-uid
+        /// sign-in is the very next EXPECTED step (the user retries the delete from
+        /// `.firebaseDeleteFailed`), so a stale `deviceIdProvider`/`exportArtifactStore` read under
+        /// that same uid would be harmless. I44 found that assumption was never enforced — a
+        /// DIFFERENT person can reach the sign-in screen from `.signedOutForRetry` and sign in
+        /// before the retry completes, in which case the previous user's plaintext export (008 §3)
+        /// and device id would still be readable on disk, the identical window I43 closed on the
+        /// forced-sign-out path — and switched `signOutForRetry()` to the default (`true`). I44 also
+        /// established the deferral's assumed savings didn't hold up: `appVersionTracker` (cleared
+        /// unconditionally below, independent of this option) already forces a `POST /devices`
+        /// call on the very next sign-in regardless, and account deletion deletes the backend
+        /// `Devices` partition FIRST (002 §4.2 step 1), so the old deviceId's backend row is already
+        /// gone by the time the same uid retries — reusing it would not have preserved anything.
+        /// **This option is now a single-value axis with zero current callers of `false` — a
+        /// candidate for removal (flagged by I44, not removed there since removing a public API is
+        /// a separate decision).** Kept for now as a documented escape hatch for a future call site
+        /// that can justify it in a comment at that call site, same as the surviving
+        /// `clearsStoredSession` exception below.
         public var clearsDeviceIdentityAndExportArtifact: Bool
         /// `false` only for `RootView.clearSessionOnConfirmedAuthFailure()` (A37 review, Finding
         /// 4): `clearStoredSession()` clears just the Keychain-backed phone-verification (OTP) id,
@@ -66,7 +77,7 @@ public enum EndOfSessionRoutine {
     /// `deviceIdProvider`/`exportArtifactStore`, it is not a plain value: it GATES CONTROL FLOW
     /// (`DeviceRegistrationService.registerOnLaunchIfNeeded()` no-ops entirely once the stored
     /// version already matches the running app version), so no existing path defers clearing it —
-    /// see `Options.clearsDeviceIdentityAndExportArtifact`'s doc for the full I25 rationale.
+    /// see `Options.clearsDeviceIdentityAndExportArtifact`'s doc for the full I25/I44 rationale.
     public static func run(
         currentUserId: String?,
         authProvider: AuthProviding?,

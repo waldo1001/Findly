@@ -81,13 +81,19 @@ struct EndOfSessionRoutineTests {
         #expect(auth.signOutCallCount == 1)
     }
 
-    // MARK: - The two documented, deliberate exceptions (must survive as the ONLY divergence)
+    // MARK: - Options mechanics, exercised directly (call-site routing is proven by DeleteAccountViewModelTests / RootView's own thin wrapper)
 
-    /// `DeleteAccountViewModel.signOutForRetry()`'s shape (I25 review): the backend account is
-    /// already gone, but a SAME-uid sign-in is the very next expected step (the user retries the
-    /// delete) — `deviceIdProvider`/`exportArtifactStore` are plain values a stale read of which is
-    /// harmless under that same uid, so clearing them is deferred to the point the deletion is
-    /// actually confirmed complete.
+    /// Proves the `clearsDeviceIdentityAndExportArtifact: false` axis still behaves correctly as a
+    /// mechanism, even though **no call site in the app target uses it any more (I44, specs/008
+    /// §3.1)** — `DeleteAccountViewModel.signOutForRetry()` was the one caller that ever passed
+    /// `false` here (I25 review: the backend account is already gone, but a SAME-uid sign-in was
+    /// assumed to be the very next step, so a stale `deviceIdProvider`/`exportArtifactStore` read
+    /// under that same uid was assumed harmless). I44 found that assumption unenforced — a
+    /// DIFFERENT person can reach sign-in from the retry state first — and switched
+    /// `signOutForRetry()` to the routine's default (`true`). This test is kept as a direct unit
+    /// test of the `Options` struct's own behavior (a future call site could still have a reason to
+    /// set it), not as a proof of any current caller's shape; see `Options.clearsDeviceIdentityAndExportArtifact`'s
+    /// doc for the full history and I44's dead-option flag.
     @Test func run_clearsDeviceIdentityAndExportArtifactFalse_leavesThoseTwoAlone_butStillClearsAppVersionTrackerAndWipesAndSignsOut() async {
         let deviceIdProvider = InMemoryDeviceIdProvider()
         let originalDeviceId = deviceIdProvider.deviceId(forUserId: "u1")
