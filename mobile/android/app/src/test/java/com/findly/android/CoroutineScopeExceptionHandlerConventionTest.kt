@@ -1,6 +1,7 @@
 package com.findly.android
 
 import java.io.File
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -101,9 +102,123 @@ class CoroutineScopeExceptionHandlerConventionTest {
         return Regex("//[^\n]*").replace(noBlockComments, "")
     }
 
+    /** Third review round fix, finding 1: replaces the interior (and delimiters) of every string
+     * literal — a regular `"..."` (respecting `\"` escapes so an escaped quote never ends the
+     * literal early) or a triple-quoted `"""..."""` (no escape processing, per Kotlin) — with
+     * spaces, preserving length and newlines so every index into the result still lines up with
+     * [source]. Applied once, up front, so every brace/paren depth-counting loop and every regex
+     * match below it — [constructionSites]' and [handlerBodies]' matching parenthesis/brace scans,
+     * [handlerTypeReference], [handlerDeclarationOccurrences], [mainScopeSite],
+     * [globalScopeReference] — is automatically blind to text an author merely wrote *inside* a
+     * string (a `}` in an ordinary log message, `CoroutineExceptionHandler` named in an error
+     * string) without any of them needing their own string-literal awareness. The reviewer's exact
+     * defeat snippet was a `}` inside `"}"` inside a handler body's own string argument, which
+     * dropped [handlerBodies]' naive `{`/`}` depth count to zero early and hid everything after it
+     * — including the real throwable leak the test exists to catch.
+     *
+     * **String-template interpolation (`${'$'}{expr}`, `${'$'}identifier`) is left un-masked.** A
+     * first version of this fix masked template bodies too, which broke the compliant
+     * `Log.d(TAG, "unhandled failure (${'$'}{throwable::class.simpleName})")` shape several real
+     * handlers in this module use (`AppContainer.kt`, `LocateForegroundService.kt`,
+     * `LocationForegroundService.kt`, `BootCompletedReceiver.kt`,
+     * `GeofenceTransitionReceiver.kt`) — masking the whole string blanked out the very
+     * `throwable::class.simpleName` expression the logging check looks for, turning entirely
+     * compliant code into five false fails. A template's expression is real, executable Kotlin
+     * (which can itself contain further string literals, so `${'$'}{...}` recurses back through
+     * the same masking) — only the literal text *around* a template is ever masked. */
+    private fun maskStringLiterals(source: String): String {
+        val out = CharArray(source.length) { ' ' }
+
+        // Kotlin local functions can't forward-reference each other, but these two are mutually
+        // recursive by construction (real code can contain a string, whose `${...}` template can
+        // contain more real code, which can contain another string, ...), so they're declared as
+        // lateinit lambdas assigned in dependency order instead of `fun`.
+        lateinit var maskCode: (from: Int, inTemplate: Boolean) -> Int
+        lateinit var maskString: (from: Int, triple: Boolean) -> Int
+
+        maskCode = { from, inTemplate ->
+            var i = from
+            var depth = 0
+            while (i < source.length) {
+                when {
+                    source.startsWith("\"\"\"", i) -> i = maskString(i + 3, true)
+                    source[i] == '"' -> i = maskString(i + 1, false)
+                    inTemplate && source[i] == '{' -> {
+                        depth++
+                        out[i] = source[i]
+                        i++
+                    }
+                    inTemplate && source[i] == '}' && depth == 0 -> {
+                        // The template's own closing delimiter, matching the `${` that was
+                        // itself masked (not copied) below — mask this one too, symmetrically,
+                        // so a downstream naive brace counter (handlerBodies, constructionSites)
+                        // never sees an unmatched `}` where the `{` half was masked away.
+                        i++
+                        depth = -1 // sentinel: stop the loop below via the break check
+                    }
+                    inTemplate && source[i] == '}' -> {
+                        depth--
+                        out[i] = source[i]
+                        i++
+                    }
+                    else -> {
+                        out[i] = source[i]
+                        i++
+                    }
+                }
+                if (inTemplate && depth == -1) break
+            }
+            i
+        }
+
+        maskString = { from, triple ->
+            var i = from
+            var closed = false
+            while (i < source.length && !closed) {
+                when {
+                    !triple && source[i] == '\\' -> i += if (i + 1 < source.length) 2 else 1
+                    !triple && source[i] == '"' -> {
+                        i++
+                        closed = true
+                    }
+                    triple && source.startsWith("\"\"\"", i) -> {
+                        i += 3
+                        closed = true
+                    }
+                    source[i] == '$' && i + 1 < source.length && source[i + 1] == '{' ->
+                        i = maskCode(i + 2, true)
+                    source[i] == '$' && i + 1 < source.length &&
+                        (source[i + 1].isLetter() || source[i + 1] == '_') -> {
+                        var j = i + 1
+                        while (j < source.length && (source[j].isLetterOrDigit() || source[j] == '_')) {
+                            out[j] = source[j]
+                            j++
+                        }
+                        i = j
+                    }
+                    else -> {
+                        if (source[i] == '\n') out[i] = '\n'
+                        i++
+                    }
+                }
+            }
+            i
+        }
+
+        maskCode(0, false)
+        return String(out)
+    }
+
+    /** The single preprocessing pipeline every scan below runs on: strip comments, then mask out
+     * string-literal interiors. Every `@Test` and every direct scanner-unit-test in this file goes
+     * through this one function so the two stages can never drift out of sync with each other. */
+    private fun preprocessSource(rawText: String): String = maskStringLiterals(stripComments(rawText))
+
     /** Every real `CoroutineScope(` construction — not `rememberCoroutineScope()`, excluded by the
      * negative lookbehind requiring a non-letter (or start of file) immediately before the match —
-     * as the full text between (and including) its balanced parentheses. */
+     * as the full text between (and including) its balanced parentheses. Operates on already
+     * comment-stripped, string-masked source ([preprocessSource]), so a `)` an author happened to
+     * write inside a string literal can never be mistaken for the real closing paren. */
     private fun constructionSites(source: String): List<String> {
         val regex = Regex("(?<![A-Za-z])CoroutineScope\\(")
         return regex.findAll(source).map { match ->
@@ -142,9 +257,21 @@ class CoroutineScopeExceptionHandlerConventionTest {
      * (e.g. `ceh`) and false-positived any identifier that happened to contain it without being a
      * handler at all. A bare identifier referenced in a site now only counts if it resolves, in
      * the same file, to a `val <name> ... = CoroutineExceptionHandler` declaration. */
+    /** Third review round fix, finding 2: the RHS match used to require `CoroutineExceptionHandler`
+     * to appear immediately after `=` (only whitespace allowed between), so the very ordinary
+     * refactor of hoisting the context into a named `val` —
+     * `val ctx = SupervisorJob() + Dispatchers.Default + CoroutineExceptionHandler { ... }` then
+     * `CoroutineScope(ctx)` — false-failed because the RHS *starts* with `SupervisorJob()`, not the
+     * handler. The RHS is now searched for `CoroutineExceptionHandler` anywhere after the `=`,
+     * still bounded to one line (`[^;\n]*`, no `;`/newline crossed) so it can never accidentally
+     * bleed into a different statement or a different `val`'s declaration. A `+`-combined RHS whose
+     * pieces are split across multiple lines is not resolved by this — see specs/003 §3.1's known
+     * blind spots. */
     private fun siteReferencesDeclaredHandler(site: String, source: String): String? =
         bareIdentifiers(site).firstOrNull { name ->
-            Regex("""\bval\s+${Regex.escape(name)}\b[^=\n]*=\s*CoroutineExceptionHandler\b""").containsMatchIn(source)
+            Regex(
+                """\bval\s+${Regex.escape(name)}\b[^=\n]*=[^;\n]*(?<![A-Za-z0-9_])CoroutineExceptionHandler\b""",
+            ).containsMatchIn(source)
         }
 
     private val mainScopeSite = Regex("""(?<![A-Za-z0-9_])MainScope\s*\(\s*\)""")
@@ -154,7 +281,7 @@ class CoroutineScopeExceptionHandlerConventionTest {
     fun `every CoroutineScope construction site carries a CoroutineExceptionHandler`() {
         val failures = mutableListOf<String>()
         for (file in kotlinSourceFiles()) {
-            val source = stripComments(file.readText())
+            val source = preprocessSource(file.readText())
             for (site in constructionSites(source)) {
                 if (siteHasInlineHandler(site) || siteReferencesDeclaredHandler(site, source) != null) continue
                 val candidates = bareIdentifiers(site).filter { Regex("""^[A-Za-z_]\w*$""").matches(it) }
@@ -237,14 +364,30 @@ class CoroutineScopeExceptionHandlerConventionTest {
         val withoutImports = source.lineSequence()
             .filterNot { it.trimStart().startsWith("import ") }
             .joinToString("\n")
-        return handlerTypeReference.findAll(withoutImports).map { it.value }.toList()
+        return handlerTypeReference.findAll(withoutImports)
+            .filterNot { match -> isReturnTypeAnnotationPosition(withoutImports, match.range.first) }
+            .map { it.value }
+            .toList()
     }
+
+    /** Third review round fix, finding 2: a bare mention in a function's return-type position
+     * (`private fun makeHandler(): CoroutineExceptionHandler`) is a mere type annotation, not a
+     * construction — counting it here double-counted an ordinary factory function against the
+     * single real construction on its body/RHS and false-failed entirely correct code. Only this
+     * specific, unambiguous shape is excluded (a `)` then `:` immediately before the name);
+     * `object : CoroutineExceptionHandler { ... }` is preceded by the `object` keyword, not `)`, so
+     * it is still counted and still fails closed, as intended. A constructor-parameter or property
+     * type annotation (`class Foo(private val handler: CoroutineExceptionHandler)`) is a narrower,
+     * still-open instance of the same class of false positive — see specs/003 §3.1's known blind
+     * spots. */
+    private fun isReturnTypeAnnotationPosition(text: String, matchStart: Int): Boolean =
+        Regex("""\)\s*:\s*$""").containsMatchIn(text.substring(0, matchStart))
 
     @Test
     fun `every CoroutineExceptionHandler logs the throwable's class name only, never the throwable itself`() {
         val failures = mutableListOf<String>()
         for (file in kotlinSourceFiles()) {
-            val source = stripComments(file.readText())
+            val source = preprocessSource(file.readText())
             val declarationCount = handlerDeclarationOccurrences(source).size
             val bodies = handlerBodies(source)
             if (bodies.size < declarationCount) {
@@ -283,6 +426,175 @@ class CoroutineScopeExceptionHandlerConventionTest {
             "CoroutineExceptionHandler(s) that don't log class-name-only found (or couldn't be " +
                 "verified at all):\n" + failures.joinToString("\n"),
             failures.isEmpty(),
+        )
+    }
+
+    // --- Third review round, finding 1: adversarial fixtures for the string-literal defeat. ---
+
+    /** Reviewer's exact defeat snippet (quoted verbatim in the A42 task brief): a `}` inside the
+     * ordinary string `"}"` used to drop [handlerBodies]' naive brace-depth count to zero early, so
+     * everything after it — including the real §9 leak on the
+     * `Log.w(TAG, throwable.message ?: "", throwable)` line — was never examined. Exercises the
+     * real scanning function directly against this exact text, independent of any file under
+     * `src/main`, so this regression can never again depend on a fixture file surviving in the
+     * production tree. */
+    @Test
+    fun `handlerBodies does not stop scanning at a brace inside an ordinary string literal`() {
+        val snippet = """
+            fun start() {
+                CoroutineScope(SupervisorJob() + Dispatchers.Default + CoroutineExceptionHandler { _, throwable ->
+                    Log.d(TAG, "failure: ${'$'}{throwable::class.simpleName}")
+                    val bogus = "}"
+                    Log.w(TAG, throwable.message ?: "", throwable)
+                })
+            }
+        """.trimIndent()
+        val source = preprocessSource(snippet)
+        val bodies = handlerBodies(source)
+        assertEquals(1, bodies.size)
+        val (throwableName, body) = bodies.single()
+        assertEquals("throwable", throwableName)
+        assertTrue(
+            "handlerBodies truncated the handler body at the brace inside the string literal " +
+                "\"}\" instead of the real closing brace of the CoroutineExceptionHandler lambda " +
+                "— the leaking Log.w(...) line was never captured:\n$body",
+            body.contains("Log.w(TAG, throwable.message"),
+        )
+    }
+
+    /** Same defect class as above, in [constructionSites]' paren-depth count (task brief: "the
+     * construction-site scan around line 99"): a `)` inside an ordinary string literal must not be
+     * mistaken for the real closing paren of `CoroutineScope(...)`. */
+    @Test
+    fun `constructionSites does not stop scanning at a parenthesis inside an ordinary string literal`() {
+        val snippet = """
+            fun start() {
+                CoroutineScope(
+                    SupervisorJob() + Dispatchers.Default + CoroutineExceptionHandler { _, throwable ->
+                        val bogus = ")"
+                        Log.d(TAG, throwable::class.simpleName ?: "unknown")
+                    }
+                )
+            }
+        """.trimIndent()
+        val source = preprocessSource(snippet)
+        val sites = constructionSites(source)
+        assertEquals(1, sites.size)
+        val site = sites.single()
+        assertTrue(
+            "constructionSites truncated the site at the parenthesis inside the string literal " +
+                "\")\" instead of the real closing paren of CoroutineScope(...) — everything after " +
+                "it was never captured as part of the site:\n$site",
+            site.contains("Log.d(TAG, throwable::class.simpleName"),
+        )
+    }
+
+    /** Regression guard for [maskStringLiterals] itself, added after a first version of the finding
+     * 1 fix masked template bodies wholesale and false-failed five real, compliant handlers in this
+     * module — `AppContainer.kt`, `LocateForegroundService.kt`, `LocationForegroundService.kt`,
+     * `BootCompletedReceiver.kt`, `GeofenceTransitionReceiver.kt` — all of which log via
+     * `"...(${'$'}{throwable::class.simpleName})"` string-template interpolation rather than a
+     * plain trailing `Log.d(TAG, throwable::class.simpleName)` argument. The `${'$'}{...}`
+     * expression is real code and must remain visible to the logging check. */
+    @Test
+    fun `a compliant handler logging via string-template interpolation is still recognized`() {
+        val snippet = """
+            private val handler = CoroutineExceptionHandler { _, throwable ->
+                Log.d(TAG, "unhandled failure (${'$'}{throwable::class.simpleName})")
+            }
+        """.trimIndent()
+        val source = preprocessSource(snippet)
+        val bodies = handlerBodies(source)
+        assertEquals(1, bodies.size)
+        val (_, body) = bodies.single()
+        assertTrue(
+            "masking the string literal also masked away the real " +
+                "\${throwable::class.simpleName} template expression inside it, which is how " +
+                "several real handlers in this codebase log compliantly:\n$body",
+            Regex("""throwable\s*::\s*class\s*\.\s*simpleName""").containsMatchIn(body),
+        )
+    }
+
+    // --- Third review round, finding 2: adversarial fixtures for the fail-closed false-fails. ---
+
+    /** A factory function's return-type annotation (`private fun makeHandler(): " +
+     * "CoroutineExceptionHandler`) is a mere type mention, not a construction — it must not be
+     * double-counted against the one real construction on the function's body/RHS, or entirely
+     * correct code false-fails the fail-closed count check. */
+    @Test
+    fun `a factory function's return-type annotation does not double-count as a second handler declaration`() {
+        val snippet = """
+            private fun makeHandler(): CoroutineExceptionHandler = CoroutineExceptionHandler { _, throwable ->
+                Log.d(TAG, throwable::class.simpleName ?: "unknown")
+            }
+        """.trimIndent()
+        val source = stripComments(snippet)
+        val declarationCount = handlerDeclarationOccurrences(source).size
+        val bodyCount = handlerBodies(source).size
+        assertEquals(
+            "the return-type mention of CoroutineExceptionHandler in `makeHandler(): " +
+                "CoroutineExceptionHandler` was counted as a second declaration alongside the real " +
+                "construction on the RHS, so the fail-closed count check flags this entirely " +
+                "correct code as unverifiable (declarations=$declarationCount, bodies=$bodyCount)",
+            bodyCount,
+            declarationCount,
+        )
+    }
+
+    /** Guard against over-correcting the above: an `object : CoroutineExceptionHandler { ... }`
+     * also has a `:` before the type name, but it is preceded by the `object` keyword, not `)` —
+     * it must still be counted and still fail closed (it cannot be verified). */
+    @Test
+    fun `an unparseable object-expression handler is still counted and fails closed`() {
+        val snippet = """
+            private val handler = object : CoroutineExceptionHandler {
+                override fun handleException(context: CoroutineContext, exception: Throwable) {
+                    Log.d(TAG, exception::class.simpleName ?: "unknown")
+                }
+            }
+        """.trimIndent()
+        val source = stripComments(snippet)
+        assertEquals(1, handlerDeclarationOccurrences(source).size)
+        assertEquals(0, handlerBodies(source).size)
+    }
+
+    /** A log/error message that merely names `CoroutineExceptionHandler` in prose must not count
+     * as a declaration — string-literal content must never be mistaken for a real reference to the
+     * type. */
+    @Test
+    fun `a log message merely naming CoroutineExceptionHandler in prose does not count as a declaration`() {
+        val snippet = """
+            private val handler = CoroutineExceptionHandler { _, throwable ->
+                Log.e(TAG, "CoroutineExceptionHandler misconfiguration: " + (throwable::class.simpleName ?: "unknown"))
+            }
+        """.trimIndent()
+        val source = preprocessSource(snippet)
+        assertEquals(1, handlerDeclarationOccurrences(source).size)
+        assertEquals(1, handlerBodies(source).size)
+    }
+
+    /** The ordinary refactor of hoisting a handler into a named, `+`-combined context `val` —
+     * `val ctx = SupervisorJob() + Dispatchers.Default + CoroutineExceptionHandler { ... }` then
+     * `CoroutineScope(ctx)` — must resolve `ctx` as carrying a handler; the old regex only matched
+     * a RHS that *starts* with `CoroutineExceptionHandler`. */
+    @Test
+    fun `a handler hoisted into a plus-combined context val is resolved by reference`() {
+        val snippet = """
+            fun start() {
+                val ctx = SupervisorJob() + Dispatchers.Default + CoroutineExceptionHandler { _, throwable ->
+                    Log.d(TAG, throwable::class.simpleName ?: "unknown")
+                }
+                val scope = CoroutineScope(ctx)
+            }
+        """.trimIndent()
+        val source = stripComments(snippet)
+        val sites = constructionSites(source)
+        assertEquals(1, sites.size)
+        val site = sites.single()
+        assertTrue(
+            "CoroutineScope(ctx) was not recognized as carrying a handler even though `ctx` is a " +
+                "same-file val whose +-combined right-hand side includes CoroutineExceptionHandler",
+            siteHasInlineHandler(site) || siteReferencesDeclaredHandler(site, source) != null,
         )
     }
 }
