@@ -4,6 +4,8 @@ import Testing
 
 /// specs/009-device-runtime.md §1.2 (suppression) + §1.1 (accuracy tiers, tested separately in
 /// `FixAccuracyPolicyTests`) — mirrors Android's `FixCaptureCoordinatorTest.kt` coverage.
+/// I53 - @MainActor: constructs FakeLocationProviding, now inferred @MainActor from LocationProviding.
+@MainActor
 struct FixCaptureCoordinatorTests {
 
     func makeFix(lat: Double = 51.0, lon: Double = 3.7, recordedAt: String = "2026-07-19T09:00:00Z") -> LocationFix {

@@ -7,6 +7,8 @@ import Testing
 /// `LocateRequestPushHandler` doc): a paused device still fulfills an explicit locate request:
 /// only the periodic pipeline's own suppression rules (`FixCaptureCoordinator`) check pause state,
 /// and this class bypasses that coordinator entirely by calling `LocationProviding` directly.
+/// I53 - @MainActor: constructs FakeLocationProviding, now inferred @MainActor from LocationProviding.
+@MainActor
 struct LocateRequestPushHandlerTests {
 
     private static let iso = ISO8601DateFormatter()

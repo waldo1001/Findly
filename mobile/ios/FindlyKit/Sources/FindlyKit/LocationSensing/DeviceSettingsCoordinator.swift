@@ -65,7 +65,16 @@ public actor DeviceSettingsCoordinator: DeviceSettingsApplying {
     private let scheduler: SyncScheduling
     private let geofenceRegistrar: GeofenceRegistrarStub
     private let stateStore: DeviceSettingsStateStoring
-    private let onPause: () -> Void
+    /// **I53 — `async`, not a bare `() -> Void` (the exact same fix `reconcilePresence` below
+    /// already got in I52, applied here for the same reason).** `LocationRuntimeContainer.init`'s
+    /// `onPause` closure calls `locationProvider.stopBackgroundMonitoring()`, which — now that
+    /// `LocationProviding` is `@MainActor` — is main-actor-isolated. This actor's `applySettings`
+    /// runs on ITS OWN cooperative-pool executor, not Main; calling a bare synchronous closure that
+    /// reaches a `@MainActor`-isolated method from here is the identical unsound pattern
+    /// `reconcilePresence`'s own doc describes in detail (Swift 5 language mode only WARNS about it
+    /// rather than refusing to compile, so it would silently run off Main at runtime). Declaring
+    /// this `async` and `await`-ing it forces the real hop, exactly like `reconcilePresence`.
+    private let onPause: () async -> Void
     private let onResume: () async -> Void
     /// **I52 review round 2, finding 1 (Blocking) — `async`, not a bare `() -> Void`.** This actor
     /// is a genuine `actor`: `applySettings` executes on ITS OWN cooperative-pool executor, not
@@ -88,7 +97,7 @@ public actor DeviceSettingsCoordinator: DeviceSettingsApplying {
         scheduler: SyncScheduling,
         geofenceRegistrar: GeofenceRegistrarStub = NoOpGeofenceRegistrarStub(),
         stateStore: DeviceSettingsStateStoring,
-        onPause: @escaping () -> Void = {},
+        onPause: @escaping () async -> Void = {},
         onResume: @escaping () async -> Void = {},
         reconcilePresence: @escaping () async -> Void = {}
     ) {
@@ -118,7 +127,10 @@ public actor DeviceSettingsCoordinator: DeviceSettingsApplying {
             // FixCaptureCoordinator's own pause check discard the result — no data leak, but a
             // real, avoidable battery cost). The BG task itself is deliberately NOT stopped here —
             // see `SyncScheduling`'s doc for why that would be wrong on iOS.
-            onPause()
+            //
+            // I53 — `await` is what actually performs the Main-actor hop (see `onPause`'s own doc),
+            // rather than merely calling straight through on this actor's own executor.
+            await onPause()
         case .resume:
             await onResume()
         case .none:

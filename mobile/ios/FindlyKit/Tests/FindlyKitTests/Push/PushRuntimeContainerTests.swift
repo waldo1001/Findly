@@ -22,6 +22,8 @@ private final class FakeGeofenceEventNotifying: GeofenceEventNotifying {
 /// builds (see `PushRuntimeContainer`'s own doc for why); these tests build their own throwaway
 /// instance per test (fakes underneath), since there's no `LocationRuntimeContainer` in scope here
 /// and the sharing behavior itself isn't this file's concern.
+/// I53 - @MainActor: constructs FakeLocationProviding, now inferred @MainActor from LocationProviding.
+@MainActor
 struct PushRuntimeContainerTests {
 
     private func makeGeofenceConfigSyncCoordinator(apiClient: FindlyAPIClient) -> GeofenceConfigSyncCoordinator {

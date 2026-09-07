@@ -5,6 +5,11 @@ import Testing
 /// this file used to describe with real implementations (`SystemLocationProvider`,
 /// `SystemBackgroundSyncScheduler`, both `#if os(iOS)`-gated). What remains testable on every host
 /// (incl. this macOS session, no simulator) is the protocol seam + its no-op fakes.
+///
+/// **I53 — `@MainActor`.** `NoOpLocationProvider` conforms to `LocationProviding`, now `@MainActor`;
+/// this suite calls its methods directly and synchronously (not through an already-`await`ed actor
+/// seam like most other `LocationProviding` consumers), so the suite itself must be main-isolated.
+@MainActor
 struct LocationSensingScaffoldingTests {
 
     @Test func noOpLocationProvider_requestSingleFix_throwsNotImplemented() async {

@@ -26,6 +26,17 @@ import CoreLocation
 ///   coordinates are passed as `hint:` (specs/009 §6.3's "MAY reuse the transition's own
 ///   coordinates" pattern, applied here to significant-location-change too — no reason to spend a
 ///   second GPS request when the OS already handed us a location).
+/// **`@MainActor` (I53 — specs/009 §1.3/§3.4).** Three consecutive I52 review rounds each found the
+/// same class of defect one layer deeper in `SystemLocationProvider`, ending with a hand-written
+/// `Thread.isMainThread` guard that itself reopened a sliver of the race it was meant to fix (see
+/// that type's own history, kept in its doc for the record). The conclusion: hand-written
+/// `Thread.isMainThread` guards cannot express "this state is main-confined" as an invariant — every
+/// new entry point is a fresh chance to forget one, and a doc comment claiming the invariant held
+/// (round 2's) is exactly what let round 2 ship broken. Marking the protocol itself `@MainActor`
+/// makes isolation compiler-enforced for every current AND future conforming type/call site, instead
+/// of a claim a comment can get wrong. `NoOpLocationProvider` and `SystemLocationProvider` (the two
+/// production conformers) and the test fake are all `@MainActor` accordingly.
+@MainActor
 public protocol LocationProviding: AnyObject {
     func requestSingleFix(source: FixSource) async throws -> LocationFix
     func startBackgroundMonitoring(coordinator: FixCaptureCoordinator)
@@ -67,6 +78,7 @@ public extension Notification.Name {
     static let findlyLocationAuthorizationChanged = Notification.Name("com.findly.locationAuthorizationChanged")
 }
 
+@MainActor
 public protocol SystemLocationProviderRequesting: AnyObject {
     /// MUST be called only after the foreground disclosure is acknowledged (specs/009 §7).
     func requestWhenInUseAuthorizationIfNeeded()
@@ -85,8 +97,17 @@ public enum LocationProvidingError: Error, Equatable {
 }
 
 /// Test/macOS-build default — always fails `requestSingleFix`, background monitoring is inert.
+@MainActor
 public final class NoOpLocationProvider: LocationProviding {
-    public init() {}
+    /// **I53 — `nonisolated`.** This type holds no stored state, so its `init` doesn't need
+    /// `@MainActor` isolation, and staying `nonisolated` lets `LocationRuntimeContainer.init`'s
+    /// `locationProvider: LocationProviding = NoOpLocationProvider()` default-parameter EXPRESSION
+    /// keep working — Swift type-checks a default-argument expression as if evaluated by the
+    /// (unknown-isolation) caller, not by the `@MainActor` initializer it defaults into, so a plain
+    /// `@MainActor init()` there fails with "call to main actor-isolated initializer in a
+    /// synchronous nonisolated context" even though every real caller of `LocationRuntimeContainer`
+    /// is itself `@MainActor`.
+    public nonisolated init() {}
     public func requestSingleFix(source: FixSource) async throws -> LocationFix { throw LocationProvidingError.notImplemented }
     public func startBackgroundMonitoring(coordinator: FixCaptureCoordinator) {}
     public func stopBackgroundMonitoring() {}
@@ -101,6 +122,7 @@ public final class NoOpLocationProvider: LocationProviding {
 /// lives elsewhere (`FixCaptureCoordinator`, `FixAccuracyPolicy`) so this class stays a pure
 /// CLLocationManager adapter, unit-untestable by nature (same bucket as Android's
 /// `FusedLocationCapturer`) but kept as small as possible so there's little here to get wrong.
+@MainActor
 public final class SystemLocationProvider: NSObject, LocationProviding, SystemLocationProviderRequesting {
     private let manager: CLLocationManager
     private let batteryLevelProvider: () -> Int
@@ -122,27 +144,41 @@ public final class SystemLocationProvider: NSObject, LocationProviding, SystemLo
     /// (`PresenceAccuracyPolicy.drainAction`) reads `isPresenceActive` below rather than a second,
     /// separately-maintained flag, so the two can never drift apart.
     ///
-    /// **I52 review round 3 finding (Major) — corrects a false claim from round 2.** This property
-    /// is NOT read and written only from `startPresence`/`stopPresence`: `isPresenceActive` below
-    /// reads it too, and `isPresenceActive` is consulted inside `applyDrainAction()`, which has
-    /// THREE callers, not two — `didUpdateLocations` and `didFailWithError` (both
-    /// `CLLocationManagerDelegate` callbacks, main-bound because CoreLocation delivers them on
-    /// whatever thread created `manager`, which is always Main here), AND the per-caller timeout
-    /// `Task {}` inside `awaitNextLocation`, which fires after a `Task.sleep` and inherits NO
-    /// isolation, because `SystemLocationProvider` is a plain `NSObject` subclass — not `@MainActor`,
-    /// not an actor. That third path really did run `applyDrainAction()`'s body (and therefore this
-    /// property's read) on an arbitrary cooperative-pool thread, concurrently with
-    /// `startPresence`/`stopPresence` mutating the same manager on Main — a genuine data race the
-    /// round-2 wording above overstated away instead of covering. The reviewer's probe demonstrated
-    /// the contrast directly: the same `Task {}`-after-sleep shape stays on Main when the host type
-    /// is `@MainActor`, and lands on an arbitrary thread when it is a plain class like this one, even
-    /// when the enclosing method was itself called from Main. Confinement is maintained not by "only
-    /// two methods touch this" but by an explicit `Thread.isMainThread` guard +
-    /// `DispatchQueue.main.async` re-entry at EVERY entry point that can reach this property —
-    /// `startPresence`, `stopPresence`, and now `applyDrainAction()` too (see its own doc).
-    /// `Timer.invalidate()` is Apple-documented as needing to run on the thread that installed the
-    /// timer; these three guards together are what actually make that true here.
+    /// **I52 review round 3 finding (Major) — corrects a false claim from round 2, closed for good
+    /// by I53.** This property was never read and written only from `startPresence`/`stopPresence`:
+    /// `isPresenceActive` below reads it too, and `isPresenceActive` is consulted inside
+    /// `applyDrainAction()`, which has THREE callers, not two — `didUpdateLocations` and
+    /// `didFailWithError` (both `CLLocationManagerDelegate` callbacks), AND the per-caller timeout
+    /// `Task {}` inside `awaitNextLocation`, which fires after a `Task.sleep`. Round 2 claimed
+    /// confinement because "only two methods touch this"; round 3 proved that false with a probe
+    /// (zero of the expected ticks landed on Main when the class was a plain, non-isolated
+    /// `NSObject` subclass) and patched it with a hand-written `Thread.isMainThread` guard +
+    /// `DispatchQueue.main.async` re-entry at every entry point — which itself reopened a sliver of
+    /// I50's race (deferring the manager mutation off `PendingFixContinuations`' lock let a
+    /// newly-registered caller's `requestLocation()` be cancelled by a previously-scheduled drain
+    /// landing later).
+    ///
+    /// **I53: the class itself is now `@MainActor`.** An unstructured `Task { ... }` created inside
+    /// a `@MainActor`-isolated method inherits that actor's isolation (unlike the plain-class case
+    /// above, where it inherited none) — so the timeout `Task` in `awaitNextLocation`, and every
+    /// `CLLocationManagerDelegate` callback below, are now compiler-enforced to run on Main, exactly
+    /// like `startPresence`/`stopPresence` always were. The three hand-written guards are gone; see
+    /// `LocationProviding`'s own doc for why a guard could never have been the real fix.
     private var presenceTimer: Timer?
+
+    /// specs/009 §1.1, 001 §5.1 `source` (I54) — bumped every time `awaitNextLocation` actually
+    /// issues a fresh `CLLocationManager.requestLocation()` (inside `registerAndAct`'s `action`
+    /// closure, the single seam that ever does). See `StaleDeliveryPolicy`'s doc for the full
+    /// rationale; `abandonedRequestGeneration` below is the other half.
+    private var requestGeneration = 0
+
+    /// specs/009 §1.1, 001 §5.1 `source` (I54) — set by the timeout path in `awaitNextLocation` when
+    /// every caller has given up on `requestGeneration` WITHOUT the manager's in-flight request
+    /// actually being cancelled (`PresenceAccuracyPolicy.drainAction` chose
+    /// `.resetAccuracyToPresenceBaseline` because presence is active — see `StaleDeliveryPolicy`'s
+    /// doc). `didUpdateLocations` consults and clears this the moment it's used, so at most one
+    /// unattributed delivery per abandonment is ever treated as the ghost.
+    private var abandonedRequestGeneration: Int?
 
     /// specs/009 §1.3/§3.5 (I52 review round 2, finding 2, Major) — the interval `presenceTimer`
     /// was actually built with. Previously `startPresence` only ever checked `presenceTimer == nil`,
@@ -285,6 +321,9 @@ public final class SystemLocationProvider: NSObject, LocationProviding, SystemLo
         let timeout = FixAccuracyPolicy.timeout(for: source)
         return try await withCheckedThrowingContinuation { continuation in
             let id = pendingFixes.registerAndAct(source: source, continuation: continuation) {
+                // I54 — bumped exactly when a fresh platform request is actually issued (the one
+                // seam `registerAndAct`'s `needsPlatformRequest` guards). See `StaleDeliveryPolicy`.
+                requestGeneration += 1
                 manager.desiredAccuracy = Self.clAccuracy(for: FixAccuracyPolicy.tier(for: source))
                 manager.requestLocation()
             }
@@ -304,8 +343,13 @@ public final class SystemLocationProvider: NSObject, LocationProviding, SystemLo
                 // rule both this closure and the delivery/failure paths below consult so the
                 // manager is never stopped out from under a running presence session, and so the
                 // manager's accuracy is put back to the presence baseline instead.
+                //
+                // I54 — `dueToTimeout: true` is what lets `applyDrainAction()` remember this
+                // generation as abandoned when the manager isn't actually stopped (presence active),
+                // so a later, unattributed delivery can be recognised as its ghost. See
+                // `StaleDeliveryPolicy`'s doc for the full rationale.
                 self.pendingFixes.timeOutAndAct(id: id, error: LocationProvidingError.timedOut) {
-                    self.applyDrainAction()
+                    self.applyDrainAction(dueToTimeout: true)
                 }
             }
         }
@@ -341,26 +385,23 @@ public final class SystemLocationProvider: NSObject, LocationProviding, SystemLo
     /// `Timer`. A second call at a DIFFERENT interval while already active rebuilds immediately
     /// (specs/009 §3.5, I52 review round 2, finding 2) — see `presenceIntervalMinutes`'s own doc.
     ///
-    /// **I52 review round 2, finding 1 (Blocking), defense-in-depth.** The documented reproduction
-    /// (a settings-arrival call running on `DeviceSettingsCoordinator`'s own actor executor) is
-    /// fixed at its true origin, the `LocationRuntimeContainer`/`DeviceSettingsCoordinator` closure
-    /// boundary (see that fix's own commit — the closure is now genuinely `async`, forcing a real
-    /// actor hop). This `Thread.isMainThread` guard is added here too, on this method itself,
-    /// because `LocationProviding` is a protocol other, currently-hypothetical callers could reach
-    /// this same way — making "main-bound" a property of `startPresence` itself, not only of
-    /// today's one call path. `Timer(timeInterval:repeats:)` (the NON-scheduling initializer) plus
-    /// exactly one `RunLoop.main.add(_:forMode:)` below replaces `Timer.scheduledTimer`, which
-    /// schedules on whatever run loop is CURRENT at call time — ambiguous, and the original root
-    /// cause once that current run loop wasn't Main's. This way there is exactly one, unambiguous
-    /// registration, always on Main, in `.common` mode.
+    /// **I52 review round 2, finding 1 (Blocking) — fixed at its true origin, then made
+    /// compiler-enforced by I53.** The documented reproduction (a settings-arrival call running on
+    /// `DeviceSettingsCoordinator`'s own actor executor) was fixed at the
+    /// `LocationRuntimeContainer`/`DeviceSettingsCoordinator` closure boundary (the closure became
+    /// genuinely `async`, forcing a real actor hop). Round 2 additionally added a hand-written
+    /// `Thread.isMainThread` guard here, reasoning that `LocationProviding` is a protocol other,
+    /// currently-hypothetical callers could reach a different way. I53 replaces that guard with
+    /// `LocationProviding` itself being `@MainActor`: every conforming type's `startPresence` is now
+    /// compiler-required to be main-isolated, which is the same property the guard was trying (and,
+    /// per round 3's finding on a neighboring property, failing) to establish by hand. `Timer
+    /// (timeInterval:repeats:)` (the NON-scheduling initializer) plus exactly one
+    /// `RunLoop.main.add(_:forMode:)` below replaces `Timer.scheduledTimer`, which schedules on
+    /// whatever run loop is CURRENT at call time — ambiguous, and the original root cause once that
+    /// current run loop wasn't Main's. This way there is exactly one, unambiguous registration,
+    /// always on Main (guaranteed by this method's own isolation now, not a runtime check), in
+    /// `.common` mode.
     public func startPresence(syncIntervalMinutes: Int, onTick: @escaping () -> Void) {
-        guard Thread.isMainThread else {
-            DispatchQueue.main.async { [weak self] in
-                self?.startPresence(syncIntervalMinutes: syncIntervalMinutes, onTick: onTick)
-            }
-            return
-        }
-
         if presenceTimer != nil {
             // I52 review round 2, finding 2 (Major) — idempotent no-op ONLY when the interval is
             // unchanged; a genuinely different interval must tear down and rebuild immediately,
@@ -392,8 +433,8 @@ public final class SystemLocationProvider: NSObject, LocationProviding, SystemLo
             onTick()
         }
         // The non-scheduling initializer above registers nowhere on its own — this is the single,
-        // explicit, unambiguous registration, always on Main (guaranteed by the guard at the top of
-        // this method), in `.common` mode so a `UIScrollView`/similar can't starve it.
+        // explicit, unambiguous registration, always on Main (guaranteed by this class's own
+        // `@MainActor` isolation), in `.common` mode so a `UIScrollView`/similar can't starve it.
         RunLoop.main.add(timer, forMode: .common)
         presenceTimer = timer
         presenceIntervalMinutes = syncIntervalMinutes
@@ -404,16 +445,11 @@ public final class SystemLocationProvider: NSObject, LocationProviding, SystemLo
     /// every lifecycle path in `LocationRuntimeContainer` calls this unconditionally as part of
     /// `PresencePolicy` reconciliation, whether or not presence happened to be running).
     ///
-    /// **I52 review round 2, finding 1 (Blocking), defense-in-depth** — same `Thread.isMainThread`
-    /// guard as `startPresence` (see its doc), and for the same reason: Apple documents
-    /// `Timer.invalidate()` as needing to run on the thread that installed the timer, which this
-    /// guarantees here since `startPresence` always installs on Main too.
+    /// **I52 review round 2, finding 1 (Blocking) — same guard-to-`@MainActor` history as
+    /// `startPresence`** (see its doc). Apple documents `Timer.invalidate()` as needing to run on
+    /// the thread that installed the timer; this class being `@MainActor` guarantees that
+    /// compile-time now, since `startPresence` always installs on Main too.
     public func stopPresence() {
-        guard Thread.isMainThread else {
-            DispatchQueue.main.async { [weak self] in self?.stopPresence() }
-            return
-        }
-
         presenceTimer?.invalidate()
         presenceTimer = nil
         presenceIntervalMinutes = nil
@@ -436,12 +472,13 @@ public final class SystemLocationProvider: NSObject, LocationProviding, SystemLo
         // `applyDrainAction()`, which — now that `isPresenceActive` reads false — correctly calls
         // `.stopUpdating` itself at that point.
         //
-        // Deliberately NOT the reviewer's suggested monotonic generation counter, which would also
-        // fix this file's OTHER finding-6 half (a stale delivery arriving after a timeout while
-        // presence is active still gets mislabelled `source: "periodic"`, I50 fix 8's regression
-        // resurfacing) — that touches `PendingFixContinuations`' register/resume machinery for
-        // every caller, not just this path, which is too invasive for this round. Deferred; see
-        // this task's report for the reasoning and the residual gap this leaves.
+        // I54 (specs/009 §1.1, 001 §5.1 `source`) — this file's OTHER finding-6 half (a stale
+        // delivery arriving after a timeout while presence is active gets mislabelled
+        // `source: "periodic"`, I50 fix 8's regression resurfacing) is now closed by the
+        // `requestGeneration`/`abandonedRequestGeneration` bookkeeping + `StaleDeliveryPolicy`
+        // consulted from `applyDrainAction()`/`didUpdateLocations` below — deferred out of I52's
+        // closing round as "too invasive for this round" when this class had no compiler-enforced
+        // isolation to build on; done together with I53 once it did (see this task's report).
         if pendingFixes.count == 0 {
             manager.stopUpdatingLocation()
         }
@@ -460,26 +497,33 @@ public final class SystemLocationProvider: NSObject, LocationProviding, SystemLo
     /// fresh here — rather than each call site re-deriving it — is what keeps the decision correct
     /// even though the three call sites run at different points in this class's lifecycle.
     ///
-    /// **I52 review round 3 finding (Major).** Two of those three call sites — `didUpdateLocations`
-    /// and `didFailWithError` — are `CLLocationManagerDelegate` callbacks and therefore main-bound
-    /// (CoreLocation delivers them on the thread that created `manager`, which is Main here). The
-    /// third, the per-caller timeout `Task {}` in `awaitNextLocation`, fires after a `Task.sleep`
-    /// and inherits no isolation, since this class is a plain `NSObject` subclass rather than
-    /// `@MainActor` or an actor — so it can and did run this method's body (reading
-    /// `isPresenceActive`/`presenceTimer` and mutating `manager`) on an arbitrary cooperative-pool
-    /// thread, concurrently with `startPresence`/`stopPresence` doing the same on Main. Same
-    /// `Thread.isMainThread` guard + `DispatchQueue.main.async` re-entry those two already use,
-    /// added here too, so all three callers converge on Main before touching anything.
-    private func applyDrainAction() {
-        guard Thread.isMainThread else {
-            DispatchQueue.main.async { [weak self] in self?.applyDrainAction() }
-            return
-        }
-        switch PresenceAccuracyPolicy.drainAction(presenceActive: isPresenceActive) {
+    /// **I52 review round 3 finding (Major) — closed by I53.** Two of those three call sites —
+    /// `didUpdateLocations` and `didFailWithError` — are `CLLocationManagerDelegate` callbacks; the
+    /// third is the per-caller timeout `Task {}` in `awaitNextLocation`, which fires after a
+    /// `Task.sleep`. Before I53 this class was a plain `NSObject` subclass with no compiler-enforced
+    /// isolation, so that third path genuinely ran on an arbitrary cooperative-pool thread — a
+    /// hand-written `Thread.isMainThread` guard patched it here. Now that the class is `@MainActor`,
+    /// the `Task {}` inherits that isolation at creation (the same rule that already made
+    /// `startPresence`/`stopPresence` main-bound), so all three callers are compiler-guaranteed to
+    /// already be on Main by the time this runs — no guard needed.
+    ///
+    /// - Parameter dueToTimeout: `true` only from the timeout path above. I54 — when the drain
+    ///   action doesn't actually stop the manager (presence active), this marks `requestGeneration`
+    ///   as abandoned, so a later unattributed delivery can be recognised as its ghost instead of
+    ///   mislabelled `source: "periodic"` (`StaleDeliveryPolicy`'s doc has the full rationale). The
+    ///   two delivery/failure call sites below pass `false` (the default): a genuine platform answer
+    ///   or error is not an abandonment, so neither sets this new state — `didUpdateLocations`'s own
+    ///   consult-and-clear of `abandonedRequestGeneration` is what actually resolves it.
+    private func applyDrainAction(dueToTimeout: Bool = false) {
+        let action = PresenceAccuracyPolicy.drainAction(presenceActive: isPresenceActive)
+        switch action {
         case .stopUpdating:
             manager.stopUpdatingLocation()
         case .resetAccuracyToPresenceBaseline:
             manager.desiredAccuracy = Self.presenceAccuracy
+        }
+        if dueToTimeout {
+            abandonedRequestGeneration = StaleDeliveryPolicy.abandonedGeneration(afterDrainAction: action, currentGeneration: requestGeneration)
         }
     }
 }
@@ -538,9 +582,21 @@ extension SystemLocationProvider: CLLocationManagerDelegate {
             }
         )
         guard !resolvedAPendingFix else { return }
+
+        // I54 (specs/009 §1.1, 001 §5.1 `source`) — an empty pending registry doesn't necessarily
+        // mean this is a genuine significant-location-change/visit callback: it may be the delayed
+        // answer to a request every caller already gave up on while presence kept the manager alive
+        // (`PresenceAccuracyPolicy.resetAccuracyToPresenceBaseline` deliberately does NOT cancel
+        // it). CoreLocation gives no way to tag a delivery with which API call produced it, so this
+        // is a heuristic, not a certainty — see `StaleDeliveryPolicy`'s doc. Consult-and-clear: at
+        // most one unattributed delivery per abandonment is treated as the ghost.
+        if StaleDeliveryPolicy.isGhostOfAbandonedRequest(abandonedGeneration: abandonedRequestGeneration, currentGeneration: requestGeneration) {
+            abandonedRequestGeneration = nil
+            return
+        }
+
         // Not a pending single-fix request - this is a significant-location-change delegate
-        // callback (or a stray late delivery after every single-fix request already resolved via
-        // timeout). Route through the coordinator's own suppression (specs/009 §1.2) as a
+        // callback. Route through the coordinator's own suppression (specs/009 §1.2) as a
         // `.periodic` hint rather than enqueuing directly.
         guard let coordinator = backgroundCoordinator else { return }
         let fix = location.toLocationFix(source: .periodic, batteryPct: batteryLevelProvider())

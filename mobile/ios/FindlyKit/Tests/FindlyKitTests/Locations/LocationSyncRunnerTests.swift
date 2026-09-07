@@ -33,6 +33,8 @@ private final class FakeGeofenceEventDraining: GeofenceEventDraining {
 /// fix (gated by `SyncTriggerPolicy`'s 0.8 rule) then drain the queue, applying the mandatory
 /// settings piggyback and reacting to `SyncOutcome` per §9's table. Mirrors Android's
 /// `LocationSyncRunner`, scoped to what I10 owns (no geofence-event queue - that's I11).
+/// I53 - @MainActor: constructs FakeLocationProviding, now inferred @MainActor from LocationProviding.
+@MainActor
 struct LocationSyncRunnerTests {
 
     func makeFix() -> LocationFix {
