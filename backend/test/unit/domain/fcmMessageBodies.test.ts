@@ -122,6 +122,31 @@ describe("fcmMessageBodies / buildFcmBody", () => {
     });
   });
 
+  it("B28 RED — a LOCATE_REQUEST built without notificationTitle (legal under today's optional field) must not silently produce an empty aps.alert; pins the runtime contract that the B28 discriminated union will make impossible to violate at compile time", () => {
+    // notificationTitle intentionally omitted — today's `notificationTitle?: string` on
+    // PushMessage (src/ports/pushSender.ts) still permits this for LOCATE_REQUEST, even
+    // though specs/001 §8.1 (amended 2026-09-06) requires the iOS payload to carry
+    // aps.alert.title. Once B28 lands, PushMessage becomes a discriminated union where
+    // notificationTitle is a REQUIRED field of the LOCATE_REQUEST variant, so this exact
+    // object literal will fail to typecheck — the defect below becomes compiler-enforced,
+    // not just test-enforced.
+    const message: PushMessage = {
+      token: "t",
+      type: "LOCATE_REQUEST",
+      data: { type: "LOCATE_REQUEST", requestId: "lr_1", requestedByName: "X", expiresAt: "2026-01-01T00:00:00Z" },
+    };
+
+    const wireBody = JSON.parse(JSON.stringify(buildFcmBody(message))) as {
+      message: { apns: { payload: { aps: { alert?: { title?: string } } } } };
+    };
+
+    // This is exactly the invisible-push failure described in docs/implementation-handoff.md
+    // B28: JSON.stringify drops the undefined `title` key, so aps.alert ends up `{}` — an
+    // "alert" push with no alert text.
+    expect(typeof wireBody.message.apns.payload.aps.alert?.title).toBe("string");
+    expect((wireBody.message.apns.payload.aps.alert?.title ?? "").length).toBeGreaterThan(0);
+  });
+
   it("throws for an unrecognized message type (the exact shape of the B24 SETTINGS_CHANGED gap)", () => {
     const message = {
       token: "t",
