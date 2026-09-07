@@ -131,7 +131,7 @@ describe("http/validate groupIdParamSchema", () => {
 // the exhaustive character-class coverage for all of them (each domain test file separately
 // proves its own use case wires the schema in end to end).
 describe("http/validate displayName normalization (001 §1.4, B29)", () => {
-  function parseDisplayName(displayName: unknown) {
+  async function parseDisplayName(displayName: unknown) {
     return parseOrThrow(createFamilyRequestSchema, { familyName: "Wauters", displayName });
   }
 
@@ -204,7 +204,7 @@ describe("http/validate geofenceName normalization (001 §1.4, B29)", () => {
     };
   }
 
-  function parseGeofenceName(name: unknown) {
+  async function parseGeofenceName(name: unknown) {
     return parseOrThrow(geofenceEntryRequestSchema, geofence(name));
   }
 

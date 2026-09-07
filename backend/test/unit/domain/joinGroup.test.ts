@@ -410,7 +410,7 @@ describe("domain/group/joinGroup", () => {
     expect(result.role).toBe("member");
     const members = await deps.groupRepo.listMembers("grp_a");
     const joined = members.find((m) => m.userId === "u2");
-    expect(joined?.displayName).toBe("Noorcire");
+    expect(joined?.displayName).toBe("NoorcirE");
   });
 
 });

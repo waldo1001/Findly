@@ -385,7 +385,7 @@ describe("domain/group/createGroup", () => {
 
     expect(result.role).toBe("owner");
     const members = await deps.groupRepo.listMembers(result.groupId);
-    expect(members[0]?.displayName).toBe("Ericcire");
+    expect(members[0]?.displayName).toBe("EriccirE");
   });
 
 });

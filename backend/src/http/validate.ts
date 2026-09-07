@@ -2,7 +2,23 @@
 // VALIDATION_FAILED's `details.fields` (§10) is populated from zod issue paths.
 
 import { z } from "zod";
+import { normalizeDisplayText } from "../domain/text/normalizeDisplayText";
 import { AppError } from "./errors";
+
+// specs/001 §1.4 (B29) — displayName/geofenceName are normalized server-side at every write
+// BEFORE their length bound is checked: strip bidi controls/newlines/C0/C1 controls, then
+// trim (src/domain/text/normalizeDisplayText.ts — pure, exhaustively unit-tested there).
+// `.transform` runs first; `.pipe` re-validates the RESULT against the length bound, so a
+// value that normalizes to empty fails `.min(1)` here and surfaces as VALIDATION_FAILED
+// (§10) — never as an empty stored name — and a value whose raw length exceeds the bound
+// only because of characters that get stripped is correctly accepted. This lives once, in
+// the schema, rather than being called at each call site in src/domain: a schema-level hook
+// covers every current and future write path automatically, which is exactly the shape of
+// gap this task exists to close (the length-only check was already applied everywhere, but
+// nothing normalized first) — a per-use-case call is one omission away from repeating it.
+function normalizedTextSchema(maxLength: number) {
+  return z.string().transform(normalizeDisplayText).pipe(z.string().min(1).max(maxLength));
+}
 
 // specs/001 §5.1/§10 — array indices use BRACKET notation (e.g. "fixes[3].recordedAt"),
 // not dot-joined ("fixes.3.recordedAt"): a numeric segment appends as `[N]` with no
@@ -31,10 +47,11 @@ export function parseOrThrow<S extends z.ZodTypeAny>(schema: S, input: unknown):
   return result.data;
 }
 
-// specs/001 §3.1 — familyName 1-50 chars; displayName 1-30 chars.
+// specs/001 §3.1 — familyName 1-50 chars; displayName 1-30 chars after normalization
+// (§1.4/B29, normalizedTextSchema above).
 export const createFamilyRequestSchema = z.object({
   familyName: z.string().min(1).max(50),
-  displayName: z.string().min(1).max(30),
+  displayName: normalizedTextSchema(30),
 });
 export type CreateFamilyRequest = z.infer<typeof createFamilyRequestSchema>;
 
@@ -115,18 +132,20 @@ export const createInviteRequestSchema = z.object({
 export type CreateInviteRequest = z.infer<typeof createInviteRequestSchema>;
 
 // specs/001 §3.4 — inviteCode canonicalized by the domain (uppercase, no hyphen) after
-// this schema only checks presence; displayName 1-30 chars (same rule as §3.1).
+// this schema only checks presence; displayName 1-30 chars after normalization (same rule
+// as §3.1, §1.4/B29).
 export const acceptInviteRequestSchema = z.object({
   inviteCode: z.string().min(1),
-  displayName: z.string().min(1).max(30),
+  displayName: normalizedTextSchema(30),
 });
 export type AcceptInviteRequest = z.infer<typeof acceptInviteRequestSchema>;
 
-// specs/001 §3.5 — at least one of role/displayName required.
+// specs/001 §3.5 — at least one of role/displayName required; displayName normalized
+// (§1.4/B29) before its 1-30 bound is checked.
 export const updateMemberRequestSchema = z
   .object({
     role: z.enum(["parent", "member"]).optional(),
-    displayName: z.string().min(1).max(30).optional(),
+    displayName: normalizedTextSchema(30).optional(),
   })
   .refine((data) => data.role !== undefined || data.displayName !== undefined, {
     message: "at least one field (role or displayName) is required",
@@ -172,7 +191,7 @@ export const createGroupRequestSchema = z.object({
   name: z.string().min(1).max(50),
   endsAt: z.string().datetime(),
   expiryPolicy: z.enum(["delete", "grace", "archive"]),
-  displayName: z.string().min(1).max(30).optional(),
+  displayName: normalizedTextSchema(30).optional(),
 });
 export type CreateGroupRequest = z.infer<typeof createGroupRequestSchema>;
 
@@ -190,7 +209,7 @@ export const joinGroupRequestSchema = z.object({
     .min(1)
     .max(16)
     .regex(ALLOWED_TABLE_KEY_CHARS, "code contains characters forbidden in a Table Storage key"),
-  displayName: z.string().min(1).max(30).optional(),
+  displayName: normalizedTextSchema(30).optional(),
 });
 export type JoinGroupRequest = z.infer<typeof joinGroupRequestSchema>;
 
@@ -258,10 +277,14 @@ export type GeofenceEventHistoryQuery = z.infer<typeof geofenceEventHistoryQuery
 const GEOFENCE_ID_REGEX = /^gf_[a-z0-9-]{1,30}$/;
 
 // specs/001 §7.2 — one geofence entry of the PUT /geofences full-document replace body.
-// radiusM 100-5000 (platform accuracy floor / sanity cap); name 1-50; icon free string <=30.
+// radiusM 100-5000 (platform accuracy floor / sanity cap); name (== §1.4's `geofenceName`)
+// 1-40 chars after normalization (§1.4/B29) — NOT the 1-50 this endpoint's own prose above
+// still says; that prose predates B29's amendment to §1.4 and was not updated in the same
+// commit (specs/ is out of scope for this task — flagged in the B29 task report, not fixed
+// here); icon free string <=30.
 export const geofenceEntryRequestSchema = z.object({
   geofenceId: z.string().regex(GEOFENCE_ID_REGEX),
-  name: z.string().min(1).max(50),
+  name: normalizedTextSchema(40),
   lat: z.number().min(-90).max(90),
   lon: z.number().min(-180).max(180),
   radiusM: z.number().min(100).max(5000),

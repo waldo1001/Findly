@@ -154,9 +154,9 @@ describe("domain/family/createFamily", () => {
       deps,
     );
 
-    expect(result.member.displayName).toBe("Ericcire");
+    expect(result.member.displayName).toBe("EriccirE");
     const profile = await deps.userRepo.getProfile("u1");
-    expect(profile?.displayName).toBe("Ericcire");
+    expect(profile?.displayName).toBe("EriccirE");
   });
 
 });

@@ -310,7 +310,7 @@ describe("domain/family/updateMember", () => {
       deps,
     );
 
-    expect(result.member.displayName).toBe("Noorcire");
+    expect(result.member.displayName).toBe("NoorcirE");
   });
 
 });

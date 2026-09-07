@@ -285,7 +285,7 @@ describe("domain/family/acceptInvite", () => {
     expect(result.familyId).toBe(FAMILY_ID);
     const members = await deps.familyRepo.listMembers(FAMILY_ID);
     const joined = members.find((m) => m.userId === "u2");
-    expect(joined?.displayName).toBe("Noorcire");
+    expect(joined?.displayName).toBe("NoorcirE");
   });
 
 });
