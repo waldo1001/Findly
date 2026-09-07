@@ -445,6 +445,37 @@ describe("domain/locate/createLocateRequest", () => {
     expectNotificationTitle(deps.pushSender.sent[0]!, "LOCATE_REQUEST", "Erictsohg is locating you");
   });
 
+  it("re-normalizes a hostile pre-existing stored displayName in data.requestedByName, not only in the title (specs/001 \u00a71.4, B34)", async () => {
+    const deps = buildDeps();
+    await deps.familyRepo.createFamily({
+      familyId: FAMILY_ID,
+      familyName: "Wauters",
+      createdBy: REQUESTER_UID,
+      createdAt: "2026-07-01T00:00:00Z",
+    });
+    // Hostile-but-non-empty: survives normalization as something, so it is NOT caught by
+    // B32's empty-string/uid-fallback substitution \u2014 it must be caught by re-normalizing
+    // the value itself before writing it into the data map, same as the title beside it.
+    await deps.familyRepo.addMember(FAMILY_ID, {
+      userId: REQUESTER_UID,
+      role: "parent",
+      displayName: "Eric\u202Etsohg",
+      joinedAt: "2026-07-01T00:00:00Z",
+    });
+    await deps.familyRepo.addMember(FAMILY_ID, {
+      userId: TARGET_UID,
+      role: "member",
+      displayName: "Noor",
+      joinedAt: "2026-07-01T00:00:00Z",
+    });
+    deps.deviceRepo.seed(TARGET_UID, device({ pushToken: "fcm-token-a" }));
+
+    await createLocateRequest(baseInput(), deps);
+
+    expect(deps.pushSender.sent[0]!.data.requestedByName).toBe("Erictsohg");
+    expect(deps.pushSender.sent[0]!.data.requestedByName).not.toBe("Eric\u202Etsohg");
+  });
+
   it("substitutes \"Someone\" when the stored requester displayName is ENTIRELY forbidden characters (specs/001 \u00a71.4)", async () => {
     const deps = buildDeps();
     await deps.familyRepo.createFamily({

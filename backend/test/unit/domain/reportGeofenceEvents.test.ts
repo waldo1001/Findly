@@ -320,6 +320,44 @@ describe("domain/geofence/reportGeofenceEvents", () => {
     expectNotificationTitle(deps.pushSender.sent[0]!, "GEOFENCE_EVENT", "Noortsohg arrived at Home");
   });
 
+  it("re-normalizes a hostile pre-existing stored displayName AND geofenceName in the data map, not only in the title (specs/001 \u00a71.4, B34)", async () => {
+    const deps = buildDeps();
+    await deps.familyRepo.createFamily({
+      familyId: FAMILY_ID,
+      familyName: "Wauters",
+      createdBy: REPORTER_UID,
+      createdAt: "2026-07-01T00:00:00Z",
+    });
+    await deps.familyRepo.addMember(FAMILY_ID, {
+      userId: OTHER_UID,
+      role: "parent",
+      displayName: "Eric",
+      joinedAt: "2026-07-01T00:00:00Z",
+    });
+    // Hostile-but-non-empty: survives normalization as something, so it is NOT caught by
+    // B32's empty-string/uid-fallback substitution \u2014 it must be caught by re-normalizing
+    // the value itself before writing it into the data map, same as the title beside it.
+    await deps.familyRepo.addMember(FAMILY_ID, {
+      userId: REPORTER_UID,
+      role: "member",
+      displayName: "Noor\u202Etsohg",
+      joinedAt: "2026-07-01T00:00:00Z",
+    });
+    seedReporterDevice(deps, { pushToken: "fcm-token-reporter" });
+    seedOtherDevice(deps);
+    const hostileGeofence = { ...HOME_GEOFENCE, name: "Ho\u202Eme" };
+    deps.geofenceConfigRepo.seedConfig(FAMILY_ID, { version: 1, geofences: [hostileGeofence] }, '"cfg-etag"');
+
+    await reportGeofenceEvents(baseInput({ body: { events: [event({ transition: "enter" })] } }), deps);
+
+    expect(deps.pushSender.sent).toHaveLength(1);
+    const sentData = deps.pushSender.sent[0]!.data;
+    expect(sentData.displayName).toBe("Noortsohg");
+    expect(sentData.displayName).not.toBe("Noor\u202Etsohg");
+    expect(sentData.geofenceName).toBe("Home");
+    expect(sentData.geofenceName).not.toBe("Ho\u202Eme");
+  });
+
   it("substitutes \"Someone\" when the stored displayName is ENTIRELY forbidden characters (specs/001 \u00a71.4)", async () => {
     const deps = buildDeps();
     await deps.familyRepo.createFamily({
