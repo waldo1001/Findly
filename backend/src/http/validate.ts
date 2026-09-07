@@ -278,13 +278,13 @@ const GEOFENCE_ID_REGEX = /^gf_[a-z0-9-]{1,30}$/;
 
 // specs/001 §7.2 — one geofence entry of the PUT /geofences full-document replace body.
 // radiusM 100-5000 (platform accuracy floor / sanity cap); name (== §1.4's `geofenceName`)
-// 1-40 chars after normalization (§1.4/B29) — NOT the 1-50 this endpoint's own prose above
-// still says; that prose predates B29's amendment to §1.4 and was not updated in the same
-// commit (specs/ is out of scope for this task — flagged in the B29 task report, not fixed
-// here); icon free string <=30.
+// 1-50 chars after normalization (§1.4/B29; bound corrected 2026-09-07 in main.912fa38 —
+// this schema previously capped at 40, which matched neither §7.2's prose nor the shipped
+// behavior on main and would have rejected already-valid 41-50 char names); icon free
+// string <=30.
 export const geofenceEntryRequestSchema = z.object({
   geofenceId: z.string().regex(GEOFENCE_ID_REGEX),
-  name: normalizedTextSchema(40),
+  name: normalizedTextSchema(50),
   lat: z.number().min(-90).max(90),
   lon: z.number().min(-180).max(180),
   radiusM: z.number().min(100).max(5000),

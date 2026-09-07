@@ -227,22 +227,22 @@ describe("domain/geofence/replaceGeofences", () => {
     );
   });
 
-  it("throws VALIDATION_FAILED for a name over 40 chars (001 §1.4/B29 — narrowed from the §7.2 prose's stale 50)", async () => {
+  it("throws VALIDATION_FAILED for a name over 50 chars (001 §1.4/B29, bound corrected 2026-09-07 to match §7.2's prose)", async () => {
     const deps = buildDeps();
     await expectAppError(
-      replaceGeofences(baseInput({ body: { geofences: [geofence({ name: "x".repeat(41) })] } }), deps),
+      replaceGeofences(baseInput({ body: { geofences: [geofence({ name: "x".repeat(51) })] } }), deps),
       "VALIDATION_FAILED",
       { fields: ["geofences[0].name"] },
     );
   });
 
-  it("accepts a name at the 40-char boundary", async () => {
+  it("accepts a name at the 50-char boundary (001 §1.4, corrected 2026-09-07)", async () => {
     const deps = buildDeps();
     const result = await replaceGeofences(
-      baseInput({ body: { geofences: [geofence({ name: "x".repeat(40) })] } }),
+      baseInput({ body: { geofences: [geofence({ name: "x".repeat(50) })] } }),
       deps,
     );
-    expect(result.geofences[0]?.name).toBe("x".repeat(40));
+    expect(result.geofences[0]?.name).toBe("x".repeat(50));
   });
 
   it("normalizes name at write time before storing (strips a right-to-left override, 001 §1.4/B29)", async () => {

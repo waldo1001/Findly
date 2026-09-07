@@ -186,10 +186,10 @@ describe("http/validate displayName normalization (001 §1.4, B29)", () => {
   });
 });
 
-// specs/001 §1.4 (B29) -- geofenceName is normalized exactly like displayName, but with a
-// 1-40 bound (NOT the 1-50 the §7.2 endpoint prose still describes -- that prose predates
-// this task's B29 spec amendment to §1.4 and was not updated in the same commit; flagged,
-// not fixed, since specs/ is out of scope here -- see the B29 task report).
+// specs/001 §1.4 (B29) -- geofenceName is normalized exactly like displayName, with a 1-50
+// bound (corrected 2026-09-07 in main.912fa38, matching §7.2's prose and shipped behavior;
+// this file previously pinned an incorrect 1-40 that B29's implementing agent flagged
+// rather than silently reconciling -- see the B29 correction-round task report).
 describe("http/validate geofenceName normalization (001 §1.4, B29)", () => {
   function geofence(name: unknown): Record<string, unknown> {
     return {
@@ -222,10 +222,10 @@ describe("http/validate geofenceName normalization (001 §1.4, B29)", () => {
     expect(result.name).toBe("Café 🏠");
   });
 
-  it("accepts a name whose length only exceeds the 40-char bound BEFORE normalization", async () => {
-    const raw = "x".repeat(40) + "‮‮";
+  it("accepts a name whose length only exceeds the 50-char bound BEFORE normalization", async () => {
+    const raw = "x".repeat(50) + "‮‮";
     const result = await parseGeofenceName(raw);
-    expect(result.name).toBe("x".repeat(40));
+    expect(result.name).toBe("x".repeat(50));
   });
 
   // specs/001 §1.4 (912fa38, 2026-09-07): the bound is 50, matching §7.2's prose and the
@@ -237,7 +237,7 @@ describe("http/validate geofenceName normalization (001 §1.4, B29)", () => {
     expect(result.name).toBe("x".repeat(50));
   });
 
-  it("still rejects a name over 40 chars AFTER normalization", async () => {
-    await expectAppError(parseGeofenceName("x".repeat(41)), "VALIDATION_FAILED", { fields: ["name"] });
+  it("still rejects a name over 50 chars AFTER normalization", async () => {
+    await expectAppError(parseGeofenceName("x".repeat(51)), "VALIDATION_FAILED", { fields: ["name"] });
   });
 });
