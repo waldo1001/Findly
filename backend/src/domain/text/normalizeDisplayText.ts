@@ -36,7 +36,7 @@
 // correct bidi text: right-to-left scripts routinely need one next to a neutral character
 // to render correctly, and §1.4 explicitly forbids narrowing the character set to exclude
 // real users. Do not add them here without a corresponding spec change.
-const FORBIDDEN_CHARS = /[\x00-\x1F\x7F-\x9F\u202A-\u202E\u2066-\u2069]/g;
+const FORBIDDEN_CHARS = /[\x00-\x1F\x7F-\x9F\u202A-\u202E\u2066-\u2069\u2028-\u2029]/g;
 
 export function normalizeDisplayText(raw: string): string {
   return raw.replace(FORBIDDEN_CHARS, "").trim();
