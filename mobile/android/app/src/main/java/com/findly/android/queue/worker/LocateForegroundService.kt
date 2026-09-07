@@ -69,8 +69,22 @@ import kotlinx.coroutines.launch
  * A literal double-overlap on this exact branch for the exact same device is therefore no longer
  * able to remove the *other* request's notification — the failure this finding exists to fix —
  * though the service may drop its formal OS foreground designation as soon as the first of the two
- * finishes, a few seconds early for the second; that residual is reported, not fixed, in this
- * round (see the A39 final-round report).
+ * finishes, a few seconds early for the second; that residual was reported, not fixed, in that
+ * round (see the A39 final-round report) and filed as its own task, **A44**.
+ *
+ * **A44:** fixed with [InFlightLocateRequestTracker] — [finish] now calls
+ * `stopForeground(STOP_FOREGROUND_DETACH)` only when [inFlightRequests] reports this was the
+ * *last* currently in-flight request's completion, not on every completion. This is additive
+ * alongside `stopSelf(startId)` (finding 7 above), not redundant with it: `stopSelf(startId)`
+ * already stops Android from killing the *service process* out from under a second in-flight
+ * request, but nothing about that semantics touches `stopForeground` — `finish()` called
+ * `STOP_FOREGROUND_DETACH` unconditionally, with no dependency on `startId` recency, so the OS
+ * foreground *designation* could still drop early even though the process itself correctly
+ * stayed alive. Read as a **bounded priority dip fix, not a data-loss or notification-content
+ * fix**: A39 already scoped the notification id per `requestId` ([LocateNotifier.notificationIdFor]),
+ * so both requests already kept their own notification and both captures already fulfilled either
+ * way — this closes the last few seconds where the second request's foreground *designation*
+ * could drop while it was still capturing.
  */
 class LocateForegroundService : Service() {
 
@@ -81,6 +95,12 @@ class LocateForegroundService : Service() {
 
     @Volatile
     private var timeoutJob: Job? = null
+
+    /** A44 (specs/009 §5.1): counts requests currently in flight on this singleton service
+     * instance so [finish] only detaches the OS foreground designation on the *last* one to
+     * complete. See [InFlightLocateRequestTracker]'s own doc for why this is additive alongside
+     * `stopSelf(startId)`, not redundant with it. */
+    private val inFlightRequests = InFlightLocateRequestTracker()
 
     private lateinit var notifier: LocateNotifier
 
@@ -105,9 +125,14 @@ class LocateForegroundService : Service() {
             return START_NOT_STICKY
         }
 
+        // A44: one token per request, started before either coroutine below can race to
+        // complete it - `inFlightRequests.finish(token)` is what decides whether *this*
+        // completion is the one that gets to detach the service's foreground designation.
+        val requestToken = inFlightRequests.start()
+
         timeoutJob = serviceScope.launch {
             kotlinx.coroutines.delay(HARD_CAP_MILLIS)
-            finish(startId, notificationId)
+            finish(startId, notificationId, requestToken)
         }
 
         serviceScope.launch {
@@ -115,7 +140,7 @@ class LocateForegroundService : Service() {
                 val container = (application as FindlyApplication).container
                 container.locateRequestPushHandler.handle(data)
             } finally {
-                finish(startId, notificationId)
+                finish(startId, notificationId, requestToken)
             }
         }
 
@@ -129,11 +154,21 @@ class LocateForegroundService : Service() {
      * `stopForeground(STOP_FOREGROUND_REMOVE)`, never removes a *different* still-in-flight
      * request's notification merely because Android currently associates it with this service's
      * foreground state — `STOP_FOREGROUND_DETACH` relinquishes that state without touching any
-     * notification's content. */
-    private fun finish(startId: Int, notificationId: Int) {
+     * notification's content.
+     *
+     * **A44:** [requestToken] identifies *this request's* completion to [inFlightRequests] —
+     * `stopForeground(STOP_FOREGROUND_DETACH)` now only runs when [InFlightLocateRequestTracker.finish]
+     * reports this was the last of all currently in-flight requests, not on every completion,
+     * closing the early-detach residual A39's final round reported but deliberately left unfixed.
+     * `finish()` being called twice for one request (this method's own "idempotent" framing above)
+     * is exactly why the tracker's own per-token guard exists — it must decrement the shared count
+     * at most once per request no matter how many times this method runs for it. */
+    private fun finish(startId: Int, notificationId: Int, requestToken: InFlightLocateRequestTracker.RequestToken) {
         timeoutJob?.cancel()
         NotificationManagerCompat.from(this).cancel(notificationId)
-        stopForeground(STOP_FOREGROUND_DETACH)
+        if (inFlightRequests.finish(requestToken)) {
+            stopForeground(STOP_FOREGROUND_DETACH)
+        }
         stopSelf(startId)
     }
 
