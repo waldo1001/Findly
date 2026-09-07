@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createLocateRequest } from "../../../src/domain/locate/createLocateRequest";
 import { getFeatures } from "../../../src/domain/plan";
 import { InMemoryDeviceRepo } from "../../fakes/inMemoryDeviceRepo";
@@ -13,6 +13,7 @@ import { SeqIdGenerator } from "../../fakes/seqIdGenerator";
 import { expectAppError } from "../../support/expectAppError";
 import { expectNotificationTitle } from "../../support/expectPushMessage";
 import type { DeviceRecord } from "../../../src/ports/repositories";
+import { EMPTY_DISPLAY_NAME_FALLBACK } from "../../../src/domain/text/normalizeDisplayText";
 
 const FAMILY_ID = "fam_9J2Kq7Lm3NpR5sTvWxYz";
 const REQUESTER_UID = "u1";
@@ -195,7 +196,7 @@ describe("domain/locate/createLocateRequest", () => {
     await expectAppError(createLocateRequest(baseInput(), deps), "DEVICE_NOT_FOUND");
   });
 
-  it("falls back to the raw uid for requestedByName when the requester isn't found in the roster", async () => {
+  it("falls back to the §1.4 placeholder (never the raw uid) for requestedByName when the requester isn't found in the roster", async () => {
     const deps = buildDeps();
     await seedFamily(deps);
     deps.deviceRepo.seed(TARGET_UID, device({ pushToken: "fcm-token-a" }));
@@ -204,7 +205,24 @@ describe("domain/locate/createLocateRequest", () => {
 
     expect(result.created).toBe(true);
     expect(deps.pushSender.sent.length).toBe(1);
-    expect(deps.pushSender.sent[0]!.data.requestedByName).toBe("ghost-uid");
+    expect(deps.pushSender.sent[0]!.data.requestedByName).toBe(EMPTY_DISPLAY_NAME_FALLBACK);
+    expect(deps.pushSender.sent[0]!.data.requestedByName).not.toBe("ghost-uid");
+  });
+
+  it("logs a class-of-event warning (never the uid) when the requester is missing from the family roster (B32)", async () => {
+    const deps = buildDeps();
+    await seedFamily(deps);
+    deps.deviceRepo.seed(TARGET_UID, device({ pushToken: "fcm-token-a" }));
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    await createLocateRequest(baseInput({ uid: "ghost-uid" }), deps);
+
+    expect(warnSpy).toHaveBeenCalledOnce();
+    const loggedMessage = warnSpy.mock.calls[0]!.join(" ");
+    expect(loggedMessage).toContain("createLocateRequest");
+    expect(loggedMessage).toContain("missing from family roster");
+    expect(loggedMessage).not.toContain("ghost-uid");
+    warnSpy.mockRestore();
   });
 
   it("creates a 201 pending request, returns instant lastKnown null when never reported, expiresAt = now+180s (specs/001 §6.1 amended 2026-09-06), createdAt = now", async () => {
@@ -387,14 +405,14 @@ describe("domain/locate/createLocateRequest", () => {
     expectNotificationTitle(deps.pushSender.sent[0]!, "LOCATE_REQUEST", "Eric is locating you");
   });
 
-  it("composes the notificationTitle from the resolved requestedByName even when it falls back to the raw uid", async () => {
+  it("composes the notificationTitle from the resolved requestedByName using the §1.4 placeholder, never the raw uid, when the requester falls back", async () => {
     const deps = buildDeps();
     await seedFamily(deps);
     deps.deviceRepo.seed(TARGET_UID, device({ pushToken: "fcm-token-a" }));
 
     await createLocateRequest(baseInput({ uid: "ghost-uid" }), deps);
 
-    expectNotificationTitle(deps.pushSender.sent[0]!, "LOCATE_REQUEST", "ghost-uid is locating you");
+    expectNotificationTitle(deps.pushSender.sent[0]!, "LOCATE_REQUEST", `${EMPTY_DISPLAY_NAME_FALLBACK} is locating you`);
   });
 
   it("re-normalizes a hostile pre-existing stored displayName when composing the LOCATE_REQUEST title (specs/001 §1.4, B29 review finding 5)", async () => {

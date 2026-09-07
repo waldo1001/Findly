@@ -115,9 +115,25 @@ async function resolveTarget(
   return { targetUserId, device: mostRecentlySeen(pool) };
 }
 
+/** specs/001 §1.4: "A user id MUST NOT be used as the fallback: it is opaque to the reader
+ * and would expose an internal identifier to every other family member." A requester
+ * missing from the family roster (B32 — the one fallback path B29's normalizer couldn't
+ * catch, since a uid contains no forbidden characters and normalizes to itself unchanged)
+ * therefore falls back to the same §1.4 placeholder as an empty-after-normalization stored
+ * value, not to the uid.
+ *
+ * A requester with no roster entry can also signal a real consistency bug (a member
+ * removed from the family while their auth session/device still work, e.g.) — worth a log
+ * line so it's visible in production rather than silently papered over. Class-of-event
+ * only (specs/009 §9, docs/security-review-checklist.md "Privacy in logs"): never the uid,
+ * never any location data, never a device id, never a token. */
 function resolveRequesterDisplayName(uid: string, members: FamilyMember[]): string {
   const requester = members.find((member) => member.userId === uid);
-  return requester?.displayName ?? uid;
+  if (!requester) {
+    console.warn("createLocateRequest: requester missing from family roster");
+    return EMPTY_DISPLAY_NAME_FALLBACK;
+  }
+  return requester.displayName;
 }
 
 /** specs/001 §8.1 (amended 2026-09-06, 000 §O8) — normative, server-composed, English in v1.
