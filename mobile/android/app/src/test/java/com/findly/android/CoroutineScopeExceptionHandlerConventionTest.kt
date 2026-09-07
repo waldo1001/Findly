@@ -94,55 +94,91 @@ class CoroutineScopeExceptionHandlerConventionTest {
     private fun kotlinSourceFiles(): List<File> =
         mainSourceRoot.walkTopDown().filter { it.isFile && it.extension == "kt" }.toList()
 
-    /** Strips `/* ... */` and `// ...` comments so a doc comment that merely *mentions*
-     * `CoroutineScope(`/`CoroutineExceptionHandler` in prose (several files here do, describing
-     * this very defect class) can never masquerade as — or hide — real code below. */
-    private fun stripComments(source: String): String {
-        val noBlockComments = Regex("/\\*.*?\\*/", RegexOption.DOT_MATCHES_ALL).replace(source, "")
-        return Regex("//[^\n]*").replace(noBlockComments, "")
-    }
-
-    /** Third review round fix, finding 1: replaces the interior (and delimiters) of every string
-     * literal — a regular `"..."` (respecting `\"` escapes so an escaped quote never ends the
-     * literal early) or a triple-quoted `"""..."""` (no escape processing, per Kotlin) — with
-     * spaces, preserving length and newlines so every index into the result still lines up with
-     * [source]. Applied once, up front, so every brace/paren depth-counting loop and every regex
-     * match below it — [constructionSites]' and [handlerBodies]' matching parenthesis/brace scans,
-     * [handlerTypeReference], [handlerDeclarationOccurrences], [mainScopeSite],
-     * [globalScopeReference] — is automatically blind to text an author merely wrote *inside* a
-     * string (a `}` in an ordinary log message, `CoroutineExceptionHandler` named in an error
-     * string) without any of them needing their own string-literal awareness. The reviewer's exact
-     * defeat snippet was a `}` inside `"}"` inside a handler body's own string argument, which
-     * dropped [handlerBodies]' naive `{`/`}` depth count to zero early and hid everything after it
-     * — including the real throwable leak the test exists to catch.
+    /** Fourth review round fix (A42) — replaces two independent passes with one combined scan.
+     * The old pipeline ran `stripComments` (a naive `//`/`/* */` regex with **zero string
+     * awareness**) *before* string-literal masking. A `//` an author wrote *inside* an ordinary
+     * string literal (`"https://$host/path"` is exactly this shape) was indistinguishable, to a
+     * regex that cannot see strings at all, from a real line comment: `stripComments` deleted
+     * from that `//` to end of line — **including the string's own closing quote**. String masking
+     * then ran on that already-mutilated text, saw an unterminated `"`, and searched *forward* for
+     * the next literal `"` anywhere in the file to treat as the closing delimiter — or, if none
+     * existed, masked everything from there to end of file. Either way, any real
+     * `CoroutineScope(...)` construction sitting in that masked span became invisible to every scan
+     * below, silently unreported. This is **fail-open** — the opposite direction from every blind
+     * spot documented in specs/003 §3.1, all of which fail *safe* (a real handler reported as
+     * missing, never a real violation hidden). `GroupJoinLinkBuilder.kt`, `Destinations.kt`, and
+     * `DevAuthProvider.kt` all already contain a `//` inside a string literal and would have
+     * defeated the old two-pass pipeline.
      *
-     * **String-template interpolation (`${'$'}{expr}`, `${'$'}identifier`) is left un-masked.** A
-     * first version of this fix masked template bodies too, which broke the compliant
-     * `Log.d(TAG, "unhandled failure (${'$'}{throwable::class.simpleName})")` shape several real
-     * handlers in this module use (`AppContainer.kt`, `LocateForegroundService.kt`,
-     * `LocationForegroundService.kt`, `BootCompletedReceiver.kt`,
-     * `GeofenceTransitionReceiver.kt`) — masking the whole string blanked out the very
-     * `throwable::class.simpleName` expression the logging check looks for, turning entirely
-     * compliant code into five false fails. A template's expression is real, executable Kotlin
-     * (which can itself contain further string literals, so `${'$'}{...}` recurses back through
-     * the same masking) — only the literal text *around* a template is ever masked. */
-    private fun maskStringLiterals(source: String): String {
+     * The fix: `scanCode`/`scanString` below track "am I in code, a string, or a comment" as one
+     * piece of shared state in a single recursive-descent walk, so a `//`/`/* */` is only ever read
+     * as a comment when the scan is currently *in code*, and a `"` only ever opens a string when
+     * the scan is currently *in code* — never inside each other. A Kotlin CHAR literal (`'"'`,
+     * `'\''`) is now also recognized and consumed as neither code nor a string, closing the other
+     * half of the same defect class (there is no production example of this today — see
+     * specs/003 §3.1 — so it is unit-only coverage).
+     *
+     * Public behaviour matches the old two-stage pipeline exactly: comments are elided entirely
+     * (not replaced with spaces — same as the old `stripComments`); string-literal interiors and
+     * delimiters (`"..."`, respecting `\"` escapes, and `"""..."""`, no escape processing) are
+     * replaced with spaces one-for-one with the characters they replace (same as the old
+     * `maskStringLiterals`), preserving newlines; and **string-template interpolation
+     * (`${'$'}{expr}`, `${'$'}identifier`) is left un-masked**, recursing back through this same
+     * scan — a template's expression is real, executable Kotlin that can itself contain further
+     * strings, comments, or char literals, exactly as it could before this fix (this is what keeps
+     * the `Log.d(TAG, "unhandled failure (${'$'}{throwable::class.simpleName})")` shape used by
+     * `AppContainer.kt`, `LocateForegroundService.kt`, `LocationForegroundService.kt`,
+     * `BootCompletedReceiver.kt`, and `GeofenceTransitionReceiver.kt` visible to the logging
+     * check), just now correctly comment/string/char-literal-aware at every nesting level instead
+     * of only at the top. */
+    private fun preprocessSource(rawText: String): String = scanSource(rawText)
+
+    private fun scanSource(source: String): String {
         val out = CharArray(source.length) { ' ' }
+        val isComment = BooleanArray(source.length)
 
         // Kotlin local functions can't forward-reference each other, but these two are mutually
         // recursive by construction (real code can contain a string, whose `${...}` template can
         // contain more real code, which can contain another string, ...), so they're declared as
         // lateinit lambdas assigned in dependency order instead of `fun`.
-        lateinit var maskCode: (from: Int, inTemplate: Boolean) -> Int
-        lateinit var maskString: (from: Int, triple: Boolean) -> Int
+        lateinit var scanCode: (from: Int, inTemplate: Boolean) -> Int
+        lateinit var scanString: (from: Int, triple: Boolean) -> Int
 
-        maskCode = { from, inTemplate ->
+        scanCode = { from, inTemplate ->
             var i = from
             var depth = 0
             while (i < source.length) {
                 when {
-                    source.startsWith("\"\"\"", i) -> i = maskString(i + 3, true)
-                    source[i] == '"' -> i = maskString(i + 1, false)
+                    source.startsWith("//", i) -> {
+                        // Line comment: mark through (not including) the newline, so the newline
+                        // itself falls through to the `else` branch below on the next iteration
+                        // and is preserved, exactly like the old regex (`//[^\n]*`) left it.
+                        var j = i
+                        while (j < source.length && source[j] != '\n') {
+                            isComment[j] = true
+                            j++
+                        }
+                        i = j
+                    }
+                    source.startsWith("/*", i) -> {
+                        val close = source.indexOf("*/", i + 2)
+                        val end = if (close == -1) source.length else close + 2
+                        for (j in i until end) isComment[j] = true
+                        i = end
+                    }
+                    source[i] == '\'' -> {
+                        // A Kotlin CHAR literal ('a', '"', '\'', '\\', '\uXXXX', ...) — consumed
+                        // whole, as neither code nor a string, so an embedded '"' can never open
+                        // one (the actual gap this review round closes: see the KDoc above).
+                        var j = i + 1
+                        while (j < source.length && source[j] != '\'') {
+                            j += if (source[j] == '\\' && j + 1 < source.length) 2 else 1
+                        }
+                        if (j < source.length) j++
+                        i = j
+                    }
+                    source.startsWith("\"\"\"", i) -> i = scanString(i + 3, true)
+                    source[i] == '"' -> i = scanString(i + 1, false)
                     inTemplate && source[i] == '{' -> {
                         depth++
                         out[i] = source[i]
@@ -171,7 +207,7 @@ class CoroutineScopeExceptionHandlerConventionTest {
             i
         }
 
-        maskString = { from, triple ->
+        scanString = { from, triple ->
             var i = from
             var closed = false
             while (i < source.length && !closed) {
@@ -186,7 +222,7 @@ class CoroutineScopeExceptionHandlerConventionTest {
                         closed = true
                     }
                     source[i] == '$' && i + 1 < source.length && source[i + 1] == '{' ->
-                        i = maskCode(i + 2, true)
+                        i = scanCode(i + 2, true)
                     source[i] == '$' && i + 1 < source.length &&
                         (source[i + 1].isLetter() || source[i + 1] == '_') -> {
                         var j = i + 1
@@ -205,14 +241,16 @@ class CoroutineScopeExceptionHandlerConventionTest {
             i
         }
 
-        maskCode(0, false)
-        return String(out)
-    }
+        scanCode(0, false)
 
-    /** The single preprocessing pipeline every scan below runs on: strip comments, then mask out
-     * string-literal interiors. Every `@Test` and every direct scanner-unit-test in this file goes
-     * through this one function so the two stages can never drift out of sync with each other. */
-    private fun preprocessSource(rawText: String): String = maskStringLiterals(stripComments(rawText))
+        // Comments are elided entirely (not replaced with spaces), matching the old
+        // stripComments' behaviour — this is a plain filter over state already decided by the one
+        // scan above, not a second parsing/tokenizing pass, so comment- and string-recognition
+        // never stop sharing state the way the old two-pass pipeline did.
+        val result = StringBuilder(source.length)
+        for (idx in source.indices) if (!isComment[idx]) result.append(out[idx])
+        return result.toString()
+    }
 
     /** Every real `CoroutineScope(` construction — not `rememberCoroutineScope()`, excluded by the
      * negative lookbehind requiring a non-letter (or start of file) immediately before the match —
@@ -489,7 +527,7 @@ class CoroutineScopeExceptionHandlerConventionTest {
         )
     }
 
-    /** Regression guard for [maskStringLiterals] itself, added after a first version of the finding
+    /** Regression guard for [scanSource] itself, added after a first version of the finding
      * 1 fix masked template bodies wholesale and false-failed five real, compliant handlers in this
      * module — `AppContainer.kt`, `LocateForegroundService.kt`, `LocationForegroundService.kt`,
      * `BootCompletedReceiver.kt`, `GeofenceTransitionReceiver.kt` — all of which log via
@@ -528,7 +566,7 @@ class CoroutineScopeExceptionHandlerConventionTest {
                 Log.d(TAG, throwable::class.simpleName ?: "unknown")
             }
         """.trimIndent()
-        val source = stripComments(snippet)
+        val source = preprocessSource(snippet)
         val declarationCount = handlerDeclarationOccurrences(source).size
         val bodyCount = handlerBodies(source).size
         assertEquals(
@@ -553,7 +591,7 @@ class CoroutineScopeExceptionHandlerConventionTest {
                 }
             }
         """.trimIndent()
-        val source = stripComments(snippet)
+        val source = preprocessSource(snippet)
         assertEquals(1, handlerDeclarationOccurrences(source).size)
         assertEquals(0, handlerBodies(source).size)
     }
@@ -587,7 +625,7 @@ class CoroutineScopeExceptionHandlerConventionTest {
                 val scope = CoroutineScope(ctx)
             }
         """.trimIndent()
-        val source = stripComments(snippet)
+        val source = preprocessSource(snippet)
         val sites = constructionSites(source)
         assertEquals(1, sites.size)
         val site = sites.single()
