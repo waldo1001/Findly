@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { reportGeofenceEvents } from "../../../src/domain/geofence/reportGeofenceEvents";
 import { getFeatures } from "../../../src/domain/plan";
+import { EMPTY_DISPLAY_NAME_FALLBACK } from "../../../src/domain/text/normalizeDisplayText";
 import { InMemoryDeviceRepo } from "../../fakes/inMemoryDeviceRepo";
 import { InMemoryFamilyRepo } from "../../fakes/inMemoryFamilyRepo";
 import { InMemoryGeofenceConfigRepo } from "../../fakes/inMemoryGeofenceConfigRepo";
@@ -371,7 +372,7 @@ describe("domain/geofence/reportGeofenceEvents", () => {
     expectNotificationTitle(deps.pushSender.sent[0]!, "GEOFENCE_EVENT", "Noor arrived at a place");
   });
 
-  it("falls back to the reporter's uid as displayName when they're not in the family roster", async () => {
+  it("falls back to the §1.4 placeholder (never the uid) as displayName when they're not in the family roster", async () => {
     const deps = buildDeps();
     await deps.familyRepo.createFamily({
       familyId: FAMILY_ID,
@@ -387,14 +388,17 @@ describe("domain/geofence/reportGeofenceEvents", () => {
     });
     // Deliberately NOT adding REPORTER_UID as a family member (edge case: a stale device
     // registration outliving its owner's membership) — resolveDisplayName must fall back
-    // to the uid itself rather than crashing on a missing roster entry.
+    // to the §1.4 placeholder rather than the uid (specs/001 §1.4: "A user id MUST NOT be
+    // used as the fallback: it is opaque to the reader and would expose an internal
+    // identifier to every other family member") or crashing on a missing roster entry.
     seedReporterDevice(deps);
     seedOtherDevice(deps);
     deps.geofenceConfigRepo.seedConfig(FAMILY_ID, { version: 1, geofences: [HOME_GEOFENCE] }, '"cfg-etag"');
 
     await reportGeofenceEvents(baseInput(), deps);
 
-    expect(deps.pushSender.sent[0]!.data.displayName).toBe(REPORTER_UID);
+    expect(deps.pushSender.sent[0]!.data.displayName).toBe(EMPTY_DISPLAY_NAME_FALLBACK);
+    expect(deps.pushSender.sent[0]!.data.displayName).not.toBe(REPORTER_UID);
   });
 
   it("resolves the reporter's displayName and the family device roster only ONCE per batch (caching), fanning out one listDevices call per family member (002 §2.4)", async () => {
