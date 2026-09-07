@@ -6,6 +6,7 @@ import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.Priority
 import com.google.android.gms.tasks.CancellationTokenSource
 import java.time.Instant
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withTimeoutOrNull
 
@@ -58,6 +59,13 @@ class FusedLocationCapturer(
                     .getCurrentLocation(request, cancellationTokenSource.token)
                     .await()
             }
+        } catch (e: CancellationException) {
+            // A42 sweep, finding 6: rethrow rather than swallow - withTimeoutOrNull already
+            // handles its own TimeoutCancellationException internally (returns null, never
+            // propagates it here), so a CancellationException reaching this catch can only be the
+            // caller's own coroutine/scope being cancelled, which this suspend fun must never
+            // absorb.
+            throw e
         } catch (e: Exception) {
             // §1.1: "no fix is better than a burned battery" - any failure is a silent null,
             // never an exception surfaced to the caller.
@@ -76,6 +84,8 @@ class FusedLocationCapturer(
     ): CapturedFix? {
         val last = try {
             fusedLocationProviderClient.lastLocation.await()
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             null
         } ?: return null

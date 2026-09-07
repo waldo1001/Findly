@@ -9,6 +9,7 @@ import com.findly.android.pushmessages.GeofenceRegistrar
 import com.google.android.gms.location.Geofence
 import com.google.android.gms.location.GeofencingClient
 import com.google.android.gms.location.GeofencingRequest
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
@@ -56,6 +57,9 @@ class GeofencingClientManager(
     override suspend fun unregisterAll() {
         try {
             geofencingClient.removeGeofences(pendingIntent).await()
+        } catch (e: CancellationException) {
+            // A42 sweep, finding 6: rethrow - a suspend fun must never absorb cancellation.
+            throw e
         } catch (e: Exception) {
             // Best-effort, same silent-failure posture as every other specs/009 §6.2 step - a
             // failed removal is still bounded by the next full-replace trigger.
@@ -70,6 +74,8 @@ class GeofencingClientManager(
             if (!permissionState.isGranted()) return@launch
             try {
                 geofencingClient.addGeofences(buildRequest(geofences), pendingIntent).await()
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 // Best-effort - the next geofenceEtag mismatch (§6.2) re-triggers a full retry.
             }
