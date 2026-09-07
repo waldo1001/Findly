@@ -83,46 +83,14 @@ struct EndOfSessionRoutineTests {
 
     // MARK: - Options mechanics, exercised directly (call-site routing is proven by DeleteAccountViewModelTests / RootView's own thin wrapper)
 
-    /// Proves the `clearsDeviceIdentityAndExportArtifact: false` axis still behaves correctly as a
-    /// mechanism, even though **no call site in the app target uses it any more (I44, specs/008
-    /// §3.1)** — `DeleteAccountViewModel.signOutForRetry()` was the one caller that ever passed
-    /// `false` here (I25 review: the backend account is already gone, but a SAME-uid sign-in was
-    /// assumed to be the very next step, so a stale `deviceIdProvider`/`exportArtifactStore` read
-    /// under that same uid was assumed harmless). I44 found that assumption unenforced — a
-    /// DIFFERENT person can reach sign-in from the retry state first — and switched
-    /// `signOutForRetry()` to the routine's default (`true`). This test is kept as a direct unit
-    /// test of the `Options` struct's own behavior (a future call site could still have a reason to
-    /// set it), not as a proof of any current caller's shape; see `Options.clearsDeviceIdentityAndExportArtifact`'s
-    /// doc for the full history and I44's dead-option flag.
-    @Test func run_clearsDeviceIdentityAndExportArtifactFalse_leavesThoseTwoAlone_butStillClearsAppVersionTrackerAndWipesAndSignsOut() async {
-        let deviceIdProvider = InMemoryDeviceIdProvider()
-        let originalDeviceId = deviceIdProvider.deviceId(forUserId: "u1")
-        let exportArtifactStore = InMemoryExportArtifactStore()
-        _ = try? exportArtifactStore.write(Data("leftover export".utf8))
-        let appVersionTracker = InMemoryAppVersionRegistrationTracker()
-        appVersionTracker.setLastRegisteredAppVersion("1.0.0", forUserId: "u1")
-        let recorder = WipeLocalStateRecorder()
-        let auth = FakeAuthProviding()
-        auth.currentUserId = "u1"
-
-        await EndOfSessionRoutine.run(
-            currentUserId: auth.currentUserId,
-            authProvider: auth,
-            deviceIdProvider: deviceIdProvider,
-            appVersionTracker: appVersionTracker,
-            exportArtifactStore: exportArtifactStore,
-            wipeLocalState: { await recorder.wipe() },
-            options: .init(clearsDeviceIdentityAndExportArtifact: false)
-        )
-
-        #expect(deviceIdProvider.deviceId(forUserId: "u1") == originalDeviceId, "I25 — deferred until wipeLocalStateAndComplete() confirms full teardown")
-        #expect(exportArtifactStore.currentURL != nil, "I25 — deferred until wipeLocalStateAndComplete() confirms full teardown")
-        #expect(appVersionTracker.lastRegisteredAppVersion(forUserId: "u1") == nil, "appVersionTracker gates control flow, unlike the two plain values above — cleared unconditionally")
-        #expect(recorder.callCount == 1)
-        #expect(auth.clearStoredSessionCallCount == 1)
-        #expect(auth.signOutCallCount == 1)
-    }
-
+    /// **(I45b)** This suite used to also carry
+    /// `run_clearsDeviceIdentityAndExportArtifactFalse_leavesThoseTwoAlone_butStillClearsAppVersionTrackerAndWipesAndSignsOut`,
+    /// proving the `clearsDeviceIdentityAndExportArtifact: false` axis as a mechanism even after
+    /// I44 left it with zero real callers. I45b deleted that axis from `Options` entirely — the
+    /// device id and export artifact clears are now unconditional (see the `run_defaultOptions_*`
+    /// tests above, which already cover both), so there is no longer an option value for that test
+    /// to exercise; keeping it would mean testing a `false` that the type can no longer express.
+    ///
     /// `RootView.clearSessionOnConfirmedAuthFailure()`'s shape (A37 review, Finding 4): the
     /// Keychain-backed `verificationID` is an opaque OTP-step handle that `signOut()`'s own teardown
     /// already makes moot — not this path's territory.
