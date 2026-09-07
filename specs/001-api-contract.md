@@ -523,6 +523,8 @@ All pushes go through FCM v1 (`projects/<project>/messages:send`); FCM routes to
 
 Title template (normative, both platforms, English in v1 — 000 §O8): `"<requestedByName> is locating you"`. Android renders it on-device from `data.requestedByName`; iOS receives it server-composed in `aps.alert.title`, and the client suppresses the banner when it is already in the foreground (009 §5.1). The `content-available: 1` alongside the alert is what makes iOS invoke the background handler even when the user does not tap; `apns-priority: 10` is permitted because the push carries an alert.
 
+**`data.requestedByName` is normalized and placeholder-substituted per §1.4 (added 2026-09-07, B34) — the identical value embedded in `aps.alert.title` above, never the raw stored `displayName`.** The server does not send a clean title next to a raw `data` field: both are derived from one normalize-then-fall-back-to-`"Someone"` step. This does not relieve the Android client of its own §1.4/009 §9 stripping obligation ("regardless of any server-side hardening") — a future write path could still bypass server-side validation — but a client author building the on-device title from this field no longer has to infer, or independently re-derive, that it is already clean.
+
 iOS (000 §O1): the message above reaches every state except a **force-quit** app. The reliable mechanism for that state, once Apple grants the Location Push entitlement, is a **direct APNs send — not FCM** (FCM cannot address location push tokens): token-based `.p8` auth, topic `<bundleId>.location-query`, headers `apns-push-type: location`, `apns-priority: 10`, targeting the device's `locationPushToken` (§4.1, obtained via `CLLocationManager.startMonitoringLocationPushes`), carrying the same `data` fields in the APNs payload. That path adds one APNs key credential to the backend when it lands (tracked in 000 §O1, backlog H11); nothing about it is implemented in v1.
 
 ### 8.2 `GEOFENCE_EVENT` (to all family devices except reporter — notification + data)
@@ -541,6 +543,8 @@ iOS (000 §O1): the message above reaches every state except a **force-quit** ap
 ```
 
 Title template (normative): `"<displayName> arrived at <geofenceName>"` / `"<displayName> left <geofenceName>"` — no time in the text (the server cannot know recipients' time zones). `mutable-content: 1` lets an iOS Notification Service Extension re-render the alert locally from `data` (000 §O8); Android clients MAY do the same in their FCM handler.
+
+**`data.displayName` and `data.geofenceName` are each normalized and placeholder-substituted per §1.4 (added 2026-09-07, B34) — the identical values embedded in `notification.title` above, never the raw stored `displayName`/`geofenceName`.** Same rule as §8.1's `data.requestedByName`, restated here because an Android (or Notification Service Extension) re-render from `data` is exactly what this field exists for; it does not need its own client-side normalization pass to be safe, though 009 §9's client-side stripping obligation still applies independently as defense in depth.
 
 ### 8.3 `SETTINGS_CHANGED` (to the affected device — data-only, normal priority)
 
