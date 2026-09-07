@@ -228,6 +228,15 @@ describe("http/validate geofenceName normalization (001 §1.4, B29)", () => {
     expect(result.name).toBe("x".repeat(40));
   });
 
+  // specs/001 §1.4 (912fa38, 2026-09-07): the bound is 50, matching §7.2's prose and the
+  // shipped behavior on main — NOT the 1-40 this file previously pinned. A 41-50 char name
+  // is valid today; this guards the boundary that regressed under the (now-corrected) 1-40
+  // reading.
+  it("accepts a name at the 50-char boundary (001 §1.4, corrected 2026-09-07)", async () => {
+    const result = await parseGeofenceName("x".repeat(50));
+    expect(result.name).toBe("x".repeat(50));
+  });
+
   it("still rejects a name over 40 chars AFTER normalization", async () => {
     await expectAppError(parseGeofenceName("x".repeat(41)), "VALIDATION_FAILED", { fields: ["name"] });
   });
