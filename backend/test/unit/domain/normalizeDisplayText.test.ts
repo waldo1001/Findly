@@ -28,7 +28,7 @@ describe("domain/text/normalizeDisplayText", () => {
   });
 
   it("strips a right-to-left override (U+202E) embedded mid-string", () => {
-    expect(normalizeDisplayText("Eric‮sirhc")).toBe("Ericsirhc");
+    expect(normalizeDisplayText("Eric\u202Esirhc")).toBe("Ericsirhc");
   });
 
   it("strips each bidi embedding/override control (U+202A-U+202E)", () => {
@@ -80,21 +80,21 @@ describe("domain/text/normalizeDisplayText", () => {
   });
 
   it("a name that is only control/bidi characters normalizes to the empty string", () => {
-    expect(normalizeDisplayText("‮\n⁦")).toBe("");
+    expect(normalizeDisplayText("\u202E\u0007\n\u2066")).toBe("");
   });
 
   it("normalizes a control-only name to empty rather than a whitespace-padded stand-in", () => {
-    const result = normalizeDisplayText("‮‮");
+    const result = normalizeDisplayText("\u202E\u202E");
     expect(result).toBe("");
     expect(result).toHaveLength(0);
   });
 
   it("strips control characters everywhere in the string, not only at the edges", () => {
-    expect(normalizeDisplayText("ABC")).toBe("ABC");
+    expect(normalizeDisplayText("A\u0001B\u0002C")).toBe("ABC");
   });
 
   it("strips characters first, then trims — a name that is spaces around a stripped control collapses fully", () => {
-    expect(normalizeDisplayText("  ‮  ")).toBe("");
+    expect(normalizeDisplayText("  \u202E  ")).toBe("");
   });
 
   it("does not collapse or alter internal ordinary whitespace", () => {
@@ -102,7 +102,7 @@ describe("domain/text/normalizeDisplayText", () => {
   });
 
   it("is idempotent: normalizing an already-normalized value is a no-op", () => {
-    const once = normalizeDisplayText("Eric‮ van Berg  ");
+    const once = normalizeDisplayText("Eric\u202E van\u0007 Berg  ");
     expect(normalizeDisplayText(once)).toBe(once);
   });
 });
