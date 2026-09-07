@@ -31,10 +31,19 @@ import Foundation
 /// **This is necessarily a heuristic, not a perfect disambiguation.** CoreLocation gives no way to
 /// tag a delivery with which API call produced it — that ambiguity is the entire reason
 /// `PendingFixContinuations` exists in the first place. At most one genuine
-/// significant-location-change/visit hint is lost per abandoned generation (the first unattributed
-/// delivery after an abandonment is always treated as the ghost, whether or not it actually is one);
-/// `SystemLocationProvider` accepts that cost against mislabelling a `.locate`/`.manual`/`.geofence`
-/// capture as routine `.periodic` (specs/001 §5.1, 001 §6.3) — the failure I54 exists to close.
+/// significant-location-change hint is lost per abandoned generation (the first unattributed
+/// delivery after an abandonment is always treated as the ghost, whether or not it actually is one).
+/// **Not a visit hint** — `didVisit` never consults `isGhostOfAbandonedRequest` (specs/009 §1.3's
+/// exception explicitly does not apply to visit callbacks, a distinct trigger), so a visit hint can
+/// never be the one lost. **And the cost is not always paid for something.** When the delivery this
+/// heuristic drops is NOT actually the ghost, the real ghost still arrives afterwards — with the
+/// registry empty and no abandonment left to consult, it falls straight through and is queued as
+/// `source: "periodic"` exactly as before, so the mislabel I54 exists to fix survives anyway and a
+/// hint was spent for nothing. On a moving device the presence stream fires on a 500 m distance
+/// filter, so an unattributed delivery arriving amid ordinary presence traffic is a coin flip
+/// between "the ghost" and "a real hint", not a rare edge case. `SystemLocationProvider` accepts
+/// that cost against mislabelling a `.locate`/`.manual`/`.geofence` capture as routine `.periodic`
+/// (specs/001 §5.1, 001 §6.3) — the failure I54 exists to close.
 ///
 /// **Deliberately plain state on `SystemLocationProvider`, not threaded through
 /// `PendingFixContinuations`'s locked API (I53/I54 combined finding).** Every read/write of the
@@ -75,5 +84,35 @@ public enum StaleDeliveryPolicy {
         // abandoned, nothing can still be in flight for that OLD generation, so an unattributed
         // delivery can no longer be its ghost.
         return abandonedGeneration == currentGeneration
+    }
+
+    /// specs/009 §1.3's exception paragraph (I54 review) — "the abandonment MUST be cleared whenever
+    /// the outstanding request is otherwise resolved... so the exception can never outlive the
+    /// request that caused it." Before this, the ONLY thing that ever cleared
+    /// `abandonedRequestGeneration` was a later successful unattributed `didUpdateLocations`
+    /// (`isGhostOfAbandonedRequest`'s consult-and-clear above) — leaving two live paths that resolve
+    /// the outstanding request without ever reaching that consult, so the flag stayed armed
+    /// indefinitely and the NEXT unattributed delivery (now near-certainly genuine, possibly hours
+    /// later and causally unrelated) was silently dropped.
+    ///
+    /// `stopPresence()` is one such path: on the branch where nothing is pending it calls
+    /// `manager.stopUpdatingLocation()`, which genuinely cancels CoreLocation's in-flight request —
+    /// so nothing can ever arrive to be mistaken for its ghost. Call this immediately after that
+    /// cancellation. Unconditional `nil`: a manager-stopped request can never answer, regardless of
+    /// which generation `currentAbandonedGeneration` was remembering.
+    public static func abandonedGeneration(afterManagerStopped currentAbandonedGeneration: Int?) -> Int? {
+        nil
+    }
+
+    /// The other resolving path specs/009 §1.3's exception covers: `didFailWithError`.
+    /// `PendingFixContinuations.failAllAndAct` early-returns on an empty pending registry
+    /// (`guard !all.isEmpty`), so a platform error arriving after every caller already timed out
+    /// used to never run the drain action at all — nothing cleared the flag, even though a platform
+    /// error IS the outstanding request's answer (CoreLocation reported exactly one outcome, success
+    /// or failure, for the in-flight request; a `kCLErrorLocationUnknown` after a timeout is at least
+    /// as likely as a location). Call this from `didFailWithError` unconditionally, including on an
+    /// empty registry. Unconditional `nil`, same reasoning as `afterManagerStopped` above.
+    public static func abandonedGeneration(afterPlatformFailure currentAbandonedGeneration: Int?) -> Int? {
+        nil
     }
 }
