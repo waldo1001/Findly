@@ -35,49 +35,37 @@ import Foundation
 /// available.
 @MainActor
 public enum EndOfSessionRoutine {
-    /// Two axes, isolated here as named, documented booleans rather than each call site
-    /// copy-pasting its own subset of the four calls. Every `false` below is a DELIBERATE, reviewed
-    /// exception — not an oversight; a new call site that wants to set either MUST justify it in a
-    /// comment at that call site, the way the existing exception already does.
+    /// One remaining axis, isolated here as a named, documented boolean rather than each call site
+    /// copy-pasting its own subset of the calls. `false` below is a DELIBERATE, reviewed exception —
+    /// not an oversight; a new call site that wants to set it MUST justify that in a comment at that
+    /// call site, the way the existing exception already does.
+    ///
+    /// **(I45b) This struct used to carry a second axis,
+    /// `clearsDeviceIdentityAndExportArtifact`, gating `deviceIdProvider.clearDeviceId` and
+    /// `exportArtifactStore.removeCurrentArtifact`.** I25 introduced `false` for
+    /// `DeleteAccountViewModel.signOutForRetry()` on the assumption that a SAME-uid sign-in was
+    /// always the very next step after a failed delete, so a stale device id/export read under that
+    /// uid would be harmless. I44 found that assumption unenforced — a DIFFERENT person could reach
+    /// sign-in from `.signedOutForRetry` first, in which case the previous user's plaintext export
+    /// (008 §3) and device id would still be on disk, the identical window I43 closed on the
+    /// forced-sign-out path — and switched `signOutForRetry()` to clear unconditionally, leaving
+    /// zero callers of `false`. I45b removed the axis entirely rather than leave a single-value
+    /// option for the next reader to re-verify: `deviceIdProvider.clearDeviceId` and
+    /// `exportArtifactStore.removeCurrentArtifact` now always run, same as `appVersionTracker`
+    /// below. A future call site that needs to defer either clear again should re-introduce the
+    /// axis with a fresh, current justification — not resurrect this one from history.
     public struct Options {
-        /// **As of I44 (specs/008 §3.1), no call site in the app target passes `false` here — every
-        /// path clears both.** Previously `false` for `DeleteAccountViewModel.signOutForRetry()`
-        /// (I25 review): the reasoning was that the backend account is already gone, but a SAME-uid
-        /// sign-in is the very next EXPECTED step (the user retries the delete from
-        /// `.firebaseDeleteFailed`), so a stale `deviceIdProvider`/`exportArtifactStore` read under
-        /// that same uid would be harmless. I44 found that assumption was never enforced — a
-        /// DIFFERENT person can reach the sign-in screen from `.signedOutForRetry` and sign in
-        /// before the retry completes, in which case the previous user's plaintext export (008 §3)
-        /// and device id would still be readable on disk, the identical window I43 closed on the
-        /// forced-sign-out path — and switched `signOutForRetry()` to the default (`true`). I44 also
-        /// established the deferral's assumed savings didn't hold up: `appVersionTracker` (cleared
-        /// unconditionally below, independent of this option) already forces a `POST /devices`
-        /// call on the very next sign-in regardless, and account deletion deletes the backend
-        /// `Devices` partition FIRST (002 §4.2 step 1), so the old deviceId's backend row is already
-        /// gone by the time the same uid retries — reusing it would not have preserved anything.
-        /// **This option is now a single-value axis with zero current callers of `false` — a
-        /// candidate for removal (flagged by I44, not removed there since removing a public API is
-        /// a separate decision).** Kept for now as a documented escape hatch for a future call site
-        /// that can justify it in a comment at that call site, same as the surviving
-        /// `clearsStoredSession` exception below.
-        public var clearsDeviceIdentityAndExportArtifact: Bool
         /// `false` only for `RootView.clearSessionOnConfirmedAuthFailure()` (A37 review, Finding
         /// 4): `clearStoredSession()` clears just the Keychain-backed phone-verification (OTP) id,
         /// a leftover of the SMS step already made moot by `signOut()`'s own teardown — not this
         /// path's territory. Every other path defaults this `true`.
         public var clearsStoredSession: Bool
 
-        public init(clearsDeviceIdentityAndExportArtifact: Bool = true, clearsStoredSession: Bool = true) {
-            self.clearsDeviceIdentityAndExportArtifact = clearsDeviceIdentityAndExportArtifact
+        public init(clearsStoredSession: Bool = true) {
             self.clearsStoredSession = clearsStoredSession
         }
     }
 
-    /// `appVersionTracker` is cleared unconditionally whenever `currentUserId` is known — unlike
-    /// `deviceIdProvider`/`exportArtifactStore`, it is not a plain value: it GATES CONTROL FLOW
-    /// (`DeviceRegistrationService.registerOnLaunchIfNeeded()` no-ops entirely once the stored
-    /// version already matches the running app version), so no existing path defers clearing it —
-    /// see `Options.clearsDeviceIdentityAndExportArtifact`'s doc for the full I25/I44 rationale.
     public static func run(
         currentUserId: String?,
         authProvider: AuthProviding?,
@@ -89,15 +77,12 @@ public enum EndOfSessionRoutine {
     ) async {
         if let uid = currentUserId {
             appVersionTracker.clearLastRegisteredAppVersion(forUserId: uid)
-            if options.clearsDeviceIdentityAndExportArtifact {
-                deviceIdProvider.clearDeviceId(forUserId: uid)
-            }
+            deviceIdProvider.clearDeviceId(forUserId: uid)
         }
-        if options.clearsDeviceIdentityAndExportArtifact {
-            // specs/008-privacy-endpoints.md §3.1 rule 2 / §4.4, specs/009 §9 (I43) — the plaintext
-            // export artifact must not outlive the session it was written for.
-            exportArtifactStore.removeCurrentArtifact()
-        }
+        // specs/008-privacy-endpoints.md §3.1 rule 2 / §4.4, specs/009 §9 (I43) — the plaintext
+        // export artifact must not outlive the session it was written for. Unconditional as of
+        // I45b — no call site has deferred this since I44.
+        exportArtifactStore.removeCurrentArtifact()
         // Independent of every clear above — no data dependency in either direction (A37 review,
         // Finding 3), so this may run in any position relative to them; kept here so the local wipe
         // always happens even when `authProvider` is `nil` and every step below is skipped.

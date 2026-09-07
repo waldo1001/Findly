@@ -43,8 +43,12 @@ import Foundation
 /// the OLD device id's backend row is already gone by the time this uid signs back in — reusing it
 /// would not have preserved any server-side state either.
 ///
-/// **`appVersionTracker` was already the one exception (I25 review fix) even before I44 — it is
-/// cleared unconditionally regardless of the axis above.** It GATES CONTROL FLOW —
+/// **`appVersionTracker` was already the one exception (I25 review fix) even before I44 — it was
+/// cleared unconditionally regardless of the deviceId/export-artifact deferral above, back when
+/// that deferral was still optional. (I45b removed the option entirely, so as of this task all
+/// three — `appVersionTracker`, `deviceIdProvider`, `exportArtifactStore` — clear unconditionally;
+/// this paragraph is kept for why `appVersionTracker` was never eligible for deferral in the first
+/// place.)** It GATES CONTROL FLOW —
 /// `DeviceRegistrationService.registerOnLaunchIfNeeded()` no-ops entirely (never calls
 /// `registerOrUpdate()` at all) once the stored version already matches the running app version.
 /// Left stale here, a user who signs back in on this same uid (whose backend profile this flow
@@ -61,14 +65,16 @@ import Foundation
 ///
 /// **(I43) Both paths above now call the single `EndOfSessionRoutine.run` — see that type's doc
 /// for the definitive, canonical call list/order.** This type no longer maintains its own copy of
-/// either list: `signOutForRetry()` now passes the routine's DEFAULT `Options()` (I44 — every axis
-/// clears), same as `wipeLocalStateAndComplete()`. `FindlyApp.swift`'s forced `onSignedOut` closure
-/// and `RootView.clearSessionOnConfirmedAuthFailure()` route through the same routine too — this
-/// was the architectural fix I43 landed after finding the forced-sign-out path had silently drifted
+/// either list: `signOutForRetry()` now passes the routine's DEFAULT `Options()`, same as
+/// `wipeLocalStateAndComplete()`. `FindlyApp.swift`'s forced `onSignedOut` closure and
+/// `RootView.clearSessionOnConfirmedAuthFailure()` route through the same routine too — this was
+/// the architectural fix I43 landed after finding the forced-sign-out path had silently drifted
 /// from this one, missing `exportArtifactStore.removeCurrentArtifact()` in particular (a previous
-/// user's plaintext export could otherwise outlive a forced sign-out). **As of I44, no caller
-/// anywhere in the app target passes `clearsDeviceIdentityAndExportArtifact: false` any more** —
-/// see `EndOfSessionRoutine.Options`'s doc for the current status of that option.
+/// user's plaintext export could otherwise outlive a forced sign-out). **(I45b)** `Options` no
+/// longer has a `clearsDeviceIdentityAndExportArtifact` parameter at all — I44 established no
+/// caller anywhere in the app target still passed `false` for it, and I45b deleted the axis rather
+/// than leave a single-value option standing; the device id and export artifact clears in
+/// `EndOfSessionRoutine.run` are now unconditional. See that type's doc for the full history.
 @MainActor
 public final class DeleteAccountViewModel: ObservableObject {
     public enum Phase: Equatable {
@@ -206,13 +212,16 @@ public final class DeleteAccountViewModel: ObservableObject {
         // and device id would still be on disk for them to read — the identical window I43 closed on
         // the forced-sign-out path. Clearing here accepts one extra `POST /devices` registration on
         // the retry path, which investigation showed is not actually extra: `appVersionTracker`
-        // (cleared unconditionally below regardless of this option) already forces
-        // `registerOnLaunchIfNeeded()` to re-register on the next sign-in, and account deletion
-        // deletes the backend `Devices` partition FIRST (002 §4.2 step 1), so the old device id's
-        // backend row is already gone by the time this uid signs back in — reusing it would not have
-        // avoided a first-registration/defaults reset either. `clearStoredSession()` stays
-        // unconditional either way — the routine calls it before the swallowed `signOut()`, so a
-        // `signOut()` failure can never strand it (review finding #5).
+        // (cleared unconditionally below, independent of the device-id/export-artifact clear)
+        // already forces `registerOnLaunchIfNeeded()` to re-register on the next sign-in, and
+        // account deletion deletes the backend `Devices` partition FIRST (002 §4.2 step 1), so the
+        // old device id's backend row is already gone by the time this uid signs back in — reusing
+        // it would not have avoided a first-registration/defaults reset either. `clearStoredSession()`
+        // stays unconditional either way — the routine calls it before the swallowed `signOut()`, so
+        // a `signOut()` failure can never strand it (review finding #5). I45b removed the
+        // `clearsDeviceIdentityAndExportArtifact` option entirely (it had zero remaining callers of
+        // `false`), so the device-id/export-artifact clear this paragraph describes is no longer
+        // something any `Options` value can defer — it always runs.
         await EndOfSessionRoutine.run(
             currentUserId: pendingWipeUserId,
             authProvider: authProvider,
