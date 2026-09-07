@@ -479,8 +479,19 @@ public final class SystemLocationProvider: NSObject, LocationProviding, SystemLo
         // consulted from `applyDrainAction()`/`didUpdateLocations` below — deferred out of I52's
         // closing round as "too invasive for this round" when this class had no compiler-enforced
         // isolation to build on; done together with I53 once it did (see this task's report).
+        //
+        // **I53/I54 review round, finding 1 (Major).** `stopUpdatingLocation()` here genuinely
+        // cancels CoreLocation's in-flight `requestLocation()` — the exact resolution specs/009
+        // §1.3's exception paragraph requires clearing `abandonedRequestGeneration` for, since
+        // nothing can now ever arrive to be mistaken for that generation's ghost. Before this fix,
+        // the only thing that ever cleared the flag was a later successful unattributed
+        // `didUpdateLocations`, so a settings change to a 60+ minute interval or an
+        // Always-to-WhenInUse downgrade (both of which reach this branch while presence stops) left
+        // it armed indefinitely — silently dropping the next, near-certainly genuine, unattributed
+        // delivery. See `StaleDeliveryPolicy.abandonedGeneration(afterManagerStopped:)`'s doc.
         if pendingFixes.count == 0 {
             manager.stopUpdatingLocation()
+            abandonedRequestGeneration = StaleDeliveryPolicy.abandonedGeneration(afterManagerStopped: abandonedRequestGeneration)
         }
     }
 
@@ -637,6 +648,18 @@ extension SystemLocationProvider: CLLocationManagerDelegate {
         pendingFixes.failAllAndAct(with: LocationProvidingError.underlying(String(describing: type(of: error)))) { [weak self] in
             self?.applyDrainAction()
         }
+
+        // **I53/I54 review round, finding 1 (Major).** `failAllAndAct` above early-returns on
+        // `guard !all.isEmpty` (`PendingFixContinuations`), so when every caller already timed out
+        // before this fires, the closure above never runs and `applyDrainAction()` is never called
+        // either — nothing would otherwise clear `abandonedRequestGeneration`. But a platform error
+        // IS the outstanding request's answer regardless of whether anyone was still waiting on it
+        // (CoreLocation reported exactly one outcome — success or failure — for the in-flight
+        // request; a `kCLErrorLocationUnknown` after a 15s/30s timeout is a normal, expected
+        // outcome, at least as likely as a location). Called unconditionally, on every path through
+        // this method, so the flag is always cleared here. See
+        // `StaleDeliveryPolicy.abandonedGeneration(afterPlatformFailure:)`'s doc.
+        abandonedRequestGeneration = StaleDeliveryPolicy.abandonedGeneration(afterPlatformFailure: abandonedRequestGeneration)
     }
 }
 
