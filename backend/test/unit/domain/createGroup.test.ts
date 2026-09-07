@@ -374,4 +374,18 @@ describe("domain/group/createGroup", () => {
       expect(result.state).toBe("active");
     });
   });
+
+  it("normalizes displayName at write time before storing (strips a right-to-left override, 001 §1.4/B29)", async () => {
+    const deps = buildDeps();
+
+    const result = await createGroup(
+      { uid: "u1", body: { ...VALID_BODY, displayName: "Eric‮cirE" } },
+      deps,
+    );
+
+    expect(result.role).toBe("owner");
+    const members = await deps.groupRepo.listMembers(result.groupId);
+    expect(members[0]?.displayName).toBe("Ericcire");
+  });
+
 });

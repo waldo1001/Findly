@@ -397,4 +397,20 @@ describe("domain/group/joinGroup", () => {
       );
     });
   });
+
+  it("normalizes displayName at write time before storing (strips a right-to-left override, 001 §1.4/B29)", async () => {
+    const deps = buildDeps();
+    await seedGroup(deps, ACTIVE_META);
+
+    const result = await joinGroup(
+      { uid: "u2", body: { code: "abcd-1234", displayName: "Noor‮cirE" } },
+      deps,
+    );
+
+    expect(result.role).toBe("member");
+    const members = await deps.groupRepo.listMembers("grp_a");
+    const joined = members.find((m) => m.userId === "u2");
+    expect(joined?.displayName).toBe("Noorcire");
+  });
+
 });

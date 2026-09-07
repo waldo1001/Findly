@@ -271,4 +271,21 @@ describe("domain/family/acceptInvite", () => {
       { fields: ["inviteCode"] },
     );
   });
+
+  it("normalizes displayName at write time before storing (strips a right-to-left override, 001 §1.4/B29)", async () => {
+    const deps = buildDeps();
+    await seedFamily(deps);
+    await deps.inviteRepo.createInvite(baseInvite());
+
+    const result = await acceptInvite(
+      { uid: "u2", familyId: null, body: { inviteCode: INVITE_CODE, displayName: "Noor‮cirE" } },
+      deps,
+    );
+
+    expect(result.familyId).toBe(FAMILY_ID);
+    const members = await deps.familyRepo.listMembers(FAMILY_ID);
+    const joined = members.find((m) => m.userId === "u2");
+    expect(joined?.displayName).toBe("Noorcire");
+  });
+
 });

@@ -145,4 +145,18 @@ describe("domain/family/createFamily", () => {
       { fields: ["(root)"] },
     );
   });
+
+  it("normalizes displayName at write time before storing (strips a right-to-left override, 001 §1.4/B29)", async () => {
+    const deps = buildDeps();
+
+    const result = await createFamily(
+      { uid: "u1", familyId: null, body: { familyName: "Wauters", displayName: "Eric‮cirE" } },
+      deps,
+    );
+
+    expect(result.member.displayName).toBe("Ericcire");
+    const profile = await deps.userRepo.getProfile("u1");
+    expect(profile?.displayName).toBe("Ericcire");
+  });
+
 });

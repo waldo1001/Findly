@@ -300,4 +300,17 @@ describe("domain/family/updateMember", () => {
       "INTERNAL_ERROR",
     );
   });
+
+  it("normalizes displayName at write time before storing (strips a right-to-left override, 001 §1.4/B29)", async () => {
+    const deps = buildDeps();
+    await seedTwoParentFamily(deps);
+
+    const result = await updateMember(
+      { uid: "u1", familyId: FAMILY_ID, role: "parent", targetUserId: "u2", body: { displayName: "Noor‮cirE" } },
+      deps,
+    );
+
+    expect(result.member.displayName).toBe("Noorcire");
+  });
+
 });
