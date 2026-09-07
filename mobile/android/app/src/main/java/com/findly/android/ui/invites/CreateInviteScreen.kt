@@ -187,17 +187,19 @@ private fun CreateInviteSuccess(
                             // coerceToText does, but it still crosses into ClipboardManager and
                             // must not be trusted to never throw). Cancellation is rethrown (this
                             // try block suspends on clipboard.setClipEntry()); every other failure
-                            // is silent - `justCopied` already flips optimistically below, and
-                            // there is no failure notice on this screen to route it to.
+                            // is silent - there is no failure notice on this screen to route it
+                            // to. Third review round fix: `justCopied` used to flip optimistically
+                            // regardless of outcome, so a failed copy still told the user
+                            // "Copied" - it is now set only after setClipEntry actually succeeds.
                             try {
                                 clipboard.setClipEntry(ClipEntry(ClipData.newPlainText("Invite code", displayCode)))
+                                justCopied = true
                             } catch (e: CancellationException) {
                                 throw e
                             } catch (e: Exception) {
                                 // Silent - see comment above.
                             }
                         }
-                        justCopied = true
                     },
                 )
             }
