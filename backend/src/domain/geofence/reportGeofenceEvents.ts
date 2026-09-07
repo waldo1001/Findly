@@ -27,6 +27,11 @@ import type { PushSender } from "../../ports/pushSender";
 import { listDevicesForMembers } from "../family/deviceFanout";
 import { getFeatures, type Features } from "../plan";
 import { shouldRefreshLastSeen } from "../device/lastSeenPolicy";
+import {
+  EMPTY_DISPLAY_NAME_FALLBACK,
+  EMPTY_GEOFENCE_NAME_FALLBACK,
+  normalizeDisplayTextOrFallback,
+} from "../text/normalizeDisplayText";
 
 export interface ReportGeofenceEventsDeps {
   deviceRepo: DeviceRepo;
@@ -71,11 +76,23 @@ function notifyFlagFor(geofence: GeofenceEntry, transition: "enter" | "exit"): b
 }
 
 /** specs/001 §8.2 — normative title template: no time in the text (server doesn't know the
- * recipient's time zone; the notification's own timestamp conveys it). */
+ * recipient's time zone; the notification's own timestamp conveys it).
+ *
+ * Re-normalizes both inputs (B29 review finding 5) instead of trusting the stored values
+ * as-is: this is a write-time-only fix with no migration, so a displayName/geofenceName
+ * written before normalizeDisplayText existed stays hostile in storage until its owner
+ * writes again. normalizeDisplayText is pure and idempotent, so applying it again here to
+ * an already-clean value is a no-op — this only matters for pre-existing data.
+ *
+ * Falls back to the §1.4 placeholders independently for each field (B29 re-review, residual
+ * fix): a stored value consisting ENTIRELY of forbidden characters normalizes to the empty
+ * string, and without this a title would go out as `" arrived at Home"` or
+ * `"Noor arrived at "` — either field can be empty on its own, so both are substituted
+ * independently rather than as an all-or-nothing pair. */
 function titleFor(displayName: string, geofenceName: string, transition: "enter" | "exit"): string {
-  return transition === "enter"
-    ? `${displayName} arrived at ${geofenceName}`
-    : `${displayName} left ${geofenceName}`;
+  const name = normalizeDisplayTextOrFallback(displayName, EMPTY_DISPLAY_NAME_FALLBACK);
+  const geofence = normalizeDisplayTextOrFallback(geofenceName, EMPTY_GEOFENCE_NAME_FALLBACK);
+  return transition === "enter" ? `${name} arrived at ${geofence}` : `${name} left ${geofence}`;
 }
 
 function resolveDisplayName(uid: string, members: FamilyMember[]): string {

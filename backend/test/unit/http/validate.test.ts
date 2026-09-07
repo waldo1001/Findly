@@ -2,7 +2,14 @@
 // §3: "validation before use" for path inputs, not just request bodies).
 
 import { describe, expect, it } from "vitest";
-import { deviceIdParamSchema, groupIdParamSchema, memberUserIdParamSchema, parseOrThrow } from "../../../src/http/validate";
+import {
+  createFamilyRequestSchema,
+  deviceIdParamSchema,
+  geofenceEntryRequestSchema,
+  groupIdParamSchema,
+  memberUserIdParamSchema,
+  parseOrThrow,
+} from "../../../src/http/validate";
 import { expectAppError } from "../../support/expectAppError";
 
 /** parseOrThrow is synchronous; wrap the call so expectAppError can assert on the rejection. */
@@ -42,7 +49,7 @@ describe("http/validate memberUserIdParamSchema", () => {
     ["a\\b", "backslash"],
     ["a#b", "hash"],
     ["a?b", "question mark"],
-    ["ab", "control character"],
+    ["a\u0007b", "control character"],
   ])("throws VALIDATION_FAILED for a userId containing a forbidden %s", async (malformed) => {
     await expectAppError(parse({ userId: malformed }), "VALIDATION_FAILED", { fields: ["userId"] });
   });
@@ -113,5 +120,124 @@ describe("http/validate groupIdParamSchema", () => {
     ["a?b", "question mark"],
   ])("throws VALIDATION_FAILED for a groupId containing a forbidden %s", async (malformed) => {
     await expectAppError(parseGroupId({ groupId: malformed }), "VALIDATION_FAILED", { fields: ["groupId"] });
+  });
+});
+
+// specs/001 §1.4 (B29) -- displayName is normalized server-side at every write, BEFORE the
+// 1-30 length bound is checked (src/domain/text/normalizeDisplayText.ts, wired in via
+// `.transform().pipe(...)` -- see that file's comment). createFamilyRequestSchema exercises
+// the shared displayNameSchema; every other displayName-accepting schema (acceptInvite,
+// updateMember, createGroup, joinGroup) reuses the identical schema value, so this suite is
+// the exhaustive character-class coverage for all of them (each domain test file separately
+// proves its own use case wires the schema in end to end).
+describe("http/validate displayName normalization (001 §1.4, B29)", () => {
+  async function parseDisplayName(displayName: unknown) {
+    return parseOrThrow(createFamilyRequestSchema, { familyName: "Wauters", displayName });
+  }
+
+  it("strips a right-to-left override before storing", async () => {
+    const result = await parseDisplayName("Eric\u202Esirhc");
+    expect(result.displayName).toBe("Ericsirhc");
+  });
+
+  it("strips an embedded newline before storing", async () => {
+    const result = await parseDisplayName("Eric\nSmith");
+    expect(result.displayName).toBe("EricSmith");
+  });
+
+  it("strips a C1 control character before storing", async () => {
+    const result = await parseDisplayName("Eric\u0085Smith");
+    expect(result.displayName).toBe("EricSmith");
+  });
+
+  it("throws VALIDATION_FAILED (not an empty stored name) for a name that is only control characters", async () => {
+    await expectAppError(parseDisplayName("\u202E\u0007\u202E"), "VALIDATION_FAILED", {
+      fields: ["displayName"],
+    });
+  });
+
+  it("passes emoji through untouched", async () => {
+    const result = await parseDisplayName("Eric 🚀");
+    expect(result.displayName).toBe("Eric 🚀");
+  });
+
+  it("passes accented characters through untouched", async () => {
+    const result = await parseDisplayName("José");
+    expect(result.displayName).toBe("José");
+  });
+
+  it("accepts a name whose length only exceeds the 30-char bound BEFORE normalization", async () => {
+    // 30 real chars + 3 bidi-override chars that strip away to nothing = 30 after
+    // normalization: must pass, proving the bound is checked AFTER normalization.
+    const raw = "x".repeat(30) + "\u202E\u202E\u202E";
+    const result = await parseDisplayName(raw);
+    expect(result.displayName).toBe("x".repeat(30));
+  });
+
+  it("still rejects a name over 30 chars AFTER normalization", async () => {
+    await expectAppError(parseDisplayName("x".repeat(31)), "VALIDATION_FAILED", {
+      fields: ["displayName"],
+    });
+  });
+
+  it("trims ordinary leading/trailing whitespace before storing", async () => {
+    const result = await parseDisplayName("  Eric  ");
+    expect(result.displayName).toBe("Eric");
+  });
+});
+
+// specs/001 §1.4 (B29) -- geofenceName is normalized exactly like displayName, with a 1-50
+// bound (corrected 2026-09-07 in main.912fa38, matching §7.2's prose and shipped behavior;
+// this file previously pinned an incorrect 1-40 that B29's implementing agent flagged
+// rather than silently reconciling -- see the B29 correction-round task report).
+describe("http/validate geofenceName normalization (001 §1.4, B29)", () => {
+  function geofence(name: unknown): Record<string, unknown> {
+    return {
+      geofenceId: "gf_home",
+      name,
+      lat: 51.0543,
+      lon: 3.7174,
+      radiusM: 150,
+      icon: "home",
+      notifyOnEnter: true,
+      notifyOnExit: true,
+    };
+  }
+
+  async function parseGeofenceName(name: unknown) {
+    return parseOrThrow(geofenceEntryRequestSchema, geofence(name));
+  }
+
+  it("strips a right-to-left override before storing", async () => {
+    const result = await parseGeofenceName("Home\u202EemoH");
+    expect(result.name).toBe("HomeemoH");
+  });
+
+  it("throws VALIDATION_FAILED for a name that is only control characters", async () => {
+    await expectAppError(parseGeofenceName("\u202E\u202E"), "VALIDATION_FAILED", { fields: ["name"] });
+  });
+
+  it("passes emoji and accented characters through untouched", async () => {
+    const result = await parseGeofenceName("Café 🏠");
+    expect(result.name).toBe("Café 🏠");
+  });
+
+  it("accepts a name whose length only exceeds the 50-char bound BEFORE normalization", async () => {
+    const raw = "x".repeat(50) + "\u202E\u202E";
+    const result = await parseGeofenceName(raw);
+    expect(result.name).toBe("x".repeat(50));
+  });
+
+  // specs/001 §1.4 (912fa38, 2026-09-07): the bound is 50, matching §7.2's prose and the
+  // shipped behavior on main — NOT the 1-40 this file previously pinned. A 41-50 char name
+  // is valid today; this guards the boundary that regressed under the (now-corrected) 1-40
+  // reading.
+  it("accepts a name at the 50-char boundary (001 §1.4, corrected 2026-09-07)", async () => {
+    const result = await parseGeofenceName("x".repeat(50));
+    expect(result.name).toBe("x".repeat(50));
+  });
+
+  it("still rejects a name over 50 chars AFTER normalization", async () => {
+    await expectAppError(parseGeofenceName("x".repeat(51)), "VALIDATION_FAILED", { fields: ["name"] });
   });
 });

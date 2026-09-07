@@ -397,6 +397,67 @@ describe("domain/locate/createLocateRequest", () => {
     expectNotificationTitle(deps.pushSender.sent[0]!, "LOCATE_REQUEST", "ghost-uid is locating you");
   });
 
+  it("re-normalizes a hostile pre-existing stored displayName when composing the LOCATE_REQUEST title (specs/001 §1.4, B29 review finding 5)", async () => {
+    const deps = buildDeps();
+    await deps.familyRepo.createFamily({
+      familyId: FAMILY_ID,
+      familyName: "Wauters",
+      createdBy: REQUESTER_UID,
+      createdAt: "2026-07-01T00:00:00Z",
+    });
+    // Hostile value stored directly (bypassing the schema-level normalizer entirely) — this
+    // simulates a displayName written BEFORE B29's write-time normalizer shipped, which the
+    // write-time fix alone cannot clean since it is not retroactive.
+    await deps.familyRepo.addMember(FAMILY_ID, {
+      userId: REQUESTER_UID,
+      role: "parent",
+      displayName: "Eric\u202Etsohg",
+      joinedAt: "2026-07-01T00:00:00Z",
+    });
+    await deps.familyRepo.addMember(FAMILY_ID, {
+      userId: TARGET_UID,
+      role: "member",
+      displayName: "Noor",
+      joinedAt: "2026-07-01T00:00:00Z",
+    });
+    deps.deviceRepo.seed(TARGET_UID, device({ pushToken: "fcm-token-a" }));
+
+    await createLocateRequest(baseInput(), deps);
+
+    expectNotificationTitle(deps.pushSender.sent[0]!, "LOCATE_REQUEST", "Erictsohg is locating you");
+  });
+
+  it("substitutes \"Someone\" when the stored requester displayName is ENTIRELY forbidden characters (specs/001 \u00a71.4)", async () => {
+    const deps = buildDeps();
+    await deps.familyRepo.createFamily({
+      familyId: FAMILY_ID,
+      familyName: "Wauters",
+      createdBy: REQUESTER_UID,
+      createdAt: "2026-07-01T00:00:00Z",
+    });
+    // Entirely forbidden characters (bidi override + isolate) -- normalizeDisplayText
+    // reduces this to the empty string, unlike the partially-hostile "Eric\u202Etsohg"
+    // case above, which still has real name characters left over after stripping.
+    await deps.familyRepo.addMember(FAMILY_ID, {
+      userId: REQUESTER_UID,
+      role: "parent",
+      displayName: "\u202E\u2066",
+      joinedAt: "2026-07-01T00:00:00Z",
+    });
+    await deps.familyRepo.addMember(FAMILY_ID, {
+      userId: TARGET_UID,
+      role: "member",
+      displayName: "Noor",
+      joinedAt: "2026-07-01T00:00:00Z",
+    });
+    deps.deviceRepo.seed(TARGET_UID, device({ pushToken: "fcm-token-a" }));
+
+    await createLocateRequest(baseInput(), deps);
+
+    // No leading space, no missing name: "Someone is locating you", NOT " is locating you".
+    expectNotificationTitle(deps.pushSender.sent[0]!, "LOCATE_REQUEST", "Someone is locating you");
+  });
+
   it("pushFailed path (invalidToken outcome) marks the device pushInvalid:true", async () => {
     const deps = buildDeps();
     await seedFamily(deps);
