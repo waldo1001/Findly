@@ -6,6 +6,16 @@ import Foundation
 /// decision/coordination logic... no platform framework in unit tests"). Used by
 /// `FixCaptureCoordinatorTests` (indirectly, via its own local fake) and directly by
 /// `LocationSyncRunnerTests`/`LocationRuntimeContainerTests`.
+///
+/// **I53 — `@MainActor` (inferred, made explicit here).** `LocationProviding` is now `@MainActor`;
+/// Swift infers the SAME global actor for any type that conforms to a globally-isolated protocol
+/// unless the type declares its own conflicting isolation, so this class is `@MainActor` whether or
+/// not it says so — annotating it explicitly documents that rather than leaving it a surprise.
+/// Every test file that constructs one or touches its protocol-conformance surface directly
+/// (`FixCaptureCoordinatorTests`, `LocateRequestPushHandlerTests`, `PushRuntimeContainerTests`,
+/// `LocationSyncRunnerTests`, `GeofenceTransitionHandlerTests`, `LocationRuntimeContainerTests`) is
+/// `@MainActor` accordingly.
+@MainActor
 final class FakeLocationProviding: LocationProviding {
     var nextFix: Result<LocationFix, Error> = .failure(LocationProvidingError.notImplemented)
 

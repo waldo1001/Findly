@@ -5,6 +5,8 @@ import Testing
 /// specs/009-device-runtime.md §6.3 — the tested decision logic behind a region-monitoring
 /// enter/exit callback, independent of any real `CLLocationManagerDelegate`/`CLRegion` (those live
 /// in the untested `SystemGeofenceRegistrar`). Mirrors Android's `GeofenceTransitionHandlerTest`.
+/// I53 - @MainActor: constructs FakeLocationProviding, now inferred @MainActor from LocationProviding.
+@MainActor
 struct GeofenceTransitionHandlerTests {
 
     private func sequenceIdGenerator(prefix: String) -> () -> String {

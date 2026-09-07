@@ -19,6 +19,34 @@ import Foundation
 /// CoreLocation-free by design (only `LocationFix`/`FixSource`/`Foundation`), so it's testable on
 /// any host — unlike `SystemLocationProvider` itself, which is `#if os(iOS) &&
 /// canImport(CoreLocation)` platform glue `swift test` cannot exercise.
+///
+/// **I53 — re-examined whether this lock is still needed now that `SystemLocationProvider` is
+/// `@MainActor`, and kept it.** In PRODUCTION, `SystemLocationProvider` is this type's only caller,
+/// and every one of its own methods that touches `pendingFixes` — `awaitNextLocation`'s
+/// registration, the timeout `Task {}` (which now inherits `@MainActor` isolation at creation, per
+/// that class's own doc), and every `CLLocationManagerDelegate` callback — is now compiler-confined
+/// to Main, so the MainActor executor alone already serializes every real call into this registry;
+/// the lock is uncontended there. Removing it anyway was rejected for three reasons:
+///
+/// 1. **This type has no compiler-enforced tie to `@MainActor` at all** — it's `@unchecked
+///    Sendable`, not itself a global-actor type, precisely so it stays usable from anywhere (see
+///    "not an actor" above). "Safe because its only caller happens to be `@MainActor`" is a claim
+///    about a CALLER's discipline, not something this type's own signature expresses or the
+///    compiler checks — which is exactly the failure shape I53 exists to eliminate one layer up (a
+///    round-2 doc comment claiming "only two methods touch this," proven false by round 3). Trading
+///    a compiler-enforced invariant for another unenforced comment-only one, one layer down, would
+///    reintroduce the same defect class this task is closing, not finish closing it.
+/// 2. **This type's own test suite (`PendingFixContinuationsTests`) deliberately drives it from real
+///    OS `Thread`s with no actor involved at all**, to prove `registerAndAct`/`timeOutAndAct`/
+///    `resumeAllAndAct`/`failAllAndAct`'s mutual-exclusion guarantee independent of any caller's
+///    isolation — a genuinely valuable, independently-verifiable property this type advertises
+///    ("testable on any host," above). Removing the lock would invalidate that suite's premise.
+/// 3. **The cost is negligible.** The lock is held only across the synchronous register/act/resume
+///    bookkeeping — never across a continuation `resume` call (see `registerAndAct`/`timeOutAndAct`/
+///    `resumeAllAndAct`/`failAllAndAct`'s own docs) — so keeping it costs one uncontended
+///    lock/unlock pair per call in the one path that matters (production), in exchange for a type
+///    whose thread-safety is true by its own construction rather than by an assumption about who
+///    calls it.
 public final class PendingFixContinuations: @unchecked Sendable {
     public typealias ID = UUID
 
