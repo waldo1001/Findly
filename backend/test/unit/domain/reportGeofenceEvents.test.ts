@@ -425,6 +425,8 @@ describe("domain/geofence/reportGeofenceEvents", () => {
 
     expect(warnSpy).toHaveBeenCalledOnce();
     const loggedMessage = warnSpy.mock.calls[0]!.join(" ");
+    expect(loggedMessage).toContain("reportGeofenceEvents");
+    expect(loggedMessage).toContain("missing from family roster");
     expect(loggedMessage).not.toContain(REPORTER_UID);
     expect(loggedMessage).not.toContain(DEVICE_ID);
     warnSpy.mockRestore();

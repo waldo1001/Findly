@@ -219,6 +219,8 @@ describe("domain/locate/createLocateRequest", () => {
 
     expect(warnSpy).toHaveBeenCalledOnce();
     const loggedMessage = warnSpy.mock.calls[0]!.join(" ");
+    expect(loggedMessage).toContain("createLocateRequest");
+    expect(loggedMessage).toContain("missing from family roster");
     expect(loggedMessage).not.toContain("ghost-uid");
     warnSpy.mockRestore();
   });
