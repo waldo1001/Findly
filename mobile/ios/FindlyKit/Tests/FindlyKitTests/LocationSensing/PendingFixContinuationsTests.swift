@@ -20,7 +20,17 @@ struct PendingFixContinuationsTests {
         LocationFix(fixId: "f", recordedAt: "2026-09-06T00:00:00Z", lat: 1, lon: 2, accuracyM: 5, batteryPct: 90, source: source)
     }
 
-    @Test func register_reportsIsFirstOnlyForTheFirstConcurrentCaller() {
+    // I55: these three `register_*` tests used to poll `registry.count` with a `Thread.sleep`
+    // busy-loop from a *non-async* `@Test` (i.e. directly on a swift-testing cooperative-pool
+    // thread), waiting for a just-spawned `Task` to run `register()`. That is the same forbidden
+    // pattern the old, non-async `makeSynchronousContinuation()` had (see the atomicity-test
+    // section below, and `makeContinuation()`'s own doc comment there, for that one): a
+    // sleep-loop on a pool thread never yields the thread back to the pool between iterations, so
+    // on a pool narrowed to one thread the spawned `Task` can never get scheduled and the loop
+    // spins forever. Making the tests `async` and polling with `await Task.yield()` — already the
+    // pattern `resumeAll_resumesEveryPendingCallerWithItsOwnSource()` below uses — suspends instead
+    // of blocking, so the pool thread is free to run the pending `Task` between polls.
+    @Test func register_reportsIsFirstOnlyForTheFirstConcurrentCaller() async {
         let registry = PendingFixContinuations()
 
         let first = Task<LocationFix, Error> {
@@ -29,7 +39,7 @@ struct PendingFixContinuationsTests {
                 #expect(isFirst, "the first registration must report isFirst so the caller knows to actually call requestLocation()")
             }
         }
-        while registry.count < 1 { Thread.sleep(forTimeInterval: 0.001) }
+        while registry.count < 1 { await Task.yield() }
 
         let second = Task<LocationFix, Error> {
             try await withCheckedThrowingContinuation { continuation in
@@ -40,14 +50,14 @@ struct PendingFixContinuationsTests {
                 #expect(isFirst, "a HIGHER-tier joiner (.locate over an in-flight .periodic) must still trigger its own requestLocation() re-issue")
             }
         }
-        while registry.count < 2 { Thread.sleep(forTimeInterval: 0.001) }
+        while registry.count < 2 { await Task.yield() }
 
         registry.resumeAll { makeFix(source: $0) }
         first.cancel()
         second.cancel()
     }
 
-    @Test func register_equalOrLowerTierJoiner_doesNotReTriggerThePlatformRequest() {
+    @Test func register_equalOrLowerTierJoiner_doesNotReTriggerThePlatformRequest() async {
         // The harmless, common case this dedup exists for: two `.periodic` (balanced) callers, or
         // a `.periodic` joining an in-flight `.locate` (high) - both ride along.
         let registry = PendingFixContinuations()
@@ -58,7 +68,7 @@ struct PendingFixContinuationsTests {
                 #expect(isFirst)
             }
         }
-        while registry.count < 1 { Thread.sleep(forTimeInterval: 0.001) }
+        while registry.count < 1 { await Task.yield() }
 
         let second = Task<LocationFix, Error> {
             try await withCheckedThrowingContinuation { continuation in
@@ -66,14 +76,14 @@ struct PendingFixContinuationsTests {
                 #expect(!isFirst, "an equal-or-lower-tier joiner (.periodic over an in-flight .locate) must NOT re-trigger requestLocation() - it rides along for free")
             }
         }
-        while registry.count < 2 { Thread.sleep(forTimeInterval: 0.001) }
+        while registry.count < 2 { await Task.yield() }
 
         registry.resumeAll { makeFix(source: $0) }
         first.cancel()
         second.cancel()
     }
 
-    @Test func register_blockingFinding_locateJoiningAnInFlightPeriodic_mustNotRideAlongUntagged() {
+    @Test func register_blockingFinding_locateJoiningAnInFlightPeriodic_mustNotRideAlongUntagged() async {
         // specs/009-device-runtime.md §1.1 (I50 review Blocking finding) - a `.locate` capture that
         // joins an in-flight `.periodic` request used to get a balanced (~100m) fix tagged
         // `source: "locate"`, because `register()` only ever looked at `pending.isEmpty`, not the
@@ -88,7 +98,7 @@ struct PendingFixContinuationsTests {
                 registry.register(source: .periodic, continuation: continuation)
             }
         }
-        while registry.count < 1 { Thread.sleep(forTimeInterval: 0.001) }
+        while registry.count < 1 { await Task.yield() }
 
         var locateNeedsPlatformRequest: Bool?
         let locateJoinsSecond = Task<LocationFix, Error> {
@@ -97,7 +107,7 @@ struct PendingFixContinuationsTests {
                 locateNeedsPlatformRequest = needsPlatformRequest
             }
         }
-        while registry.count < 2 { Thread.sleep(forTimeInterval: 0.001) }
+        while registry.count < 2 { await Task.yield() }
 
         #expect(locateNeedsPlatformRequest == true, "SystemLocationProvider relies on this to raise desiredAccuracy AND re-issue requestLocation() - otherwise the eventual delivery is the balanced fix, mistagged as a high-accuracy locate")
 
@@ -278,25 +288,37 @@ struct PendingFixContinuationsTests {
         }
     }
 
-    /// Bridges a real `CheckedContinuation` out of `withCheckedThrowingContinuation` synchronously,
-    /// so a plain `Thread` (not an `async` context) can call `registerAndAct`/`timeOutAndAct`
-    /// directly. The started `Task` is intentionally discarded - it is already scheduled and keeps
-    /// itself alive until `resumeAll`/`failAll` resolves it at the end of each test.
-    private final class ContinuationBox: @unchecked Sendable {
-        var continuation: CheckedContinuation<LocationFix, Error>?
-    }
-
-    private func makeSynchronousContinuation() -> CheckedContinuation<LocationFix, Error> {
-        let box = ContinuationBox()
-        let handoff = DispatchSemaphore(value: 0)
-        Task<LocationFix, Error> {
-            try await withCheckedThrowingContinuation { continuation in
-                box.continuation = continuation
-                handoff.signal()
+    /// Bridges a real `CheckedContinuation` out of `withCheckedThrowingContinuation`, so a plain
+    /// `Thread` (not an `async` context) can call `registerAndAct`/`timeOutAndAct` directly. The
+    /// started inner `Task` is intentionally discarded - it is already scheduled and keeps itself
+    /// alive until `resumeAll`/`failAll` resolves it at the end of each test.
+    ///
+    /// **I55 fix.** The previous version (`makeSynchronousContinuation`, non-`async`) got the
+    /// continuation out via a `DispatchSemaphore`: it spawned the inner `Task` then called
+    /// `handoff.wait()` on the CALLING thread, blocking it until that `Task` got a chance to run.
+    /// swift-testing runs test bodies on Swift's cooperative thread pool (width = core count), and
+    /// blocking a pool thread while waiting for a *separately scheduled* Task to be dispatched is
+    /// the textbook forbidden pattern: block enough pool threads this way at once (or narrow the
+    /// pool enough — see `LIBDISPATCH_COOPERATIVE_POOL_STRICT=1`) and there is no free pool thread
+    /// left to run the very Task being waited on, so the pool deadlocks. That is exactly what hung
+    /// CI for six hours while passing locally in 0.2s on a many-core Mac with pool slack to spare.
+    ///
+    /// This version gets the same real `CheckedContinuation` via a second, outer
+    /// `withCheckedContinuation` and plain `await` instead of a blocking wait. `await` SUSPENDS the
+    /// caller's task (returning its thread to the pool to do other work) rather than blocking a
+    /// thread outright, so it carries no pool-starvation risk regardless of pool width — the call
+    /// sites below simply become `async` and `await` this instead of calling it directly. The real
+    /// concurrency this test file exists to exercise — two genuine OS `Thread`s racing
+    /// `registerAndAct`/`timeOutAndAct` against each other — is untouched: only how the
+    /// continuations are obtained beforehand changed, not the racing itself.
+    private func makeContinuation() async -> CheckedContinuation<LocationFix, Error> {
+        await withCheckedContinuation { (outer: CheckedContinuation<CheckedContinuation<LocationFix, Error>, Never>) in
+            Task<LocationFix, Error> {
+                try await withCheckedThrowingContinuation { inner in
+                    outer.resume(returning: inner)
+                }
             }
         }
-        handoff.wait()
-        return box.continuation!
     }
 
     /// Asserts the recorded events never show one label's action starting while another label's
@@ -321,7 +343,7 @@ struct PendingFixContinuationsTests {
         #expect(!events.isEmpty, "expected at least one caller's action to actually run")
     }
 
-    @Test func registerAndAct_serializesItsActionAgainstAConcurrentRegisterAndActCall() {
+    @Test func registerAndAct_serializesItsActionAgainstAConcurrentRegisterAndActCall() async {
         // What this proves: two `registerAndAct` calls made from genuinely different OS threads at
         // the same moment never run their actions concurrently - the recorded events never
         // interleave, regardless of which caller's action(s) actually fire.
@@ -332,8 +354,8 @@ struct PendingFixContinuationsTests {
         // exclusion is verified here.
         let registry = PendingFixContinuations()
         let recorder = EventRecorder()
-        let continuationA = makeSynchronousContinuation()
-        let continuationB = makeSynchronousContinuation()
+        let continuationA = await makeContinuation()
+        let continuationB = await makeContinuation()
         let ready = DispatchSemaphore(value: 0)
         let start = DispatchSemaphore(value: 0)
 
@@ -368,16 +390,16 @@ struct PendingFixContinuationsTests {
         registry.failAll(with: LocationProvidingError.timedOut)
     }
 
-    @Test func registerAndAct_serializesItsActionAgainstAConcurrentTimeOutAndActCall() {
+    @Test func registerAndAct_serializesItsActionAgainstAConcurrentTimeOutAndActCall() async {
         // Covers the second face of the same finding: fix 8's belated `stopUpdatingLocation()`
         // (`timeOutAndAct`'s action) racing a brand-new caller's `register()` + `requestLocation()`
         // (`registerAndAct`'s action). An existing caller is registered up front (not part of the
         // race) and its timeout races a second, brand-new caller's registration.
         let registry = PendingFixContinuations()
         let recorder = EventRecorder()
-        let existingContinuation = makeSynchronousContinuation()
+        let existingContinuation = await makeContinuation()
         let (existingId, _) = registry.register(source: .periodic, continuation: existingContinuation)
-        let newContinuation = makeSynchronousContinuation()
+        let newContinuation = await makeContinuation()
         let ready = DispatchSemaphore(value: 0)
         let start = DispatchSemaphore(value: 0)
 
@@ -579,15 +601,15 @@ struct PendingFixContinuationsTests {
         #expect(!resumed)
     }
 
-    @Test func resumeAllAndAct_serializesItsActionAgainstAConcurrentRegisterAndActCall() {
+    @Test func resumeAllAndAct_serializesItsActionAgainstAConcurrentRegisterAndActCall() async {
         // The exact concurrency property registerAndAct/timeOutAndAct already prove for each
         // other, extended to resumeAllAndAct: a delivery draining the registry and a brand-new
         // caller registering at the same moment must never run their actions concurrently.
         let registry = PendingFixContinuations()
         let recorder = EventRecorder()
-        let existingContinuation = makeSynchronousContinuation()
+        let existingContinuation = await makeContinuation()
         registry.register(source: .periodic, continuation: existingContinuation)
-        let newContinuation = makeSynchronousContinuation()
+        let newContinuation = await makeContinuation()
         let ready = DispatchSemaphore(value: 0)
         let start = DispatchSemaphore(value: 0)
 
