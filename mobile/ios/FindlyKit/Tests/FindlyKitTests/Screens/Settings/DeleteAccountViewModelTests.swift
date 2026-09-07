@@ -332,23 +332,23 @@ struct DeleteAccountViewModelTests {
         #expect(viewModel.phase == .signedOutForRetry, "the screen still navigates to sign-in — there is nothing else to offer")
     }
 
-    /// I25 review fix — `appVersionTracker` does NOT join `deviceIdProvider`/`exportArtifactStore`
-    /// in the "deliberately left alone here" category, despite all three being per-uid state set by
-    /// a completed registration/session. `deviceIdProvider`/`exportArtifactStore` are plain VALUES:
-    /// a stale read after `signOutForRetry()` is harmless (a stale deviceId just re-registers under
-    /// the same UUID; a stale export artifact just gets overwritten), so clearing them is deferred
-    /// to `wipeLocalStateAndComplete()`, which only runs once the account is FULLY torn down.
-    /// `appVersionTracker` is different in kind — it GATES CONTROL FLOW:
-    /// `DeviceRegistrationService.registerOnLaunchIfNeeded()` no-ops entirely (never calls
-    /// `registerOrUpdate()` at all) whenever the stored version already matches the running app
-    /// version. Left stale across sign-out/sign-back-in on the SAME uid (whose backend profile this
-    /// flow already erased), every I24 bootstrap-completion retry (`RootView`'s `onSignedIn`
-    /// re-invocations) also no-ops, and nothing in this flow itself schedules another attempt — the
-    /// user is left signed in with no registered device until an unrelated trigger (a push-token
-    /// refresh, which calls `registerOrUpdate()` directly and ungated, or the `DEVICE_NOT_FOUND`
-    /// self-heal) happens to fire. Clearing it early is always safe to re-enter —
-    /// `registerOrUpdate()`'s probe-then-register path fails open — so it is cleared here instead.
-    @Test func signOutForRetry_clearsAppVersionTracker_butLeavesDeviceIdAlone() async {
+    /// **I44 (specs/008 §3.1) — supersedes the old I25 "leave deviceId/exportArtifact alone" test.**
+    /// I25's deferral assumed the *same* uid always retries; I43's shared `EndOfSessionRoutine` made
+    /// that assumption a named, visible option (`clearsDeviceIdentityAndExportArtifact: false`)
+    /// rather than implicit behavior, which is what made the residual question askable: if a
+    /// *different* person reaches the sign-in screen from the `.signedOutForRetry` state and signs
+    /// in before the retry completes, the previous user's plaintext export artifact (008 §3) and
+    /// device id are still on disk — the identical window I43 closed on the forced-sign-out path.
+    /// `signOutForRetry()` now clears both, same as every other `EndOfSessionRoutine` caller
+    /// (default `Options()`), accepting one extra `POST /devices` registration on the retry path.
+    /// That cost turned out to be nominal, not merely acceptable: `appVersionTracker` was ALREADY
+    /// cleared unconditionally here (see below), which alone forces `registerOnLaunchIfNeeded()` to
+    /// re-register on the very next sign-in regardless of the device id; and account deletion
+    /// deletes the `Devices` partition FIRST (002 §4.2 step 1), so by the time this method's uid
+    /// signs back in, the OLD device row is already gone server-side — reusing the old id would not
+    /// have avoided a first-registration/defaults reset either. Generating a fresh id costs nothing
+    /// beyond what was already going to happen.
+    @Test func signOutForRetry_clearsDeviceIdAndExportArtifact_andAppVersionTracker() async {
         let api = FakeAPIClient()
         api.deleteAccountHandler = {}
         let auth = FakeAuthProviding()
@@ -356,16 +356,20 @@ struct DeleteAccountViewModelTests {
         auth.deleteCurrentUserResult = .failure(AuthError.notSignedIn)
         let deviceIdProvider = InMemoryDeviceIdProvider()
         let existingDeviceId = deviceIdProvider.deviceId(forUserId: "u1")
+        let exportArtifactStore = InMemoryExportArtifactStore()
+        _ = try? exportArtifactStore.write(Data("leftover export".utf8))
         let appVersionTracker = InMemoryAppVersionRegistrationTracker()
         appVersionTracker.setLastRegisteredAppVersion("1.0.0", forUserId: "u1")
         let viewModel = makeViewModel(
-            api: api, auth: auth, deviceIdProvider: deviceIdProvider, appVersionTracker: appVersionTracker
+            api: api, auth: auth, deviceIdProvider: deviceIdProvider,
+            exportArtifactStore: exportArtifactStore, appVersionTracker: appVersionTracker
         )
         await viewModel.confirmDelete()
 
         await viewModel.signOutForRetry()
 
-        #expect(deviceIdProvider.deviceId(forUserId: "u1") == existingDeviceId, "deviceIdProvider is a plain value — only cleared by wipeLocalStateAndComplete()")
+        #expect(deviceIdProvider.deviceId(forUserId: "u1") != existingDeviceId, "I44 (008 §3.1) — a different user reaching sign-in from the retry state must not find the previous user's device id on disk; a fresh id proves the old one was actually cleared, not merely re-read")
+        #expect(exportArtifactStore.currentURL == nil, "I44 (008 §3.1) — a different user reaching sign-in from the retry state must not find the previous user's plaintext export on disk")
         #expect(appVersionTracker.lastRegisteredAppVersion(forUserId: "u1") == nil, "appVersionTracker gates registerOnLaunchIfNeeded() — must not survive signOutForRetry(), or a user who abandons the retry is left with no registered device and no scheduled retry")
     }
 
