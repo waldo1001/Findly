@@ -30,15 +30,23 @@ import kotlinx.coroutines.runBlocking
  * `RemoteMessage` ints and handed the actual routing decision + capture off to a coroutine on
  * `AppContainer`'s own scope.
  *
- * The other three types (`SETTINGS_CHANGED`, `GEOFENCE_EVENT`, `GEOFENCE_CONFIG_CHANGED`) keep
- * their existing in-callback `runBlocking` dispatch — each is cheap (an in-memory schedule
- * rebuild, posting a local notification, or one small `GET /geofences` fetch plus geofence
- * re-registration) and, per the A39 task brief, "already correct". Honest caveat, not silently
- * assumed: `GEOFENCE_CONFIG_CHANGED`'s `GET /geofences` call is the one of the three that does real
- * network I/O with no bound tied to the 10 s budget — on a slow or lossy connection it *could*
- * approach or exceed it, unlike the other two, which never leave the process. Left unchanged here
- * because it is out of A39's scope (only `LOCATE_REQUEST` handling is authorized to change) and
- * flagged in the task report instead.
+ * **A43 — `GEOFENCE_CONFIG_CHANGED` no longer blocks this callback either (specs/009 §5.4/§6.2).**
+ * A39's implementing agent flagged, rather than fixed out of scope, that this type's real
+ * `GET /geofences` fetch plus full `GeofencingClient` unregister/re-register cycle carried no
+ * timeout tied to this callback's ~10 s budget — on a slow or lossy connection that could approach
+ * or exceed it, risking the same Doze-exemption loss and mid-re-registration kill that motivated
+ * A39, landing in 009 §6.2's documented "zero geofences registered" state (which that section's
+ * own self-healing bound, the next report's `geofenceEtag` piggyback, already covers — this is a
+ * robustness fix, not a data-loss fix). Routed to
+ * [com.findly.android.queue.worker.GeofenceConfigSyncWorkEnqueuer.enqueue] — the same expedited-
+ * `WorkManager` seam A39 built for the demoted-`LOCATE_REQUEST` fallback
+ * ([com.findly.android.queue.worker.LocateRequestWorker]) — instead of a coroutine handoff: unlike
+ * `LOCATE_REQUEST`, there is no priority/permission/presence-service decision to make first, so a
+ * synchronous, immediately-returning `WorkManager.enqueue()` call is the whole handoff.
+ *
+ * The remaining two types (`SETTINGS_CHANGED`, `GEOFENCE_EVENT`) keep their existing in-callback
+ * `runBlocking` dispatch — both are cheap, pure in-memory work (a schedule rebuild, or posting a
+ * local notification) with no I/O, independently verified safe by both A39's and A43's reviewers.
  */
 class FindlyMessagingService : FirebaseMessagingService() {
 
@@ -49,10 +57,17 @@ class FindlyMessagingService : FirebaseMessagingService() {
     }
 
     override fun onMessageReceived(message: RemoteMessage) {
-        if (PushMessageType.from(message.data) is PushMessageType.LocateRequest) {
+        val type = PushMessageType.from(message.data)
+
+        if (type is PushMessageType.LocateRequest) {
             val isHighPriority = message.priority == RemoteMessage.PRIORITY_HIGH
             val wasDemoted = PushPriorityDemotion.wasDemoted(message.priority, message.originalPriority)
             container.locateRequestHandoff.handle(message.data, isHighPriority, wasDemoted)
+            return
+        }
+
+        if (type is PushMessageType.GeofenceConfigChanged) {
+            container.geofenceConfigSyncWorkEnqueuer.enqueue()
             return
         }
 
