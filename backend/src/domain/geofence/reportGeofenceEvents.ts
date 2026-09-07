@@ -27,7 +27,11 @@ import type { PushSender } from "../../ports/pushSender";
 import { listDevicesForMembers } from "../family/deviceFanout";
 import { getFeatures, type Features } from "../plan";
 import { shouldRefreshLastSeen } from "../device/lastSeenPolicy";
-import { normalizeDisplayText } from "../text/normalizeDisplayText";
+import {
+  EMPTY_DISPLAY_NAME_FALLBACK,
+  EMPTY_GEOFENCE_NAME_FALLBACK,
+  normalizeDisplayTextOrFallback,
+} from "../text/normalizeDisplayText";
 
 export interface ReportGeofenceEventsDeps {
   deviceRepo: DeviceRepo;
@@ -78,10 +82,16 @@ function notifyFlagFor(geofence: GeofenceEntry, transition: "enter" | "exit"): b
  * as-is: this is a write-time-only fix with no migration, so a displayName/geofenceName
  * written before normalizeDisplayText existed stays hostile in storage until its owner
  * writes again. normalizeDisplayText is pure and idempotent, so applying it again here to
- * an already-clean value is a no-op — this only matters for pre-existing data. */
+ * an already-clean value is a no-op — this only matters for pre-existing data.
+ *
+ * Falls back to the §1.4 placeholders independently for each field (B29 re-review, residual
+ * fix): a stored value consisting ENTIRELY of forbidden characters normalizes to the empty
+ * string, and without this a title would go out as `" arrived at Home"` or
+ * `"Noor arrived at "` — either field can be empty on its own, so both are substituted
+ * independently rather than as an all-or-nothing pair. */
 function titleFor(displayName: string, geofenceName: string, transition: "enter" | "exit"): string {
-  const name = normalizeDisplayText(displayName);
-  const geofence = normalizeDisplayText(geofenceName);
+  const name = normalizeDisplayTextOrFallback(displayName, EMPTY_DISPLAY_NAME_FALLBACK);
+  const geofence = normalizeDisplayTextOrFallback(geofenceName, EMPTY_GEOFENCE_NAME_FALLBACK);
   return transition === "enter" ? `${name} arrived at ${geofence}` : `${name} left ${geofence}`;
 }
 

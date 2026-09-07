@@ -41,3 +41,25 @@ const FORBIDDEN_CHARS = /[\x00-\x1F\x7F-\x9F\u202A-\u202E\u2066-\u2069\u2028-\u2
 export function normalizeDisplayText(raw: string): string {
   return raw.replace(FORBIDDEN_CHARS, "").trim();
 }
+
+/** specs/001 §1.4 (B29 re-review, residual fix) — compose-time fallback placeholders for a
+ * `displayName`/`geofenceName` that normalizes to the EMPTY string: a value consisting
+ * entirely of forbidden characters. Without this, a compose point emits a title with a
+ * leading space and no name (`" arrived at Home"`, `" is locating you"`) — this only bites
+ * pre-existing data, since the write-time schema guard (`.pipe(z.string().min(1))`) rejects
+ * an all-forbidden value at write time but cannot retroactively clean what's already stored.
+ *
+ * A user id MUST NOT be used as this fallback (specs/001 §1.4): it is opaque to the reader
+ * and would expose an internal identifier to every other family member who receives the
+ * notification. Named constants here keep both placeholder strings in exactly one place. */
+export const EMPTY_DISPLAY_NAME_FALLBACK = "Someone";
+export const EMPTY_GEOFENCE_NAME_FALLBACK = "a place";
+
+/** Normalize `raw`, substituting `fallback` when normalization yields the empty string.
+ * Shared by both compose-time title builders (`titleFor` in reportGeofenceEvents.ts,
+ * `buildLocateRequestTitle` in createLocateRequest.ts) so the "normalize, then fall back if
+ * empty" rule is written and tested once instead of being duplicated at each call site. */
+export function normalizeDisplayTextOrFallback(raw: string, fallback: string): string {
+  const normalized = normalizeDisplayText(raw);
+  return normalized === "" ? fallback : normalized;
+}

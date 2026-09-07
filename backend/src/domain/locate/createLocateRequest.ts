@@ -22,7 +22,7 @@ import type {
 import type { PushSender } from "../../ports/pushSender";
 import { findDeviceInFamily, listDevicesForMembers } from "../family/deviceFanout";
 import { getFeatures, type Features } from "../plan";
-import { normalizeDisplayText } from "../text/normalizeDisplayText";
+import { EMPTY_DISPLAY_NAME_FALLBACK, normalizeDisplayTextOrFallback } from "../text/normalizeDisplayText";
 
 const REQUEST_ID_LENGTH = 20;
 const EXPIRY_MS = 180 * 1000; // now + 180s (§6.1, amended 2026-09-06 — was 60s)
@@ -130,9 +130,13 @@ function resolveRequesterDisplayName(uid: string, members: FamilyMember[]): stri
  * as-is: this is a write-time-only fix with no migration, so a displayName written before
  * normalizeDisplayText existed stays hostile in storage until its owner writes again.
  * normalizeDisplayText is pure and idempotent, so applying it again here to an already-clean
- * value is a no-op — this only matters for pre-existing data. */
+ * value is a no-op — this only matters for pre-existing data.
+ *
+ * Falls back to the §1.4 placeholder (B29 re-review, residual fix) when requestedByName
+ * normalizes to the empty string — a stored value consisting ENTIRELY of forbidden
+ * characters — instead of emitting `" is locating you"` with a leading space and no name. */
 function buildLocateRequestTitle(requestedByName: string): string {
-  return `${normalizeDisplayText(requestedByName)} is locating you`;
+  return `${normalizeDisplayTextOrFallback(requestedByName, EMPTY_DISPLAY_NAME_FALLBACK)} is locating you`;
 }
 
 function toLastKnownAnswer(deviceId: string, record: LastKnownRecord | null): LastKnownAnswer | null {
