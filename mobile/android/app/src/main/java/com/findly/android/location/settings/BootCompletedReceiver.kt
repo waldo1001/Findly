@@ -3,7 +3,9 @@ package com.findly.android.location.settings
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.util.Log
 import com.findly.android.FindlyApplication
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -32,24 +34,42 @@ import kotlinx.coroutines.launch
  * [com.findly.android.AppContainer.reapplyCachedScheduleSuspending] to swallow failures, but that
  * function used to wrap only its `reschedule` call, not the cached-settings read or the reapply
  * decision ahead of it. A throw from either of those propagated out through this `finally` into
- * the plain `CoroutineScope(Dispatchers.Default)` below, which carries no
- * `CoroutineExceptionHandler`, killing the process during boot. Fixed at the source instead of
- * here: [com.findly.android.AppContainer.reapplyCachedScheduleSuspending] now wraps its entire
- * body, so every failure short of [kotlinx.coroutines.CancellationException] is swallowed (and
- * logged by exception class name only) before it can reach this receiver's caller.
+ * the plain `CoroutineScope(Dispatchers.Default)` below, which carried no
+ * `CoroutineExceptionHandler`, killing the process during boot. Fixed at the source:
+ * [com.findly.android.AppContainer.reapplyCachedScheduleSuspending] now wraps its entire body, so
+ * every failure short of [kotlinx.coroutines.CancellationException] is swallowed (and logged by
+ * exception class name only) before it can reach this receiver's caller.
+ *
+ * **A42 (docs/implementation-handoff.md) sweep, finding 1:** the scope below still had no
+ * [CoroutineExceptionHandler] of its own — belt-and-braces against a bug in
+ * [com.findly.android.AppContainer.reapplyCachedScheduleSuspending] itself (or a future edit that
+ * narrows its own catch), or a throw from `container` construction/access before that call is even
+ * reached, either of which would otherwise still kill the process during boot exactly as this
+ * class's own doc above once diagnosed. Logs the exception's class name only, never its
+ * message/cause (specs/009-device-runtime.md §9: counts and error codes only, never
+ * coordinates/`deviceId`/tokens/phone numbers).
  */
 class BootCompletedReceiver : BroadcastReceiver() {
+
+    private val exceptionHandler = CoroutineExceptionHandler { _, throwable ->
+        Log.d(TAG, "unhandled boot-reapply coroutine failure (${throwable::class.simpleName})")
+    }
+
     override fun onReceive(context: Context, intent: Intent) {
         if (!BootCompletedActionGate.shouldReapply(intent.action)) return
 
         val container = (context.applicationContext as FindlyApplication).container
         val pendingResult = goAsync()
-        CoroutineScope(Dispatchers.Default).launch {
+        CoroutineScope(Dispatchers.Default + exceptionHandler).launch {
             try {
                 container.reapplyCachedScheduleSuspending()
             } finally {
                 pendingResult.finish()
             }
         }
+    }
+
+    private companion object {
+        const val TAG = "FindlySync"
     }
 }

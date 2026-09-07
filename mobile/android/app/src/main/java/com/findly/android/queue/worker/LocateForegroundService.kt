@@ -37,6 +37,12 @@ import kotlinx.coroutines.launch
  * FCM-started process) logs and stops this one capture rather than crashing the whole process; the
  * `finally` below still always runs first.
  *
+ * **A42 (docs/implementation-handoff.md) sweep, finding 5:** [exceptionHandler] used to log the
+ * raw `throwable` (`Log.w(TAG, "...", throwable)`), which prints its full message and stack trace —
+ * a location/Retrofit exception's message routinely embeds exactly what specs/009-device-runtime.md
+ * §9 forbids logging (coordinates, `deviceId`, tokens, phone numbers). Fixed to log the exception's
+ * class name only, matching every other handler this sweep added/audited.
+ *
  * **A39 review, finding 3:** `startForeground` itself is guarded — a start that lost its FCM
  * background-start exemption (API 31+), or a `location`-typed FGS whose permission was revoked
  * between the handoff's own check and this call (API 34), throws rather than returning an error.
@@ -69,7 +75,7 @@ import kotlinx.coroutines.launch
 class LocateForegroundService : Service() {
 
     private val exceptionHandler = CoroutineExceptionHandler { _, throwable ->
-        Log.w(TAG, "LOCATE_REQUEST capture failed", throwable)
+        Log.w(TAG, "LOCATE_REQUEST capture failed (${throwable::class.simpleName})")
     }
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default + exceptionHandler)
 

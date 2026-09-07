@@ -12,6 +12,7 @@ import com.google.firebase.auth.PhoneAuthCredential
 import com.google.firebase.auth.PhoneAuthOptions
 import com.google.firebase.auth.PhoneAuthProvider
 import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.channels.trySendBlocking
 import kotlinx.coroutines.flow.Flow
@@ -76,6 +77,11 @@ class FirebaseAuthProvider(
         return try {
             user.delete().await()
             true
+        } catch (e: CancellationException) {
+            // A42 sweep, finding 6: rethrow - a suspend fun must never absorb cancellation, or the
+            // caller's structured concurrency silently breaks instead of the coroutine finishing
+            // cancelled.
+            throw e
         } catch (e: Exception) {
             false
         }
@@ -126,6 +132,10 @@ class FirebaseAuthProvider(
         val id = verificationId ?: throw PhoneAuthException(PhoneAuthError.CODE_EXPIRED)
         try {
             firebaseAuth.signInWithCredential(PhoneAuthProvider.getCredential(id, code)).await()
+        } catch (e: CancellationException) {
+            // A42 sweep, finding 6: rethrow, don't remap to PhoneAuthException - see
+            // deleteCurrentUser's doc above for why.
+            throw e
         } catch (e: Exception) {
             throw PhoneAuthException(mapConfirmError(e))
         }

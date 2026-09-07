@@ -3,9 +3,11 @@ package com.findly.android.location.geofence
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.util.Log
 import com.findly.android.FindlyApplication
 import com.google.android.gms.location.Geofence
 import com.google.android.gms.location.GeofencingEvent
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -24,8 +26,23 @@ import kotlinx.coroutines.launch
  * transition. Per the A11 task brief and specs/009 §6.3/§1.2/§4: a detected transition MUST NOT be
  * lost (unlike a mid-GPS-capture fix, which MAY be dropped) — this is the mechanism that honors
  * that.
+ *
+ * **A42 (docs/implementation-handoff.md) sweep, finding 2:** [GeofenceTransitionHandler.handle] has
+ * no `try`/`catch` of its own (Room writes and the location-capture path can both throw on a cold
+ * FCM/geofence-woken process, the same failure modes A39's review found for
+ * [com.findly.android.queue.worker.LocateForegroundService]) and this scope carried no
+ * [CoroutineExceptionHandler] — an uncaught throw here reached the default handler and killed the
+ * process on every geofence transition that hit one of those failure modes. Logs the exception's
+ * class name only, never its message/cause (specs/009-device-runtime.md §9: counts and error codes
+ * only, never coordinates/`deviceId`/tokens/phone numbers — notable here since this handler's own
+ * payload, a lat/lon transition, is exactly the kind of thing an exception message could embed).
  */
 class GeofenceTransitionReceiver : BroadcastReceiver() {
+
+    private val exceptionHandler = CoroutineExceptionHandler { _, throwable ->
+        Log.d(TAG, "unhandled geofence-transition coroutine failure (${throwable::class.simpleName})")
+    }
+
     override fun onReceive(context: Context, intent: Intent) {
         val geofencingEvent = GeofencingEvent.fromIntent(intent) ?: return
         if (geofencingEvent.hasError()) return
@@ -33,13 +50,17 @@ class GeofenceTransitionReceiver : BroadcastReceiver() {
 
         val pendingResult = goAsync()
         val handler = (context.applicationContext as FindlyApplication).container.geofenceTransitionHandler
-        CoroutineScope(Dispatchers.Default).launch {
+        CoroutineScope(Dispatchers.Default + exceptionHandler).launch {
             try {
                 handler.handle(transitionEvent)
             } finally {
                 pendingResult.finish()
             }
         }
+    }
+
+    private companion object {
+        const val TAG = "FindlySync"
     }
 
     private fun GeofencingEvent.toTransitionEventOrNull(): GeofenceTransitionEvent? {
