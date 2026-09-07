@@ -117,6 +117,10 @@ describe("integration/groupSweeper — bucket walk + physical deletion against r
     const seeded = await seedGroup(deps, { endsAt, expiryPolicy: "delete" }, { extraMembers: 1, withLocation: true });
     const bucket = endsAt.slice(0, 10);
     await seedExpiryRow(deps, bucket, seeded.meta.groupId);
+    // extraMembers: 1 above guarantees exactly one seeded member here (noUncheckedIndexedAccess
+    // otherwise leaves memberIds[0] as `string | undefined`).
+    const [firstMemberId] = seeded.memberIds;
+    if (!firstMemberId) throw new Error("test setup: expected seedGroup's extraMembers:1 to seed one member");
 
     const result = await sweepGroups(deps);
 
@@ -125,7 +129,7 @@ describe("integration/groupSweeper — bucket walk + physical deletion against r
     expect(await deps.groupRepo.listMembers(seeded.meta.groupId)).toEqual([]);
     expect(await deps.groupCodeRepo.getCode(seeded.meta.code)).toBeNull();
     expect(await deps.userRepo.listGroupMemberships(seeded.ownerId)).toEqual([]);
-    expect(await deps.userRepo.listGroupMemberships(seeded.memberIds[0])).toEqual([]);
+    expect(await deps.userRepo.listGroupMemberships(firstMemberId)).toEqual([]);
     expect(await deps.groupLastKnownRepo.listByGroup(seeded.meta.groupId)).toEqual([]);
     expect(await findRow(deps, bucket, seeded.meta.groupId)).toBeUndefined();
   }, 30_000);

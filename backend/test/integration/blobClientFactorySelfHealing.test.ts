@@ -86,9 +86,12 @@ describe("integration/blobClientFactory self-healing container creation (specs/0
       // the caching behavior from OUTSIDE blobClientFactory.ts's own internals, without
       // reimplementing — or over-mocking — the module under test. Mirrors
       // tableClientFactorySelfHealing.test.ts's TableClient.prototype.createTable patch.
-      ContainerClient.prototype.createIfNotExists = function (this: ContainerClient, ...args: unknown[]) {
+      ContainerClient.prototype.createIfNotExists = function (
+        this: ContainerClient,
+        ...args: Parameters<typeof original>
+      ): ReturnType<typeof original> {
         createCalls += 1;
-        return (original as (...a: unknown[]) => Promise<unknown>).apply(this, args);
+        return original.apply(this, args);
       };
 
       try {

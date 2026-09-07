@@ -125,7 +125,11 @@ describe("functions/export.functions", () => {
 
     expect(response.status).toBe(500);
     expect(contextError).toHaveBeenCalledTimes(1);
-    const [label, logged] = contextError.mock.calls[0];
+    // noUncheckedIndexedAccess types mock.calls[0] as possibly undefined; the assertion above
+    // (toHaveBeenCalledTimes(1)) is what actually guarantees it's present.
+    const call = contextError.mock.calls[0];
+    if (!call) throw new Error("test setup: contextError should have been called");
+    const [label, logged] = call;
     expect(label).toBe("unhandled error in exportUserData");
     expect(logged).toEqual({ message: "connection timed out", code: "ETIMEDOUT" });
     expect(logged).not.toHaveProperty("request");

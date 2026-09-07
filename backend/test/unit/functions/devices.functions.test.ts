@@ -57,10 +57,16 @@ describe("functions/devices.functions registerDevice catch-all", () => {
     const context = { error: contextError, log: vi.fn(), warn: vi.fn(), info: vi.fn() };
     const request = { headers: { get: () => "Bearer sometoken" }, json: async () => ({}) };
 
-    await registeredHandlers.registerDevice(request, context);
+    // registeredHandlers is a Record<string, ...>, so noUncheckedIndexedAccess types this
+    // lookup as possibly undefined — the import above is what actually populates it.
+    const registerDeviceHandler = registeredHandlers.registerDevice;
+    if (!registerDeviceHandler) throw new Error("test setup: devices.functions.ts should have registered registerDevice");
+    await registerDeviceHandler(request, context);
 
     expect(contextError).toHaveBeenCalledTimes(1);
-    const [label, logged] = contextError.mock.calls[0];
+    const call = contextError.mock.calls[0];
+    if (!call) throw new Error("test setup: contextError should have been called");
+    const [label, logged] = call;
     expect(label).toBe("unhandled error in registerDevice");
     expect(logged).toEqual({ message: "connection timed out", code: "ETIMEDOUT" });
     expect(logged).not.toHaveProperty("request");
