@@ -53,6 +53,14 @@ describe("domain/text/normalizeDisplayText", () => {
     expect(normalizeDisplayText("Eric\rSmith")).toBe("EricSmith");
   });
 
+  it("strips an embedded line separator (U+2028) mid-string", () => {
+    expect(normalizeDisplayText("Eric\u2028Smith")).toBe("EricSmith");
+  });
+
+  it("strips an embedded paragraph separator (U+2029) mid-string", () => {
+    expect(normalizeDisplayText("Eric\u2029Smith")).toBe("EricSmith");
+  });
+
   it("strips a C0 control character (e.g. U+0007 BEL)", () => {
     expect(normalizeDisplayText("Eric\u0007Smith")).toBe("EricSmith");
   });
