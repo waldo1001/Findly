@@ -156,6 +156,30 @@ struct GroupMapViewModelCameraTests {
         #expect(abs(viewModel.region.spanLonDelta - 400.0 / 272.0) < 1e-9)
     }
 
+    /// specs/010 §3.4 "Occlusion model" (I49, normative) — mirrors
+    /// `LiveMapViewModelTests.load_withASheetHeightSet_fitsBoundsAboveTheSheet`: the group map
+    /// shares the same camera policy through the same renderer seam, so `sheetHeightPt` must
+    /// forward into the `.bounds` fit identically.
+    @Test func load_withASheetHeightSet_fitsBoundsAboveTheSheet() async {
+        let api = FakeAPIClient()
+        api.getGroupLatestLocationsHandler = { _ in
+            TestFeatures.envelope(GroupLatestLocationsResponse(members: [
+                self.member("u1", "Eric", lat: 50.0, lon: 3.0),
+                self.member("u2", "Noor", lat: 51.0, lon: 4.0),
+            ]))
+        }
+        let viewModel = GroupMapViewModel(apiClient: api, groupId: "grp_1")
+        let viewportSizePt = CGSize(width: 400, height: 800)
+        viewModel.mapViewportSizePt = viewportSizePt
+        viewModel.sheetHeightPt = 200
+
+        await viewModel.load()
+
+        let expectedTarget = MapCameraTarget.bounds(southLat: 50.0, northLat: 51.0, westLon: 3.0, eastLon: 4.0, paddingPt: MapCameraPolicy.boundsPaddingPt)
+        #expect(viewModel.region == MapRegion(fitting: expectedTarget, viewSizePt: viewportSizePt, sheetHeightPt: 200))
+        #expect(viewModel.region != MapRegion(fitting: expectedTarget, viewSizePt: viewportSizePt))
+    }
+
     @Test func selectMember_withAPosition_selectsAndZoomsToIt() async {
         let api = FakeAPIClient()
         api.getGroupLatestLocationsHandler = { _ in

@@ -316,6 +316,65 @@ struct LiveMapViewModelCameraTests {
         #expect(viewModel.cameraCommand?.target == .center(lat: 51.0, lon: 3.7, zoom: MapCameraPolicy.singlePointZoom))
     }
 
+    /// specs/010 §3.4 "Occlusion model" (I49, normative) — `sheetHeightPt` (mirroring
+    /// `mapViewportSizePt`'s existing wiring) must reach `MapRegion(fitting:viewSizePt:
+    /// sheetHeightPt:)` for a `.bounds` fit, exactly like the viewport size already does. Asserts
+    /// the exact resulting region — not merely that some command was minted — the same rigor
+    /// `load_withTwoOrMoreDistinctPoints_fitsBoundsUsingTheLiveViewportSize` already applies to
+    /// `mapViewportSizePt`.
+    @Test func load_withASheetHeightSet_fitsBoundsAboveTheSheet() async {
+        let api = FakeAPIClient()
+        api.getLatestLocationsHandler = {
+            TestFeatures.envelope(LatestLocationsResponse(members: [
+                self.member("u1", "Eric", devices: [self.device("d1", lat: 50.0, lon: 3.0)]),
+                self.member("u2", "Noor", devices: [self.device("d2", lat: 51.0, lon: 4.0)]),
+            ]))
+        }
+        let viewModel = LiveMapViewModel(apiClient: api)
+        let viewportSizePt = CGSize(width: 400, height: 800)
+        viewModel.mapViewportSizePt = viewportSizePt
+        viewModel.sheetHeightPt = 200
+
+        await viewModel.load()
+
+        let expectedTarget = MapCameraTarget.bounds(southLat: 50.0, northLat: 51.0, westLon: 3.0, eastLon: 4.0, paddingPt: MapCameraPolicy.boundsPaddingPt)
+        let expectedRegion = MapRegion(fitting: expectedTarget, viewSizePt: viewportSizePt, sheetHeightPt: 200)
+        #expect(viewModel.region == expectedRegion)
+        // Pin against the sheet-LESS region too, so a wiring bug that silently drops
+        // `sheetHeightPt` (always fitting the full viewport) is caught even if the equality check
+        // above were wrong for some unrelated reason.
+        #expect(viewModel.region != MapRegion(fitting: expectedTarget, viewSizePt: viewportSizePt))
+    }
+
+    /// specs/010 §3.4 — fit-all re-reads `sheetHeightPt` at the moment it's invoked (not a value
+    /// captured back at the initial load), matching "fit-all uses whatever detent is current at
+    /// the moment it is invoked".
+    @Test func fitAll_usesTheSheetHeightCurrentAtTheMomentItIsInvoked() async {
+        let api = FakeAPIClient()
+        api.getLatestLocationsHandler = {
+            TestFeatures.envelope(LatestLocationsResponse(members: [
+                self.member("u1", "Eric", devices: [self.device("d1", lat: 50.0, lon: 3.0)]),
+                self.member("u2", "Noor", devices: [self.device("d2", lat: 51.0, lon: 4.0)]),
+            ]))
+        }
+        let viewModel = LiveMapViewModel(apiClient: api)
+        let viewportSizePt = CGSize(width: 400, height: 800)
+        viewModel.mapViewportSizePt = viewportSizePt
+        viewModel.sheetHeightPt = 160
+        await viewModel.load()
+        let regionAtMinimized = viewModel.region
+
+        // The user drags the sheet to a taller detent between the initial load and the next
+        // fit-all tap — §3.4: a detent drag alone must not move the camera, but the NEXT fit-all
+        // must reframe against the NEW height.
+        viewModel.sheetHeightPt = 440
+        viewModel.fitAll()
+
+        #expect(viewModel.region != regionAtMinimized)
+        let expectedTarget = MapCameraTarget.bounds(southLat: 50.0, northLat: 51.0, westLon: 3.0, eastLon: 4.0, paddingPt: MapCameraPolicy.boundsPaddingPt)
+        #expect(viewModel.region == MapRegion(fitting: expectedTarget, viewSizePt: viewportSizePt, sheetHeightPt: 440))
+    }
+
     @Test func aMemberWhoDisappearsFromTheRoster_isNoLongerSelected() async {
         let api = FakeAPIClient()
         api.getLatestLocationsHandler = {
