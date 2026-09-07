@@ -18,6 +18,14 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
 
+    <!-- A43 (specs/009-device-runtime.md §5.4/§6.2): GeofenceConfigSyncWorker's expedited-
+         WorkManager fallback for GEOFENCE_CONFIG_CHANGED runs as a "dataSync" foreground service
+         type on API 34+ (a GET /geofences fetch plus local re-registration bookkeeping, not a GPS
+         capture - never FOREGROUND_SERVICE_TYPE_LOCATION). Required alongside the matching
+         foregroundServiceType declared below, the same way FOREGROUND_SERVICE_LOCATION above
+         pairs with LocateRequestWorker's. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+
     <!-- A40 (specs/009-device-runtime.md §3.2 "Restart and recovery"): lets
          BootCompletedReceiver restart the foreground presence service after a reboot / app
          update, one of the explicit Android start-from-background exemptions for a location
@@ -179,10 +187,19 @@
              without this override the library's own service entry has no type at all and the
              entire fallback throws — caught by lintVitalRelease, not by any local gate
              (`SpecifyForegroundServiceType`). tools:node="merge" overrides the library's manifest
-             entry for this app the same way the androidx.startup provider below already does. -->
+             entry for this app the same way the androidx.startup provider below already does.
+
+             A43 (specs/009 §5.4/§6.2) adds "dataSync" to the same declaration: this single
+             SystemForegroundService instance is shared by every expedited worker in the app, and
+             GeofenceConfigSyncWorker.getForegroundInfo() now also runs through it with a
+             FOREGROUND_SERVICE_TYPE_DATA_SYNC ForegroundInfo (never "location" - that push type
+             does a GET /geofences fetch plus re-registration bookkeeping, not a GPS capture).
+             Android supports multiple declared types on one service via this pipe-separated list;
+             the type actually passed to startForeground() per call still comes from whichever
+             worker's own ForegroundInfo is running. -->
         <service
             android:name="androidx.work.impl.foreground.SystemForegroundService"
-            android:foregroundServiceType="location"
+            android:foregroundServiceType="location|dataSync"
             tools:node="merge" />
 
         <!-- A11 (specs/009-device-runtime.md §6.3): GeofencingClient's transition callback

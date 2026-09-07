@@ -68,6 +68,7 @@ import com.findly.android.queue.room.RoomFixQueueStore
 import com.findly.android.queue.room.RoomGeofenceEventQueueStore
 import com.findly.android.queue.worker.DefaultForegroundServiceController
 import com.findly.android.queue.worker.FindlyWorkerFactory
+import com.findly.android.queue.worker.GeofenceConfigSyncWorkEnqueuer
 import com.findly.android.queue.worker.LastCaptureDateStore
 import com.findly.android.queue.worker.LocateForegroundService
 import com.findly.android.queue.worker.LocateRequestWorkEnqueuer
@@ -260,6 +261,13 @@ class AppContainer(context: Context) {
         geofenceConfigStore = geofenceConfigStateStore,
         geofenceRegistrar = geofencingClientManager,
     )
+
+    /** A43 (specs/009 §5.4): the `GEOFENCE_CONFIG_CHANGED` handler, hoisted to its own property
+     * (same reasoning as [locateRequestPushHandler]'s own doc) so `pushMessageDispatcher` and
+     * [workerFactory]'s [GeofenceConfigSyncWorker][com.findly.android.queue.worker.GeofenceConfigSyncWorker]
+     * provider share one instance instead of duplicating its construction. */
+    val geofenceConfigChangedPushHandler: GeofenceConfigChangedPushHandler =
+        GeofenceConfigChangedPushHandler(geofenceConfigSyncCoordinator)
 
     private val foregroundServiceController = DefaultForegroundServiceController(context)
     private val syncScheduler: SyncScheduler = LocationSyncScheduler(
@@ -496,6 +504,7 @@ class AppContainer(context: Context) {
         locationSyncRunnerProvider = ::locationSyncRunnerOrNull,
         settingsPollerProvider = ::settingsPollerOrNull,
         locateRequestPushHandlerProvider = { locateRequestPushHandler },
+        geofenceConfigChangedPushHandlerProvider = { geofenceConfigChangedPushHandler },
     )
 
     /** specs/009-device-runtime.md §5.1: the notifier shared by all three `LOCATE_REQUEST` handoff
@@ -506,6 +515,10 @@ class AppContainer(context: Context) {
     /** Not private (A39 review, finding 3): [LocateForegroundService] enqueues onto this directly
      * as its own fallback when `startForeground` itself throws. */
     val locateRequestWorkEnqueuer = LocateRequestWorkEnqueuer(context)
+
+    /** A43 (specs/009 §5.4/§6.2): `FindlyMessagingService` calls this directly for
+     * `GEOFENCE_CONFIG_CHANGED` and returns immediately - see that class's own doc. */
+    val geofenceConfigSyncWorkEnqueuer = GeofenceConfigSyncWorkEnqueuer(context)
 
     /** specs/009-device-runtime.md §5.1 "Android execution model", option 2: starts the
      * short-lived `FOREGROUND_SERVICE_LOCATION` service, handing off the raw push `data` as string
@@ -691,16 +704,18 @@ class AppContainer(context: Context) {
 
     /** A9 (specs/009-device-runtime.md §5): routes every FCM data message to its 001 §8 handler.
      * `FindlyMessagingService` (the real `FirebaseMessagingService`) is this class's one
-     * production caller for the three types below — since A39, `LOCATE_REQUEST` is intercepted
+     * production caller for the two types below — since A39, `LOCATE_REQUEST` is intercepted
      * *before* reaching this dispatcher (`FindlyMessagingService`'s own doc explains why: this
      * class's `dispatch` is a `suspend` fun the caller `runBlocking`s on, exactly what specs/009
-     * §5.1 forbids for a `LOCATE_REQUEST`). [locateRequestHandler] is still wired here (sharing
-     * the same hoisted [locateRequestPushHandler] instance every A39 handoff branch uses) so this
-     * dispatcher's own routing stays correct and independently testable even though production
-     * code no longer reaches it through this path for that one type. [locationCapturer] and
-     * [deviceSettingsCoordinator] are A10's real implementations of A9's placeholder seams
-     * (`UnimplementedLocationCapturer`/`ScheduleRebuilder`'s TODO body); A11 wires
-     * [geofenceConfigSyncCoordinator] into `GEOFENCE_CONFIG_CHANGED` the same way. */
+     * §5.1 forbids for a `LOCATE_REQUEST`), and since A43 `GEOFENCE_CONFIG_CHANGED` is intercepted
+     * the same way for the same reason (§5.4/§6.2: its real `GET /geofences` + re-registration
+     * cycle has no timeout tied to the callback's ~10s budget either). [locateRequestHandler] and
+     * [geofenceConfigChangedHandler] are still wired here (sharing the same hoisted
+     * [locateRequestPushHandler]/[geofenceConfigChangedPushHandler] instances every real caller
+     * uses) so this dispatcher's own routing stays correct and independently testable even though
+     * production code no longer reaches it through this path for either type. [locationCapturer]
+     * and [deviceSettingsCoordinator] are A10's real implementations of A9's placeholder seams
+     * (`UnimplementedLocationCapturer`/`ScheduleRebuilder`'s TODO body). */
     val pushMessageDispatcher: PushMessageDispatcher = PushMessageDispatcher(
         locateRequestHandler = locateRequestPushHandler,
         settingsChangedHandler = SettingsChangedPushHandler(
@@ -717,7 +732,7 @@ class AppContainer(context: Context) {
             },
         ),
         geofenceEventHandler = GeofenceEventPushHandler(GeofenceEventNotifier(context)),
-        geofenceConfigChangedHandler = GeofenceConfigChangedPushHandler(geofenceConfigSyncCoordinator),
+        geofenceConfigChangedHandler = geofenceConfigChangedPushHandler,
     )
 
     init {
