@@ -65,4 +65,30 @@ struct StaleDeliveryPolicyTests {
     @Test func isGhostOfAbandonedRequest_whenNothingWasAbandoned_isFalse() {
         #expect(!StaleDeliveryPolicy.isGhostOfAbandonedRequest(abandonedGeneration: nil, currentGeneration: 3))
     }
+
+    // MARK: - abandonedGeneration(afterManagerStopped:) / abandonedGeneration(afterPlatformFailure:)
+    //
+    // specs/009-device-runtime.md §1.3's exception paragraph (I54 review): the abandonment MUST be
+    // cleared whenever the outstanding request is otherwise resolved, so it can never outlive the
+    // request that caused it. Two `SystemLocationProvider` paths resolve the outstanding request
+    // without a delivery ever reaching `didUpdateLocations` (the only thing that previously cleared
+    // the flag) — `stopPresence()` genuinely cancelling the manager, and `didFailWithError` on an
+    // already-empty pending registry (a platform error IS the request's answer). Both must clear
+    // unconditionally, regardless of what was previously remembered as abandoned.
+
+    @Test func abandonedGeneration_afterManagerStopped_clearsEvenWhenSomethingWasAbandoned() {
+        #expect(StaleDeliveryPolicy.abandonedGeneration(afterManagerStopped: 5) == nil)
+    }
+
+    @Test func abandonedGeneration_afterManagerStopped_staysNilWhenNothingWasAbandoned() {
+        #expect(StaleDeliveryPolicy.abandonedGeneration(afterManagerStopped: nil) == nil)
+    }
+
+    @Test func abandonedGeneration_afterPlatformFailure_clearsEvenWhenSomethingWasAbandoned() {
+        #expect(StaleDeliveryPolicy.abandonedGeneration(afterPlatformFailure: 5) == nil)
+    }
+
+    @Test func abandonedGeneration_afterPlatformFailure_staysNilWhenNothingWasAbandoned() {
+        #expect(StaleDeliveryPolicy.abandonedGeneration(afterPlatformFailure: nil) == nil)
+    }
 }
