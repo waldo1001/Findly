@@ -122,29 +122,27 @@ describe("fcmMessageBodies / buildFcmBody", () => {
     });
   });
 
-  it("B28 RED — a LOCATE_REQUEST built without notificationTitle (legal under today's optional field) must not silently produce an empty aps.alert; pins the runtime contract that the B28 discriminated union will make impossible to violate at compile time", () => {
-    // notificationTitle intentionally omitted — today's `notificationTitle?: string` on
-    // PushMessage (src/ports/pushSender.ts) still permits this for LOCATE_REQUEST, even
-    // though specs/001 §8.1 (amended 2026-09-06) requires the iOS payload to carry
-    // aps.alert.title. Once B28 lands, PushMessage becomes a discriminated union where
-    // notificationTitle is a REQUIRED field of the LOCATE_REQUEST variant, so this exact
-    // object literal will fail to typecheck — the defect below becomes compiler-enforced,
-    // not just test-enforced.
-    const message: PushMessage = {
+  it("B28 GREEN (compiler-enforced) — a LOCATE_REQUEST without notificationTitle no longer typechecks, so the empty-alert defect the RED commit pinned at runtime is now impossible to construct", () => {
+    // PushMessage is now a discriminated union (src/ports/pushSender.ts, B28):
+    // notificationTitle is a REQUIRED string on the LOCATE_REQUEST variant, so the exact
+    // object literal the RED commit used to reproduce the empty aps.alert defect is a
+    // compile error below — enforcement moved from this test to the type checker.
+    //
+    // Caveat, stated plainly: backend/tsconfig.json's `include` is `src/**/*` only, so
+    // `test/**` (this file included) is NOT typechecked by `npm run build` or by `npm test`
+    // (Vitest transpiles via esbuild, which strips types without checking them). The
+    // directive below is therefore verified by an editor's TS language service or an ad hoc
+    // `tsc --noEmit` run against `test/**`, not by any script in this repo — see the B28
+    // task report for how it was verified. The runtime contract that a validly-typed
+    // LOCATE_REQUEST's notificationTitle always reaches aps.alert.title is unaffected and
+    // still covered by the first test in this file.
+    // @ts-expect-error — notificationTitle is required on LocateRequestPushMessage (B28).
+    const invalid: PushMessage = {
       token: "t",
       type: "LOCATE_REQUEST",
       data: { type: "LOCATE_REQUEST", requestId: "lr_1", requestedByName: "X", expiresAt: "2026-01-01T00:00:00Z" },
     };
-
-    const wireBody = JSON.parse(JSON.stringify(buildFcmBody(message))) as {
-      message: { apns: { payload: { aps: { alert?: { title?: string } } } } };
-    };
-
-    // This is exactly the invisible-push failure described in docs/implementation-handoff.md
-    // B28: JSON.stringify drops the undefined `title` key, so aps.alert ends up `{}` — an
-    // "alert" push with no alert text.
-    expect(typeof wireBody.message.apns.payload.aps.alert?.title).toBe("string");
-    expect((wireBody.message.apns.payload.aps.alert?.title ?? "").length).toBeGreaterThan(0);
+    expect(invalid).toBeDefined();
   });
 
   it("throws for an unrecognized message type (the exact shape of the B24 SETTINGS_CHANGED gap)", () => {

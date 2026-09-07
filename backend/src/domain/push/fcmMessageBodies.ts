@@ -9,9 +9,15 @@
 // (src/adapters/push/fcmV1Sender.ts) stays the thin credential-and-transport shell that
 // imports buildFcmBody from here.
 
-import type { PushMessage } from "../../ports/pushSender";
+import type {
+  GeofenceConfigChangedPushMessage,
+  GeofenceEventPushMessage,
+  LocateRequestPushMessage,
+  PushMessage,
+  SettingsChangedPushMessage,
+} from "../../ports/pushSender";
 
-function buildLocateRequestBody(message: PushMessage): Record<string, unknown> {
+function buildLocateRequestBody(message: LocateRequestPushMessage): Record<string, unknown> {
   // specs/001 §8.1 (amended 2026-09-06) — user-visible on both platforms.
   // Android stays DATA-ONLY at high priority: the client posts its own notification
   // (specs/009 §5.1) — an FCM `notification` block would make the SDK display it and skip
@@ -39,7 +45,7 @@ function buildLocateRequestBody(message: PushMessage): Record<string, unknown> {
   };
 }
 
-function buildGeofenceEventBody(message: PushMessage): Record<string, unknown> {
+function buildGeofenceEventBody(message: GeofenceEventPushMessage): Record<string, unknown> {
   // specs/001 §8.2 — notification + data: server-composed English title, no body (the
   // notification's own timestamp conveys the time in the recipient's locale/zone).
   // mutable-content:1 lets an iOS Notification Service Extension re-render the alert locally.
@@ -57,7 +63,9 @@ function buildGeofenceEventBody(message: PushMessage): Record<string, unknown> {
   };
 }
 
-function buildDataOnlyBackgroundBody(message: PushMessage): Record<string, unknown> {
+function buildDataOnlyBackgroundBody(
+  message: SettingsChangedPushMessage | GeofenceConfigChangedPushMessage,
+): Record<string, unknown> {
   // specs/001 §8.3 SETTINGS_CHANGED and §8.4 GEOFENCE_CONFIG_CHANGED share this exact wire
   // shape — data-only, normal priority, background APNs push-type — so one function backs
   // both switch cases below rather than two byte-identical ones (two identical functions
@@ -90,7 +98,14 @@ export function buildFcmBody(message: PushMessage): Record<string, unknown> {
     case "SETTINGS_CHANGED":
     case "GEOFENCE_CONFIG_CHANGED":
       return buildDataOnlyBackgroundBody(message);
-    default:
-      throw new Error(`fcmMessageBodies: unknown push message type "${message.type}"`);
+    default: {
+      // The four cases above exhaust PushMessage (B28), so `message` is `never` here for any
+      // value that actually typechecks — this branch only runs for a value that reached us
+      // through a runtime/type-system escape hatch (e.g. an `as PushMessage` cast in a test),
+      // exactly as the "unrecognized message type" test below exercises. Widen to read the
+      // unexpected `type` for the error message without re-introducing `any`.
+      const unexpected = message as { type: unknown };
+      throw new Error(`fcmMessageBodies: unknown push message type "${String(unexpected.type)}"`);
+    }
   }
 }

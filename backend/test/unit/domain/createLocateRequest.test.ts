@@ -11,6 +11,7 @@ import { FakePushSender } from "../../fakes/fakePushSender";
 import { FixedClock } from "../../fakes/fixedClock";
 import { SeqIdGenerator } from "../../fakes/seqIdGenerator";
 import { expectAppError } from "../../support/expectAppError";
+import { expectNotificationTitle } from "../../support/expectPushMessage";
 import type { DeviceRecord } from "../../../src/ports/repositories";
 
 const FAMILY_ID = "fam_9J2Kq7Lm3NpR5sTvWxYz";
@@ -383,7 +384,7 @@ describe("domain/locate/createLocateRequest", () => {
     await createLocateRequest(baseInput(), deps);
 
     expect(deps.pushSender.sent.length).toBe(1);
-    expect(deps.pushSender.sent[0]!.notificationTitle).toBe("Eric is locating you");
+    expectNotificationTitle(deps.pushSender.sent[0]!, "LOCATE_REQUEST", "Eric is locating you");
   });
 
   it("composes the notificationTitle from the resolved requestedByName even when it falls back to the raw uid", async () => {
@@ -393,7 +394,7 @@ describe("domain/locate/createLocateRequest", () => {
 
     await createLocateRequest(baseInput({ uid: "ghost-uid" }), deps);
 
-    expect(deps.pushSender.sent[0]!.notificationTitle).toBe("ghost-uid is locating you");
+    expectNotificationTitle(deps.pushSender.sent[0]!, "LOCATE_REQUEST", "ghost-uid is locating you");
   });
 
   it("pushFailed path (invalidToken outcome) marks the device pushInvalid:true", async () => {
