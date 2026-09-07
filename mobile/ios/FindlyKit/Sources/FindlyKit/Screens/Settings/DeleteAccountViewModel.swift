@@ -27,15 +27,24 @@ import Foundation
 /// fresh session lets `user.delete()` succeed. No in-place re-authentication sub-flow is built.
 /// `signOutForRetry()` also runs `wipeLocalState()` (security review addition — the backend account
 /// is already gone by this point, so this device's location/geofence local state has no live
-/// account to belong to either); `deviceIdProvider`/`exportArtifactStore` are deliberately left
-/// alone here, same as before — they're only cleared once `wipeLocalStateAndComplete()` confirms
-/// the account is FULLY torn down, including client-side.
+/// account to belong to either).
 ///
-/// **`appVersionTracker` is the one exception (I25 review fix) — do NOT re-merge it into the
-/// "leave alone" group above.** `deviceIdProvider`/`exportArtifactStore` are plain VALUES: reusing
-/// a stale one after `signOutForRetry()` is harmless (a stale deviceId just re-registers under the
-/// same UUID; a stale export artifact just gets overwritten), so deferring their clear costs
-/// nothing. `appVersionTracker` GATES CONTROL FLOW instead —
+/// **`deviceIdProvider`/`exportArtifactStore` are now cleared here too (I44, specs/008 §3.1) — do
+/// NOT re-introduce the old "leave alone until `wipeLocalStateAndComplete()`" deferral.** I25
+/// deferred both on the assumption that the SAME uid always retries next, so reusing a stale
+/// deviceId/export artifact under that same uid would be harmless. That assumption was never
+/// enforced: a DIFFERENT person can reach the sign-in screen from `.signedOutForRetry` and sign in
+/// before the retry completes, in which case the previous user's plaintext export (008 §3) and
+/// device id would still be readable on disk — the identical window I43 closed on the forced-
+/// sign-out path. Clearing here trades that privacy gap for one extra `POST /devices`
+/// registration on the retry path, and investigation (I44) found that cost is nominal: it does not
+/// actually add a network round trip beyond what `appVersionTracker` already forces (below), and
+/// the backend `Devices` partition is deleted FIRST during account deletion (002 §4.2 step 1), so
+/// the OLD device id's backend row is already gone by the time this uid signs back in — reusing it
+/// would not have preserved any server-side state either.
+///
+/// **`appVersionTracker` was already the one exception (I25 review fix) even before I44 — it is
+/// cleared unconditionally regardless of the axis above.** It GATES CONTROL FLOW —
 /// `DeviceRegistrationService.registerOnLaunchIfNeeded()` no-ops entirely (never calls
 /// `registerOrUpdate()` at all) once the stored version already matches the running app version.
 /// Left stale here, a user who signs back in on this same uid (whose backend profile this flow
@@ -52,13 +61,14 @@ import Foundation
 ///
 /// **(I43) Both paths above now call the single `EndOfSessionRoutine.run` — see that type's doc
 /// for the definitive, canonical call list/order.** This type no longer maintains its own copy of
-/// either list: `signOutForRetry()` passes `Options(clearsDeviceIdentityAndExportArtifact: false)`
-/// for exactly the "leave alone" reasoning above; `wipeLocalStateAndComplete()` passes the
-/// (all-`true`) default. `FindlyApp.swift`'s forced `onSignedOut` closure and
-/// `RootView.clearSessionOnConfirmedAuthFailure()` route through the same routine now too — this
+/// either list: `signOutForRetry()` now passes the routine's DEFAULT `Options()` (I44 — every axis
+/// clears), same as `wipeLocalStateAndComplete()`. `FindlyApp.swift`'s forced `onSignedOut` closure
+/// and `RootView.clearSessionOnConfirmedAuthFailure()` route through the same routine too — this
 /// was the architectural fix I43 landed after finding the forced-sign-out path had silently drifted
 /// from this one, missing `exportArtifactStore.removeCurrentArtifact()` in particular (a previous
-/// user's plaintext export could otherwise outlive a forced sign-out).
+/// user's plaintext export could otherwise outlive a forced sign-out). **As of I44, no caller
+/// anywhere in the app target passes `clearsDeviceIdentityAndExportArtifact: false` any more** —
+/// see `EndOfSessionRoutine.Options`'s doc for the current status of that option.
 @MainActor
 public final class DeleteAccountViewModel: ObservableObject {
     public enum Phase: Equatable {
@@ -70,12 +80,13 @@ public final class DeleteAccountViewModel: ObservableObject {
         case firebaseDeleteFailed
         /// `signOutForRetry()` ran — the screen navigates to sign-in, same as `.completed`.
         /// Location/geofence local state WAS wiped (`wipeLocalState()`, security review addition —
-        /// the backend account is already gone by this point); `deviceId`/export artifact were NOT
-        /// (the account isn't confirmed torn down client-side yet) — the user re-opens this screen
-        /// after signing back in to finish (a no-op backend call + a now-succeeding Firebase
-        /// delete), at which point `wipeLocalStateAndComplete()` clears those too. The
-        /// app-version-tracker entry (I25) is the one exception: it WAS already cleared here — see
-        /// this type's top doc for why it cannot wait like the other two.
+        /// the backend account is already gone by this point). **As of I44 (specs/008 §3.1),
+        /// `deviceId`/export artifact WERE also cleared here** — a different person reaching
+        /// sign-in from this state must not find the previous user's device id or plaintext export
+        /// on disk. The user re-opens this screen after signing back in to finish (a no-op backend
+        /// call + a now-succeeding Firebase delete); `wipeLocalStateAndComplete()` clears the same
+        /// state again there (harmless double-clear) for whichever fresh registration that retry
+        /// produces. See this type's top doc for the full I44 rationale.
         case signedOutForRetry
         /// Both steps succeeded and local state has been wiped — the screen navigates to sign-in.
         case completed
@@ -92,9 +103,10 @@ public final class DeleteAccountViewModel: ObservableObject {
     /// load-bearing for `DeviceRegistrationService.registerOrUpdate()`/`registerOnLaunchIfNeeded()`'s
     /// probe-skip/no-op decisions, but this view model previously never cleared it, so a completed
     /// account deletion left a stale "this device has registered before" bit behind for the uid.
-    /// Cleared in BOTH `signOutForRetry()` and `wipeLocalStateAndComplete()` — unlike
-    /// `deviceIdProvider`/`exportArtifactStore`, which are only cleared in the latter. See this
-    /// type's top doc for why: this one gates control flow, not just a value a stale read reuses.
+    /// Cleared in BOTH `signOutForRetry()` and `wipeLocalStateAndComplete()` — as of I44,
+    /// `deviceIdProvider`/`exportArtifactStore` are cleared in both places too (see this type's top
+    /// doc), so this is no longer the sole exception, just the one that was cleared unconditionally
+    /// even before I44 because it gates control flow rather than being a value a stale read reuses.
     private let appVersionTracker: AppVersionRegistrationTracking
     /// **Post-review addition (security review, High finding).** The single consolidated
     /// `LocationRuntimeContainer.wipeLocalState()` call, injected as a closure rather than this
@@ -185,9 +197,20 @@ public final class DeleteAccountViewModel: ObservableObject {
     /// rather than retrying, since every I24 bootstrap-completion retry goes through that same
     /// gated call.
     public func signOutForRetry() async {
-        // I43 — routes through the one shared `EndOfSessionRoutine`; `clearsDeviceIdentityAndExportArtifact:
-        // false` is this method's one documented divergence (see this type's top doc and
-        // `EndOfSessionRoutine.Options`'s doc for the I25 rationale). `clearStoredSession()` stays
+        // I44 (specs/008 §3.1) — routes through the one shared `EndOfSessionRoutine` with its
+        // DEFAULT `Options()` (every axis clears), same as every other caller. Previously passed
+        // `clearsDeviceIdentityAndExportArtifact: false` (I25), deferring the device-id/export-
+        // artifact clear on the assumption the SAME uid always retries next. That assumption was
+        // never enforced: if a DIFFERENT person reaches the sign-in screen from `.signedOutForRetry`
+        // and signs in before the retry completes, the previous user's plaintext export (008 §3)
+        // and device id would still be on disk for them to read — the identical window I43 closed on
+        // the forced-sign-out path. Clearing here accepts one extra `POST /devices` registration on
+        // the retry path, which investigation showed is not actually extra: `appVersionTracker`
+        // (cleared unconditionally below regardless of this option) already forces
+        // `registerOnLaunchIfNeeded()` to re-register on the next sign-in, and account deletion
+        // deletes the backend `Devices` partition FIRST (002 §4.2 step 1), so the old device id's
+        // backend row is already gone by the time this uid signs back in — reusing it would not have
+        // avoided a first-registration/defaults reset either. `clearStoredSession()` stays
         // unconditional either way — the routine calls it before the swallowed `signOut()`, so a
         // `signOut()` failure can never strand it (review finding #5).
         await EndOfSessionRoutine.run(
@@ -196,8 +219,7 @@ public final class DeleteAccountViewModel: ObservableObject {
             deviceIdProvider: deviceIdProvider,
             appVersionTracker: appVersionTracker,
             exportArtifactStore: exportArtifactStore,
-            wipeLocalState: wipeLocalState,
-            options: .init(clearsDeviceIdentityAndExportArtifact: false)
+            wipeLocalState: wipeLocalState
         )
         phase = .signedOutForRetry
     }
