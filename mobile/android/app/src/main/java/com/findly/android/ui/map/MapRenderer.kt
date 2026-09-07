@@ -2,6 +2,7 @@ package com.findly.android.ui.map
 
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import com.findly.android.ui.designsystem.components.FindlyBottomSheetDetent
 import com.findly.android.ui.groups.GroupMapMemberUi
 
 /**
@@ -39,6 +40,14 @@ interface MapRenderer {
      * list), which is what stops an ordinary refresh from moving the camera. [onMemberSelected]
      * fires when a marker (or, on the roster side, a row — wired by the screen, not here) is
      * tapped; [onBackgroundTap] fires on a tap that hits the map surface itself, deselecting.
+     *
+     * [sheetDetent] (specs/010-app-shell-and-screen-ux.md §3.4 "Occlusion model", I49) is the
+     * roster sheet's CURRENT detent — implementations that fit bounds (only [GoogleMapRenderer]
+     * does) MUST resolve it to a height against their own measured viewport and widen the fit-all
+     * target via [MapCameraFraming.widenForSheetOcclusion] before fitting, so the result lands
+     * above the sheet rather than underneath it. Defaults to `.Standard`, matching
+     * `rememberFindlyBottomSheetState`'s own default, so existing previews/tests that don't care
+     * about this need not supply it.
      */
     @Composable
     fun Render(
@@ -48,11 +57,12 @@ interface MapRenderer {
         onMemberSelected: (userId: String) -> Unit,
         onBackgroundTap: () -> Unit,
         modifier: Modifier,
+        sheetDetent: FindlyBottomSheetDetent = FindlyBottomSheetDetent.Standard,
     )
 
     /** specs/005-temporary-groups.md §3 — position-only: no device/battery fields anywhere in
      * [GroupMapMemberUi], unlike [RosterMemberUi]'s [RosterDeviceUi] children. Same
-     * selection/camera contract as [Render]. */
+     * selection/camera/[sheetDetent] contract as [Render]. */
     @Composable
     fun RenderGroup(
         members: List<GroupMapMemberUi>,
@@ -61,5 +71,6 @@ interface MapRenderer {
         onMemberSelected: (userId: String) -> Unit,
         onBackgroundTap: () -> Unit,
         modifier: Modifier,
+        sheetDetent: FindlyBottomSheetDetent = FindlyBottomSheetDetent.Standard,
     )
 }

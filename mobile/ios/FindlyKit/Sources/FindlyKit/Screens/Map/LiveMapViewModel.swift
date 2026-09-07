@@ -40,6 +40,13 @@ public final class LiveMapViewModel: ObservableObject {
     /// size so a `.bounds` command that fires before the first real layout pass still produces a
     /// sane, non-degenerate region.
     public var mapViewportSizePt: CGSize = MapRegion.unmeasuredViewportSizePt
+    /// specs/010-app-shell-and-screen-ux.md §3.4 "Occlusion model" (added 2026-09-07, row I49) —
+    /// the roster sheet's height in points, kept current by `LiveMapScreen` from whatever detent
+    /// is selected. Read only inside `emitCameraCommand`, at the moment a camera command is
+    /// actually minted — matching "fit-all uses whatever detent is current at the moment it is
+    /// invoked" and "a detent change MUST NOT move the camera" (a later change to this property
+    /// alone never re-fits anything; only the next `load()`/`fitAll()`/`selectMember()` call does).
+    public var sheetHeightPt: CGFloat = 0
 
     private let apiClient: FindlyAPIClient
     private var cameraPolicyState = MapCameraPolicyState.initial
@@ -146,7 +153,7 @@ public final class LiveMapViewModel: ObservableObject {
     private func emitCameraCommand(_ target: MapCameraTarget) {
         cameraSequence += 1
         cameraCommand = MapCameraCommand(sequence: cameraSequence, target: target)
-        region = MapRegion(fitting: target, viewSizePt: mapViewportSizePt)
+        region = MapRegion(fitting: target, viewSizePt: mapViewportSizePt, sheetHeightPt: sheetHeightPt)
     }
 
     private static func initials(for name: String) -> String {

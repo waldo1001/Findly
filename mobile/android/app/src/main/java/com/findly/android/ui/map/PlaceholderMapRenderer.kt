@@ -11,6 +11,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import com.findly.android.ui.designsystem.FindlyTheme
+import com.findly.android.ui.designsystem.components.FindlyBottomSheetDetent
 import com.findly.android.ui.designsystem.components.FindlyEmptyState
 import com.findly.android.ui.designsystem.components.FindlyMapMarkerBubble
 import com.findly.android.ui.groups.GroupMapMemberUi
@@ -37,6 +38,7 @@ class PlaceholderMapRenderer : MapRenderer {
         onMemberSelected: (userId: String) -> Unit,
         onBackgroundTap: () -> Unit,
         modifier: Modifier,
+        sheetDetent: FindlyBottomSheetDetent,
     ) {
         val markers = members.flatMap { member ->
             member.devices.filter { it.hasLocation }.map { device -> member to device }
@@ -80,6 +82,7 @@ class PlaceholderMapRenderer : MapRenderer {
         onMemberSelected: (userId: String) -> Unit,
         onBackgroundTap: () -> Unit,
         modifier: Modifier,
+        sheetDetent: FindlyBottomSheetDetent,
     ) {
         val located = members.filter { it.hasLocation }
 
