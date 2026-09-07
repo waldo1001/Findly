@@ -210,15 +210,22 @@ public struct LiveMapScreen: View {
         )
     }
 
-    /// specs/010 §3.1 (I46) — `fullRoster`'s actual row/divider shape: one `FindlyListRow` per
-    /// DEVICE (or one "no devices" row when a member has none), a divider between a member's own
-    /// devices, and one more divider after every member (mirrors `fullRoster`/`memberRow` below
-    /// exactly, so this stays correct if that layout ever changes without this comment being
-    /// re-read — the two are meant to be edited together).
+    /// specs/010 §3.1 (I46; row/divider shape single-sourced via `RosterRowPlan` — I48) —
+    /// `fullRoster`'s actual row/divider shape: one `FindlyListRow` per DEVICE (or one "no devices"
+    /// row when a member has none), a divider between a member's own devices, and one more divider
+    /// after every member. The per-member part of that shape comes from `RosterRowPlan`, the SAME
+    /// type `memberRow` below builds to decide what it renders — not a hand-rolled count kept in
+    /// sync with `memberRow` by comment, the way this used to work (I48: a reviewer confirmed the
+    /// two matched at the time, but nothing enforced it, so a future edit to either side could have
+    /// drifted silently). The "one divider after every member" term stays a direct `members.count`
+    /// here: it's already a trivial 1:1 with `fullRoster`'s own unconditional
+    /// `FindlyCardDivider()` after every member block, so there was never a second, independently-
+    /// derived count for it to drift from.
     private var sheetStandardHeight: CGFloat {
         guard case .loaded(let members) = viewModel.state else { return 320 }
-        let rowCount = members.reduce(0) { $0 + max(1, $1.devices.count) }
-        let interDeviceDividers = members.reduce(0) { $0 + max(0, $1.devices.count - 1) }
+        let rowPlans = members.map { RosterRowPlan.compute(devices: $0.devices) }
+        let rowCount = rowPlans.reduce(0) { $0 + $1.rows.count }
+        let interDeviceDividers = rowPlans.reduce(0) { $0 + $1.interRowDividerCount }
         let perMemberDividers = members.count
         return FindlyBottomSheetHeightPlanning.standardHeight(
             typography: theme.typography,
@@ -405,27 +412,32 @@ public struct LiveMapScreen: View {
 
     /// specs/010 §3.5 — tapping a member's roster row selects them (and, via `viewModel`, zooms to
     /// their freshest located device).
+    ///
+    /// specs/010 §3.1 (I48, part 2) — renders `RosterRowPlan.compute(devices:)`'s rows exactly, the
+    /// SAME plan `sheetStandardHeight` above sizes against, rather than each independently
+    /// re-deriving the "one row per device, dividers between" shape from `member.devices`.
     private func memberRow(_ member: MemberLocations) -> some View {
         let isSelected = member.userId == viewModel.selectedUserId
+        let plan = RosterRowPlan.compute(devices: member.devices)
         return Button {
             syncSheetHeight()
             viewModel.selectMember(member.userId)
         } label: {
             VStack(spacing: 0) {
-                if member.devices.isEmpty {
-                    FindlyListRow(title: member.displayName, subtitle: "No devices registered", avatarText: Self.initials(for: member.displayName))
-                } else {
-                    ForEach(Array(member.devices.enumerated()), id: \.element.deviceId) { index, device in
+                ForEach(Array(plan.rows.enumerated()), id: \.element.id) { index, row in
+                    if let device = row.device {
                         FindlyListRow(
-                            title: index == 0 ? member.displayName : device.deviceName,
+                            title: row.isFirst ? member.displayName : device.deviceName,
                             subtitle: subtitle(for: device),
                             avatarText: Self.initials(for: member.displayName)
                         ) {
                             statusChip(for: device)
                         }
-                        if index < member.devices.count - 1 {
-                            FindlyCardDivider()
-                        }
+                    } else {
+                        FindlyListRow(title: member.displayName, subtitle: "No devices registered", avatarText: Self.initials(for: member.displayName))
+                    }
+                    if index < plan.rows.count - 1 {
+                        FindlyCardDivider()
                     }
                 }
             }
