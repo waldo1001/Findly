@@ -49,6 +49,26 @@ class LocateNotificationTitleTest {
         assertEquals("Eric X is locating you", LocateNotificationTitle.forRequester("Eric\u0007X"))
     }
 
+    // A46 (found by B29's final re-review): `Char.isISOControl()` covers U+0000-U+001F and
+    // U+007F-U+009F but NOT U+2028 LINE SEPARATOR / U+2029 PARAGRAPH SEPARATOR - newlines by
+    // Unicode's own Zl/Zp classification, and precisely the two characters the backend's
+    // normalizeDisplayText.ts (specs/001 section 1.4) strips for that reason. Android renders
+    // its own title on-device from the raw `data.requestedByName` (only the iOS
+    // `aps.alert.title` is server re-normalized), so a legacy name written before that
+    // normalizer shipped can still arrive here with its separators intact.
+
+    @Test
+    fun `collapses an embedded line separator instead of letting it reflow the notification`() {
+        // U+2028 LINE SEPARATOR.
+        assertEquals("Eric X is locating you", LocateNotificationTitle.forRequester("Eric\u2028X"))
+    }
+
+    @Test
+    fun `collapses an embedded paragraph separator instead of letting it reflow the notification`() {
+        // U+2029 PARAGRAPH SEPARATOR.
+        assertEquals("Eric X is locating you", LocateNotificationTitle.forRequester("Eric\u2029X"))
+    }
+
     @Test
     fun `leaves an emoji in the display name untouched`() {
         // U+1F389 (party popper), written as its UTF-16 surrogate pair.
