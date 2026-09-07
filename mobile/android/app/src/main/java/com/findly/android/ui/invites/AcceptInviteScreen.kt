@@ -25,6 +25,7 @@ import com.findly.android.ui.designsystem.components.FindlyStatusChip
 import com.findly.android.ui.designsystem.components.FindlyStatusTone
 import com.findly.android.ui.designsystem.components.FindlyTextField
 import com.findly.android.ui.designsystem.components.FindlyTopBar
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
 /**
@@ -143,17 +144,36 @@ fun AcceptInviteScreen(
                         compact = true,
                         onClick = {
                             coroutineScope.launch {
-                                val clipboardText = clipboard.getClipEntry()
-                                    ?.clipData
-                                    ?.takeIf { it.itemCount > 0 }
-                                    ?.getItemAt(0)
-                                    ?.coerceToText(context)
-                                    ?.toString()
-                                val extracted = clipboardText?.let { InviteCodeClipboardExtractor.extract(it, joinLinkHost) }
-                                if (extracted != null) {
-                                    code = extracted
-                                    pasteNotice = null
-                                } else {
+                                // Review round fix, finding 5: rememberCoroutineScope() carries no
+                                // CoroutineExceptionHandler and can't be given one (Compose exposes
+                                // no such overload), so an uncaught throw from this launch reaches
+                                // the default handler and kills the process. It was not
+                                // theoretical: ClipData.Item.coerceToText resolves a content://
+                                // clipboard item through ContentResolver and throws
+                                // SecurityException when this app has no read grant on it (e.g.
+                                // pasting something copied from another app) - a real,
+                                // user-reachable crash on this exact "Paste code" tap. Cancellation
+                                // is rethrown (this try block suspends on clipboard.getClipEntry())
+                                // so structured concurrency isn't silently broken; every other
+                                // failure falls back to the same "couldn't find a code" notice the
+                                // no-match branch already shows.
+                                try {
+                                    val clipboardText = clipboard.getClipEntry()
+                                        ?.clipData
+                                        ?.takeIf { it.itemCount > 0 }
+                                        ?.getItemAt(0)
+                                        ?.coerceToText(context)
+                                        ?.toString()
+                                    val extracted = clipboardText?.let { InviteCodeClipboardExtractor.extract(it, joinLinkHost) }
+                                    if (extracted != null) {
+                                        code = extracted
+                                        pasteNotice = null
+                                    } else {
+                                        pasteNotice = "Couldn't find an invite code on the clipboard"
+                                    }
+                                } catch (e: CancellationException) {
+                                    throw e
+                                } catch (e: Exception) {
                                     pasteNotice = "Couldn't find an invite code on the clipboard"
                                 }
                             }

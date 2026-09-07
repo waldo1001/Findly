@@ -37,6 +37,7 @@ import com.findly.android.ui.designsystem.components.FindlyStatusTone
 import com.findly.android.ui.designsystem.components.FindlyTextField
 import com.findly.android.ui.designsystem.components.FindlyTopBar
 import com.findly.android.ui.groups.GroupQrCodeGenerator
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -178,7 +179,23 @@ private fun CreateInviteSuccess(
                     compact = true,
                     onClick = {
                         coroutineScope.launch {
-                            clipboard.setClipEntry(ClipEntry(ClipData.newPlainText("Invite code", displayCode)))
+                            // Review round fix, finding 5: rememberCoroutineScope() carries no
+                            // CoroutineExceptionHandler and can't be given one, so an uncaught
+                            // throw from this launch would kill the process - a lesser instance
+                            // of the same crash class AcceptInviteScreen's "Paste code" button
+                            // had (setClipEntry doesn't resolve content:// URIs the way
+                            // coerceToText does, but it still crosses into ClipboardManager and
+                            // must not be trusted to never throw). Cancellation is rethrown (this
+                            // try block suspends on clipboard.setClipEntry()); every other failure
+                            // is silent - `justCopied` already flips optimistically below, and
+                            // there is no failure notice on this screen to route it to.
+                            try {
+                                clipboard.setClipEntry(ClipEntry(ClipData.newPlainText("Invite code", displayCode)))
+                            } catch (e: CancellationException) {
+                                throw e
+                            } catch (e: Exception) {
+                                // Silent - see comment above.
+                            }
                         }
                         justCopied = true
                     },
