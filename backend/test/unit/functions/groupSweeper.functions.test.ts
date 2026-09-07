@@ -42,10 +42,16 @@ describe("functions/groupSweeper.functions unhandled-error catch-all", () => {
     const contextError = vi.fn();
     const context = { error: contextError, log: vi.fn(), warn: vi.fn(), info: vi.fn() };
 
-    await registeredHandlers.groupSweeper({}, context);
+    // registeredHandlers is a Record<string, ...>, so noUncheckedIndexedAccess types this
+    // lookup as possibly undefined — the import above is what actually populates it.
+    const groupSweeperHandler = registeredHandlers.groupSweeper;
+    if (!groupSweeperHandler) throw new Error("test setup: groupSweeper.functions.ts should have registered groupSweeper");
+    await groupSweeperHandler({}, context);
 
     expect(contextError).toHaveBeenCalledTimes(1);
-    const [label, logged] = contextError.mock.calls[0];
+    const call = contextError.mock.calls[0];
+    if (!call) throw new Error("test setup: contextError should have been called");
+    const [label, logged] = call;
     expect(label).toBe("groupSweeper: unhandled error");
     expect(logged).toEqual({ message: "connection timed out", code: "ETIMEDOUT" });
     expect(logged).not.toHaveProperty("request");

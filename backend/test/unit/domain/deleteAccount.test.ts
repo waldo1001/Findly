@@ -362,7 +362,9 @@ async function assertCallerFullyErased(
   expect(await deps.groupRepo.getGroupMeta(JOINED_GROUP)).not.toBeNull();
   expect(await deps.groupRepo.getMember(JOINED_GROUP, CALLER)).toBeNull();
   expect(await deps.groupRepo.getMember(JOINED_GROUP, OTHER_MEMBER)).not.toBeNull();
-  expect(await deps.groupLastKnownRepo.get(JOINED_GROUP, CALLER)).toBeNull();
+  // `get` is a fake-only convenience (InMemoryGroupLastKnownRepo), not on the GroupLastKnownRepo
+  // port — same pattern as the InMemoryGroupExpiryRepo cast above.
+  expect(await (deps.groupLastKnownRepo as InMemoryGroupLastKnownRepo).get(JOINED_GROUP, CALLER)).toBeNull();
   expect(await deps.userRepo.listGroupMemberships(CALLER)).toEqual([]);
 
   // Events: CALLER's line always gone; OTHER_MEMBER's line survives UNLESS the cascade

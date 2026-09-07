@@ -104,6 +104,9 @@ describe("domain/group/createGroup", () => {
 
     const result = await createGroup({ uid: "u1", body: VALID_BODY }, deps);
 
+    // GroupListItem.code is `string | null` (null once the group is no longer "active" —
+    // groupView.ts) but a freshly created group is always active, so it's a real code here.
+    if (!result.code) throw new Error("test setup: a freshly created group must be active and carry a code");
     const codeRecord = await deps.groupCodeRepo.getCode(result.code);
     expect(codeRecord).toEqual({ groupId: result.groupId, createdAt: NOW.toISOString() });
   });

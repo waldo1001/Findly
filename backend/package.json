@@ -10,6 +10,8 @@
   "scripts": {
     "build": "tsc",
     "watch": "tsc -w",
+    "typecheck:test": "tsc --noEmit -p tsconfig.test.json",
+    "pretest": "npm run typecheck:test",
     "test": "vitest run --passWithNoTests",
     "test:watch": "vitest",
     "test:integration": "vitest run --config vitest.integration.config.ts --passWithNoTests",
