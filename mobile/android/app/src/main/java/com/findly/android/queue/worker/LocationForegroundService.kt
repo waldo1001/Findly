@@ -9,10 +9,13 @@ import android.app.Service
 import android.content.Intent
 import android.os.IBinder
 import android.os.SystemClock
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.findly.android.FindlyApplication
 import com.findly.android.MainActivity
 import com.findly.android.R
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -54,10 +57,22 @@ import kotlinx.coroutines.withContext
  * re-foreground the presence service after the permission was revoked from system settings) and
  * either resumes the cycle at the cached interval or `stopSelf()`s — never sits foregrounded with
  * no loop running, and never with location denied by the platform.
+ *
+ * **A42 (docs/implementation-handoff.md) sweep, finding 3:** [serviceScope] carried no
+ * [CoroutineExceptionHandler] — a [SupervisorJob] does not swallow exceptions, it only isolates
+ * sibling coroutines from each other's failures, so an uncaught throw from either `launch` below
+ * (the restart-decision branch's `AppContainer` access, or [runCycle]'s own `runner.runOnce()` —
+ * already caught, but [ServiceRestartDecision]'s branch above it and `container.locationSyncRunnerOrNull()`
+ * itself are not) reached the default handler and killed the process running this exact §3.2
+ * presence service. Logs the exception's class name only, never its message/cause (specs/009 §9).
  */
 class LocationForegroundService : Service() {
 
-    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val exceptionHandler = CoroutineExceptionHandler { _, throwable ->
+        Log.d(TAG, "unhandled LocationForegroundService coroutine failure (${throwable::class.simpleName})")
+    }
+
+    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default + exceptionHandler)
 
     /**
      * Round-3 post-A40 review (finding 2): [runCycle]'s cancel-then-reassign of this field
@@ -199,9 +214,16 @@ class LocationForegroundService : Service() {
             // this job was itself the one cancelled by the guard above (a fresh cycle superseding
             // it) - skip scheduling in that case so a fresh, non-cancelled job's own schedule call
             // isn't raced/overwritten by this stale one's.
+            //
+            // A42 sweep, finding 4: CancellationException MUST be rethrown before the general
+            // catch below - a suspend fun (this launch block) that absorbs cancellation (e.g. from
+            // the cycleJob?.cancel() guard above racing this same coroutine) silently breaks
+            // structured concurrency instead of letting the coroutine actually finish cancelled.
             var result: RunResult = RunResult.Retry
             try {
                 result = runner.runOnce()
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 result = RunResult.Retry
             } finally {
@@ -300,5 +322,6 @@ class LocationForegroundService : Service() {
         private const val CHANNEL_ID = "findly_location_sharing"
         private const val CHANNEL_NAME = "Location sharing"
         private const val NOTIFICATION_ID = 1001
+        private const val TAG = "FindlySync"
     }
 }
