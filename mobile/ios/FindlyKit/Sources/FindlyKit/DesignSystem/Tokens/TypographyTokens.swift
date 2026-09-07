@@ -6,9 +6,18 @@ import SwiftUI
 public struct TypeStyle: Equatable {
     public var size: CGFloat
     public var weight: Font.Weight
-    /// Target line height in points. SwiftUI's closest primitive is `.lineSpacing(_:)`, which adds
-    /// *extra* space between lines rather than setting an absolute line height — components apply
-    /// `.lineSpacing(lineHeight - size)` as the practical approximation.
+    /// Target line height in points — a design intent, NOT automatically applied. SwiftUI has no
+    /// primitive that sets an absolute line height; the modifier that would approximate it,
+    /// `.lineSpacing(lineHeight - size)`, appears in exactly two places in the whole design system
+    /// (`ErrorStateView.swift:35`, `EmptyStateView.swift:31`) — and both of those use a different,
+    /// ad hoc formula (`size * 1.5 - size`), not this value. Everywhere else this field is declared
+    /// but unenforced; do not assume a `Text` using this role actually renders at this line height.
+    /// (specs/010 §3.1, row I48 — found because `FindlyBottomSheetHeightPlanning` trusted this
+    /// target as if it were a rendered height, making computed sheet detents slightly too generous;
+    /// that planner now derives real line heights from `UIFont`/`NSFont` system-font metrics
+    /// instead — see `FindlyBottomSheetHeightPlanning.renderedLineHeight(for:)` — rather than this
+    /// property, and applying `.lineSpacing` app-wide to make this field true was deliberately not
+    /// done in that fix, for lack of any way to visually verify a typography-wide change today.)
     public var lineHeight: CGFloat
     public var tracking: CGFloat
 
