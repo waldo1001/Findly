@@ -263,9 +263,11 @@ class AppContainer(context: Context) {
     )
 
     /** A43 (specs/009 §5.4): the `GEOFENCE_CONFIG_CHANGED` handler, hoisted to its own property
-     * (same reasoning as [locateRequestPushHandler]'s own doc) so `pushMessageDispatcher` and
-     * [workerFactory]'s [GeofenceConfigSyncWorker][com.findly.android.queue.worker.GeofenceConfigSyncWorker]
-     * provider share one instance instead of duplicating its construction. */
+     * (same reasoning as [locateRequestPushHandler]'s own doc). A47: `PushMessageDispatcher` no
+     * longer wires this in (that type never reaches `dispatch(`, see its own doc) — this instance
+     * is now shared only by [workerFactory]'s
+     * [GeofenceConfigSyncWorker][com.findly.android.queue.worker.GeofenceConfigSyncWorker]
+     * provider. */
     val geofenceConfigChangedPushHandler: GeofenceConfigChangedPushHandler =
         GeofenceConfigChangedPushHandler(geofenceConfigSyncCoordinator)
 
@@ -401,8 +403,8 @@ class AppContainer(context: Context) {
 
     /** A9's [LocationCapturer] seam (specs/009 §1.1), now backed by the real
      * `FusedLocationProviderClient` — shared by [fixCaptureCoordinator] below (periodic/manual,
-     * suppression-gated) and `pushMessageDispatcher`'s `LocateRequestPushHandler` (locate,
-     * deliberately ungated — see [LocationCapturer]'s doc). */
+     * suppression-gated) and [locateRequestPushHandler] (locate, deliberately ungated — see
+     * [LocationCapturer]'s doc). */
     private val locationCapturer: LocationCapturer =
         FusedLocationCapturer(LocationServices.getFusedLocationProviderClient(context), batteryLevelProvider)
 
@@ -482,13 +484,16 @@ class AppContainer(context: Context) {
     }
 
     /** specs/009-device-runtime.md §5.1: the `LOCATE_REQUEST` capture-and-fulfil logic, shared
-     * verbatim by all three of A39's handoff branches — `pushMessageDispatcher`'s direct-dispatch
-     * routing (kept as-is for forward compatibility/tests, though `FindlyMessagingService` no
-     * longer reaches this type through it, see its doc), [LocateForegroundService],
+     * verbatim by all three of A39's handoff branches — [LocateForegroundService],
      * [com.findly.android.queue.worker.LocateRequestWorker] (via [workerFactory]), and the
      * §5.1-option-3 "presence service captures directly" branch below. Hoisted to its own property
-     * (previously constructed inline inside `pushMessageDispatcher`) so every caller shares one
-     * instance instead of duplicating its construction. */
+     * so every caller shares one instance instead of duplicating its construction.
+     *
+     * **A47 — no longer wired into `pushMessageDispatcher`.** `PushMessageDispatcher` used to be
+     * constructed with this handler "for forward compatibility/tests" even though
+     * `FindlyMessagingService` never reached `LOCATE_REQUEST` through it (see that class's own
+     * A39 doc); verified `dispatch(` had no second production caller, so that wiring was a trap,
+     * not a feature, and is now removed along with `PushMessageDispatcher`'s dead branch. */
     val locateRequestPushHandler: LocateRequestPushHandler = LocateRequestPushHandler(
         locationCapturer = locationCapturer,
         locateApi = findlyApiClient,
@@ -702,22 +707,19 @@ class AppContainer(context: Context) {
      * Compose previews/tests (specs/003-android-client.md §12.1). */
     val mapRenderer: MapRenderer = GoogleMapRenderer()
 
-    /** A9 (specs/009-device-runtime.md §5): routes every FCM data message to its 001 §8 handler.
-     * `FindlyMessagingService` (the real `FirebaseMessagingService`) is this class's one
-     * production caller for the two types below — since A39, `LOCATE_REQUEST` is intercepted
-     * *before* reaching this dispatcher (`FindlyMessagingService`'s own doc explains why: this
-     * class's `dispatch` is a `suspend` fun the caller `runBlocking`s on, exactly what specs/009
-     * §5.1 forbids for a `LOCATE_REQUEST`), and since A43 `GEOFENCE_CONFIG_CHANGED` is intercepted
-     * the same way for the same reason (§5.4/§6.2: its real `GET /geofences` + re-registration
-     * cycle has no timeout tied to the callback's ~10s budget either). [locateRequestHandler] and
-     * [geofenceConfigChangedHandler] are still wired here (sharing the same hoisted
-     * [locateRequestPushHandler]/[geofenceConfigChangedPushHandler] instances every real caller
-     * uses) so this dispatcher's own routing stays correct and independently testable even though
-     * production code no longer reaches it through this path for either type. [locationCapturer]
-     * and [deviceSettingsCoordinator] are A10's real implementations of A9's placeholder seams
-     * (`UnimplementedLocationCapturer`/`ScheduleRebuilder`'s TODO body). */
+    /** A9 (specs/009-device-runtime.md §5): routes an FCM data message to its 001 §8 handler for
+     * the two types that have no faster lane. `FindlyMessagingService` (the real
+     * `FirebaseMessagingService`) is this class's one production caller
+     * ([PushMessageDispatcher]'s own doc), reached only for
+     * [Dispatcher][com.findly.android.pushmessages.PushMessageLane.Dispatcher] —
+     * `PushMessageLanePolicy.decide` sends `LOCATE_REQUEST` to [locateRequestHandoff] and
+     * `GEOFENCE_CONFIG_CHANGED` to [geofenceConfigSyncWorkEnqueuer] before `dispatch(` is ever
+     * called, so this dispatcher no longer carries a handler for either (A47 — verified `dispatch(`
+     * has no second production caller, then removed the two dead branches and the tests that
+     * pinned them as correct; see `PushMessageDispatcher`'s own doc for the reasoning).
+     * [locationCapturer] and [deviceSettingsCoordinator] are A10's real implementations of A9's
+     * placeholder seams (`UnimplementedLocationCapturer`/`ScheduleRebuilder`'s TODO body). */
     val pushMessageDispatcher: PushMessageDispatcher = PushMessageDispatcher(
-        locateRequestHandler = locateRequestPushHandler,
         settingsChangedHandler = SettingsChangedPushHandler(
             // specs/009 §3.5 path 1 - the same DeviceSettingsCoordinator.applySettings entry
             // point every other settings-arrival path uses, so SETTINGS_CHANGED gets the full
@@ -732,7 +734,6 @@ class AppContainer(context: Context) {
             },
         ),
         geofenceEventHandler = GeofenceEventPushHandler(GeofenceEventNotifier(context)),
-        geofenceConfigChangedHandler = geofenceConfigChangedPushHandler,
     )
 
     init {
