@@ -103,12 +103,43 @@ public struct LiveMapScreen: View {
                 )
             }
         }
-        .task { await viewModel.load() }
+        .task {
+            syncSheetHeight()
+            await viewModel.load()
+        }
         .onChange(of: routingVariant) { variant in
             if let variant { onProfileDeadEnd(variant) }
         }
         .onReceive(Self.ticker) { date in now = date }
     }
+
+    /// specs/010 §3.4 "Occlusion model" (I49) — reads the sheet's height for whatever detent is
+    /// CURRENT right now and hands it to the view model, so the next camera command
+    /// (`load()`/`fitAll()`/`selectMember()`) fits against it. Called immediately before every one
+    /// of those three triggers, never on a bare detent change — that is what makes "a detent
+    /// change MUST NOT move the camera, fit-all uses whatever detent is current at the moment it
+    /// is invoked" true: the sheet's height is read at the moment of the NEXT trigger, not kept
+    /// reactively in sync with every drag.
+    private func syncSheetHeight() {
+        viewModel.sheetHeightPt = currentSheetHeightPt
+    }
+
+    /// specs/010 §3.4 (I49) — the roster sheet's height for `sheetDetent` right now.
+    /// `.minimized`/`.standard` mirror `FindlyBottomSheet`'s own detent-height resolution exactly
+    /// (`cappedStandardHeight`); `.expanded` maps to the platform `.large` detent, which reports no
+    /// height of its own — `FindlyBottomSheet`'s own doc already treats the measured viewport
+    /// height as `.large`'s practical stand-in (`standardHeightCap`), so this reuses the same
+    /// value with `expandedHeightFraction`, matching Android's own `EXPANDED_FRACTION` (0.92) for
+    /// cross-platform parity in the one case neither platform can measure precisely.
+    private var currentSheetHeightPt: CGFloat {
+        switch sheetDetent {
+        case .minimized: return sheetMinimizedHeight
+        case .standard: return max(min(sheetStandardHeight, viewModel.mapViewportSizePt.height), sheetMinimizedHeight + 1)
+        case .expanded: return viewModel.mapViewportSizePt.height * Self.expandedHeightFraction
+        }
+    }
+
+    private static let expandedHeightFraction: CGFloat = 0.92
 
     /// specs/010 §3.1 — full-bleed map (edge-to-edge behind system bars) with the ☰ button + family
     /// pill floating above it, and the roster sheet on top of everything. The map renders
@@ -255,7 +286,10 @@ public struct LiveMapScreen: View {
     /// specs/010 §3.4 — the explicit fit-all action (a small floating ⌖-class button) that
     /// re-runs the camera policy over the currently loaded points.
     private var fitAllButton: some View {
-        Button(action: { viewModel.fitAll() }) {
+        Button(action: {
+            syncSheetHeight()
+            viewModel.fitAll()
+        }) {
             Image(systemName: "scope")
                 .font(.system(size: 18, weight: .semibold))
                 .foregroundColor(theme.colors.onSurface)
@@ -326,7 +360,10 @@ public struct LiveMapScreen: View {
                     .font(theme.typography.titleMedium.font)
                     .foregroundColor(theme.colors.onSurface)
                 Spacer()
-                Button("Refresh") { Task { await viewModel.load() } }
+                Button("Refresh") {
+                    syncSheetHeight()
+                    Task { await viewModel.load() }
+                }
                     .font(theme.typography.bodyMedium.font)
                     .foregroundColor(theme.colors.primary)
             }
@@ -371,6 +408,7 @@ public struct LiveMapScreen: View {
     private func memberRow(_ member: MemberLocations) -> some View {
         let isSelected = member.userId == viewModel.selectedUserId
         return Button {
+            syncSheetHeight()
             viewModel.selectMember(member.userId)
         } label: {
             VStack(spacing: 0) {

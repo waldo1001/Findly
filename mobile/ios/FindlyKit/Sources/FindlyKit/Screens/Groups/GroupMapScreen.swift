@@ -43,9 +43,28 @@ public struct GroupMapScreen: View {
                 mapWithChromeAndSheet
             }
         }
-        .task { await viewModel.load() }
+        .task {
+            syncSheetHeight()
+            await viewModel.load()
+        }
         .onReceive(Self.ticker) { date in now = date }
     }
+
+    /// specs/010 §3.4 "Occlusion model" (I49) — mirrors `LiveMapScreen.syncSheetHeight` exactly.
+    private func syncSheetHeight() {
+        viewModel.sheetHeightPt = currentSheetHeightPt
+    }
+
+    /// specs/010 §3.4 (I49) — mirrors `LiveMapScreen.currentSheetHeightPt` exactly.
+    private var currentSheetHeightPt: CGFloat {
+        switch sheetDetent {
+        case .minimized: return sheetMinimizedHeight
+        case .standard: return max(min(sheetStandardHeight, viewModel.mapViewportSizePt.height), sheetMinimizedHeight + 1)
+        case .expanded: return viewModel.mapViewportSizePt.height * Self.expandedHeightFraction
+        }
+    }
+
+    private static let expandedHeightFraction: CGFloat = 0.92
 
     /// specs/010 §3.2/§3.4 (amended 2026-08-27, row I45) — mirrors `LiveMapScreen`'s
     /// `mapWithChromeAndSheet` exactly: the `GeometryReader` is the render boundary that resolves
@@ -124,7 +143,10 @@ public struct GroupMapScreen: View {
             }
             titlePill
             Spacer()
-            floatingIconButton(systemName: "scope", accessibilityLabel: "Fit all", action: { viewModel.fitAll() })
+            floatingIconButton(systemName: "scope", accessibilityLabel: "Fit all", action: {
+                syncSheetHeight()
+                viewModel.fitAll()
+            })
         }
     }
 
@@ -200,7 +222,10 @@ public struct GroupMapScreen: View {
                     .font(theme.typography.titleMedium.font)
                     .foregroundColor(theme.colors.onSurface)
                 Spacer()
-                Button("Refresh") { Task { await viewModel.load() } }
+                Button("Refresh") {
+                    syncSheetHeight()
+                    Task { await viewModel.load() }
+                }
                     .font(theme.typography.bodyMedium.font)
                     .foregroundColor(theme.colors.primary)
             }
@@ -225,6 +250,7 @@ public struct GroupMapScreen: View {
     private func memberRow(_ member: GroupMemberLocation) -> some View {
         let isSelected = member.userId == viewModel.selectedUserId
         return Button {
+            syncSheetHeight()
             viewModel.selectMember(member.userId)
         } label: {
             FindlyListRow(title: member.displayName, subtitle: subtitle(for: member), avatarText: Self.initials(for: member.displayName)) {
