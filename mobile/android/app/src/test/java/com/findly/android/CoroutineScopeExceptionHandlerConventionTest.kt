@@ -597,4 +597,155 @@ class CoroutineScopeExceptionHandlerConventionTest {
             siteHasInlineHandler(site) || siteReferencesDeclaredHandler(site, source) != null,
         )
     }
+
+    // --- A42 defect fix: stripComments (naive `//`/`/* */` regex) ran BEFORE string masking, so a
+    // `//` an author wrote *inside* a string literal was read as a real comment - deleting the rest
+    // of that line, including the string's own closing quote. String masking then treated the
+    // string as unterminated and searched forward for the next `"` in the file (or ran to EOF if
+    // none existed), hiding every real CoroutineScope(...) construction in between. This is
+    // fail-open - the opposite direction from every blind spot specs/003 §3.1 previously documented.
+    // Three shipped files already have this shape: GroupJoinLinkBuilder.kt (no later `"` at all, so
+    // masking ran to EOF), Destinations.kt, and DevAuthProvider.kt.
+
+    /** The minimal reproduction: a `//` inside an ordinary string, with a second, unrelated string
+     * later in the file. Under the old two-pass pipeline, the `//` truncated its line (eating the
+     * string's own closing quote), and string masking then treated the *later* string's opening `"`
+     * as the "closing" of the truncated one - masking everything in between, including the real
+     * CoroutineScope(...) construction site that sits between the two strings. */
+    @Test
+    fun `a slash-slash inside an ordinary string literal does not truncate the line or hide later code`() {
+        val snippet = """
+            fun start() {
+                val url = "https://example.com/x"
+                CoroutineScope(SupervisorJob() + Dispatchers.Default)
+                val other = "unrelated"
+            }
+        """.trimIndent()
+        val source = preprocessSource(snippet)
+        val sites = constructionSites(source)
+        assertEquals(
+            "the // inside \"https://example.com/x\" was treated as a comment, truncating the line " +
+                "and eating the string's closing quote, which then let the next \" in the file " +
+                "(\"unrelated\"'s opening quote) masquerade as its closing quote, hiding the real " +
+                "CoroutineScope(...) construction site in between",
+            1,
+            sites.size,
+        )
+    }
+
+    /** The exact `GroupJoinLinkBuilder.kt` shape: a `//`-containing string with NO later `"`
+     * anywhere else in the file. Under the old pipeline this is worse than the case above - with no
+     * later quote to (incorrectly) close the string, masking ran all the way to end of file, so the
+     * unguarded CoroutineScope(...) after it was never reported at all. */
+    @Test
+    fun `a slash-slash inside a string with no later quote in the file still leaves later code scannable (GroupJoinLinkBuilder shape)`() {
+        val snippet = """
+            object Probe {
+                private const val url = "https://example.com/no-later-quote"
+                val probeScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+            }
+        """.trimIndent()
+        // Sanity check on the fixture itself: exactly one string (two quote characters, the url's
+        // own open/close) in the whole file, and no other `"` anywhere later - this is what makes
+        // the old pipeline's "search forward for the next quote" run all the way to EOF.
+        assertEquals(2, snippet.count { it == '"' })
+        val source = preprocessSource(snippet)
+        assertEquals(
+            "the unguarded CoroutineScope(...) after the // string was hidden because masking ran " +
+                "to end of file with no later \" to (incorrectly) stop at",
+            1,
+            constructionSites(source).size,
+        )
+    }
+
+    /** A `"` written inside a `//` line comment must never be read as opening a string. */
+    @Test
+    fun `a quote inside a slash-slash comment does not start a string`() {
+        val snippet = """
+            fun start() {
+                // a comment mentioning a "quote" and even /* nested-looking */ text
+                CoroutineScope(SupervisorJob() + Dispatchers.Default + CoroutineExceptionHandler { _, throwable ->
+                    Log.d(TAG, throwable::class.simpleName ?: "unknown")
+                })
+            }
+        """.trimIndent()
+        val source = preprocessSource(snippet)
+        val sites = constructionSites(source)
+        assertEquals(1, sites.size)
+        assertTrue(
+            "the \" inside the // comment was misread as opening a string, hiding the real handler",
+            siteHasInlineHandler(sites.single()),
+        )
+    }
+
+    /** A `"` written inside a `/* */` block comment must never be read as opening a string. */
+    @Test
+    fun `a quote inside a block comment does not start a string`() {
+        val snippet = """
+            fun start() {
+                /* a block comment mentioning a "quote" and a // slash-slash too */
+                CoroutineScope(SupervisorJob() + Dispatchers.Default + CoroutineExceptionHandler { _, throwable ->
+                    Log.d(TAG, throwable::class.simpleName ?: "unknown")
+                })
+            }
+        """.trimIndent()
+        val source = preprocessSource(snippet)
+        val sites = constructionSites(source)
+        assertEquals(1, sites.size)
+        assertTrue(
+            "the \" inside the block comment was misread as opening a string, hiding the real handler",
+            siteHasInlineHandler(sites.single()),
+        )
+    }
+
+    /** A Kotlin CHAR literal containing a double quote (`'"'`) must not be read as opening a
+     * string - currently unhandled by both the old and new scanner until this fix, per the task
+     * brief: there is no production example today, so this is unit-only coverage. Without char-literal
+     * awareness, the `"` inside `'"'` would be read as a real string-open, and the scan would then
+     * search forward for the next `"` - here, `"unknown"`'s opening quote - masking everything in
+     * between, including the real handler. */
+    @Test
+    fun `a char literal containing a double quote does not start a string`() {
+        val snippet = """
+            fun start() {
+                val quoteChar = '"'
+                CoroutineScope(SupervisorJob() + Dispatchers.Default + CoroutineExceptionHandler { _, throwable ->
+                    Log.d(TAG, throwable::class.simpleName ?: "unknown")
+                })
+            }
+        """.trimIndent()
+        val source = preprocessSource(snippet)
+        val sites = constructionSites(source)
+        assertEquals(1, sites.size)
+        assertTrue(
+            "the \" inside the '\"' char literal was misread as opening a string, hiding the real " +
+                "handler",
+            siteHasInlineHandler(sites.single()),
+        )
+    }
+
+    /** A raw `"""..."""` string containing both `//` and a lone `"` must be masked as one string,
+     * not misread as a comment or an early-closing string. Built via `${"\"\"\""}` template
+     * expressions in the outer fixture string (rather than literal `"""` sequences) purely so the
+     * Kotlin source of *this test file* doesn't itself get confused about where its own triple-quote
+     * fixture string ends. */
+    @Test
+    fun `a raw triple-quoted string containing slash-slash and a quote is not treated as code`() {
+        val snippet = """
+            fun start() {
+                val raw = ${"\"\"\""}has a // slash-slash and a " quote inside${"\"\"\""}
+                CoroutineScope(SupervisorJob() + Dispatchers.Default + CoroutineExceptionHandler { _, throwable ->
+                    Log.d(TAG, throwable::class.simpleName ?: "unknown")
+                })
+            }
+        """.trimIndent()
+        val source = preprocessSource(snippet)
+        val sites = constructionSites(source)
+        assertEquals(1, sites.size)
+        assertTrue(
+            "content inside the raw triple-quoted string was misread as a comment or as ending the " +
+                "string early, hiding the real handler",
+            siteHasInlineHandler(sites.single()),
+        )
+    }
 }
