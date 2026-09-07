@@ -379,7 +379,7 @@ describe("domain/group/createGroup", () => {
     const deps = buildDeps();
 
     const result = await createGroup(
-      { uid: "u1", body: { ...VALID_BODY, displayName: "Eric‮cirE" } },
+      { uid: "u1", body: { ...VALID_BODY, displayName: "Eric\u202EcirE" } },
       deps,
     );
 

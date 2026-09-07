@@ -248,7 +248,7 @@ describe("domain/geofence/replaceGeofences", () => {
   it("normalizes name at write time before storing (strips a right-to-left override, 001 §1.4/B29)", async () => {
     const deps = buildDeps();
     const result = await replaceGeofences(
-      baseInput({ body: { geofences: [geofence({ name: "Home‮emoH" })] } }),
+      baseInput({ body: { geofences: [geofence({ name: "Home\u202EemoH" })] } }),
       deps,
     );
     expect(result.geofences[0]?.name).toBe("HomeemoH");
@@ -257,7 +257,7 @@ describe("domain/geofence/replaceGeofences", () => {
   it("throws VALIDATION_FAILED (not an empty stored name) when name is only control characters", async () => {
     const deps = buildDeps();
     await expectAppError(
-      replaceGeofences(baseInput({ body: { geofences: [geofence({ name: "‮‮" })] } }), deps),
+      replaceGeofences(baseInput({ body: { geofences: [geofence({ name: "\u202E\u202E" })] } }), deps),
       "VALIDATION_FAILED",
       { fields: ["geofences[0].name"] },
     );

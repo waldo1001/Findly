@@ -403,7 +403,7 @@ describe("domain/group/joinGroup", () => {
     await seedGroup(deps, ACTIVE_META);
 
     const result = await joinGroup(
-      { uid: "u2", body: { code: "abcd-1234", displayName: "Noor‮cirE" } },
+      { uid: "u2", body: { code: "abcd-1234", displayName: "Noor\u202EcirE" } },
       deps,
     );
 

@@ -49,7 +49,7 @@ describe("http/validate memberUserIdParamSchema", () => {
     ["a\\b", "backslash"],
     ["a#b", "hash"],
     ["a?b", "question mark"],
-    ["ab", "control character"],
+    ["a\u0007b", "control character"],
   ])("throws VALIDATION_FAILED for a userId containing a forbidden %s", async (malformed) => {
     await expectAppError(parse({ userId: malformed }), "VALIDATION_FAILED", { fields: ["userId"] });
   });
@@ -136,7 +136,7 @@ describe("http/validate displayName normalization (001 §1.4, B29)", () => {
   }
 
   it("strips a right-to-left override before storing", async () => {
-    const result = await parseDisplayName("Eric‮sirhc");
+    const result = await parseDisplayName("Eric\u202Esirhc");
     expect(result.displayName).toBe("Ericsirhc");
   });
 
@@ -146,12 +146,12 @@ describe("http/validate displayName normalization (001 §1.4, B29)", () => {
   });
 
   it("strips a C1 control character before storing", async () => {
-    const result = await parseDisplayName("EricSmith");
+    const result = await parseDisplayName("Eric\u0085Smith");
     expect(result.displayName).toBe("EricSmith");
   });
 
   it("throws VALIDATION_FAILED (not an empty stored name) for a name that is only control characters", async () => {
-    await expectAppError(parseDisplayName("‮‮"), "VALIDATION_FAILED", {
+    await expectAppError(parseDisplayName("\u202E\u0007\u202E"), "VALIDATION_FAILED", {
       fields: ["displayName"],
     });
   });
@@ -169,7 +169,7 @@ describe("http/validate displayName normalization (001 §1.4, B29)", () => {
   it("accepts a name whose length only exceeds the 30-char bound BEFORE normalization", async () => {
     // 30 real chars + 3 bidi-override chars that strip away to nothing = 30 after
     // normalization: must pass, proving the bound is checked AFTER normalization.
-    const raw = "x".repeat(30) + "‮‮‮";
+    const raw = "x".repeat(30) + "\u202E\u202E\u202E";
     const result = await parseDisplayName(raw);
     expect(result.displayName).toBe("x".repeat(30));
   });
@@ -209,12 +209,12 @@ describe("http/validate geofenceName normalization (001 §1.4, B29)", () => {
   }
 
   it("strips a right-to-left override before storing", async () => {
-    const result = await parseGeofenceName("Home‮emoH");
+    const result = await parseGeofenceName("Home\u202EemoH");
     expect(result.name).toBe("HomeemoH");
   });
 
   it("throws VALIDATION_FAILED for a name that is only control characters", async () => {
-    await expectAppError(parseGeofenceName("‮‮"), "VALIDATION_FAILED", { fields: ["name"] });
+    await expectAppError(parseGeofenceName("\u202E\u202E"), "VALIDATION_FAILED", { fields: ["name"] });
   });
 
   it("passes emoji and accented characters through untouched", async () => {
@@ -223,7 +223,7 @@ describe("http/validate geofenceName normalization (001 §1.4, B29)", () => {
   });
 
   it("accepts a name whose length only exceeds the 50-char bound BEFORE normalization", async () => {
-    const raw = "x".repeat(50) + "‮‮";
+    const raw = "x".repeat(50) + "\u202E\u202E";
     const result = await parseGeofenceName(raw);
     expect(result.name).toBe("x".repeat(50));
   });

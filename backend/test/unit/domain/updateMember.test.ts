@@ -306,7 +306,7 @@ describe("domain/family/updateMember", () => {
     await seedTwoParentFamily(deps);
 
     const result = await updateMember(
-      { uid: "u1", familyId: FAMILY_ID, role: "parent", targetUserId: "u2", body: { displayName: "Noor‮cirE" } },
+      { uid: "u1", familyId: FAMILY_ID, role: "parent", targetUserId: "u2", body: { displayName: "Noor\u202EcirE" } },
       deps,
     );
 

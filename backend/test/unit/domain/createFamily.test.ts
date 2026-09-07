@@ -150,7 +150,7 @@ describe("domain/family/createFamily", () => {
     const deps = buildDeps();
 
     const result = await createFamily(
-      { uid: "u1", familyId: null, body: { familyName: "Wauters", displayName: "Eric‮cirE" } },
+      { uid: "u1", familyId: null, body: { familyName: "Wauters", displayName: "Eric\u202EcirE" } },
       deps,
     );
 

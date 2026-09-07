@@ -278,7 +278,7 @@ describe("domain/family/acceptInvite", () => {
     await deps.inviteRepo.createInvite(baseInvite());
 
     const result = await acceptInvite(
-      { uid: "u2", familyId: null, body: { inviteCode: INVITE_CODE, displayName: "Noor‮cirE" } },
+      { uid: "u2", familyId: null, body: { inviteCode: INVITE_CODE, displayName: "Noor\u202EcirE" } },
       deps,
     );
 
