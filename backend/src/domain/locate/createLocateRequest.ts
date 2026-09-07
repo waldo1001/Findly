@@ -217,12 +217,17 @@ export async function createLocateRequest(
   let status: LocateRequestStatus = "pending";
   if (hasValidToken(device)) {
     const requestedByName = resolveRequesterDisplayName(input.uid, members);
+    // B34: data.requestedByName must carry the SAME normalized/placeholder-substituted
+    // value as the title beside it (buildLocateRequestTitle), not the raw stored value —
+    // Android is data-only (009 §5.1) and builds its own title from this field, so on that
+    // leg the client sanitiser was otherwise the sole defence against a hostile stored name.
+    const normalizedRequestedByName = normalizeDisplayTextOrFallback(requestedByName, EMPTY_DISPLAY_NAME_FALLBACK);
     try {
       const outcome = await deps.pushSender.send({
         token: device.pushToken as string,
         type: "LOCATE_REQUEST",
         notificationTitle: buildLocateRequestTitle(requestedByName),
-        data: { type: "LOCATE_REQUEST", requestId, requestedByName, expiresAt },
+        data: { type: "LOCATE_REQUEST", requestId, requestedByName: normalizedRequestedByName, expiresAt },
       });
       if (outcome === "invalidToken") {
         status = "pushFailed";
