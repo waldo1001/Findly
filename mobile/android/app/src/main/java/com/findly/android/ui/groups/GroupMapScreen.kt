@@ -129,6 +129,11 @@ fun GroupMapScreen(
                 if (state.members.isEmpty()) {
                     FindlyEmptyState(title = "No members yet", message = "Share the join code to get this group moving.")
                 } else {
+                    val sheetState = rememberFindlyBottomSheetState()
+
+                    // specs/010-app-shell-and-screen-ux.md §3.2/§3.4 "Occlusion model" (I49) —
+                    // mirrors MapScreen exactly: the renderer resolves `sheetState.detent` against
+                    // its own measured viewport height and widens a fit-all target above the sheet.
                     mapRenderer.RenderGroup(
                         members = state.members,
                         selectedUserId = state.selectedUserId,
@@ -136,9 +141,9 @@ fun GroupMapScreen(
                         onMemberSelected = onSelectMember,
                         onBackgroundTap = onBackgroundTap,
                         modifier = Modifier.fillMaxSize(),
+                        sheetDetent = sheetState.detent,
                     )
 
-                    val sheetState = rememberFindlyBottomSheetState()
                     FindlyBottomSheet(
                         state = sheetState,
                         header = { GroupRosterHeader(state = state) },

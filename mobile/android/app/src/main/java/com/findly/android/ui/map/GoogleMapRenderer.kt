@@ -3,10 +3,17 @@ package com.findly.android.ui.map
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
+import com.findly.android.ui.designsystem.components.FindlyBottomSheetDetent
+import com.findly.android.ui.designsystem.components.FindlyBottomSheetHeights
 import com.findly.android.ui.designsystem.components.FindlyMapMarkerBubble
 import com.findly.android.ui.designsystem.components.FindlyMapMarkerState
 import com.findly.android.ui.groups.GroupMapMemberUi
@@ -63,6 +70,7 @@ class GoogleMapRenderer : MapRenderer {
         onMemberSelected: (userId: String) -> Unit,
         onBackgroundTap: () -> Unit,
         modifier: Modifier,
+        sheetDetent: FindlyBottomSheetDetent,
     ) {
         val markers = members.flatMap { member ->
             member.devices.filter { it.hasLocation }.map { device ->
@@ -83,6 +91,7 @@ class GoogleMapRenderer : MapRenderer {
             onMemberSelected = onMemberSelected,
             onBackgroundTap = onBackgroundTap,
             modifier = modifier,
+            sheetDetent = sheetDetent,
         )
     }
 
@@ -96,6 +105,7 @@ class GoogleMapRenderer : MapRenderer {
         onMemberSelected: (userId: String) -> Unit,
         onBackgroundTap: () -> Unit,
         modifier: Modifier,
+        sheetDetent: FindlyBottomSheetDetent,
     ) {
         val markers = members.filter { it.hasLocation }.map { member ->
             MapMarker(
@@ -114,6 +124,7 @@ class GoogleMapRenderer : MapRenderer {
             onMemberSelected = onMemberSelected,
             onBackgroundTap = onBackgroundTap,
             modifier = modifier,
+            sheetDetent = sheetDetent,
         )
     }
 }
@@ -140,6 +151,7 @@ private fun MapSurface(
     onMemberSelected: (userId: String) -> Unit,
     onBackgroundTap: () -> Unit,
     modifier: Modifier,
+    sheetDetent: FindlyBottomSheetDetent,
 ) {
     val cameraPositionState = rememberCameraPositionState {
         position = CameraPosition.fromLatLngZoom(
@@ -148,6 +160,12 @@ private fun MapSurface(
         )
     }
     val density = LocalDensity.current
+    // specs/010-app-shell-and-screen-ux.md §3.4 "Occlusion model" (I49) — the map's real measured
+    // pixel height, needed to widen a `.Bounds` target via `MapCameraFraming` before fitting (the
+    // sheet occludes a fraction of this height, not of some abstract dp value). 0 before the first
+    // layout pass; `MapCameraFraming.widenForSheetOcclusion` degrades to a no-op for a non-positive
+    // viewport, same guard `MapCamera`'s own degenerate-viewport handling uses.
+    var mapHeightPx by remember { mutableIntStateOf(0) }
 
     // specs/010-app-shell-and-screen-ux.md §3.4: keyed on the command's `seq` alone — NOT on
     // `markers`/`points` — so a refresh that only changes marker positions (no new seq) never
@@ -164,13 +182,29 @@ private fun MapSurface(
                 LatLng(target.lat, target.lon),
                 target.zoom,
             )
-            is MapCameraTarget.Bounds -> CameraUpdateFactory.newLatLngBounds(
-                LatLngBounds(
-                    LatLng(target.southLat, target.westLon),
-                    LatLng(target.northLat, target.eastLon),
-                ),
-                with(density) { target.paddingDp.dp.roundToPx() },
-            )
+            is MapCameraTarget.Bounds -> {
+                val paddingPx = with(density) { target.paddingDp.dp.roundToPx() }
+                // specs/010 §3.4 "Occlusion model" (I49) — resolved against THIS renderer's own
+                // measured `mapHeightPx`, not some caller-supplied dp value, so `.Expanded`'s
+                // fraction-of-viewport estimate (`FindlyBottomSheetHeights.forDetent`) is always
+                // consistent with the SAME height this fit is about to be computed against.
+                val sheetHeightPx = with(density) {
+                    FindlyBottomSheetHeights.forDetent(sheetDetent, maxHeight = mapHeightPx.toFloat().toDp()).roundToPx()
+                }
+                val widened = MapCameraFraming.widenForSheetOcclusion(
+                    bounds = target,
+                    viewportHeightPx = mapHeightPx.toFloat(),
+                    sheetHeightPx = sheetHeightPx.toFloat(),
+                    paddingPx = paddingPx.toFloat(),
+                )
+                CameraUpdateFactory.newLatLngBounds(
+                    LatLngBounds(
+                        LatLng(widened.southLat, widened.westLon),
+                        LatLng(widened.northLat, widened.eastLon),
+                    ),
+                    paddingPx,
+                )
+            }
         }
         // Suspends until a map is actually bound (maps-compose's CameraPositionState.animate
         // contract).
@@ -178,7 +212,9 @@ private fun MapSurface(
     }
 
     GoogleMap(
-        modifier = modifier.fillMaxSize(),
+        modifier = modifier
+            .fillMaxSize()
+            .onSizeChanged { mapHeightPx = it.height },
         cameraPositionState = cameraPositionState,
         onMapClick = { onBackgroundTap() },
     ) {

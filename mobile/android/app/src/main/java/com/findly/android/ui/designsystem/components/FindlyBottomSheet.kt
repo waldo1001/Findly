@@ -65,6 +65,23 @@ val FindlyBottomSheetStandardHeight: Dp = 440.dp
  * iOS's `.large` `UISheetPresentationController.Detent`, which has no fixed height. */
 private const val EXPANDED_FRACTION = 0.92f
 
+/**
+ * specs/010-app-shell-and-screen-ux.md §3.4 "Occlusion model" (added 2026-09-07, row I49) — a
+ * caller (`MapScreen`/`GroupMapScreen`) needs to know the sheet's height for whatever detent is
+ * CURRENT, right when a camera-moving action fires, so it can widen the fit-all target above the
+ * sheet ([com.findly.android.ui.map.MapCameraFraming]). Exposed as a standalone pure function
+ * (not a method on [FindlyBottomSheetState], which has no [maxHeight] of its own to compute
+ * `Expanded`'s height with) so both this component's internal `pxFor` and external callers share
+ * exactly one formula — no risk of the two drifting apart.
+ */
+object FindlyBottomSheetHeights {
+    fun forDetent(detent: FindlyBottomSheetDetent, maxHeight: Dp): Dp = when (detent) {
+        FindlyBottomSheetDetent.Minimized -> FindlyBottomSheetMinimizedHeight
+        FindlyBottomSheetDetent.Standard -> FindlyBottomSheetStandardHeight
+        FindlyBottomSheetDetent.Expanded -> maxHeight * EXPANDED_FRACTION
+    }
+}
+
 @Stable
 class FindlyBottomSheetState(initial: FindlyBottomSheetDetent) {
     var detent: FindlyBottomSheetDetent by mutableStateOf(initial)
@@ -91,10 +108,9 @@ fun FindlyBottomSheet(
 ) {
     BoxWithConstraints(modifier = modifier.fillMaxSize()) {
         val density = LocalDensity.current
-        val maxHeightPx = with(density) { maxHeight.toPx() }
         val minimizedPx = with(density) { FindlyBottomSheetMinimizedHeight.toPx() }
         val standardPx = with(density) { FindlyBottomSheetStandardHeight.toPx() }
-        val expandedPx = maxHeightPx * EXPANDED_FRACTION
+        val expandedPx = with(density) { FindlyBottomSheetHeights.forDetent(FindlyBottomSheetDetent.Expanded, maxHeight).toPx() }
 
         fun pxFor(detent: FindlyBottomSheetDetent): Float = when (detent) {
             FindlyBottomSheetDetent.Minimized -> minimizedPx

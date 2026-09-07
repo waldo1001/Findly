@@ -138,6 +138,13 @@ fun MapScreen(
                 if (state.members.isEmpty()) {
                     FindlyEmptyState(title = "No family yet", message = "Join or create a family to see the map.")
                 } else {
+                    val sheetState = rememberFindlyBottomSheetState()
+
+                    // specs/010-app-shell-and-screen-ux.md §3.4 "Occlusion model" (I49) — the
+                    // renderer resolves `sheetState.detent` against its own measured viewport
+                    // height (GoogleMapRenderer) and widens a fit-all target above the sheet.
+                    // Read at composition time, same as every other value this call captures —
+                    // exactly "whatever detent is current at the moment" a camera command fires.
                     mapRenderer.Render(
                         members = state.members,
                         selectedUserId = state.selectedUserId,
@@ -145,9 +152,9 @@ fun MapScreen(
                         onMemberSelected = onSelectMember,
                         onBackgroundTap = onBackgroundTap,
                         modifier = Modifier.fillMaxSize(),
+                        sheetDetent = sheetState.detent,
                     )
 
-                    val sheetState = rememberFindlyBottomSheetState()
                     FindlyBottomSheet(
                         state = sheetState,
                         header = {
