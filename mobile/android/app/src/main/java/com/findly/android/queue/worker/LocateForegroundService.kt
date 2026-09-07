@@ -10,7 +10,6 @@ import com.findly.android.pushmessages.LocateNotifier
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
@@ -49,11 +48,12 @@ import kotlinx.coroutines.launch
  * On that failure this service stops itself and falls through to the same expedited-work
  * enqueuer the handoff layer's own refused-start fallback uses (finding 4).
  *
- * **A39 review, finding 7:** [timeoutJob] is `@Volatile` (written on the main thread from
- * [onStartCommand], read/cancelled from [Dispatchers.Default]) and every `stopSelf` call passes
- * this start's own `startId`, so a second `LOCATE_REQUEST` arriving while the first is still in
- * flight can no longer have its capture killed mid-way by the first's orphaned timeout — Android
- * only honours `stopSelf(startId)` once no more recent start has been delivered.
+ * **A39 review, finding 7:** every `stopSelf` call passes this start's own `startId`, so a second
+ * `LOCATE_REQUEST` arriving while the first is still in flight can no longer have its capture
+ * killed mid-way by the first's orphaned timeout — Android only honours `stopSelf(startId)` once
+ * no more recent start has been delivered. (The timeout *job* itself was, at this point, still a
+ * single field shared by every request — see the A48 note below for why that was a separate,
+ * unrelated bug that this finding's `startId`-scoping did not address.)
  *
  * **A39's final round, finding 1 (Major):** this service is a singleton — a second
  * `LOCATE_REQUEST` landing on this branch while the first is still in flight re-delivers via
@@ -85,6 +85,20 @@ import kotlinx.coroutines.launch
  * so both requests already kept their own notification and both captures already fulfilled either
  * way — this closes the last few seconds where the second request's foreground *designation*
  * could drop while it was still capturing.
+ *
+ * **A48 (found by A44, reported rather than folded in):** finding 7's own fix above only made
+ * `stopSelf` per-request (via `startId`); it said nothing about the timeout `Job` itself, which
+ * stayed a single `@Volatile` field on this service shared by every request. A second request's
+ * [onStartCommand] running while a first was still in flight overwrote that field with its own
+ * timeout job; a later [finish] for the *first* request then cancelled whichever job the field
+ * currently held, which could be the *second* request's still-legitimately-running 45s hard cap —
+ * the wrong request could lose its cap while the other was cancelled early. Fixed by moving the
+ * timeout job onto [InFlightLocateRequestTracker.RequestToken] itself (already a per-request
+ * handle) via [InFlightLocateRequestTracker.attachTimeoutJob], so [finish] cancelling "this
+ * request's timeout job" is a per-token operation, not a shared-field read — there is no longer a
+ * single field a different request's completion could reach. See
+ * [InFlightLocateRequestTracker]'s own class doc for the full reasoning and
+ * [InFlightLocateRequestTrackerTest] for the concurrent proof.
  */
 class LocateForegroundService : Service() {
 
@@ -92,9 +106,6 @@ class LocateForegroundService : Service() {
         Log.w(TAG, "LOCATE_REQUEST capture failed (${throwable::class.simpleName})")
     }
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default + exceptionHandler)
-
-    @Volatile
-    private var timeoutJob: Job? = null
 
     /** A44 (specs/009 §5.1): counts requests currently in flight on this singleton service
      * instance so [finish] only detaches the OS foreground designation on the *last* one to
@@ -130,10 +141,18 @@ class LocateForegroundService : Service() {
         // completion is the one that gets to detach the service's foreground designation.
         val requestToken = inFlightRequests.start()
 
-        timeoutJob = serviceScope.launch {
+        // A48: the timeout job is attached to *this request's own* token, not stored in a field
+        // shared across requests - `finish()` (called from either coroutine below, for possibly
+        // many overlapping requests) can then only ever cancel this request's own timer. The
+        // attach call is synchronous, immediately after `launch` returns and before the capture
+        // coroutine below is even launched - both on this calling (main) thread, with no
+        // suspension in between - so it is guaranteed to land before either coroutine's body could
+        // possibly reach `finish()` for this token (see InFlightLocateRequestTracker.attachTimeoutJob).
+        val timeoutJob = serviceScope.launch {
             kotlinx.coroutines.delay(HARD_CAP_MILLIS)
             finish(startId, notificationId, requestToken)
         }
+        inFlightRequests.attachTimeoutJob(requestToken, timeoutJob)
 
         serviceScope.launch {
             try {
@@ -162,9 +181,15 @@ class LocateForegroundService : Service() {
      * closing the early-detach residual A39's final round reported but deliberately left unfixed.
      * `finish()` being called twice for one request (this method's own "idempotent" framing above)
      * is exactly why the tracker's own per-token guard exists — it must decrement the shared count
-     * at most once per request no matter how many times this method runs for it. */
+     * at most once per request no matter how many times this method runs for it.
+     *
+     * **A48:** [InFlightLocateRequestTracker.finish] also cancels [requestToken]'s own attached
+     * timeout job as part of the same call — there is no `timeoutJob?.cancel()` here any more.
+     * That used to read a single field shared by every request on this singleton service, so a
+     * first request's completion could cancel a *second*, still-in-flight request's timer. Cancel
+     * now happens per-token, inside the tracker, so it structurally cannot reach another request's
+     * job. */
     private fun finish(startId: Int, notificationId: Int, requestToken: InFlightLocateRequestTracker.RequestToken) {
-        timeoutJob?.cancel()
         NotificationManagerCompat.from(this).cancel(notificationId)
         if (inFlightRequests.finish(requestToken)) {
             stopForeground(STOP_FOREGROUND_DETACH)
