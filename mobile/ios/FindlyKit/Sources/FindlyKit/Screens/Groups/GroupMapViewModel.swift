@@ -34,6 +34,10 @@ public final class GroupMapViewModel: ObservableObject {
     /// `GeometryReader`, so the fixed 64pt bounds padding converts to an angular span at the render
     /// boundary rather than in the pure `MapCameraPolicy` decision.
     public var mapViewportSizePt: CGSize = MapRegion.unmeasuredViewportSizePt
+    /// specs/010-app-shell-and-screen-ux.md §3.4 "Occlusion model" (added 2026-09-07, row I49) —
+    /// mirrors `LiveMapViewModel.sheetHeightPt` exactly, kept current by `GroupMapScreen` from
+    /// whatever detent is selected.
+    public var sheetHeightPt: CGFloat = 0
 
     private let apiClient: FindlyAPIClient
     public let groupId: String
@@ -103,7 +107,7 @@ public final class GroupMapViewModel: ObservableObject {
     private func emitCameraCommand(_ target: MapCameraTarget) {
         cameraSequence += 1
         cameraCommand = MapCameraCommand(sequence: cameraSequence, target: target)
-        region = MapRegion(fitting: target, viewSizePt: mapViewportSizePt)
+        region = MapRegion(fitting: target, viewSizePt: mapViewportSizePt, sheetHeightPt: sheetHeightPt)
     }
 
     /// Every member with a known position — `MapMarkerBubble`-ready. Members with no position yet
