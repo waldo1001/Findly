@@ -95,9 +95,26 @@ function titleFor(displayName: string, geofenceName: string, transition: "enter"
   return transition === "enter" ? `${name} arrived at ${geofence}` : `${name} left ${geofence}`;
 }
 
+/** specs/001 §1.4: "A user id MUST NOT be used as the fallback: it is opaque to the reader
+ * and would expose an internal identifier to every other family member." A roster miss
+ * (a device whose owner isn't in the family roster) therefore falls back to the same
+ * §1.4 placeholder as an empty-after-normalization stored value (B29), not to the uid
+ * (B32 — this was the one fallback path B29's normalizer couldn't catch, since a uid
+ * contains no forbidden characters and normalizes to itself unchanged).
+ *
+ * A reporting device whose owner has no family-roster entry can also signal a real
+ * consistency bug (a member removed from the family while their device stays registered
+ * and keeps reporting, e.g.) — worth a log line so it's visible in production, not just
+ * silently papered over by the placeholder. Class-of-event only (specs/009 §9,
+ * docs/security-review-checklist.md "Privacy in logs"): never the uid, never any location
+ * data, never a device id, never a token. */
 function resolveDisplayName(uid: string, members: FamilyMember[]): string {
   const member = members.find((m) => m.userId === uid);
-  return member?.displayName ?? uid;
+  if (!member) {
+    console.warn("reportGeofenceEvents: reporter missing from family roster");
+    return EMPTY_DISPLAY_NAME_FALLBACK;
+  }
+  return member.displayName;
 }
 
 export async function reportGeofenceEvents(

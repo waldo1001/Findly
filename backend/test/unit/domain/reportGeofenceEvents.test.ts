@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { reportGeofenceEvents } from "../../../src/domain/geofence/reportGeofenceEvents";
 import { getFeatures } from "../../../src/domain/plan";
 import { EMPTY_DISPLAY_NAME_FALLBACK } from "../../../src/domain/text/normalizeDisplayText";
@@ -399,6 +399,35 @@ describe("domain/geofence/reportGeofenceEvents", () => {
 
     expect(deps.pushSender.sent[0]!.data.displayName).toBe(EMPTY_DISPLAY_NAME_FALLBACK);
     expect(deps.pushSender.sent[0]!.data.displayName).not.toBe(REPORTER_UID);
+  });
+
+  it("logs a class-of-event warning (never the uid) when the reporter is missing from the family roster (B32)", async () => {
+    const deps = buildDeps();
+    await deps.familyRepo.createFamily({
+      familyId: FAMILY_ID,
+      familyName: "Wauters",
+      createdBy: OTHER_UID,
+      createdAt: "2026-07-01T00:00:00Z",
+    });
+    await deps.familyRepo.addMember(FAMILY_ID, {
+      userId: OTHER_UID,
+      role: "parent",
+      displayName: "Eric",
+      joinedAt: "2026-07-01T00:00:00Z",
+    });
+    // Deliberately NOT adding REPORTER_UID (see the test above).
+    seedReporterDevice(deps);
+    seedOtherDevice(deps);
+    deps.geofenceConfigRepo.seedConfig(FAMILY_ID, { version: 1, geofences: [HOME_GEOFENCE] }, '"cfg-etag"');
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    await reportGeofenceEvents(baseInput(), deps);
+
+    expect(warnSpy).toHaveBeenCalledOnce();
+    const loggedMessage = warnSpy.mock.calls[0]!.join(" ");
+    expect(loggedMessage).not.toContain(REPORTER_UID);
+    expect(loggedMessage).not.toContain(DEVICE_ID);
+    warnSpy.mockRestore();
   });
 
   it("resolves the reporter's displayName and the family device roster only ONCE per batch (caching), fanning out one listDevices call per family member (002 §2.4)", async () => {

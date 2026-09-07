@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createLocateRequest } from "../../../src/domain/locate/createLocateRequest";
 import { getFeatures } from "../../../src/domain/plan";
 import { InMemoryDeviceRepo } from "../../fakes/inMemoryDeviceRepo";
@@ -207,6 +207,20 @@ describe("domain/locate/createLocateRequest", () => {
     expect(deps.pushSender.sent.length).toBe(1);
     expect(deps.pushSender.sent[0]!.data.requestedByName).toBe(EMPTY_DISPLAY_NAME_FALLBACK);
     expect(deps.pushSender.sent[0]!.data.requestedByName).not.toBe("ghost-uid");
+  });
+
+  it("logs a class-of-event warning (never the uid) when the requester is missing from the family roster (B32)", async () => {
+    const deps = buildDeps();
+    await seedFamily(deps);
+    deps.deviceRepo.seed(TARGET_UID, device({ pushToken: "fcm-token-a" }));
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    await createLocateRequest(baseInput({ uid: "ghost-uid" }), deps);
+
+    expect(warnSpy).toHaveBeenCalledOnce();
+    const loggedMessage = warnSpy.mock.calls[0]!.join(" ");
+    expect(loggedMessage).not.toContain("ghost-uid");
+    warnSpy.mockRestore();
   });
 
   it("creates a 201 pending request, returns instant lastKnown null when never reported, expiresAt = now+180s (specs/001 §6.1 amended 2026-09-06), createdAt = now", async () => {
