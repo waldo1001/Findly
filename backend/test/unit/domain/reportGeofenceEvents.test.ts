@@ -11,6 +11,7 @@ import { InMemoryEntitlementsRepo } from "../../fakes/inMemoryEntitlementsRepo";
 import { FakePushSender } from "../../fakes/fakePushSender";
 import { FixedClock } from "../../fakes/fixedClock";
 import { expectAppError } from "../../support/expectAppError";
+import { expectNotificationTitle } from "../../support/expectPushMessage";
 import type { DeviceRecord } from "../../../src/ports/repositories";
 
 const FAMILY_ID = "fam_9J2Kq7Lm3NpR5sTvWxYz";
@@ -268,8 +269,7 @@ describe("domain/geofence/reportGeofenceEvents", () => {
     expect(deps.pushSender.sent).toHaveLength(1);
     const message = deps.pushSender.sent[0]!;
     expect(message.token).toBe("fcm-token-other");
-    expect(message.type).toBe("GEOFENCE_EVENT");
-    expect(message.notificationTitle).toBe("Noor arrived at Home");
+    expectNotificationTitle(message, "GEOFENCE_EVENT", "Noor arrived at Home");
     expect(message.data).toEqual({
       type: "GEOFENCE_EVENT",
       userId: REPORTER_UID,
@@ -372,7 +372,7 @@ describe("domain/geofence/reportGeofenceEvents", () => {
       deps,
     );
 
-    expect(deps.pushSender.sent[0]!.notificationTitle).toBe("Noor left Home");
+    expectNotificationTitle(deps.pushSender.sent[0]!, "GEOFENCE_EVENT", "Noor left Home");
   });
 
   it("does NOT fan out when notifyOnEnter is false for an enter transition", async () => {
