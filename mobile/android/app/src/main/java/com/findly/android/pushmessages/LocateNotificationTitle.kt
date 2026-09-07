@@ -8,15 +8,19 @@ package com.findly.android.pushmessages
  */
 object LocateNotificationTitle {
 
-    /** specs/009 section 9 (amended 2026-09-06 - A39's security review): `requestedByName` is
-     * another family member's raw, attacker-controlled `displayName` - the backend validates it
-     * for length only (1-30), never for character content - rendered straight into an ongoing
-     * notification for up to 45 s (section 5.1). Strips bidi override/isolate controls
-     * (U+202A-U+202E, U+2066-U+2069, which can visually reverse or hide the rest of the string,
-     * including this class's own " is locating you" suffix), collapses newlines and other
-     * control characters into a single space so they cannot reflow or truncate the title, and
-     * clamps to 30 characters as defence in depth even though the server already enforces that
-     * bound. This is a client-side obligation regardless of any server-side hardening.
+    /** specs/009 section 9 (amended 2026-09-06 - A39's security review; control mapping extended
+     * 2026-09-07 for A46): `requestedByName` is another family member's raw, attacker-controlled
+     * `displayName` - the backend validates it for length only (1-30), never for character
+     * content - rendered straight into an ongoing notification for up to 45 s (section 5.1).
+     * Strips bidi override/isolate controls (U+202A-U+202E, U+2066-U+2069, which can visually
+     * reverse or hide the rest of the string, including this class's own " is locating you"
+     * suffix), collapses newlines and other control characters - including U+2028 LINE SEPARATOR
+     * and U+2029 PARAGRAPH SEPARATOR, which are newlines by Unicode's own Zl/Zp classification
+     * but outside `Char.isISOControl()`'s C0/C1 ranges (A46; the backend's
+     * `normalizeDisplayText.ts`, specs/001 section 1.4, already strips both for the same reason)
+     * - into a single space so they cannot reflow or truncate the title, and clamps to 30
+     * characters as defence in depth even though the server already enforces that bound. This is
+     * a client-side obligation regardless of any server-side hardening.
      *
      * **A39's final round, finding 4 (Minor):** a name made entirely of bidi/control characters
      * (or, per [forRequesterData], one missing from the push data entirely) sanitises down to a
@@ -36,6 +40,14 @@ object LocateNotificationTitle {
     fun forRequesterData(data: Map<String, String>): String = forRequester(data["requestedByName"].orEmpty())
 
     private val BIDI_CONTROLS = ('\u202A'..'\u202E') + ('\u2066'..'\u2069')
+
+    /** A46: U+2028 LINE SEPARATOR and U+2029 PARAGRAPH SEPARATOR - newlines by Unicode's Zl/Zp
+     * classification but outside `Char.isISOControl()`'s C0 (U+0000-U+001F, U+007F) / C1
+     * (U+0080-U+009F) ranges, so [sanitize] must fold them into its control mapping explicitly.
+     * They are separators, not bidi controls, so they collapse to a space like the other
+     * newlines rather than being removed outright the way [BIDI_CONTROLS] is. */
+    private val UNICODE_LINE_SEPARATORS = setOf('\u2028', '\u2029')
+
     private const val MAX_NAME_LENGTH = 30
 
     /** specs/009 section 9 (amended 2026-09-06 - A39's final round, finding 4): used both when
@@ -46,7 +58,9 @@ object LocateNotificationTitle {
 
     private fun sanitize(name: String): String {
         val withoutBidi = name.filterNot { it in BIDI_CONTROLS }
-        val withoutControls = withoutBidi.map { ch -> if (ch.isISOControl()) ' ' else ch }.joinToString("")
+        val withoutControls = withoutBidi
+            .map { ch -> if (ch.isISOControl() || ch in UNICODE_LINE_SEPARATORS) ' ' else ch }
+            .joinToString("")
         val collapsed = withoutControls.replace(Regex(" +"), " ").trim()
         if (collapsed.isBlank()) return PLACEHOLDER_NAME
         return clampToCodePoints(collapsed, MAX_NAME_LENGTH)
