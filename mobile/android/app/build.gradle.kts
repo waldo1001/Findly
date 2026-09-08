@@ -72,6 +72,38 @@ val hasReleaseSigningMaterial: Boolean =
 // value (unlike BASE_URL/AUTH_MODE) — the join-link surface has no dev mode (specs/003 §12.3).
 val joinLinkHost: String = "kind-plant-0fb99b003.7.azurestaticapps.net"
 
+// A49 (docs/implementation-handoff.md) — a signed release build MUST NOT ship a blank Maps key.
+//
+// The `mapsApiKey` default above is deliberately an empty string so local dev and PR builds never
+// fail for a secret they don't need, and the comment there is right that the Maps SDK just renders
+// a tile-less map when it is blank. What that reasoning missed is the consequence for a build that
+// actually reaches Play: on 26 Aug 2026 this app was REJECTED under the Broken Functionality
+// policy ("Unresponsive UI elements, such as buttons or icons"), and the evidence screenshot
+// Google attached is the Family map rendering as a blank rectangle with only the zoom controls and
+// the Google watermark on it — the exact appearance of a Maps SDK with no usable key. A silent
+// empty string is a safe default for a build nobody ships and a release-stopping defect for one
+// that is, so the default stays and this guard draws the line between the two.
+//
+// Gated on `hasReleaseSigningMaterial` (the same signal the release signingConfig uses) so it can
+// only ever fire for a genuinely uploadable artifact, and registered on the task graph rather than
+// thrown at configuration time so `test`/`assembleDebug` are unaffected even in CI, where the
+// signing secrets are present on the job.
+gradle.taskGraph.whenReady {
+    val packagesSignedRelease = allTasks.any { task ->
+        task.name == "assembleRelease" || task.name == "bundleRelease"
+    }
+    if (packagesSignedRelease && hasReleaseSigningMaterial && mapsApiKey.isBlank()) {
+        throw GradleException(
+            "MAPS_API_KEY is blank, but this is a signed release build that can be uploaded to " +
+                "Play. Shipping it would render the map as a blank rectangle — the defect that got " +
+                "this app rejected under the Broken Functionality policy on 26 Aug 2026. Pass " +
+                "-PMAPS_API_KEY=<key> (CI: the MAPS_API_KEY repo secret, wired in " +
+                ".github/workflows/android.yml). Unsigned local and PR release builds are " +
+                "deliberately unaffected.",
+        )
+    }
+}
+
 // H10 (docs/implementation-handoff.md): Play rejects a reused versionCode, and until now it was
 // bumped by hand on every release (0.1.0/1 -> 1.0.0 (6) -> 1.0.0 (7), 2026-08-06) — exactly the
 // toil this task exists to remove. `.github/workflows/android.yml` now passes
