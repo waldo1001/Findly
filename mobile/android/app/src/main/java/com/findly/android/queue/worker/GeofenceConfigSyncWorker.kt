@@ -3,8 +3,6 @@ package com.findly.android.queue.worker
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
-import android.content.pm.ServiceInfo
-import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.work.CoroutineWorker
 import androidx.work.ForegroundInfo
@@ -24,18 +22,19 @@ import com.findly.android.pushmessages.GeofenceConfigChangedPushHandler
  * the eventual self-healing bound (the next report's `geofenceEtag` piggyback) - this is a
  * robustness fix, not a data-loss fix.
  *
- * **Not location-typed, unlike [LocateRequestWorker].** This work is a network fetch plus
- * geofence-registration bookkeeping, never a GPS capture, so [getForegroundInfo] declares
- * `FOREGROUND_SERVICE_TYPE_DATA_SYNC` instead of `..._LOCATION` - the fit Android's own foreground
- * service type taxonomy intends for a "sync data with a server, then persist it locally" job like
- * this one. Copy-pasting `LOCATE_REQUEST`'s location type here would be wrong on its own terms
- * *and* would force the shared `androidx.work.impl.foreground.SystemForegroundService` manifest
- * entry to keep declaring a type this work never needs.
- *
  * On API <= 30, `WorkManager` runs expedited work as a foreground service and calls
  * [getForegroundInfo] before [doWork] - the default `CoroutineWorker` implementation throws, so
  * without this override the branch never runs on Android 8-11 (same finding A39 made for
- * [LocateRequestWorker]).
+ * [LocateRequestWorker]). From API 31 it runs as an expedited job and never calls it.
+ *
+ * **Typeless, unlike [LocateRequestWorker] (A50, specs/003-android-client.md §11.6).** This work is
+ * a network fetch plus geofence-registration bookkeeping, never a GPS capture, so the location
+ * type would be wrong. A43 used `FOREGROUND_SERVICE_TYPE_DATA_SYNC`, which needs the
+ * `FOREGROUND_SERVICE_DATA_SYNC` permission, which needs a Play Console declaration the console
+ * could not offer - every publish failed on it (handoff H13/H15). It bought nothing: the only
+ * versions that reach this method (below API 31) accept a type of `0`, and the type permissions
+ * are enforced only from API 34. Do not reintroduce a type here without that declaration existing
+ * first; `ForegroundServiceTypeDeclarationTest` fails if the manifest side comes back.
  *
  * Untested Android-framework glue by design (same bucket as [LocateRequestWorker]/
  * [SettingsPollWorker]).
@@ -63,11 +62,7 @@ class GeofenceConfigSyncWorker(
             .setOnlyAlertOnce(true)
             .setPriority(NotificationCompat.PRIORITY_MIN)
             .build()
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            ForegroundInfo(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
-        } else {
-            ForegroundInfo(NOTIFICATION_ID, notification)
-        }
+        return ForegroundInfo(NOTIFICATION_ID, notification)
     }
 
     private fun ensureChannel() {
