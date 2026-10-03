@@ -47,19 +47,28 @@ struct BatteryPercentTests {
 
     // MARK: The truncation trap — round, never truncate
 
-    @Test func pointThreeFive_mapsToThirtyFive_notThirtyFour() {
-        // Float(0.35) * 100 == 34.9999994..., so `Int(level * 100)` would send 34.
-        #expect(BatteryPercent.from(uiDeviceLevel: 0.35) == 35)
+    // Each input below is one a TRUNCATING implementation (`Int(level * 100)`) gets one percent low
+    // — verified in Float arithmetic: `Float(0.53) * 100` == 52.999996 and `Float(0.59) * 100` ==
+    // 58.999996, while `Float(0.35) * 100` and `Float(0.05) * 100` are exactly 35.0 / 5.0 (so those
+    // two are NOT traps; their `nextDown` neighbours are).
+
+    @Test func pointFiveThree_mapsToFiftyThree_notFiftyTwo() {
+        #expect(BatteryPercent.from(uiDeviceLevel: 0.53) == 53)
     }
 
-    @Test func pointZeroFive_mapsToFive_notFour() {
-        // Float(0.05) * 100 is just under 5 as well.
-        #expect(BatteryPercent.from(uiDeviceLevel: 0.05) == 5)
+    @Test func pointFiveNine_mapsToFiftyNine_notFiftyEight() {
+        #expect(BatteryPercent.from(uiDeviceLevel: 0.59) == 59)
     }
 
-    @Test func everyFivePercentStepIOSReports_mapsToItsExactPercent() {
-        // iOS reports the battery level in 5 % steps (0.00, 0.05, ..., 1.00). Each must survive the
-        // Float round-trip exactly — the property the truncating formula violates for several steps.
+    @Test func oneUlpBelowAWholePercent_stillMapsToThatPercent() {
+        // An OS-supplied Float can sit one ulp low (34.999996 / 4.9999995 after the multiply).
+        #expect(BatteryPercent.from(uiDeviceLevel: Float(0.35).nextDown) == 35)
+        #expect(BatteryPercent.from(uiDeviceLevel: Float(0.05).nextDown) == 5)
+    }
+
+    @Test func everyFivePercentStep_mapsToItsExactPercent() {
+        // iOS 17+ reports the level in 5 % steps (iOS 16 in 1 % steps — see the whole-percent sweep
+        // below); every step must map to its exact percent. Plain correctness, not a truncation trap.
         for percent in stride(from: 0, through: 100, by: 5) {
             let level = Float(percent) / 100
             #expect(BatteryPercent.from(uiDeviceLevel: level) == percent, "step \(percent) % (level \(level))")
@@ -67,6 +76,9 @@ struct BatteryPercentTests {
     }
 
     @Test func everyWholePercent_roundTripsExactly() {
+        // The 1 % granularity iOS 16 reports. Over `Float(p) / 100`, a truncating implementation
+        // fails only at 53 and 59 — so this sweep catches it too, but the two named tests above
+        // pin the failure down by name.
         for percent in 0...100 {
             let level = Float(percent) / 100
             #expect(BatteryPercent.from(uiDeviceLevel: level) == percent, "\(percent) % (level \(level))")
