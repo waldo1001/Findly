@@ -225,10 +225,15 @@ public final class SystemLocationProvider: NSObject, LocationProviding, SystemLo
     private static let presenceAccuracy = kCLLocationAccuracyThreeKilometers
 
     /// `batteryLevelProvider` is injected (not read from `UIDevice` directly) so this class stays
-    /// constructible — if not fully testable — outside a real device context; the real app target
-    /// wiring passes `{ Int(UIDevice.current.batteryLevel * 100) }` after enabling
-    /// `UIDevice.current.isBatteryMonitoringEnabled`.
-    public init(batteryLevelProvider: @escaping () -> Int = { 100 }) {
+    /// constructible — if not fully testable — outside a real device context. The app target
+    /// (`FindlyApp.init()`) passes `{ batteryMonitor.percent }` from ONE shared `BatteryLevelMonitor`
+    /// — the same closure it gives `LocationRuntimeContainer` — whose init enables
+    /// `UIDevice.isBatteryMonitoringEnabled` and whose value is `BatteryPercent.from(uiDeviceLevel:)`
+    /// (rounded, clamped, `100` when iOS reports the level as unknown; specs/004 §7 "Battery level",
+    /// I57). The `{ 100 }` default is only the "no battery source wired" placeholder for tests and
+    /// non-device hosts; the shipping app MUST NOT rely on it (it is what every iPhone reported until
+    /// I57). Called on the main actor from every path in this class.
+    public init(batteryLevelProvider: @escaping () -> Int = { BatteryPercent.unknown }) {
         self.manager = CLLocationManager()
         self.batteryLevelProvider = batteryLevelProvider
         super.init()
