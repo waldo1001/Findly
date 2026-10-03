@@ -20,9 +20,12 @@ import UIKit
 /// briefly from suspension (SLC, visit, BG refresh, geofence), so the cache can lag the real level by
 /// the length of the suspension. Every read that happens on the main thread therefore reads
 /// `UIDevice` directly and refreshes the cache (all of `SystemLocationProvider`'s paths, and the
-/// wake-ups that begin on main); only the off-main geofence read can see a value that old, and
-/// iOS's 5 % granularity bounds what a few hours can change. A fresher read there would need an async
-/// battery provider — a wider change than I57.
+/// wake-ups that begin on main); only the off-main geofence read can see a stale value, and it can be
+/// as old as the last time the process was awake (the OS's reporting granularity bounds one reading's
+/// precision, not how far the real level drifts between readings — a phone can lose 30 % in a few
+/// hours). Possible follow-up, deliberately not done in I57: `GeofenceTransitionHandler.handle` is
+/// already `async`, so it could read live with `await MainActor.run { … }` without changing the
+/// `batteryLevelProvider` closure type.
 public final class BatteryLevelMonitor: @unchecked Sendable {
     private let lock = NSLock()
     private var cachedPercent = BatteryPercent.unknown

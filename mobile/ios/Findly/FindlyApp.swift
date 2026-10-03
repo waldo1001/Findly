@@ -198,10 +198,11 @@ struct FindlyApp: App {
             authProvider: authProvider, appVersionTracker: appVersionTracker
         )
         // specs/004-ios-client.md §7 "Battery level" (I57) — ONE battery reader for EVERY capture
-        // path. Built before anything that can capture a fix: its init turns on
-        // `UIDevice.isBatteryMonitoringEnabled` (without it `UIDevice.batteryLevel` is always
-        // -1.0, which is how every iPhone came to report `batteryPct: 100` on every fix forever).
-        // The same closure goes to `SystemLocationProvider` (main-actor callers) AND to
+        // path. Until I57 every iPhone reported `batteryPct: 100` on every fix because both consumers
+        // below were built with their `{ 100 }` default closures, which never read `UIDevice` at all.
+        // Reading the real level also needs `UIDevice.isBatteryMonitoringEnabled = true` (without it
+        // `batteryLevel` is always -1.0); the monitor's init turns it on, and it is built before
+        // anything that can capture a fix. The same closure goes to `SystemLocationProvider` (main-actor callers) AND to
         // `LocationRuntimeContainer` → `GeofenceTransitionHandler` (an async, non-main-actor caller);
         // `BatteryLevelMonitor.percent` is safe from either — see its doc for why it is a cache.
         let batteryMonitor = BatteryLevelMonitor()
