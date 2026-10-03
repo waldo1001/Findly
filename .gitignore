@@ -27,3 +27,7 @@ keystore.properties
 *.p8
 *.p12
 *.mobileprovision
+# Firebase/Google service-account keys (the FCM sender's credential lives in func-findly's app
+# settings, never here). The checklist above requires this pattern; until 2026-10-03 nothing
+# ignored it anywhere in the repo.
+serviceAccountKey*.json
