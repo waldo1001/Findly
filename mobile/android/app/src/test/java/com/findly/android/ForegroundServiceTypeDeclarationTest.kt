@@ -32,29 +32,83 @@ class ForegroundServiceTypeDeclarationTest {
 
     @Test
     fun `the only foreground-service type permission is FOREGROUND_SERVICE_LOCATION`() {
-        val typePermissions = elements("uses-permission")
-            .map { it.getAttribute("android:name") }
-            .filter { it.startsWith(TYPE_PERMISSION_PREFIX) }
-            .toSet()
-
-        assertEquals(PLAY_DECLARATION_REASON, setOf("android.permission.FOREGROUND_SERVICE_LOCATION"), typePermissions)
+        assertEquals(
+            PLAY_DECLARATION_REASON,
+            setOf("android.permission.FOREGROUND_SERVICE_LOCATION"),
+            typePermissions(manifest),
+        )
     }
 
     @Test
     fun `every service declares only the location foreground-service type`() {
-        val declaredTypes = elements("service")
+        assertEquals(PLAY_DECLARATION_REASON, setOf("location"), serviceTypes(manifest))
+    }
+
+    // The two tests below pin the guard's own reading of the manifest against fixtures, because
+    // the real manifest exercises neither case today.
+
+    @Test
+    fun `a type permission stripped with tools node remove is not counted as declared`() {
+        // The standard way to strip a type permission a dependency merges in - the most likely
+        // shape of the correct fix if this regression ever comes back through a library.
+        val fixture = parse(
+            """
+            <manifest xmlns:android="http://schemas.android.com/apk/res/android"
+                xmlns:tools="http://schemas.android.com/tools">
+                <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+                <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" tools:node="remove" />
+                <application>
+                    <service android:name=".A" android:foregroundServiceType="location" />
+                    <service android:name=".B" android:foregroundServiceType="dataSync" tools:node="remove" />
+                </application>
+            </manifest>
+            """,
+        )
+
+        assertEquals(setOf("android.permission.FOREGROUND_SERVICE_LOCATION"), typePermissions(fixture))
+        assertEquals(setOf("location"), serviceTypes(fixture))
+    }
+
+    @Test
+    fun `a type permission declared through uses-permission-sdk-23 is counted`() {
+        val fixture = parse(
+            """
+            <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+                <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+                <uses-permission-sdk-23 android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+            </manifest>
+            """,
+        )
+
+        assertEquals(
+            setOf(
+                "android.permission.FOREGROUND_SERVICE_LOCATION",
+                "android.permission.FOREGROUND_SERVICE_DATA_SYNC",
+            ),
+            typePermissions(fixture),
+        )
+    }
+
+    private fun typePermissions(document: Document): Set<String> =
+        elements(document, "uses-permission")
+            .map { it.getAttribute("android:name") }
+            .filter { it.startsWith(TYPE_PERMISSION_PREFIX) }
+            .toSet()
+
+    private fun serviceTypes(document: Document): Set<String> =
+        elements(document, "service")
             .map { it.getAttribute("android:foregroundServiceType") }
             .filter { it.isNotEmpty() }
             .flatMap { it.split('|') }
             .toSet()
 
-        assertEquals(PLAY_DECLARATION_REASON, setOf("location"), declaredTypes)
-    }
-
-    private fun elements(tag: String): List<Element> {
-        val nodes = manifest.getElementsByTagName(tag)
+    private fun elements(document: Document, tag: String): List<Element> {
+        val nodes = document.getElementsByTagName(tag)
         return (0 until nodes.length).map { nodes.item(it) as Element }
     }
+
+    private fun parse(xml: String): Document =
+        DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(xml.trimIndent().byteInputStream())
 
     private fun parseManifest(): Document {
         val cwd = File(System.getProperty("user.dir") ?: ".").absoluteFile
