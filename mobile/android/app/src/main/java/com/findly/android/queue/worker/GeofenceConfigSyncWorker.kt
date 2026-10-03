@@ -36,6 +36,12 @@ import com.findly.android.pushmessages.GeofenceConfigChangedPushHandler
  * are enforced only from API 34. Do not reintroduce a type here without that declaration existing
  * first; `ForegroundServiceTypeDeclarationTest` fails if the manifest side comes back.
  *
+ * **Typeless is safe only while this stays off the foreground-service path from API 31.** From
+ * targetSdk 34 the platform prohibits a typeless foreground service, and the exception it throws
+ * is not one WorkManager's API 31 start path catches. So never call `setForeground()` from this
+ * worker, and on every WorkManager upgrade re-check that `WorkForegroundKt.workForeground` still
+ * returns early from API 31 (verified for 2.10.0 by A50).
+ *
  * Untested Android-framework glue by design (same bucket as [LocateRequestWorker]/
  * [SettingsPollWorker]).
  */

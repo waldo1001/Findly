@@ -1,6 +1,7 @@
 package com.findly.android
 
 import java.io.File
+import javax.xml.XMLConstants
 import javax.xml.parsers.DocumentBuilderFactory
 import org.junit.Assert.assertEquals
 import org.junit.Test
@@ -21,9 +22,11 @@ import org.w3c.dom.Element
  * foreground service only below API 31, the type permissions are enforced only from API 34.
  *
  * Reads the real `src/main/AndroidManifest.xml`, not the merged manifest, because this is the
- * file a change would land in. Library manifests have contributed no type permission so far; the
- * merged output is checked by hand when this guard changes (see the A50 dev-loop entry). That the
- * type a worker passes to `ForegroundInfo` is declared on the service is `lintVitalRelease`'s
+ * file a change would land in. **What it cannot see:** a dependency bump whose library manifest
+ * merges in a type permission. None does as of A50 (the merged release manifest was checked), but
+ * nothing re-checks it on a bump; that regression would show up as the Play commit failing again,
+ * the way H13 did. The fix there is a `tools:node="remove"` entry, which this guard accepts. That
+ * the type a worker passes to `ForegroundInfo` is declared on the service is `lintVitalRelease`'s
  * `SpecifyForegroundServiceType` check, not this test's.
  */
 class ForegroundServiceTypeDeclarationTest {
@@ -90,7 +93,7 @@ class ForegroundServiceTypeDeclarationTest {
     }
 
     private fun typePermissions(document: Document): Set<String> =
-        elements(document, "uses-permission")
+        (elements(document, "uses-permission") + elements(document, "uses-permission-sdk-23"))
             .map { it.getAttribute("android:name") }
             .filter { it.startsWith(TYPE_PERMISSION_PREFIX) }
             .toSet()
@@ -102,20 +105,28 @@ class ForegroundServiceTypeDeclarationTest {
             .flatMap { it.split('|') }
             .toSet()
 
+    // An element marked tools:node="remove" is stripped by the manifest merger, so it is not
+    // declared. The parser is not namespace-aware, so attributes are read by qualified name.
     private fun elements(document: Document, tag: String): List<Element> {
         val nodes = document.getElementsByTagName(tag)
-        return (0 until nodes.length).map { nodes.item(it) as Element }
+        return (0 until nodes.length)
+            .map { nodes.item(it) as Element }
+            .filterNot { it.getAttribute("tools:node") == "remove" }
     }
 
-    private fun parse(xml: String): Document =
-        DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(xml.trimIndent().byteInputStream())
+    private fun parse(xml: String): Document = documentBuilder().parse(xml.trimIndent().byteInputStream())
+
+    private fun documentBuilder() =
+        DocumentBuilderFactory.newInstance()
+            .apply { setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, true) }
+            .newDocumentBuilder()
 
     private fun parseManifest(): Document {
         val cwd = File(System.getProperty("user.dir") ?: ".").absoluteFile
         var dir: File? = cwd
         while (dir != null) {
             val file = File(dir, "src/main/AndroidManifest.xml")
-            if (file.isFile) return DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(file)
+            if (file.isFile) return documentBuilder().parse(file)
             dir = dir.parentFile
         }
         error(

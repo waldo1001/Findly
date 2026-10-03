@@ -181,12 +181,14 @@
              fallback does not run in one of our own services — WorkManager runs expedited work
              inside its own androidx.work.impl.foreground.SystemForegroundService, and
              LocateRequestWorker.getForegroundInfo() (specs/009 §5.1 option 2) returns a
-             location-typed ForegroundInfo for it. Android 14+ hard-enforces that a typed
-             foreground service declare its type in the manifest entry that actually runs it, so
-             without this override the library's own service entry has no type at all and the
-             entire fallback throws — caught by lintVitalRelease, not by any local gate
-             (`SpecifyForegroundServiceType`). tools:node="merge" overrides the library's manifest
-             entry for this app the same way the androidx.startup provider below already does.
+             location-typed ForegroundInfo for it. The library's own service entry declares no
+             type, and from API 29 the platform rejects a startForeground() type that is not a
+             subset of the manifest's: without this override, LocateRequestWorker's location type
+             throws IllegalArgumentException on Android 10-11 (WorkManager's API 29 start path does
+             not catch it, so the process crashes) — caught by lintVitalRelease, not by any local
+             gate (`SpecifyForegroundServiceType`). From API 31 expedited work never runs here.
+             tools:node="merge" overrides the library's manifest entry for this app the same way
+             the androidx.startup provider below already does.
 
              This single SystemForegroundService instance is shared by every expedited worker in
              the app. GeofenceConfigSyncWorker (A43) also runs through it, with a TYPELESS
