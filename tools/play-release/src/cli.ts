@@ -11,7 +11,7 @@
 
 import { appendFileSync } from "node:fs";
 import { fetchAccessToken, parseServiceAccount } from "./auth";
-import type { FetchFn } from "./auth";
+import type { FetchFn, MaskFn } from "./auth";
 import { PACKAGE_NAME } from "./config";
 import { PlayClient } from "./play-client";
 import { checkNotes } from "./plan";
@@ -23,6 +23,8 @@ export interface CliDeps {
   /** Current time in milliseconds. */
   now: () => number;
   log: (line: string) => void;
+  /** Registers a derived credential (signed assertion, access token) for redaction. Defaults to `::add-mask::`. */
+  mask: MaskFn;
 }
 
 function parseDryRun(value: string | undefined): boolean {
@@ -44,6 +46,9 @@ export async function run(env: Record<string, string | undefined>, deps: Partial
   // One log call = one physical line. Text that reaches here can include Play's own error
   // messages; a newline in one must not be able to begin a `::workflow-command::` line.
   const log = (line: string): void => sink(line.replace(/[\r\n]+/g, " "));
+  // `::add-mask::` makes the runner redact the value from every later log line. The command line is
+  // consumed by the runner, so the value itself is not printed.
+  const mask: MaskFn = deps.mask ?? ((secret: string) => log(`::add-mask::${escapeAnnotation(secret)}`));
 
   const summaryPath = env.GITHUB_STEP_SUMMARY === undefined || env.GITHUB_STEP_SUMMARY === "" ? undefined : env.GITHUB_STEP_SUMMARY;
   const writeSummary = (markdown: string): void => {
@@ -62,9 +67,12 @@ export async function run(env: Record<string, string | undefined>, deps: Partial
     if (!notes.ok) throw new Error(notes.error.message);
     const serviceAccount = parseServiceAccount(env.PLAY_SERVICE_ACCOUNT_JSON);
 
+    // The assertion and the token are masked inside fetchAccessToken (before the request and right
+    // after the exchange), so nothing is narrated until both are registered.
+    const token = await fetchAccessToken(fetchFn, serviceAccount, Math.floor(now() / 1000), mask);
     log(`${dryRun ? "Dry run" : "Real run"}: promoting the Internal testing release of ${PACKAGE_NAME} to Production and Closed testing – Alpha.`);
-    const token = await fetchAccessToken(fetchFn, serviceAccount, Math.floor(now() / 1000));
-    const api = new PlayClient(fetchFn, token, PACKAGE_NAME);
+    // A dry-run client cannot commit at all — structural, on top of release()'s own flag check.
+    const api = new PlayClient(fetchFn, token, PACKAGE_NAME, { dryRun });
     const outcome = await release({ api, notes: env.RELEASE_NOTES, dryRun, log });
 
     writeSummary(renderSummary({ status: "ok", outcome, dryRun }));

@@ -3,10 +3,15 @@
 // properties:
 //   - bad release notes fail before a single Play call is made;
 //   - a dry run validates the edit, then deletes it — it never commits;
-//   - "nothing to release" and every failure delete the edit — only a successful commit keeps it;
-//   - a failure surfaces the *original* error, whatever the cleanup does.
+//   - a change already in review is never cancelled: the commit says ERROR_IF_IN_REVIEW and a
+//     refusal for that reason is a clean "stopped", not a failure;
+//   - "nothing to release", "stopped" and every failure delete the edit — only a successful commit
+//     keeps it;
+//   - a failure surfaces the *original* error, whatever the cleanup does;
+//   - the production state shown afterwards is read-only and best effort: it can never fail a run.
 
-import type { PlayApi } from "./play-client";
+import { PlayApiError } from "./play-client";
+import type { PlayApi, ReleaseSummary } from "./play-client";
 import { checkNotes, plan } from "./plan";
 import type { PlanErrorCode } from "./plan";
 
@@ -70,6 +75,24 @@ export interface ReleaseOptions {
 
 const list = (codes: string[]): string => (codes.length > 0 ? codes.join(", ") : "none");
 
+const NEXT_STEP = "Next step: in Play Console open Publishing overview and choose Send changes for review.";
+
+/** Any commit refusal other than "already in review" tells the operator what to do by hand. */
+function withNextStep(error: unknown): unknown {
+  if (!(error instanceof PlayApiError) || error.status === 0) return error;
+  const end = /[.!?]$/.test(error.message) ? "" : ".";
+  return new PlayApiError(`${error.message}${end} ${NEXT_STEP}`, error.status, error.reasons);
+}
+
+function toProductionRelease(summary: ReleaseSummary): ProductionRelease {
+  return {
+    name: summary.releaseName,
+    versionCodes: summary.versionCodes ?? [],
+    status: summary.status,
+    lifecycleState: summary.releaseLifecycleState,
+  };
+}
+
 export async function release(options: ReleaseOptions): Promise<Outcome> {
   const { api, dryRun } = options;
   const log = options.log ?? (() => undefined);
@@ -87,6 +110,18 @@ export async function release(options: ReleaseOptions): Promise<Outcome> {
     } catch (error) {
       const reason = error instanceof Error ? error.message : "unknown error";
       log(`Warning: could not delete the Play edit (${reason}). It was not committed and expires on its own.`);
+    }
+  };
+
+  // Best effort, never throws: the state shown in the summary must not be able to fail a run whose
+  // real work is already done (or deliberately not done).
+  const readProduction = async (): Promise<ProductionRelease[] | undefined> => {
+    try {
+      return (await api.listReleases("production")).map(toProductionRelease);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : "unknown error";
+      log(`Warning: could not read the production release state (${reason}).`);
+      return undefined;
     }
   };
 
@@ -112,11 +147,11 @@ export async function release(options: ReleaseOptions): Promise<Outcome> {
         versionCodes: decision.versionCodes,
         name: decision.name,
         before: { production: decision.production, alpha: decision.alpha },
-        productionNow: undefined,
+        productionNow: await readProduction(),
       };
     }
 
-    log(`Internal testing: completed release with version code(s) ${list(decision.versionCodes)}.`);
+    log(`Internal testing: completed release ${decision.name ? `${decision.name} ` : ""}with version code(s) ${list(decision.versionCodes)}.`);
     log(`Production now: ${list(decision.before.production)}. Alpha now: ${list(decision.before.alpha)}.`);
     log(
       `${dryRun ? "Would set" : "Setting"} production and alpha to version code(s) ${list(decision.versionCodes)} ` +
@@ -128,26 +163,48 @@ export async function release(options: ReleaseOptions): Promise<Outcome> {
     await api.validate(editId);
     log("Play validated the edit.");
 
-    const outcome = {
+    const facts = {
       versionCodes: decision.versionCodes,
       name: decision.name,
-      languages: decision.languages,
-      notesLength: decision.notes.length,
       before: decision.before,
-      productionNow: undefined,
     };
 
     if (dryRun) {
       await discard();
       finished = true;
       log("Dry run: the edit was discarded, nothing changed.");
-      return { kind: "dry-run", ...outcome };
+      return {
+        kind: "dry-run",
+        ...facts,
+        languages: decision.languages,
+        notesLength: decision.notes.length,
+        productionNow: await readProduction(),
+      };
     }
 
-    await api.commit(editId);
+    let result: Awaited<ReturnType<PlayApi["commit"]>>;
+    try {
+      result = await api.commit(editId);
+    } catch (error) {
+      throw withNextStep(error);
+    }
+
+    if (result === "changes-in-review") {
+      log("Production has changes in review — stopped. Nothing was changed; the in-review change was not cancelled.");
+      await discard();
+      finished = true;
+      return { kind: "stopped", reason: "changes-in-review", ...facts, productionNow: await readProduction() };
+    }
+
     finished = true;
     log("Committed: the change is sent for review.");
-    return { kind: "committed", ...outcome };
+    return {
+      kind: "committed",
+      ...facts,
+      languages: decision.languages,
+      notesLength: decision.notes.length,
+      productionNow: await readProduction(),
+    };
   } finally {
     // Reached on success too; `finished` says whether the edit was already settled (committed
     // or discarded above). Only a failure in between leaves it open.

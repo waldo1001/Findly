@@ -12,11 +12,14 @@ const REQUEST_TIMEOUT_MS = 60_000;
 
 export class PlayApiError extends Error {
   readonly status: number;
+  /** Machine-readable error reasons from the response (`error.details[].reason`, `error.errors[].reason`). */
+  readonly reasons: string[];
 
-  constructor(message: string, status: number) {
+  constructor(message: string, status: number, reasons: string[] = []) {
     super(message);
     this.name = "PlayApiError";
     this.status = status;
+    this.reasons = reasons;
   }
 }
 
@@ -77,16 +80,35 @@ function playMessage(payload: unknown): string | undefined {
   return typeof message === "string" && message !== "" ? message : undefined;
 }
 
+/** Google's error body carries the reason twice over: `details[]` (ErrorInfo) and the legacy `errors[]`. */
+function playReasons(payload: unknown): string[] {
+  if (!isRecord(payload) || !isRecord(payload.error)) return [];
+  const entries = [payload.error.details, payload.error.errors].flatMap((list) => (Array.isArray(list) ? list : []));
+  return entries.flatMap((entry: unknown) => (isRecord(entry) && typeof entry.reason === "string" ? [entry.reason] : []));
+}
+
+/** The path as shown in messages: without the query string. */
+const labelOf = (path: string): string => path.split("?")[0] ?? path;
+
+/** CHANGES_ALREADY_IN_REVIEW, changesAlreadyInReview, … all compare equal. */
+const normalizeReason = (reason: string): string => reason.replace(/[^a-z0-9]/gi, "").toLowerCase();
+
+const IN_REVIEW_REASON = normalizeReason("CHANGES_ALREADY_IN_REVIEW");
+
+const optionalString = (value: unknown): string | undefined => (typeof value === "string" ? value : undefined);
+
 export class PlayClient implements PlayApi {
   private readonly base: string;
+  private readonly dryRun: boolean;
 
   constructor(
     private readonly fetchFn: FetchFn,
     private readonly accessToken: string,
     packageName: string,
-    _options: ClientOptions = {},
+    options: ClientOptions = {},
   ) {
     this.base = `${API_ROOT}/${encodeURIComponent(packageName)}`;
+    this.dryRun = options.dryRun === true;
   }
 
   private async request(
@@ -111,7 +133,7 @@ export class PlayClient implements PlayApi {
     } catch (error) {
       // Only the error's *name* is kept (e.g. TimeoutError): its message may quote the request.
       const name = error instanceof Error ? error.name : "unknown";
-      throw new PlayApiError(`Play API ${method} ${path} failed: network error (${name}).`, 0);
+      throw new PlayApiError(`Play API ${method} ${labelOf(path)} failed: network error (${name}).`, 0);
     }
 
     const payload = parseJson(await response.text());
@@ -125,7 +147,11 @@ export class PlayClient implements PlayApi {
 
   private failure(method: string, path: string, status: number, payload: unknown): PlayApiError {
     const message = playMessage(payload);
-    return new PlayApiError(`Play API ${method} ${path} failed (HTTP ${status})${message ? `: ${message}` : "."}`, status);
+    return new PlayApiError(
+      `Play API ${method} ${labelOf(path)} failed (HTTP ${status})${message ? `: ${message}` : "."}`,
+      status,
+      playReasons(payload),
+    );
   }
 
   /** Like `request`, but a 404 is an error too. */
@@ -171,15 +197,52 @@ export class PlayClient implements PlayApi {
   }
 
   async commit(editId: string): Promise<CommitResult> {
-    await this.call("POST", `/edits/${encodeURIComponent(editId)}:commit`);
-    return "committed";
+    if (this.dryRun) {
+      // Structural guard behind the caller's own dry-run flag: no request is even built.
+      throw new Error("Refusing to commit: this client was created for a dry run.");
+    }
+    // Play's default (CANCEL_IN_REVIEW_AND_SUBMIT) would silently cancel changes already in review
+    // and resubmit; ERROR_IF_IN_REVIEW makes Play refuse instead. changesNotSentForReview is
+    // deliberately never set: an edit must go to review, not sit unsent.
+    const path = `/edits/${encodeURIComponent(editId)}:commit?changesInReviewBehavior=ERROR_IF_IN_REVIEW`;
+    try {
+      await this.call("POST", path);
+      return "committed";
+    } catch (error) {
+      const refused =
+        error instanceof PlayApiError &&
+        error.status === 400 &&
+        error.reasons.some((reason) => normalizeReason(reason) === IN_REVIEW_REASON);
+      if (refused) return "changes-in-review";
+      throw error;
+    }
   }
 
   async deleteEdit(editId: string): Promise<void> {
     await this.call("DELETE", `/edits/${encodeURIComponent(editId)}`);
   }
 
-  async listReleases(_track: string): Promise<ReleaseSummary[]> {
-    throw new Error("not implemented");
+  async listReleases(track: string): Promise<ReleaseSummary[]> {
+    const payload = await this.call("GET", `/tracks/${encodeURIComponent(track)}/releases`);
+    const releases = isRecord(payload) && Array.isArray(payload.releases) ? payload.releases : [];
+    return releases.flatMap((entry: unknown): ReleaseSummary[] => {
+      if (!isRecord(entry)) return [];
+      const versionCodes = Array.isArray(entry.versionCodes)
+        ? entry.versionCodes.filter((code): code is string => typeof code === "string")
+        : undefined;
+      const summary: ReleaseSummary = {};
+      const releaseName = optionalString(entry.releaseName);
+      const trackName = optionalString(entry.track);
+      const status = optionalString(entry.status);
+      const releaseLifecycleState = optionalString(entry.releaseLifecycleState);
+      const lastUpdateTime = optionalString(entry.lastUpdateTime);
+      if (releaseName !== undefined) summary.releaseName = releaseName;
+      if (trackName !== undefined) summary.track = trackName;
+      if (versionCodes !== undefined) summary.versionCodes = versionCodes;
+      if (status !== undefined) summary.status = status;
+      if (releaseLifecycleState !== undefined) summary.releaseLifecycleState = releaseLifecycleState;
+      if (lastUpdateTime !== undefined) summary.lastUpdateTime = lastUpdateTime;
+      return [summary];
+    });
   }
 }
