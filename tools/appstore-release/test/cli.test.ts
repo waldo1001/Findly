@@ -52,16 +52,28 @@ function routes(versions: VersionFx[]): Route[] {
 }
 
 async function cli(envOver: Record<string, string | undefined>, rs: Route[]) {
-  const stub = createStubFetch(rs);
+  const events: string[] = [];
+  const masked: string[] = [];
+  const stub = createStubFetch([
+    (call) => {
+      events.push(`fetch ${call.method} ${new URL(call.url).pathname}`);
+      return undefined;
+    },
+    ...rs,
+  ]);
   const out: string[] = [];
   const summaries: string[] = [];
   const code = await runCli({
     env: { ...ENV, ...envOver },
     fetch: stub.fetch,
     log: (l) => out.push(l),
+    mask: (v) => {
+      masked.push(v);
+      events.push(`mask ${v}`);
+    },
     writeSummary: (md) => summaries.push(md),
   });
-  return { code, stub, out: out.join("\n"), summary: summaries.join("\n") };
+  return { code, stub, out: out.join("\n"), summary: summaries.join("\n"), masked, events };
 }
 
 describe("runCli", () => {
@@ -94,6 +106,26 @@ describe("runCli", () => {
       expect(text).not.toContain(token);
       expect(text).not.toMatch(/BEGIN [A-Z ]*PRIVATE KEY/);
     }
+  });
+
+  it("registers the decoded key and every minted token with ::add-mask:: before use", async () => {
+    const r = await cli({}, routes([{ id: "v120", versionString: "1.2.0", state: "WAITING_FOR_REVIEW" }]));
+    const token = r.stub.calls[0]!.headers.authorization!.slice("Bearer ".length);
+    expect(r.masked).toContain(token);
+    // every line of the key body is masked (add-mask is single-line), headers/footers are not needed
+    const bodyLines = pem.split("\n").filter((l) => l.length > 0 && !l.startsWith("-----"));
+    expect(bodyLines.length).toBeGreaterThan(0);
+    for (const line of bodyLines) expect(r.masked).toContain(line);
+    expect(r.masked.every((v) => !v.includes("\n"))).toBe(true);
+    // ordering: key masked first, token masked before the first request that carries it
+    const firstFetch = r.events.findIndex((e) => e.startsWith("fetch "));
+    expect(r.events.indexOf(`mask ${bodyLines[0]}`)).toBeLessThan(firstFetch);
+    expect(r.events.indexOf(`mask ${token}`)).toBeLessThan(firstFetch);
+  });
+
+  it("nothing is masked when configuration is invalid (no key was decoded)", async () => {
+    const r = await cli({ DRY_RUN: "maybe" }, routes([]));
+    expect(r.masked.some((v) => v.length > 40)).toBe(false);
   });
 
   it("DRY_RUN on an editable version: exit 0, still GET only, summary lists the planned steps", async () => {

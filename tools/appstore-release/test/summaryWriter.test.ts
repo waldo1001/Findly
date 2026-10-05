@@ -34,4 +34,25 @@ describe("makeSummaryWriter ($GITHUB_STEP_SUMMARY)", () => {
     expect(() => write("## hello")).not.toThrow();
     expect(printed).toEqual(["## hello"]);
   });
+
+  it("the stdout fallback goes through per-line oneLine: no line can start a workflow command", () => {
+    const printed: string[] = [];
+    const evil = "## ok\n::add-mask::oops\n\u2028::error::spoof\nfine";
+    makeSummaryWriter(undefined, { append: () => {}, print: (s) => printed.push(s) })(evil);
+    const lines = printed.join("\n").split("\n");
+    expect(lines.some((l) => l.startsWith("::"))).toBe(false);
+    expect(lines).toContain("## ok");
+    expect(lines).toContain("fine");
+  });
+
+  it("the fallback after a failed file write is sanitised the same way", () => {
+    const printed: string[] = [];
+    makeSummaryWriter("/nope/summary.md", {
+      append: () => {
+        throw new Error("ENOENT");
+      },
+      print: (s) => printed.push(s),
+    })("::stop-commands::x");
+    expect(printed.join("\n").startsWith("::")).toBe(false);
+  });
 });

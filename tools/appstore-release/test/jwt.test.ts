@@ -148,4 +148,16 @@ describe("createTokenProvider", () => {
     expect(claims.iat).toBe(now);
     expect(claims.exp - claims.iat).toBeLessThanOrEqual(20 * 60);
   });
+
+  it("announces every minted token through onMint (so it can be masked), and only when it mints", () => {
+    let now = 1_000_000;
+    const minted: string[] = [];
+    const provider = createTokenProvider({ ...BASE, privateKey: privatePem, clock: () => now, onMint: (t) => minted.push(t) });
+    const t1 = provider();
+    provider();
+    expect(minted).toEqual([t1]);
+    now += 16 * 60;
+    const t2 = provider();
+    expect(minted).toEqual([t1, t2]);
+  });
 });
