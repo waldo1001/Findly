@@ -376,13 +376,24 @@ describe("planEdit: review submissions", () => {
   });
 
   describe("every non-terminal submission state is checked before any change", () => {
-    it.each(["UNRESOLVED_ISSUES", "WAITING_FOR_REVIEW", "IN_REVIEW", "CANCELING", "COMPLETING"])("FAILS on a submission in %s", (state) => {
+    it.each(["UNRESOLVED_ISSUES", "WAITING_FOR_REVIEW", "IN_REVIEW"])("FAILS on a submission in %s: resolve or resubmit it", (state) => {
       const p = plan(details({ submissions: [ref("rsX", state)] }));
       expect(p.kind).toBe("fail");
       if (p.kind !== "fail") return;
       expect(p.message).toContain(state);
       expect(p.message).toContain("rsX");
       expect(p.message).toContain("resolve or resubmit it in App Store Connect");
+      expect(p.message).not.toMatch(/wait a few minutes/i);
+    });
+
+    it.each(["CANCELING", "COMPLETING"])("FAILS on a submission in %s: transient, wait a few minutes and re-run", (state) => {
+      const p = plan(details({ submissions: [ref("rsX", state)] }));
+      expect(p.kind).toBe("fail");
+      if (p.kind !== "fail") return;
+      expect(p.message).toContain(state);
+      expect(p.message).toContain("rsX");
+      expect(p.message).toContain("wait a few minutes and re-run");
+      expect(p.message).not.toContain("resolve or resubmit");
     });
 
     it("still fails when a reusable draft exists next to the blocking submission", () => {
@@ -460,11 +471,19 @@ describe("planCreate: every blocker is checked before the version is created", (
     });
   });
 
-  it.each(["UNRESOLVED_ISSUES", "WAITING_FOR_REVIEW", "IN_REVIEW", "CANCELING", "COMPLETING"])("FAILS on a submission in %s", (state) => {
+  it.each(["UNRESOLVED_ISSUES", "WAITING_FOR_REVIEW", "IN_REVIEW"])("FAILS on a submission in %s: resolve or resubmit it", (state) => {
     const p = planCreate({ ...base, submissions: [ref("rsX", state)] });
     expect(p.kind).toBe("fail");
     expect(p.kind === "fail" && p.message).toContain(state);
     expect(p.kind === "fail" && p.message).toContain("resolve or resubmit it in App Store Connect");
+  });
+
+  it.each(["CANCELING", "COMPLETING"])("FAILS on a submission in %s: wait a few minutes and re-run", (state) => {
+    const p = planCreate({ ...base, submissions: [ref("rsX", state)] });
+    expect(p.kind).toBe("fail");
+    expect(p.kind === "fail" && p.message).toContain(state);
+    expect(p.kind === "fail" && p.message).toContain("wait a few minutes and re-run");
+    expect(p.kind === "fail" && p.message).not.toContain("resolve or resubmit");
   });
 
   it("FAILS when an open draft already holds items (the new version could not be added to it safely)", () => {
@@ -492,6 +511,26 @@ describe("planCreate: every blocker is checked before the version is created", (
     expect(p.kind).toBe("fail");
     expect(p.kind === "fail" && p.message).toMatch(/demo account/i);
     expect(p.kind === "fail" && p.message).not.toContain("secret.person");
+  });
+
+  describe("the advice never tells you to edit a live (read-only) version", () => {
+    const cases: Array<[string, ReturnType<typeof parseReviewDetail>]> = [
+      ["no review detail at all", null],
+      ["sign-in not required", parseReviewDetail(reviewDetailDoc({ demoAccountRequired: false, demoAccountName: "x@example.test" }))],
+      ["blank demo account name", parseReviewDetail(reviewDetailDoc({ demoAccountRequired: true, demoAccountName: "  " }))],
+    ];
+    it.each(cases)("%s: create the NEW version, fill in its App Review information, re-run", (_label, proxy) => {
+      const p = planCreate({ ...base, proxyReviewDetail: proxy });
+      expect(p.kind).toBe("fail");
+      if (p.kind !== "fail") return;
+      expect(p.message).toMatch(/create version 1\.2\.1 in App Store Connect/i);
+      expect(p.message).toMatch(/fill in its App Review information/i);
+      expect(p.message).toMatch(/re-run/i);
+      expect(p.message).toMatch(/read-only/i);
+      expect(p.message).toMatch(/edit path/i);
+      // the old, impossible advice ("Open it in App Store Connect and fill in App Review") is gone
+      expect(p.message).not.toMatch(/open it in App Store Connect/i);
+    });
   });
 
   it("without a previous live version (first release) there is no proxy to check", () => {

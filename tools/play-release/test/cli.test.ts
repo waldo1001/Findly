@@ -198,13 +198,25 @@ describe("run() — derived credentials are masked, the token endpoint is pinned
     expect(result.masked).toEqual([ASSERTION(), TOKEN]);
   });
 
-  it("without an injected hook, masks go out as ::add-mask:: workflow commands (assertion, then token)", async () => {
-    const result = await runCli({ DRY_RUN: "true" }, {}, undefined, false);
+  it("without an injected hook, on GitHub Actions, masks go out as ::add-mask:: workflow commands (assertion, then token)", async () => {
+    const result = await runCli({ DRY_RUN: "true", GITHUB_ACTIONS: "true" }, {}, undefined, false);
     const masks = result.out.filter((line) => line.startsWith("::add-mask::"));
     expect(masks).toEqual([`::add-mask::${ASSERTION()}`, `::add-mask::${TOKEN}`]);
     // ...and they are the very first thing emitted, ahead of any narration.
     expect(result.out.indexOf(masks[0]!)).toBeLessThan(result.out.findIndex((l) => !l.startsWith("::add-mask::")));
   });
+
+  it.each([undefined, "", "false", "TRUE", "1"])(
+    "without an injected hook and GITHUB_ACTIONS=%j (a local run), the signed assertion and the token are NOT printed",
+    async (value) => {
+      const result = await runCli({ DRY_RUN: "true", GITHUB_ACTIONS: value }, {}, undefined, false);
+      expect(result.exitCode).toBe(0);
+      const all = result.out.join("\n");
+      expect(all).not.toContain("::add-mask::");
+      expect(all).not.toContain(ASSERTION());
+      expect(all).not.toContain(TOKEN);
+    },
+  );
 
   it("a key file whose token_uri is not Google's is rejected before any network call, without echoing it", async () => {
     const doctored = JSON.stringify({ ...JSON.parse(saJson), token_uri: "https://evil.example/collect" });

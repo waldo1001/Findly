@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { escapeHtml, maskCommand, oneLine } from "../src/text";
+import { createMasker, escapeHtml, maskCommand, oneLine } from "../src/text";
 
 describe("oneLine (log text must never start a workflow command)", () => {
   it("defuses a line that would start with ::", () => {
@@ -42,5 +42,27 @@ describe("maskCommand", () => {
 describe("escapeHtml", () => {
   it("escapes &, < and >", () => {
     expect(escapeHtml("a & <b>")).toBe("a &amp; &lt;b&gt;");
+  });
+});
+
+describe("createMasker (credentials must not be printed outside GitHub Actions)", () => {
+  it("on GitHub Actions (GITHUB_ACTIONS=true) prints the add-mask command", () => {
+    const printed: string[] = [];
+    createMasker({ GITHUB_ACTIONS: "true" }, (l) => printed.push(l))("abc.def");
+    expect(printed).toEqual(["::add-mask::abc.def"]);
+  });
+
+  it.each([undefined, "", "false", "TRUE", "1", "yes"])("prints nothing when GITHUB_ACTIONS=%j (a local run must not echo the key or tokens)", (value) => {
+    const printed: string[] = [];
+    const mask = createMasker({ GITHUB_ACTIONS: value }, (l) => printed.push(l));
+    mask("-----BEGIN-body-line");
+    mask("eyJhbGciOiJFUzI1NiJ9.payload.signature");
+    expect(printed).toEqual([]);
+  });
+
+  it("does not look at anything but GITHUB_ACTIONS", () => {
+    const printed: string[] = [];
+    createMasker({ CI: "true", GITHUB_STEP_SUMMARY: "/tmp/x" }, (l) => printed.push(l))("secret");
+    expect(printed).toEqual([]);
   });
 });

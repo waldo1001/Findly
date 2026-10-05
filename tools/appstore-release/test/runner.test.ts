@@ -277,11 +277,12 @@ describe("new version (live run)", () => {
     expect(mutations(stub)).toEqual([]);
   });
 
-  it("a previous live version without a demo account fails BEFORE the version is created", async () => {
+  it("a previous live version without a demo account fails BEFORE the version is created, with advice that can actually be followed", async () => {
     const { stub, result } = await run({ versions: [LIVE_110], proxyReview: { demoAccountRequired: false } }, false);
     expect(result.outcome).toBe("failed");
     expect(result.message).toMatch(/demo account/i);
     expect(result.message).toContain("1.1.0");
+    expect(result.message).toMatch(/create version 1\.2\.0 in App Store Connect/i);
     expect(mutations(stub)).toEqual([]);
   });
 
@@ -410,7 +411,9 @@ describe("unresolved review submissions block everything, before any change", ()
         const { stub, result } = await run({ versions: [EDITABLE], submissions: [{ id: "rsX", state }] }, dryRun);
         expect(result.outcome).toBe("failed");
         expect(result.message).toContain(state);
-        expect(result.message).toContain("resolve or resubmit it in App Store Connect");
+        expect(result.message).toContain(
+          state === "CANCELING" || state === "COMPLETING" ? "wait a few minutes and re-run" : "resolve or resubmit it in App Store Connect",
+        );
         expect(mutations(stub)).toEqual([]);
         expect(stub.calls.every((c) => c.method === "GET")).toBe(true);
       });
