@@ -252,6 +252,41 @@ describe("run() upload-internal — failures", () => {
     expect(annotations(result.out, "error")[0]).not.toContain("Publishing overview");
   });
 
+  it("a commit Play did not confirm (503): exit 1, the annotation and the summary say it may have been applied and that a re-run is safe", async () => {
+    const result = await runCli({}, { [COMMIT]: playError(503, "The service is currently unavailable.", "UNAVAILABLE") });
+    expect(result.exitCode).toBe(1);
+    const annotation = annotations(result.out, "error")[0]!;
+    expect(annotation).toContain("The service is currently unavailable.");
+    expect(annotation).toMatch(/did not confirm the commit/i);
+    expect(annotation).toMatch(/may have been applied/i);
+    expect(annotation).toMatch(/re-run is safe/i);
+    expect(result.summary).toMatch(/did not confirm the commit/i);
+    expect(result.summary).toMatch(/Failed/);
+    expect(result.play).toEqual([...OPEN, COMMIT, DELETE_EDIT]);
+  });
+
+  it("a commit that fails with a network error says the same, and a failing cleanup then does not claim 'not committed'", async () => {
+    const result = await runCli(
+      {},
+      {
+        [COMMIT]: () => {
+          throw new Error("connect ECONNRESET");
+        },
+        [DELETE_EDIT]: playError(404, "Edit not found.", "NOT_FOUND"),
+      },
+    );
+    expect(result.exitCode).toBe(1);
+    expect(annotations(result.out, "error")[0]).toMatch(/did not confirm the commit/i);
+    const warning = result.out.find((l) => /could not delete/i.test(l))!;
+    expect(warning).toMatch(/not confirmed/i);
+    expect(warning).not.toMatch(/was not committed/i);
+  });
+
+  it("a definite refusal (400) does not get the 'may have been applied' wording", async () => {
+    const result = await runCli({}, { [COMMIT]: playError(400, "Version code 235 has already been used.") });
+    expect(annotations(result.out, "error")[0]).not.toMatch(/did not confirm|may have been applied/i);
+  });
+
   it("a rejected token exchange fails the run before any Play call", async () => {
     const result = await runCli({}, {}, jsonResponse({ error: "invalid_grant", error_description: "Invalid JWT Signature." }, 400));
     expect(result.exitCode).toBe(1);

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { PlayApiError, PlayClient, requiresChangesNotSentForReview } from "../src/play-client";
 import type { TrackBody } from "../src/plan";
 import internalCompleted from "./fixtures/internal-completed.json";
@@ -424,6 +424,40 @@ describe("PlayClient.uploadBundle — edits.bundles.upload", () => {
     const { fake, play } = uploadClient();
     await play.uploadBundle(EDIT_ID, BUNDLE);
     expect(fake.calls[0]!.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  // A59 review round 1: "a signal is passed" would still pass if the upload silently fell back to the
+  // 60 s limit of the JSON calls. `AbortSignal.timeout` exposes no duration, so the call is spied on.
+  describe("timeouts", () => {
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it("the bundle upload gets 300 s (Google recommends generous timeouts for edits.bundles.upload), not the 60 s of the JSON calls", async () => {
+      const timeout = vi.spyOn(AbortSignal, "timeout");
+      const { fake, play } = uploadClient();
+      await play.uploadBundle(EDIT_ID, BUNDLE);
+      expect(fake.calls).toHaveLength(1);
+      expect(timeout).toHaveBeenCalledTimes(1);
+      expect(timeout).toHaveBeenCalledWith(300_000);
+    });
+
+    it("every other call keeps the 60 s limit", async () => {
+      const timeout = vi.spyOn(AbortSignal, "timeout");
+      const { fake, play } = uploadClient({ [COMMIT_UNSENT]: jsonResponse({ id: EDIT_ID }) });
+      await play.insertEdit();
+      await play.getTrack(EDIT_ID, "internal");
+      await play.listListingLanguages(EDIT_ID);
+      await play.updateTrack(EDIT_ID, { track: "internal", releases: [{ versionCodes: ["235"], status: "completed" }] });
+      await play.validate(EDIT_ID);
+      await play.commit(EDIT_ID);
+      await play.commit(EDIT_ID, { changesNotSentForReview: true });
+      await play.deleteEdit(EDIT_ID);
+      await play.listReleases("production");
+      expect(fake.calls).toHaveLength(9);
+      expect(timeout).toHaveBeenCalledTimes(9);
+      for (const call of timeout.mock.calls) expect(call).toEqual([60_000]);
+    });
   });
 
   it("a dry-run client refuses to upload — structurally, without sending any request", async () => {

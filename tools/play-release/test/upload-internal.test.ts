@@ -228,6 +228,91 @@ describe("uploadInternal() — every other failure fails the run and deletes the
   });
 });
 
+// A59 review round 1: after a 5xx or a network failure ON THE COMMIT, Play may or may not have applied
+// it. The run must say so (release mode's NOT_CONFIRMED wording), not claim "it was not committed".
+describe("uploadInternal() — a commit Play did not confirm (5xx / network): it may have been applied", () => {
+  const networkDown: Reply = () => {
+    throw new Error("connect ECONNRESET");
+  };
+
+  it.each([
+    ["a 500", playError(500, "Backend error", "INTERNAL"), /HTTP 500.*Backend error/],
+    ["a 503", playError(503, "The service is currently unavailable.", "UNAVAILABLE"), /HTTP 503.*currently unavailable/],
+    ["a network failure", networkDown, /network error/i],
+  ])("%s on the commit: fails, keeps Play's message, says it may have been applied and that a re-run is safe", async (_label, reply, original) => {
+    const { fake, run } = setup({ [COMMIT]: reply });
+    const failure = run();
+    await expect(failure).rejects.toThrow(original);
+    await expect(failure).rejects.toThrow(/did not confirm the commit/i);
+    await expect(failure).rejects.toThrow(/may have been applied/i);
+    await expect(failure).rejects.toThrow(/re-run is safe/i);
+    await expect(failure).rejects.toThrow(/already used/i);
+    await expect(failure).rejects.toBeInstanceOf(PlayApiError);
+    // Still no retry with the flag, and the edit is still discarded (best effort).
+    expect(fake.sequence()).toEqual([...OPEN, COMMIT, DELETE_EDIT]);
+  });
+
+  it("keeps the HTTP status and reasons of the original error", async () => {
+    const { run } = setup({ [COMMIT]: playError(503, "Unavailable", "UNAVAILABLE") });
+    const error = (await run().catch((e: unknown) => e)) as PlayApiError;
+    expect(error.status).toBe(503);
+  });
+
+  it("a 5xx on the RETRY commit says the same", async () => {
+    const { fake, run } = setup({
+      [COMMIT]: changesCannotBeSentAutomatically(),
+      [COMMIT_UNSENT]: playError(502, "Bad gateway", "UNAVAILABLE"),
+    });
+    const failure = run();
+    await expect(failure).rejects.toThrow(/HTTP 502.*Bad gateway/);
+    await expect(failure).rejects.toThrow(/did not confirm the commit/i);
+    expect(fake.sequence()).toEqual([...OPEN, COMMIT, COMMIT_UNSENT, DELETE_EDIT]);
+  });
+
+  it("the cleanup warning after it does not claim 'not committed' — it was not confirmed", async () => {
+    const { run, log } = setup({
+      [COMMIT]: playError(503, "Unavailable", "UNAVAILABLE"),
+      [DELETE_EDIT]: playError(404, "Edit not found.", "NOT_FOUND"),
+    });
+    await expect(run()).rejects.toThrow(/Unavailable/);
+    const warning = log.find((l) => /could not delete/i.test(l))!;
+    expect(warning).toBeDefined();
+    expect(warning).not.toMatch(/was not committed|never committed/i);
+    expect(warning).toMatch(/not confirmed/i);
+  });
+
+  it.each([
+    ["an unrelated 400", playError(400, "Version code 235 has already been used.")],
+    ["a 403", playError(403, "The caller does not have permission", "PERMISSION_DENIED")],
+    ["a 404", playError(404, "Edit not found.", "NOT_FOUND")],
+    ["a 429", playError(429, "Quota exceeded.", "RESOURCE_EXHAUSTED")],
+  ])("%s on the commit is a definite refusal: no 'may have been applied' wording, and the cleanup warning still says 'not committed'", async (_label, reply) => {
+    const { run, log } = setup({ [COMMIT]: reply, [DELETE_EDIT]: playError(500, "oops", "INTERNAL") });
+    const failure = run();
+    await expect(failure).rejects.not.toThrow(/did not confirm|may have been applied/i);
+    expect(log.find((l) => /could not delete/i.test(l))).toMatch(/was not committed/i);
+  });
+
+  it("a failing UPLOAD or track update (5xx) never reached the commit: the cleanup warning still says 'not committed', and no 'may have been applied'", async () => {
+    const failing: Record<string, Reply>[] = [
+      { [UPLOAD]: playError(503, "Unavailable", "UNAVAILABLE") },
+      { [INTERNAL_PUT]: playError(503, "Unavailable", "UNAVAILABLE") },
+    ];
+    for (const overrides of failing) {
+      const { run, log } = setup({ ...overrides, [DELETE_EDIT]: playError(500, "oops", "INTERNAL") });
+      const failure = run();
+      await expect(failure).rejects.not.toThrow(/did not confirm|may have been applied/i);
+      expect(log.find((l) => /could not delete/i.test(l))).toMatch(/was not committed/i);
+    }
+  });
+
+  it("a deferred upload whose cleanup fails still says 'not committed' (Play refused the commit outright)", async () => {
+    const { run, log } = setup({ [COMMIT]: changesAlreadyInReview(), [DELETE_EDIT]: playError(500, "oops", "INTERNAL") });
+    await run();
+    expect(log.find((l) => /could not delete/i.test(l))).toMatch(/was not committed/i);
+  });
+});
+
 describe("uploadInternal() — log hygiene", () => {
   // (Collapsing newlines in what Play says is the CLI's `log` wrapper's job, as in release mode; it is
   // covered in cli-upload-internal.test.ts.)
