@@ -8,12 +8,23 @@
 //   - the one other refusal that has a way forward — Play insisting the edit be committed with
 //     changesNotSentForReview — gets exactly one retry, with ERROR_IF_IN_REVIEW still on;
 //   - "deferred" and every failure delete the edit — only a successful commit keeps it;
-//   - a failure surfaces the *original* error, whatever the cleanup does.
+//   - a failure surfaces the *original* error, whatever the cleanup does;
+//   - a commit that ends in a 5xx or no response at all is not claimed to have failed cleanly: Play
+//     may have applied it, so the error and the cleanup warning say so (release mode's NOT_CONFIRMED
+//     wording) and a re-run is the way to find out.
 
-import { requiresChangesNotSentForReview } from "./play-client";
-import type { CommitResult, PlayApi } from "./play-client";
+import { PlayApiError, requiresChangesNotSentForReview } from "./play-client";
+import type { CommitOptions, CommitResult, PlayApi } from "./play-client";
 
 const INTERNAL_TRACK = "internal";
+
+/**
+ * Appended to the error of a commit that ended in a 5xx or without any response. Re-running the
+ * same workflow run reuses the version code: if Play did apply the commit, the upload is refused as
+ * "already used"; if not, it uploads normally.
+ */
+const NOT_CONFIRMED =
+  "Play did not confirm the commit; it may have been applied. A re-run is safe: it uploads again, or Play reports the version code as already used.";
 
 /** The `::notice::` text of a deferred upload (the CLI escapes it like every annotation). */
 export const DEFERRED_NOTICE =
@@ -42,13 +53,33 @@ export async function uploadInternal(options: UploadInternalOptions): Promise<In
 
   const editId = await api.insertEdit();
 
-  // Best effort, never throws: an undeleted edit was never committed and expires by itself.
+  // Set when a commit ended in a 5xx or without a response: Play may have applied it.
+  let unconfirmed = false;
+
+  // Best effort, never throws: an undeleted edit expires by itself.
   const discard = async (): Promise<void> => {
     try {
       await api.deleteEdit(editId);
     } catch (error) {
       const reason = error instanceof Error ? error.message : "unknown error";
-      log(`Warning: could not delete the Play edit (${reason}). It was not committed and expires on its own.`);
+      log(
+        unconfirmed
+          ? `Warning: could not delete the Play edit (${reason}). Its commit was not confirmed (see the error), so it is left to expire on its own.`
+          : `Warning: could not delete the Play edit (${reason}). It was not committed and expires on its own.`,
+      );
+    }
+  };
+
+  // Every commit goes through here, so a 5xx / network failure is worded the same on the first commit
+  // and on the retry. Definite refusals (4xx) are passed on untouched.
+  const commit = async (options?: CommitOptions): Promise<CommitResult> => {
+    try {
+      return await api.commit(editId, options);
+    } catch (error) {
+      if (!(error instanceof PlayApiError) || (error.status !== 0 && error.status < 500)) throw error;
+      unconfirmed = true;
+      const end = /[.!?]$/.test(error.message) ? "" : ".";
+      throw new PlayApiError(`${error.message}${end} ${NOT_CONFIRMED}`, error.status, error.reasons);
     }
   };
 
@@ -76,14 +107,14 @@ export async function uploadInternal(options: UploadInternalOptions): Promise<In
 
     let first: CommitResult;
     try {
-      first = await api.commit(editId);
+      first = await commit();
     } catch (error) {
       if (!requiresChangesNotSentForReview(error)) throw error;
       log(
         `Play refused to submit the change for review automatically (${error.message}). ` +
           "Retrying the commit once with changesNotSentForReview=true and ERROR_IF_IN_REVIEW.",
       );
-      const retried = await api.commit(editId, { changesNotSentForReview: true });
+      const retried = await commit({ changesNotSentForReview: true });
       if (retried === "changes-in-review") return await deferred();
       finished = true;
       log("Committed (not sent for review): the bundle is on the Internal testing track.");
