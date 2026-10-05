@@ -46,9 +46,12 @@ public final class GroupMapViewModel: ObservableObject {
     private let refreshInterval: Duration
     private let refreshSleep: (Duration) async -> Void
 
-    // RED STUB (specs/010 §3.6, I59): the driver exists but performs nothing yet.
+    /// specs/010 §3.2/§3.6 (rows A55/I59) — mirrors `LiveMapViewModel.refreshDriver` exactly: owns
+    /// WHEN the group map refreshes and runs each refresh through `performRefresh`.
     public private(set) lazy var refreshDriver = MapRefreshDriver(
-        interval: refreshInterval, sleep: refreshSleep, perform: { _ in }
+        interval: refreshInterval,
+        sleep: refreshSleep,
+        perform: { [weak self] trigger in await self?.performRefresh(trigger) }
     )
 
     public init(
@@ -63,30 +66,52 @@ public final class GroupMapViewModel: ObservableObject {
         self.refreshSleep = refreshSleep
     }
 
+    /// An EXPLICIT load (Refresh / Retry) — mirrors `LiveMapViewModel.load()`: goes through
+    /// `refreshDriver` so the §3.6 one-request-in-flight rule covers it, shows `.loading` while it
+    /// runs and reports its own failure.
     public func load() async {
-        state = .loading
+        await refreshDriver.refresh()
+    }
+
+    /// One fetch of the group roster for `trigger` — mirrors `LiveMapViewModel.performRefresh`
+    /// (specs/010 §3.2/§3.6). `410 GROUP_EXPIRED` is terminal for every trigger: the screen swaps to
+    /// "This group has ended" (005 §2.3) and the refresh schedule ends — there is nothing to poll.
+    private func performRefresh(_ trigger: MapRefreshPolicy.Trigger) async {
+        let hasDataOnScreen: Bool
+        if case .loaded = state { hasDataOnScreen = true } else { hasDataOnScreen = false }
+        if trigger == .explicit { state = .loading }
         do {
             let envelope = try await apiClient.getGroupLatestLocations(groupId: groupId)
-            let members = envelope.data.members
-            state = .loaded(members)
-
-            if let selectedUserId, !members.contains(where: { $0.userId == selectedUserId }) {
-                self.selectedUserId = nil
-            }
-
-            let points = Self.locatedPoints(in: members)
-            let hasPoints = !points.isEmpty
-            if MapCameraPolicy.shouldRunOnLoadOrRefresh(state: cameraPolicyState, hasPoints: hasPoints) {
-                emitCameraCommand(MapCameraPolicy.target(points: points))
-            }
-            cameraPolicyState = MapCameraPolicy.nextState(state: cameraPolicyState, hasPoints: hasPoints)
+            apply(envelope.data.members)
         } catch {
             if (error as? APIError)?.serverCode == .groupExpired {
                 state = .expired
-            } else {
-                state = .error(userFacingMessage(for: error))
+                refreshDriver.end()
+                return
+            }
+            switch MapRefreshPolicy.failureOutcome(for: trigger, hasDataOnScreen: hasDataOnScreen) {
+            case .keepLastData: break
+            case .showError: state = .error(userFacingMessage(for: error))
             }
         }
+    }
+
+    private func apply(_ members: [GroupMemberLocation]) {
+        // An unchanged 30 s poll must not republish (and so re-render) the roster sheet.
+        if state != .loaded(members) {
+            state = .loaded(members)
+        }
+
+        if let selectedUserId, !members.contains(where: { $0.userId == selectedUserId }) {
+            self.selectedUserId = nil
+        }
+
+        let points = Self.locatedPoints(in: members)
+        let hasPoints = !points.isEmpty
+        if MapCameraPolicy.shouldRunOnLoadOrRefresh(state: cameraPolicyState, hasPoints: hasPoints) {
+            emitCameraCommand(MapCameraPolicy.target(points: points))
+        }
+        cameraPolicyState = MapCameraPolicy.nextState(state: cameraPolicyState, hasPoints: hasPoints)
     }
 
     /// specs/010 §3.5, position-only mirror of `LiveMapViewModel.selectMember` — there is exactly

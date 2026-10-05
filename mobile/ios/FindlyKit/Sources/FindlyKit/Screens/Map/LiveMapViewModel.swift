@@ -54,9 +54,15 @@ public final class LiveMapViewModel: ObservableObject {
     private let refreshInterval: Duration
     private let refreshSleep: (Duration) async -> Void
 
-    // RED STUB (specs/010 §3.6, I59): the driver exists but performs nothing yet.
+    /// specs/010 §3.6 (rows A55/I59) — owns WHEN this screen refreshes (first appearance, every
+    /// return to the foreground / to the map, every 30 s while visible and foregrounded, never in
+    /// the background; at most one fetch in flight) and runs each refresh through `performRefresh`.
+    /// `LiveMapScreen` forwards its SwiftUI lifecycle signals to it and does nothing else; the
+    /// driver holds this view model weakly, so a discarded screen is not kept alive by its own timer.
     public private(set) lazy var refreshDriver = MapRefreshDriver(
-        interval: refreshInterval, sleep: refreshSleep, perform: { _ in }
+        interval: refreshInterval,
+        sleep: refreshSleep,
+        perform: { [weak self] trigger in await self?.performRefresh(trigger) }
     )
 
     public init(
@@ -69,42 +75,74 @@ public final class LiveMapViewModel: ObservableObject {
         self.refreshSleep = refreshSleep
     }
 
-    /// The single entry point for both the initial load and the §3.1 Refresh affordance — the
-    /// SAME call, deliberately, so the pure `MapCameraPolicyState` machine (which persists on this
-    /// instance across calls) is what withholds camera movement on a refresh, not a different code
-    /// path. This is what makes "refresh never yanks the camera" true regardless of which caller
-    /// triggers it.
+    /// An EXPLICIT load: the §3.1 Refresh control and an error state's Retry (and every test that
+    /// wants "load the roster now"). Goes through `refreshDriver` so the §3.6 one-request-in-flight
+    /// rule covers it too — it returns immediately, doing nothing, if a fetch is already running.
+    ///
+    /// Shows `.loading` while it runs and reports its own failure as `.error`, exactly as before
+    /// §3.6; the periodic/foreground refreshes `refreshDriver` schedules do neither (see
+    /// `performRefresh`). Either way the pure `MapCameraPolicyState` machine (which persists on this
+    /// instance across calls) is what withholds camera movement on a refresh, so "refresh never
+    /// yanks the camera" holds regardless of which trigger ran.
     public func load() async {
-        state = .loading
+        await refreshDriver.refresh()
+    }
+
+    /// One fetch of the roster for `trigger` — the `perform` closure of `refreshDriver`.
+    ///
+    /// specs/010 §3.6: only an `.explicit` refresh flips the sheet to `.loading` (the first
+    /// appearance is already in it); a periodic/foreground/return refresh runs invisibly over the
+    /// current content, so the map and roster never flash a spinner every 30 s. On failure
+    /// `MapRefreshPolicy.failureOutcome` decides: with data on screen a background refresh keeps it
+    /// silently; with none (a first load) or for an explicit Refresh the error state shows.
+    ///
+    /// The two routed 404s (010 §2.1) are NOT transient failures, so they route to Onboarding for
+    /// every trigger — a poll that discovers the profile or family is gone must not keep showing the
+    /// old family's positions — and end the refresh schedule.
+    private func performRefresh(_ trigger: MapRefreshPolicy.Trigger) async {
+        let hasDataOnScreen: Bool
+        if case .loaded = state { hasDataOnScreen = true } else { hasDataOnScreen = false }
+        if trigger == .explicit { state = .loading }
         do {
             let envelope = try await apiClient.getLatestLocations()
-            let members = envelope.data.members
-            state = .loaded(members)
-
-            // specs/010 §3.5 — a selection whose member disappeared from the roster (removed from
-            // the family) no longer has anything to highlight.
-            if let selectedUserId, !members.contains(where: { $0.userId == selectedUserId }) {
-                self.selectedUserId = nil
-            }
-
-            let points = Self.locatedPoints(in: members)
-            let hasPoints = !points.isEmpty
-            // specs/010 §3.4 (normative) — decide WHETHER this load/refresh re-runs the camera
-            // policy: only on the first successful load, or the first refresh that brings the
-            // first-ever point in from a zero-point open. Never on an ordinary refresh after that,
-            // even one whose marker set changed — this is the actual fix for "every marker-set
-            // change yanks the camera".
-            if MapCameraPolicy.shouldRunOnLoadOrRefresh(state: cameraPolicyState, hasPoints: hasPoints) {
-                emitCameraCommand(MapCameraPolicy.target(points: points))
-            }
-            cameraPolicyState = MapCameraPolicy.nextState(state: cameraPolicyState, hasPoints: hasPoints)
+            apply(envelope.data.members)
         } catch {
             if let variant = onboardingRoutingOutcome(for: error) {
                 state = .routeToOnboarding(variant)
-            } else {
-                state = .error(userFacingMessage(for: error))
+                refreshDriver.end()
+                return
+            }
+            switch MapRefreshPolicy.failureOutcome(for: trigger, hasDataOnScreen: hasDataOnScreen) {
+            case .keepLastData: break
+            case .showError: state = .error(userFacingMessage(for: error))
             }
         }
+    }
+
+    private func apply(_ members: [MemberLocations]) {
+        // `@Published` republishes on every assignment, equal value or not; an unchanged 30 s poll
+        // must not re-render the roster sheet.
+        if state != .loaded(members) {
+            state = .loaded(members)
+        }
+
+        // specs/010 §3.5 — a selection whose member disappeared from the roster (removed from
+        // the family) no longer has anything to highlight.
+        if let selectedUserId, !members.contains(where: { $0.userId == selectedUserId }) {
+            self.selectedUserId = nil
+        }
+
+        let points = Self.locatedPoints(in: members)
+        let hasPoints = !points.isEmpty
+        // specs/010 §3.4 (normative) — decide WHETHER this load/refresh re-runs the camera
+        // policy: only on the first successful load, or the first refresh that brings the
+        // first-ever point in from a zero-point open. Never on an ordinary refresh after that,
+        // even one whose marker set changed — this is the actual fix for "every marker-set
+        // change yanks the camera".
+        if MapCameraPolicy.shouldRunOnLoadOrRefresh(state: cameraPolicyState, hasPoints: hasPoints) {
+            emitCameraCommand(MapCameraPolicy.target(points: points))
+        }
+        cameraPolicyState = MapCameraPolicy.nextState(state: cameraPolicyState, hasPoints: hasPoints)
     }
 
     /// specs/010 §3.5 (MUST): tapping a member's roster row/marker selects that member and animates
