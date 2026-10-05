@@ -147,7 +147,7 @@ export function planEdit(args: {
       kind: "fail",
       message:
         `Version ${version.versionString} has no App Review information. Open it in App Store Connect and fill in App Review ` +
-        "(sign-in required, demo account); the automation will not invent one. Nothing was changed.",
+        "(sign-in required, demo account); the automation will not invent one.",
     };
   }
   if (review.demoAccountRequired !== true || (review.demoAccountName ?? "").trim() === "") {
@@ -155,13 +155,13 @@ export function planEdit(args: {
       kind: "fail",
       message:
         `App Review information for ${version.versionString} does not include a demo account (sign-in required, with a ` +
-        "demo account name). Set it in App Store Connect; the automation will not invent one. Nothing was changed.",
+        "demo account name). Set it in App Store Connect; the automation will not invent one.",
     };
   }
   if (details.localizations.length === 0) {
     return {
       kind: "fail",
-      message: `Version ${version.versionString} has no localizations, so there is nowhere to set What's New. Nothing was changed.`,
+      message: `Version ${version.versionString} has no localizations, so there is nowhere to set What's New.`,
     };
   }
   const open = details.openSubmission;
@@ -170,7 +170,7 @@ export function planEdit(args: {
       kind: "fail",
       message:
         `The open review submission ${open.id} contains other items besides version ${version.versionString}; ` +
-        "submitting it would send them too. Review it in App Store Connect. Nothing was changed.",
+        "submitting it would send them too. Review it in App Store Connect.",
     };
   }
 

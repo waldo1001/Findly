@@ -1,4 +1,4 @@
-import { createPublicKey, generateKeyPairSync, verify } from "node:crypto";
+import { generateKeyPairSync, verify } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { runCli } from "../src/main";
 import {
@@ -81,7 +81,7 @@ describe("runCli", () => {
     const [h, p, s] = auth.slice("Bearer ".length).split(".") as [string, string, string];
     expect(JSON.parse(Buffer.from(h, "base64url").toString())).toEqual({ alg: "ES256", kid: "WV483G2U79", typ: "JWT" });
     expect(JSON.parse(Buffer.from(p, "base64url").toString()).iss).toBe(ENV.ASC_ISSUER_ID);
-    const ok = verify("sha256", Buffer.from(`${h}.${p}`), { key: createPublicKey(keys.publicKey), dsaEncoding: "ieee-p1363" }, Buffer.from(s, "base64url"));
+    const ok = verify("sha256", Buffer.from(`${h}.${p}`), { key: keys.publicKey, dsaEncoding: "ieee-p1363" }, Buffer.from(s, "base64url"));
     expect(ok).toBe(true);
   });
 
