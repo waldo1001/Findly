@@ -1,0 +1,57 @@
+name: tools
+
+# docs/store-readiness.md §5, "Tool CI and the privileged job": the release tools' unit tests run on
+# every pull request and every push to main, in THIS workflow — which holds no secrets, no
+# environment and no write scope. The credentialed release jobs (_release-android.yml, and the iOS
+# counterpart) deliberately do not run the test runner; this is where the tests run instead.
+#
+# Plain `pull_request` (never `pull_request_target`): fork and PR code runs with a read-only token
+# and nothing else. Nothing here can publish anything.
+#
+# Note: like android.yml's PR checks, a path-filtered workflow does not report on PRs that touch no
+# matching path. That is fine while `tools-test` is not a required status check; if it ever becomes
+# one, drop the `paths:` filters (see the comment on android.yml's pull_request trigger).
+
+on:
+  pull_request:
+    paths: ["tools/**", ".github/workflows/tools.yml"]
+  push:
+    branches: [main]
+    paths: ["tools/**", ".github/workflows/tools.yml"]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: tools-test (${{ matrix.package }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        package:
+          - tools/play-release
+          # TODO(I60): add `tools/appstore-release` here once the iOS release tool lands (a parallel
+          # task). Both packages follow the same contract: `npm ci --ignore-scripts`, `npm test`
+          # (typecheck + unit tests), `npm run build`.
+    defaults:
+      run:
+        working-directory: ${{ matrix.package }}
+    steps:
+      # Pinned by full SHA exactly as in _release-android.yml (v4.4.0 of each; see the notes there).
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          # Node 24, matching backend.yml.
+          node-version: 24
+      - name: install
+        run: npm ci --ignore-scripts
+      # `npm test` typechecks the tests too (pretest), then runs vitest. Never needs a secret or a
+      # network service: the Play/Google APIs are exercised against stub fetch only.
+      - name: typecheck and unit tests
+        run: npm test
+      - name: build
+        run: npm run build

@@ -1,0 +1,11 @@
+{
+  "track": "production",
+  "releases": [
+    {
+      "name": "1.1.0 (230)",
+      "versionCodes": ["230"],
+      "status": "completed",
+      "releaseNotes": [{ "language": "en-GB", "text": "Bug fixes" }]
+    }
+  ]
+}

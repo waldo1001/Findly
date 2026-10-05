@@ -1,0 +1,17 @@
+{
+  "kind": "androidpublisher#listingsListResponse",
+  "listings": [
+    {
+      "language": "en-GB",
+      "title": "Findly",
+      "shortDescription": "Know your family is safe.",
+      "fullDescription": "Private family location sharing."
+    },
+    {
+      "language": "nl-BE",
+      "title": "Findly",
+      "shortDescription": "Weet dat je gezin veilig is.",
+      "fullDescription": "Privé locatie delen voor je gezin."
+    }
+  ]
+}
