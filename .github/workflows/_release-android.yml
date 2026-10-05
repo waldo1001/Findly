@@ -1,0 +1,80 @@
+name: _release-android
+
+# docs/store-readiness.md §5 (A57): promote the current Internal-testing release of
+# com.findly.android to Production and Closed testing – Alpha, in one Play Developer API edit
+# (tools/play-release). A reusable workflow with no trigger of its own: release-stores.yml calls it
+# (workflow_dispatch only — never on push) and passes exactly the one secret it needs.
+#
+# Everything that can change the store happens in the last step. The steps before it only build and
+# unit-test the tool, and — on purpose — never see the credential: PLAY_SERVICE_ACCOUNT_JSON is
+# mapped into that one step's env, not into the job's, so `npm ci`/`npm test` (which execute
+# dev-dependency code) cannot read it.
+
+on:
+  workflow_call:
+    inputs:
+      release_notes:
+        description: "Release notes, plain text, 1-500 characters, used for every store-listing language"
+        type: string
+        required: true
+      dry_run:
+        description: "Read and validate everything (Play edit is validated, then deleted); change nothing"
+        type: boolean
+        required: true
+    secrets:
+      PLAY_SERVICE_ACCOUNT_JSON:
+        description: "Play service-account key JSON, granted Release to production for com.findly.android (store-readiness §5)"
+        required: true
+
+jobs:
+  release:
+    # Unique job name, same reason as android-build in android.yml: status checks and the run UI
+    # match on job names.
+    name: android-release
+    runs-on: ubuntu-latest
+    # §5: required reviewer (waldo1001), deployable from main only. The approval is the human gate;
+    # the service account's production permission is only reachable through this job.
+    environment: production
+    timeout-minutes: 10
+    # docs/security-review-checklist.md §2: the only GitHub token scope needed is checkout. Publishing
+    # authenticates with its own service-account secret, not a GITHUB_TOKEN scope; no id-token here.
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: tools/play-release
+    steps:
+      # Both actions are pinned to a full commit SHA (a tag is mutable, and this job sits next to a
+      # production-publishing credential) — stricter than android.yml's first-party `@v4`, which the
+      # checklist's pinning rule (first-party: major version at least) would also allow here.
+      # SHAs verified 2026-10-05 via `gh api repos/actions/<name>/git/refs/tags/v4.4.0`; v4.4.0 is
+      # the latest v4 release of each, and the moving `v4` tag points at the same commits.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # Nothing below pushes; don't leave the checkout token in .git/config for the npm steps.
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          # No `cache:` — a cache restored into a job that holds a production credential is a
+          # poisoning path, and the dependency tree (typescript + vitest) installs in seconds.
+          node-version: "20"
+      # --ignore-scripts: dev-dependency install hooks have no business running here. The tool has
+      # zero runtime dependencies; vitest/typescript work without them.
+      - name: install
+        run: npm ci --ignore-scripts
+      # `npm test` typechecks the tests too (pretest). A broken tool must fail here, before the
+      # credential is mapped into any step.
+      - name: typecheck and unit tests
+        run: npm test
+      - name: build
+        run: npm run build
+      # docs/security-review-checklist.md §2 (script injection): the dispatcher's free-text release
+      # notes and the dry-run flag reach the tool only through `env:`, never interpolated into the
+      # `run:` script. The tool validates all three values before its first network call, and
+      # never prints the credential, the signed assertion or the access token.
+      - name: promote Internal testing to Production and Alpha
+        env:
+          PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+          RELEASE_NOTES: ${{ inputs.release_notes }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: node dist/cli.js
