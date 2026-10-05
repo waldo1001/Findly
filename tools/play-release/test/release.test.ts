@@ -16,6 +16,8 @@ import {
   emptyResponse,
   jsonResponse,
   playError,
+  releaseSummaries,
+  releaseSummary,
 } from "./support/fake-play";
 
 // The orchestration (docs/store-readiness.md §5, Android): which Play calls are made, in which
@@ -93,11 +95,24 @@ describe("release() — real release", () => {
         {
           name: "1.2.0 (234)",
           versionCodes: ["234"],
-          status: "completed",
           lifecycleState: "RELEASE_LIFECYCLE_STATE_IN_REVIEW",
         },
       ],
     });
+  });
+
+  it("maps Google's activeArtifacts[].versionCode (int32 numbers) to string version codes — the codes are never empty", async () => {
+    const { run } = setup({
+      [PRODUCTION_RELEASES]: releaseSummaries(
+        releaseSummary("1.2.0 (234)", [233, 234], "IN_REVIEW"),
+        releaseSummary("1.1.0 (230)", [230], "PUBLISHED"),
+      ),
+    });
+    const outcome = await run({ dryRun: false });
+    expect(outcome.productionNow).toEqual([
+      { name: "1.2.0 (234)", versionCodes: ["233", "234"], lifecycleState: "RELEASE_LIFECYCLE_STATE_IN_REVIEW" },
+      { name: "1.1.0 (230)", versionCodes: ["230"], lifecycleState: "RELEASE_LIFECYCLE_STATE_PUBLISHED" },
+    ]);
   });
 
   it("treats a 404 on the production/alpha track as an empty track", async () => {
@@ -161,7 +176,40 @@ describe("release() — a change already in review is never cancelled", () => {
     await expect(withoutStop.run({ dryRun: false })).rejects.toThrow(/automatically\. Next step: in Play Console/);
   });
 
-  it("a network failure at commit time is not dressed up with a Play Console hint", async () => {
+  // "Send changes for review" is advice for a precondition-style refusal (the edit is valid but Play
+  // will not submit it as-is). For anything else it would send the operator to the wrong place.
+  it.each([400, 409, 412])("a %i refusal gets the Play Console next step", async (status) => {
+    const { run } = setup({ [COMMIT]: playError(status, "Refused for review reasons.") });
+    const failure = run({ dryRun: false });
+    await expect(failure).rejects.toThrow(/Publishing overview/);
+    await expect(failure).rejects.toThrow(/Send changes for review/);
+  });
+
+  it.each([404, 403, 401, 429])("a %i at commit time says nothing was committed and does NOT point at 'Send changes for review'", async (status) => {
+    const { run } = setup({ [COMMIT]: playError(status, "Some Play message.", "UNKNOWN") });
+    const failure = run({ dryRun: false });
+    await expect(failure).rejects.toThrow(/Some Play message\./);
+    await expect(failure).rejects.toThrow(/Nothing was committed; re-run later\./);
+    await failure.catch((e: Error) => {
+      expect(e.message).not.toMatch(/Publishing overview/);
+      expect(e.message).not.toMatch(/Send changes for review/);
+    });
+  });
+
+  it.each([500, 502, 503])("a %i at commit time does not claim nothing was committed (Play may have applied it) and says how to re-check", async (status) => {
+    const { fake, run } = setup({ [COMMIT]: playError(status, "Backend Error", "INTERNAL") });
+    const failure = run({ dryRun: false });
+    await expect(failure).rejects.toThrow(/Backend Error/);
+    await expect(failure).rejects.toThrow(/did not confirm the commit; re-run later/i);
+    await failure.catch((e: Error) => {
+      expect(e.message).not.toMatch(/Publishing overview/);
+      expect(e.message).not.toMatch(/Send changes for review/);
+      expect(e.message).not.toMatch(/Nothing was committed/);
+    });
+    expect(fake.sequence().at(-1)).toBe(DELETE);
+  });
+
+  it("a network failure at commit time is treated like a 5xx: not confirmed, re-run later, no Play Console hint", async () => {
     const fake = createFakePlay();
     const api = new PlayClient(
       async (url, init) => {
@@ -173,7 +221,18 @@ describe("release() — a change already in review is never cancelled", () => {
     );
     const failure = release({ api, notes: NOTES, dryRun: false });
     await expect(failure).rejects.toThrow(/network error/i);
-    await failure.catch((e: Error) => expect(e.message).not.toMatch(/Publishing overview/));
+    await expect(failure).rejects.toThrow(/did not confirm the commit; re-run later/i);
+    await failure.catch((e: Error) => {
+      expect(e.message).not.toMatch(/Publishing overview/);
+      expect(e.message).not.toMatch(/Send changes for review/);
+    });
+  });
+
+  it("the original Play message is always kept, whatever the suffix", async () => {
+    for (const status of [400, 403, 500]) {
+      const { run } = setup({ [COMMIT]: playError(status, "Original Play message.") });
+      await expect(run({ dryRun: false })).rejects.toThrow(/Original Play message\./);
+    }
   });
 
   it("never falls back to changesNotSentForReview or to cancelling the review", async () => {
@@ -257,6 +316,17 @@ describe("release() — nothing to release", () => {
     const outcome = await run({ dryRun: true });
     expect(fake.sequence()).toEqual([...READS, DELETE, PRODUCTION_RELEASES]);
     expect(outcome.kind).toBe("nothing");
+  });
+
+  it("reports the real state of the release that is already there, matched by version code", async () => {
+    const { run } = setup({
+      ...overrides,
+      [PRODUCTION_RELEASES]: releaseSummaries(releaseSummary("1.2.0 (234)", [234], "NOT_APPROVED")),
+    });
+    const outcome = await run({ dryRun: false });
+    expect(outcome.productionNow).toEqual([
+      { name: "1.2.0 (234)", versionCodes: ["234"], lifecycleState: "RELEASE_LIFECYCLE_STATE_NOT_APPROVED" },
+    ]);
   });
 
   it("a failing production-state read does not fail it either", async () => {

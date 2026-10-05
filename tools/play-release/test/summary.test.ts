@@ -9,7 +9,6 @@ import type { Outcome } from "../src/release";
 const inReview = {
   name: "1.2.0 (234)",
   versionCodes: ["234"],
-  status: "completed",
   lifecycleState: "RELEASE_LIFECYCLE_STATE_IN_REVIEW",
 };
 const published = { ...inReview, lifecycleState: "RELEASE_LIFECYCLE_STATE_PUBLISHED" };

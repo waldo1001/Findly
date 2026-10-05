@@ -43,6 +43,30 @@ export function playError(status: number, message: string, apiStatus = "FAILED_P
   return jsonResponse({ error: { code: status, message, status: apiStatus } }, status);
 }
 
+/**
+ * One entry of `applications.tracks.releases.list`, in the shape of Google's Discovery document
+ * (schema `ReleaseSummary`): `releaseName`, `track`, `activeArtifacts[]` (each `versionCode`, an
+ * int32 JSON *number*) and `releaseLifecycleState`. Nothing else — in particular no `versionCodes`,
+ * `status` or `lastUpdateTime`, which belong to the edits API's `TrackRelease`.
+ */
+export function releaseSummary(
+  releaseName: string,
+  versionCodes: number[],
+  state: "DRAFT" | "NOT_SENT_FOR_REVIEW" | "IN_REVIEW" | "APPROVED_NOT_PUBLISHED" | "NOT_APPROVED" | "PUBLISHED",
+) {
+  return {
+    releaseName,
+    track: "production",
+    activeArtifacts: versionCodes.map((versionCode) => ({ versionCode })),
+    releaseLifecycleState: `RELEASE_LIFECYCLE_STATE_${state}`,
+  };
+}
+
+/** `ListReleaseSummariesResponse`: `{ releases: [ReleaseSummary…] }`. */
+export function releaseSummaries(...releases: ReturnType<typeof releaseSummary>[]): Reply {
+  return jsonResponse({ releases });
+}
+
 /** The refusal Play sends for `ERROR_IF_IN_REVIEW` when changes are already in review. */
 export function changesAlreadyInReview(): Reply {
   return jsonResponse(
@@ -80,18 +104,7 @@ export function defaultRoutes(): Record<string, Reply> {
     [COMMIT]: jsonResponse(appEdit),
     [`DELETE /edits/${EDIT_ID}`]: emptyResponse(204),
     // Default: what production looks like once the new release has been submitted.
-    [PRODUCTION_RELEASES]: jsonResponse({
-      releases: [
-        {
-          releaseName: "1.2.0 (234)",
-          track: "production",
-          versionCodes: ["234"],
-          status: "completed",
-          releaseLifecycleState: "RELEASE_LIFECYCLE_STATE_IN_REVIEW",
-          lastUpdateTime: "2026-10-05T10:00:00Z",
-        },
-      ],
-    }),
+    [PRODUCTION_RELEASES]: releaseSummaries(releaseSummary("1.2.0 (234)", [234], "IN_REVIEW")),
   };
 }
 

@@ -215,17 +215,36 @@ describe("plan() — production safety (store-readiness §5 step 1, A57 review)"
     expect(result).toMatchObject({ action: "error", code: "production-halted" });
   });
 
-  it("fails closed when an inProgress rollout carries Internal's own version code", () => {
+  it("fails closed when an inProgress rollout carries Internal's own version code — and says what releasing would do: force it to 100%", () => {
     const result = plan(withProduction(productionStaged), languages, NOTES);
     expect(result).toMatchObject({ action: "error", code: "production-rollout-ahead" });
+    const message = (result as { message: string }).message;
+    expect(message).toContain("234");
+    expect(message).toMatch(/100%/);
+    // It is the SAME build, not an older one: "downgrade" would be wrong.
+    expect(message).not.toMatch(/downgrade/i);
   });
 
-  it("fails closed when an inProgress rollout is NEWER than Internal's release", () => {
+  it("fails closed when an inProgress rollout is NEWER than Internal's release — that one IS a downgrade", () => {
     const result = plan(withProduction(productionStagedNewer), languages, NOTES);
     expect(result).toMatchObject({ action: "error", code: "production-rollout-ahead" });
     const message = (result as { message: string }).message;
     expect(message).toContain("240");
     expect(message).toContain("234");
+    expect(message).toMatch(/downgrade/i);
+  });
+
+  it("with both a same-code and a newer rollout in flight, the newer one (the downgrade) is what the message names", () => {
+    const both: Track = {
+      track: "production",
+      releases: [
+        { versionCodes: ["234"], status: "inProgress", userFraction: 0.1 },
+        { versionCodes: ["240"], status: "inProgress", userFraction: 0.1 },
+      ],
+    };
+    const message = (plan(withProduction(both), languages, NOTES) as { message: string }).message;
+    expect(message).toContain("240");
+    expect(message).toMatch(/downgrade/i);
   });
 
   it("an inProgress rollout beats 'nothing to release' too (completed 234 + inProgress 240)", () => {

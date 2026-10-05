@@ -10,11 +10,14 @@ import productionCurrent from "./fixtures/production-current.json";
 import {
   COMMIT,
   EDIT_ID,
+  PRODUCTION_RELEASES,
   TOKEN,
   changesAlreadyInReview,
   createFakePlay,
   jsonResponse,
   playError,
+  releaseSummaries,
+  releaseSummary,
 } from "./support/fake-play";
 import type { Reply } from "./support/fake-play";
 
@@ -155,6 +158,25 @@ describe("run() — happy paths", () => {
     const result = await runCli({ DRY_RUN: "false" });
     expect(result.summary).toContain("1.2.0 (234)");
     expect(result.summary).toContain("IN_REVIEW");
+  });
+
+  // Regression for the shape bug: Google's ReleaseSummary has activeArtifacts[].versionCode, not
+  // versionCodes[]. Parsed wrongly, the codes were always empty — the summary printed "[none]" and
+  // the "nothing to release" row always said "state not reported", losing the very state §5 asks for.
+  it("end to end, with Google's real ReleaseSummary shape: the codes and the state reach the summary", async () => {
+    const result = await runCli(
+      { DRY_RUN: "false" },
+      {
+        [`GET ${T}/production`]: jsonResponse(productionCurrent),
+        [PRODUCTION_RELEASES]: releaseSummaries(releaseSummary("1.2.0 (234)", [234], "NOT_APPROVED")),
+      },
+    );
+    expect(result.exitCode).toBe(0);
+    expect(result.summary).toMatch(/Nothing to release/);
+    expect(result.summary).toContain("NOT_APPROVED");
+    expect(result.summary).toContain("[234]");
+    expect(result.summary).not.toContain("[none]");
+    expect(result.summary).not.toMatch(/state not reported/i);
   });
 
   it("any other commit refusal fails with the next step in the annotation", async () => {

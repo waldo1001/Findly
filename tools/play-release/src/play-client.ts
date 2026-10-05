@@ -50,6 +50,7 @@ export type CommitResult = "committed" | "changes-in-review";
 export interface ReleaseSummary {
   releaseName?: string;
   track?: string;
+  activeArtifacts?: { versionCode: number }[];
   versionCodes?: string[];
   status?: string;
   releaseLifecycleState?: string;

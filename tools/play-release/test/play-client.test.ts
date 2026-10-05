@@ -14,6 +14,8 @@ import {
   emptyResponse,
   jsonResponse,
   playError,
+  releaseSummaries,
+  releaseSummary,
 } from "./support/fake-play";
 
 // The thin HTTP layer: one method per Play Developer API v3 call the release flow needs. Everything
@@ -163,18 +165,59 @@ describe("PlayClient — requests", () => {
 
   it("listReleases: GET /tracks/{track}/releases — read-only, outside any edit", async () => {
     const { fake, play } = client();
-    const releases = await play.listReleases("production");
+    await play.listReleases("production");
     expect(fake.sequence()).toEqual([PRODUCTION_RELEASES]);
-    expect(releases).toEqual([
+    expect(fake.calls[0]!.url).toBe(`${BASE}/tracks/production/releases`);
+  });
+
+  // Google's Discovery document (androidpublisher v3), schema ReleaseSummary: releaseName, track,
+  // activeArtifacts[] { versionCode: int32 } and releaseLifecycleState — and nothing else.
+  it("listReleases: parses a response in Google's documented ReleaseSummary shape (activeArtifacts[].versionCode)", async () => {
+    const { play } = client();
+    expect(await play.listReleases("production")).toEqual([
       {
         releaseName: "1.2.0 (234)",
         track: "production",
-        versionCodes: ["234"],
-        status: "completed",
+        activeArtifacts: [{ versionCode: 234 }],
         releaseLifecycleState: "RELEASE_LIFECYCLE_STATE_IN_REVIEW",
-        lastUpdateTime: "2026-10-05T10:00:00Z",
       },
     ]);
+  });
+
+  it("listReleases: several artifacts and several releases come through, in order", async () => {
+    const { play } = client({
+      [PRODUCTION_RELEASES]: releaseSummaries(
+        releaseSummary("1.2.0 (234)", [233, 234], "IN_REVIEW"),
+        releaseSummary("1.1.0 (230)", [230], "PUBLISHED"),
+      ),
+    });
+    const releases = await play.listReleases("production");
+    expect(releases.map((r) => r.releaseName)).toEqual(["1.2.0 (234)", "1.1.0 (230)"]);
+    expect(releases[0]!.activeArtifacts).toEqual([{ versionCode: 233 }, { versionCode: 234 }]);
+    expect(releases[1]!.releaseLifecycleState).toBe("RELEASE_LIFECYCLE_STATE_PUBLISHED");
+  });
+
+  it("listReleases: a release without artifacts, and artifacts without a usable versionCode, yield no codes", async () => {
+    const { play } = client({
+      [PRODUCTION_RELEASES]: jsonResponse({
+        releases: [
+          { releaseName: "draft", releaseLifecycleState: "RELEASE_LIFECYCLE_STATE_DRAFT" },
+          { releaseName: "odd", activeArtifacts: [{}, { versionCode: "234" }, { versionCode: 1.5 }, "x", null, { versionCode: 7 }] },
+        ],
+      }),
+    });
+    const [draft, odd] = await play.listReleases("production");
+    expect(draft!.activeArtifacts ?? []).toEqual([]);
+    expect(odd!.activeArtifacts).toEqual([{ versionCode: 7 }]);
+  });
+
+  it("listReleases: fields that are not part of ReleaseSummary are not read (no status, no lastUpdateTime, no versionCodes)", async () => {
+    const { play } = client({
+      [PRODUCTION_RELEASES]: jsonResponse({
+        releases: [{ releaseName: "x", versionCodes: ["234"], status: "completed", lastUpdateTime: "2026-10-05T10:00:00Z" }],
+      }),
+    });
+    expect(await play.listReleases("production")).toEqual([{ releaseName: "x" }]);
   });
 
   it("listReleases: no releases key means none", async () => {
