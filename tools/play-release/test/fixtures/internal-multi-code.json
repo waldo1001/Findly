@@ -1,0 +1,10 @@
+{
+  "track": "internal",
+  "releases": [
+    {
+      "name": "1.2.0",
+      "versionCodes": ["234", "233"],
+      "status": "completed"
+    }
+  ]
+}
