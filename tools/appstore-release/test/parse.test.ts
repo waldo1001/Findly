@@ -1,15 +1,17 @@
 import { describe, expect, it } from "vitest";
 import {
+  parseBuildRef,
   parseLinkageId,
   parseLocalizations,
   parseNewestBuild,
   parseOpenSubmission,
   parseReviewDetail,
-  parseSubmissionIds,
+  parseSubmissions,
   parseVersions,
 } from "../src/parse";
 import {
   buildLinkageDoc,
+  buildRefDoc,
   buildsDoc,
   localizationsDoc,
   phasedLinkageDoc,
@@ -54,8 +56,8 @@ describe("parseVersions", () => {
       { id: "v2", versionString: "1.1.0", legacyState: "READY_FOR_SALE", legacyOnly: true },
     ]);
     expect(parseVersions(doc)).toEqual([
-      { id: "v1", versionString: "1.2.0", state: "WAITING_FOR_REVIEW", releaseType: "AFTER_APPROVAL" },
-      { id: "v2", versionString: "1.1.0", state: "READY_FOR_SALE", releaseType: "AFTER_APPROVAL" },
+      { id: "v1", versionString: "1.2.0", state: "WAITING_FOR_REVIEW", releaseType: "AFTER_APPROVAL", createdDate: "2026-10-04T08:00:00-07:00" },
+      { id: "v2", versionString: "1.1.0", state: "READY_FOR_SALE", releaseType: "AFTER_APPROVAL", createdDate: "2026-10-04T08:00:00-07:00" },
     ]);
   });
 
@@ -102,9 +104,12 @@ describe("parseReviewDetail", () => {
 });
 
 describe("review submissions", () => {
-  it("parseSubmissionIds lists the ids", () => {
-    expect(parseSubmissionIds(submissionsDoc([{ id: "rs1", state: "READY_FOR_REVIEW" }]))).toEqual(["rs1"]);
-    expect(parseSubmissionIds(submissionsDoc([]))).toEqual([]);
+  it("parseSubmissions lists id and state", () => {
+    expect(parseSubmissions(submissionsDoc([{ id: "rs1", state: "READY_FOR_REVIEW" }, { id: "rs2", state: "UNRESOLVED_ISSUES" }]))).toEqual([
+      { id: "rs1", state: "READY_FOR_REVIEW" },
+      { id: "rs2", state: "UNRESOLVED_ISSUES" },
+    ]);
+    expect(parseSubmissions(submissionsDoc([]))).toEqual([]);
   });
 
   it("parseOpenSubmission separates version items from other items", () => {
@@ -114,5 +119,16 @@ describe("review submissions", () => {
 
   it("an empty submission has no items", () => {
     expect(parseOpenSubmission("rs1", submissionItemsDoc([]))).toEqual({ id: "rs1", versionIds: [], otherItemCount: 0 });
+  });
+});
+
+describe("parseBuildRef (GET /v1/appStoreVersions/{id}/build)", () => {
+  it("returns the attached build's id and build number", () => {
+    expect(parseBuildRef(buildRefDoc("b239", "239"))).toEqual({ id: "b239", buildNumber: "239" });
+  });
+
+  it("is null when no build is attached (data: null) or the document is absent (404)", () => {
+    expect(parseBuildRef(buildRefDoc(null))).toBeNull();
+    expect(parseBuildRef(null)).toBeNull();
   });
 });

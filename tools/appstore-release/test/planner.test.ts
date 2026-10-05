@@ -4,13 +4,14 @@ import {
   chooseOpenSubmission,
   decide,
   describeOp,
+  describeStop,
   planCreate,
   planEdit,
   type Decision,
   type Details,
   type Op,
 } from "../src/planner";
-import type { AppVersion, Build, OpenSubmission } from "../src/model";
+import type { AppVersion, Build, OpenSubmission, SubmissionRef } from "../src/model";
 import {
   APP_ID,
   buildsDoc,
@@ -26,6 +27,7 @@ const NOTES = "Faster map refresh and a fix for ghost devices.";
 
 // Fixtures go through the real parsers, so these tests also pin the API shapes the planner depends on.
 const build240 = parseNewestBuild(buildsDoc([{ id: "b240", buildNumber: "240", marketingVersion: "1.2.0" }]))!;
+const build241 = parseNewestBuild(buildsDoc([{ id: "b241", buildNumber: "241", marketingVersion: "1.2.1" }]))!;
 
 function versionsFor(...vs: VersionFx[]): AppVersion[] {
   return parseVersions(versionsDoc(vs));
@@ -35,7 +37,7 @@ function decideFor(vs: VersionFx[], build: Build | null = build240): Decision {
   return decide({ build, versions: versionsFor(...vs) });
 }
 
-describe("decide — which state is the release in?", () => {
+describe("decide: which state is the release in?", () => {
   it("fails when there is no processed (VALID) build", () => {
     const d = decide({ build: parseNewestBuild(buildsDoc([])), versions: [] });
     expect(d.kind).toBe("fail");
@@ -52,22 +54,21 @@ describe("decide — which state is the release in?", () => {
 
   it("creates the version when App Store Connect has none for that marketing version", () => {
     const d = decideFor([{ id: "v110", versionString: "1.1.0", state: "READY_FOR_SALE" }]);
-    expect(d).toEqual({ kind: "create", build: build240 });
+    expect(d.kind).toBe("create");
+    expect(d.kind === "create" && d.build).toEqual(build240);
   });
 
-  it("ignores versions with a different version string", () => {
-    expect(decideFor([{ id: "v130", versionString: "1.3.0", state: "WAITING_FOR_REVIEW" }]).kind).toBe("create");
+  it("creates when the list is empty (first release): no previous live version", () => {
+    expect(decideFor([])).toEqual({ kind: "create", build: build240, previousLive: null });
   });
 
   it("STOPs, changing nothing, when 1.2.0 is waiting for review (today's real state)", () => {
     const d = decideFor([{ id: "v120", versionString: "1.2.0", state: "WAITING_FOR_REVIEW" }]);
     expect(d.kind).toBe("stop");
     if (d.kind !== "stop") return;
-    expect(d.message).toContain("1.2.0");
-    expect(d.message).toContain("WAITING_FOR_REVIEW");
-    expect(d.message).toContain("240");
-    expect(d.message).toMatch(/no changes/i);
+    expect(d.scope).toBe("target");
     expect(d.version.id).toBe("v120");
+    expect(d.build).toEqual(build240);
   });
 
   it.each(["WAITING_FOR_REVIEW", "IN_REVIEW", "PENDING_DEVELOPER_RELEASE", "PENDING_APPLE_RELEASE", "ACCEPTED", "PROCESSING_FOR_DISTRIBUTION", "PROCESSING_FOR_APP_STORE"])(
@@ -75,7 +76,7 @@ describe("decide — which state is the release in?", () => {
     (state) => {
       const d = decideFor([{ id: "v120", versionString: "1.2.0", state }]);
       expect(d.kind).toBe("stop");
-      expect(d.kind === "stop" && d.message).toContain(state);
+      expect(d.kind === "stop" && d.version.state).toBe(state);
     },
   );
 
@@ -120,7 +121,7 @@ describe("decide — which state is the release in?", () => {
     expect(d.kind).toBe("fail");
   });
 
-  it("with several matches, the most advanced state wins (live > in flight > editable)", () => {
+  it("with several rows for the build's version, the most advanced state wins (live > in flight > editable)", () => {
     const d = decideFor([
       { id: "vA", versionString: "1.2.0", state: "PREPARE_FOR_SUBMISSION" },
       { id: "vB", versionString: "1.2.0", state: "IN_REVIEW" },
@@ -130,11 +131,141 @@ describe("decide — which state is the release in?", () => {
   });
 });
 
-describe("planCreate", () => {
-  it("creates the version as automatic-release-after-approval", () => {
-    expect(planCreate({ appId: APP_ID, build: build240 })).toEqual([
-      { kind: "createVersion", appId: APP_ID, versionString: "1.2.0" },
+describe("decide: other versions are looked at too (Apple allows one non-live version at a time)", () => {
+  it("1.2.1 build while 1.2.0 waits for review: STOP naming 1.2.0", () => {
+    const d = decideFor([{ id: "v120", versionString: "1.2.0", state: "WAITING_FOR_REVIEW" }], build241);
+    expect(d.kind).toBe("stop");
+    if (d.kind !== "stop") return;
+    expect(d.scope).toBe("other");
+    expect(d.version.versionString).toBe("1.2.0");
+    expect(d.build).toEqual(build241);
+  });
+
+  it("an in-flight other version also stops, whichever in-flight state it is in", () => {
+    for (const state of ["IN_REVIEW", "PENDING_DEVELOPER_RELEASE", "ACCEPTED"]) {
+      const d = decideFor([{ id: "v120", versionString: "1.2.0", state }], build241);
+      expect(d.kind === "stop" && d.scope).toBe("other");
+    }
+  });
+
+  it("1.2.1 build with an editable 1.2.0 draft: FAIL naming 1.2.0 and its state", () => {
+    const d = decideFor([{ id: "v120", versionString: "1.2.0", state: "PREPARE_FOR_SUBMISSION" }], build241);
+    expect(d.kind).toBe("fail");
+    if (d.kind !== "fail") return;
+    expect(d.message).toContain("1.2.0");
+    expect(d.message).toContain("PREPARE_FOR_SUBMISSION");
+    expect(d.message).toContain("1.2.1");
+  });
+
+  it.each(["REJECTED", "METADATA_REJECTED", "DEVELOPER_REJECTED", "INVALID_BINARY", "READY_FOR_REVIEW"])(
+    "an other version in %s also fails, naming it",
+    (state) => {
+      const d = decideFor([{ id: "v120", versionString: "1.2.0", state }], build241);
+      expect(d.kind).toBe("fail");
+      expect(d.kind === "fail" && d.message).toContain(state);
+    },
+  );
+
+  it("live and historical other versions do not block: 1.2.1 is created after a live 1.2.0", () => {
+    const d = decideFor(
+      [
+        { id: "v120", versionString: "1.2.0", state: "READY_FOR_SALE", createdDate: "2026-09-01T00:00:00Z" },
+        { id: "v110", versionString: "1.1.0", state: "REPLACED_WITH_NEW_VERSION", createdDate: "2026-08-01T00:00:00Z" },
+        { id: "v100", versionString: "1.0.0", state: "REMOVED_FROM_SALE", createdDate: "2026-07-01T00:00:00Z" },
+      ],
+      build241,
+    );
+    expect(d.kind).toBe("create");
+    expect(d.kind === "create" && d.previousLive?.id).toBe("v120");
+  });
+
+  it("the previous live version is the newest live one by creation date", () => {
+    const d = decideFor(
+      [
+        { id: "old", versionString: "1.1.0", state: "READY_FOR_DISTRIBUTION", createdDate: "2026-08-01T00:00:00Z" },
+        { id: "new", versionString: "1.2.0", state: "READY_FOR_DISTRIBUTION", createdDate: "2026-09-01T00:00:00Z" },
+      ],
+      build241,
+    );
+    expect(d.kind === "create" && d.previousLive?.id).toBe("new");
+  });
+
+  it("falls back to the newest replaced version when none is marked live; null when there is no history at all", () => {
+    const d = decideFor(
+      [
+        { id: "a", versionString: "1.0.0", state: "REPLACED_WITH_NEW_VERSION", createdDate: "2026-07-01T00:00:00Z" },
+        { id: "b", versionString: "1.1.0", state: "REPLACED_WITH_NEW_VERSION", createdDate: "2026-08-01T00:00:00Z" },
+      ],
+      build241,
+    );
+    expect(d.kind === "create" && d.previousLive?.id).toBe("b");
+    expect(decideFor([{ id: "x", versionString: "1.0.0", state: "REMOVED_FROM_SALE" }], build241)).toMatchObject({
+      kind: "create",
+      previousLive: null,
+    });
+  });
+
+  it("the build's own live version fails with the bump hint even if another version is in flight", () => {
+    const d = decideFor(
+      [
+        { id: "v110", versionString: "1.1.0", state: "READY_FOR_SALE" },
+        { id: "v120", versionString: "1.2.0", state: "WAITING_FOR_REVIEW" },
+      ],
+      parseNewestBuild(buildsDoc([{ id: "b239", buildNumber: "239", marketingVersion: "1.1.0" }]))!,
+    );
+    expect(d.kind).toBe("fail");
+    expect(d.kind === "fail" && d.message).toContain("bump MARKETING_VERSION in mobile/ios/project.yml");
+  });
+
+  it("an editable version for the build still proceeds when no other version is in the way", () => {
+    const d = decideFor([
+      { id: "v120", versionString: "1.2.0", state: "PREPARE_FOR_SUBMISSION" },
+      { id: "v110", versionString: "1.1.0", state: "READY_FOR_SALE" },
     ]);
+    expect(d.kind).toBe("edit");
+  });
+
+  it("an other in-flight version beats an editable matching one (stop, never edit)", () => {
+    const d = decideFor([
+      { id: "v120", versionString: "1.2.0", state: "PREPARE_FOR_SUBMISSION" },
+      { id: "v119", versionString: "1.1.9", state: "IN_REVIEW" },
+    ]);
+    expect(d.kind === "stop" && d.scope).toBe("other");
+  });
+});
+
+describe("describeStop", () => {
+  const inFlight = versionsFor({ id: "v120", versionString: "1.2.0", state: "WAITING_FOR_REVIEW" })[0]!;
+
+  it("names the state and the build actually attached to the in-flight version", () => {
+    const m = describeStop({ build: build240, version: inFlight, scope: "target", attached: { id: "b240", buildNumber: "240" } });
+    expect(m).toContain("1.2.0");
+    expect(m).toContain("WAITING_FOR_REVIEW");
+    expect(m).toContain("build 240");
+    expect(m).toMatch(/no changes/i);
+    expect(m).not.toMatch(/not the one in review/i);
+  });
+
+  it("says the newest build is NOT the one in review when a different build is attached", () => {
+    const m = describeStop({ build: build240, version: inFlight, scope: "target", attached: { id: "b239", buildNumber: "239" } });
+    expect(m).toContain("239");
+    expect(m).toContain("240");
+    expect(m).toMatch(/not the one in review/i);
+  });
+
+  it("admits when it cannot tell which build is attached", () => {
+    const m = describeStop({ build: build240, version: inFlight, scope: "target", attached: null });
+    expect(m).toMatch(/could not|no build/i);
+    expect(m).toContain("WAITING_FOR_REVIEW");
+  });
+
+  it("for another version in flight: names it, its build and the newest build that is waiting", () => {
+    const m = describeStop({ build: build241, version: inFlight, scope: "other", attached: { id: "b240", buildNumber: "240" } });
+    expect(m).toContain("1.2.0");
+    expect(m).toContain("build 240");
+    expect(m).toContain("1.2.1");
+    expect(m).toContain("241");
+    expect(m).toMatch(/no changes/i);
   });
 });
 
@@ -142,9 +273,13 @@ describe("planCreate", () => {
 
 const editable = versionsFor({ id: "v120", versionString: "1.2.0", state: "PREPARE_FOR_SUBMISSION", releaseType: "MANUAL" })[0]!;
 const goodReview = parseReviewDetail(reviewDetailDoc({ demoAccountRequired: true, demoAccountName: "review@example.test" }));
+const draft = (over: Partial<OpenSubmission> = {}): OpenSubmission => ({ id: "rs1", versionIds: [], otherItemCount: 0, ...over });
+const ref = (id: string, state: string): SubmissionRef => ({ id, state });
 
-function details(over: Partial<Details> & { locs?: LocalizationFx[]; review?: ReviewDetailFx | null } = {}): Details {
-  const { locs, review, ...rest } = over;
+function details(
+  over: Partial<Details> & { locs?: LocalizationFx[]; review?: ReviewDetailFx | null; open?: OpenSubmission } = {},
+): Details {
+  const { locs, review, open, ...rest } = over;
   return {
     localizations: parseLocalizations(
       localizationsDoc(locs ?? [{ id: "l-gb", locale: "en-GB", whatsNew: "old" }, { id: "l-nl", locale: "nl-NL" }]),
@@ -152,7 +287,8 @@ function details(over: Partial<Details> & { locs?: LocalizationFx[]; review?: Re
     attachedBuildId: null,
     reviewDetail: review === undefined ? goodReview : review === null ? null : parseReviewDetail(reviewDetailDoc(review)),
     phasedReleaseId: null,
-    openSubmission: null,
+    submissions: open ? [ref(open.id, "READY_FOR_REVIEW")] : [],
+    drafts: open ? [open] : [],
     ...rest,
   };
 }
@@ -164,7 +300,7 @@ const opsOf = (p: ReturnType<typeof plan>): Op[] => {
   return p.ops;
 };
 
-describe("planEdit — an editable version", () => {
+describe("planEdit: an editable version", () => {
   it("sets whatsNew everywhere, attaches the build, sets the release type, removes phased release, then submits (in that order)", () => {
     const ops = opsOf(plan(details({ phasedReleaseId: "ph1" })));
     expect(ops).toEqual([
@@ -207,17 +343,15 @@ describe("planEdit — an editable version", () => {
     });
   });
 
-  it("a rejected version is edited the same way as a fresh one", () => {
+  it("a rejected version is edited the same way as a fresh one (when no submission blocks)", () => {
     const rejected = versionsFor({ id: "v120", versionString: "1.2.0", state: "REJECTED" })[0]!;
     expect(opsOf(plan(details(), rejected)).at(-1)).toEqual({ kind: "submitReviewSubmission", submissionId: null });
   });
 });
 
-describe("planEdit — review submissions", () => {
-  const open = (over: Partial<OpenSubmission> = {}): OpenSubmission => ({ id: "rs1", versionIds: [], otherItemCount: 0, ...over });
-
+describe("planEdit: review submissions", () => {
   it("reuses an open (draft) submission and adds the version to it", () => {
-    const ops = opsOf(plan(details({ openSubmission: open() })));
+    const ops = opsOf(plan(details({ open: draft() })));
     expect(ops.some((o) => o.kind === "createReviewSubmission")).toBe(false);
     expect(ops.slice(-2)).toEqual([
       { kind: "addSubmissionItem", submissionId: "rs1", versionId: "v120" },
@@ -226,24 +360,47 @@ describe("planEdit — review submissions", () => {
   });
 
   it("when the open submission already holds the version, only submits it", () => {
-    const ops = opsOf(plan(details({ openSubmission: open({ versionIds: ["v120"] }) })));
+    const ops = opsOf(plan(details({ open: draft({ versionIds: ["v120"] }) })));
     expect(ops.filter((o) => o.kind === "addSubmissionItem")).toEqual([]);
     expect(ops.at(-1)).toEqual({ kind: "submitReviewSubmission", submissionId: "rs1" });
   });
 
   it("FAILS rather than silently submitting someone else's items in the open submission", () => {
-    const p = plan(details({ openSubmission: open({ otherItemCount: 2 }) }));
+    const p = plan(details({ open: draft({ otherItemCount: 2 }) }));
     expect(p.kind).toBe("fail");
     expect(p.kind === "fail" && p.message).toMatch(/other items/i);
   });
 
   it("FAILS if the open submission holds a different version", () => {
-    const p = plan(details({ openSubmission: open({ versionIds: ["v-other"] }) }));
-    expect(p.kind).toBe("fail");
+    expect(plan(details({ open: draft({ versionIds: ["v-other"] }) })).kind).toBe("fail");
+  });
+
+  describe("every non-terminal submission state is checked before any change", () => {
+    it.each(["UNRESOLVED_ISSUES", "WAITING_FOR_REVIEW", "IN_REVIEW", "CANCELING", "COMPLETING"])("FAILS on a submission in %s", (state) => {
+      const p = plan(details({ submissions: [ref("rsX", state)] }));
+      expect(p.kind).toBe("fail");
+      if (p.kind !== "fail") return;
+      expect(p.message).toContain(state);
+      expect(p.message).toContain("rsX");
+      expect(p.message).toContain("resolve or resubmit it in App Store Connect");
+    });
+
+    it("still fails when a reusable draft exists next to the blocking submission", () => {
+      const p = plan(
+        details({ submissions: [ref("rs1", "READY_FOR_REVIEW"), ref("rsX", "UNRESOLVED_ISSUES")], drafts: [draft()] }),
+      );
+      expect(p.kind).toBe("fail");
+      expect(p.kind === "fail" && p.message).toContain("UNRESOLVED_ISSUES");
+    });
+
+    it("a READY_FOR_REVIEW draft and a COMPLETE (terminal) submission do not block", () => {
+      const p = plan(details({ submissions: [ref("rs0", "COMPLETE"), ref("rs1", "READY_FOR_REVIEW")], drafts: [draft()] }));
+      expect(p.kind).toBe("ops");
+    });
   });
 
   describe("chooseOpenSubmission", () => {
-    it("prefers the submission that already holds the version, else the first, else null", () => {
+    it("prefers the draft that already holds the version, else the first, else null", () => {
       const a: OpenSubmission = { id: "a", versionIds: [], otherItemCount: 0 };
       const b: OpenSubmission = { id: "b", versionIds: ["v120"], otherItemCount: 0 };
       expect(chooseOpenSubmission([a, b], "v120")).toBe(b);
@@ -253,7 +410,7 @@ describe("planEdit — review submissions", () => {
   });
 });
 
-describe("planEdit — App Review details (never invented)", () => {
+describe("planEdit: App Review details (never invented)", () => {
   it("FAILS, with no operations, when there is no review detail resource", () => {
     const p = plan(details({ review: null }));
     expect(p.kind).toBe("fail");
@@ -262,8 +419,7 @@ describe("planEdit — App Review details (never invented)", () => {
   });
 
   it("FAILS when sign-in is not marked as required", () => {
-    const p = plan(details({ review: { demoAccountRequired: false, demoAccountName: "review@example.test" } }));
-    expect(p.kind).toBe("fail");
+    expect(plan(details({ review: { demoAccountRequired: false, demoAccountName: "review@example.test" } })).kind).toBe("fail");
   });
 
   it("FAILS when the demo account name is empty", () => {
@@ -278,11 +434,68 @@ describe("planEdit — App Review details (never invented)", () => {
   });
 });
 
-describe("planEdit — localizations", () => {
+describe("planEdit: localizations", () => {
   it("FAILS when the version has no localizations (there is nowhere to put the release notes)", () => {
     const p = plan(details({ locs: [] }));
     expect(p.kind).toBe("fail");
     expect(p.kind === "fail" && p.message).toMatch(/localization/i);
+  });
+});
+
+describe("planCreate: every blocker is checked before the version is created", () => {
+  const live = versionsFor({ id: "v120", versionString: "1.2.0", state: "READY_FOR_SALE" })[0]!;
+  const base = {
+    appId: APP_ID,
+    build: build241,
+    submissions: [] as SubmissionRef[],
+    drafts: [] as OpenSubmission[],
+    previousLive: live as AppVersion | null,
+    proxyReviewDetail: goodReview,
+  };
+
+  it("creates the version when nothing blocks and the proxy review detail is good", () => {
+    expect(planCreate(base)).toEqual({
+      kind: "ops",
+      ops: [{ kind: "createVersion", appId: APP_ID, versionString: "1.2.1" }],
+    });
+  });
+
+  it.each(["UNRESOLVED_ISSUES", "WAITING_FOR_REVIEW", "IN_REVIEW", "CANCELING", "COMPLETING"])("FAILS on a submission in %s", (state) => {
+    const p = planCreate({ ...base, submissions: [ref("rsX", state)] });
+    expect(p.kind).toBe("fail");
+    expect(p.kind === "fail" && p.message).toContain(state);
+    expect(p.kind === "fail" && p.message).toContain("resolve or resubmit it in App Store Connect");
+  });
+
+  it("FAILS when an open draft already holds items (the new version could not be added to it safely)", () => {
+    const p = planCreate({ ...base, submissions: [ref("rs1", "READY_FOR_REVIEW")], drafts: [draft({ versionIds: ["v-old"] })] });
+    expect(p.kind).toBe("fail");
+    expect(p.kind === "fail" && p.message).toMatch(/other items/i);
+  });
+
+  it("an empty open draft is fine (it will be reused)", () => {
+    expect(planCreate({ ...base, submissions: [ref("rs1", "READY_FOR_REVIEW")], drafts: [draft()] }).kind).toBe("ops");
+  });
+
+  it("FAILS when the previous live version has no App Review details (the new one would inherit nothing)", () => {
+    const p = planCreate({ ...base, proxyReviewDetail: null });
+    expect(p.kind).toBe("fail");
+    expect(p.kind === "fail" && p.message).toContain("1.2.0");
+    expect(p.kind === "fail" && p.message).toMatch(/App Review/i);
+  });
+
+  it("FAILS when the previous live version has no demo account, naming it but not the account", () => {
+    const p = planCreate({
+      ...base,
+      proxyReviewDetail: parseReviewDetail(reviewDetailDoc({ demoAccountRequired: false, demoAccountName: "secret.person@example.test" })),
+    });
+    expect(p.kind).toBe("fail");
+    expect(p.kind === "fail" && p.message).toMatch(/demo account/i);
+    expect(p.kind === "fail" && p.message).not.toContain("secret.person");
+  });
+
+  it("without a previous live version (first release) there is no proxy to check", () => {
+    expect(planCreate({ ...base, previousLive: null, proxyReviewDetail: null }).kind).toBe("ops");
   });
 });
 

@@ -66,6 +66,7 @@ export interface VersionFx {
   legacyState?: string;
   legacyOnly?: boolean;
   releaseType?: string | null;
+  createdDate?: string;
 }
 
 export function versionsDoc(versions: VersionFx[]) {
@@ -83,7 +84,7 @@ export function versionsDoc(versions: VersionFx[]) {
         releaseType: v.releaseType === undefined ? "AFTER_APPROVAL" : v.releaseType,
         earliestReleaseDate: null,
         downloadable: false,
-        createdDate: "2026-10-04T08:00:00-07:00",
+        createdDate: v.createdDate ?? "2026-10-04T08:00:00-07:00",
       },
       relationships: {
         app: { links: { self: `${API}/v1/appStoreVersions/${v.id}/relationships/app` } },
@@ -122,6 +123,14 @@ export function localizationsDoc(locs: LocalizationFx[]) {
 /** GET /v1/appStoreVersions/{id}/relationships/build */
 export function buildLinkageDoc(buildId: string | null) {
   return { data: buildId === null ? null : { type: "builds", id: buildId }, links: { self: `${API}/x`, related: `${API}/y` } };
+}
+
+/** GET /v1/appStoreVersions/{id}/build */
+export function buildRefDoc(id: string | null, buildNumber = "240") {
+  return {
+    data: id === null ? null : { type: "builds", id, attributes: { version: buildNumber }, links: { self: `${API}/v1/builds/${id}` } },
+    links: { self: `${API}/v1/appStoreVersions/x/build` },
+  };
 }
 
 /** GET /v1/appStoreVersions/{id}/relationships/appStoreVersionPhasedRelease */
