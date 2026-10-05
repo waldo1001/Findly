@@ -77,9 +77,10 @@ export interface PlanRelease {
 
 export type Plan = PlanError | PlanNothing | PlanRelease;
 
-type NotesResult = { ok: true; text: string } | { ok: false; error: PlanError };
+export type NotesResult = { ok: true; text: string } | { ok: false; error: PlanError };
 
-function checkNotes(raw: string | undefined): NotesResult {
+/** Trim and validate the release notes. Exported so callers can fail before touching the network. */
+export function checkNotes(raw: string | undefined): NotesResult {
   const text = (raw ?? "").trim();
   if (text === "") {
     return {
