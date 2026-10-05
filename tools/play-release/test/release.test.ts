@@ -154,6 +154,28 @@ describe("release() — a change already in review is never cancelled", () => {
     expect(fake.sequence().at(-1)).toBe(DELETE);
   });
 
+  it("the next step reads as its own sentence whether or not Play's message ends with a full stop", async () => {
+    const withStop = setup({ [COMMIT]: playError(400, "Cannot be sent for review automatically.") });
+    await expect(withStop.run({ dryRun: false })).rejects.toThrow(/automatically\. Next step: in Play Console/);
+    const withoutStop = setup({ [COMMIT]: playError(400, "Cannot be sent for review automatically") });
+    await expect(withoutStop.run({ dryRun: false })).rejects.toThrow(/automatically\. Next step: in Play Console/);
+  });
+
+  it("a network failure at commit time is not dressed up with a Play Console hint", async () => {
+    const fake = createFakePlay();
+    const api = new PlayClient(
+      async (url, init) => {
+        if (init?.method === "POST" && url.includes(":commit")) throw new Error("socket hang up");
+        return fake.fetchFn(url, init);
+      },
+      TOKEN,
+      "com.findly.android",
+    );
+    const failure = release({ api, notes: NOTES, dryRun: false });
+    await expect(failure).rejects.toThrow(/network error/i);
+    await failure.catch((e: Error) => expect(e.message).not.toMatch(/Publishing overview/));
+  });
+
   it("never falls back to changesNotSentForReview or to cancelling the review", async () => {
     const { fake, run } = setup({ [COMMIT]: playError(400, "Changes cannot be sent for review automatically.") });
     await run({ dryRun: false }).catch(() => undefined);
