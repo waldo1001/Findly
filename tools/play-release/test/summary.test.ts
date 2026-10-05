@@ -60,7 +60,7 @@ describe("renderSummary()", () => {
   });
 
   it("failure: a message containing backticks cannot break out of the code block", () => {
-    const md = renderSummary({ status: "failed", message: "bad ``` fence\n# injected heading", dryRun: undefined });
+    const md = renderSummary({ status: "failed", message: "bad\n```\n# injected heading", dryRun: undefined });
     const fences = md.split("\n").filter((line) => line.trim().startsWith("```"));
     expect(fences).toHaveLength(2);
   });
