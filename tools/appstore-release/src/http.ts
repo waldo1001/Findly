@@ -15,7 +15,7 @@ export interface JsonApiResource {
   id: string;
   type: string;
   attributes?: Record<string, unknown>;
-  relationships?: Record<string, { data?: unknown } | undefined>;
+  relationships?: Record<string, { data?: unknown; links?: unknown } | undefined>;
 }
 
 export interface JsonApiDoc<T = JsonApiResource> {

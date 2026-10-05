@@ -194,9 +194,9 @@ export function submissionItemsDoc(items: ItemFx[]) {
       },
       links: { self: `${API}/v1/reviewSubmissionItems/${i.id}` },
     })),
-    included: items
-      .filter((i) => i.versionId !== undefined)
-      .map((i) => ({ type: "appStoreVersions", id: i.versionId, attributes: { versionString: "x" } })),
+    included: items.flatMap((i) =>
+      i.versionId === undefined ? [] : [{ type: "appStoreVersions", id: i.versionId, attributes: { versionString: "x" } }],
+    ),
     links: { self: `${API}/v1/reviewSubmissions/x/items` },
     meta: { paging: { total: items.length, limit: 200 } },
   };
