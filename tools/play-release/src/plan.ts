@@ -117,20 +117,26 @@ function byNumericValue(a: string, b: string): number {
   return Number(a) - Number(b);
 }
 
+interface CurrentRelease {
+  /** Sorted numerically, deduplicated. */
+  codes: string[];
+  name?: string | undefined;
+}
+
 /**
- * The version codes of a track's *current* completed release: of all `completed` releases that
- * carry version codes, the one holding the highest code. `undefined` when there is none.
- * Draft, halted and inProgress releases never count.
+ * A track's *current* completed release: of all `completed` releases that carry version codes,
+ * the one holding the highest code — whatever order Play lists them in. `undefined` when there is
+ * none. Draft, halted and inProgress releases never count.
  */
-function currentCompleted(track: Track | undefined): string[] | undefined {
-  let best: string[] | undefined;
+function currentCompleted(track: Track | undefined): CurrentRelease | undefined {
+  let best: CurrentRelease | undefined;
   let bestMax = -Infinity;
   for (const release of track?.releases ?? []) {
     if (release.status !== "completed" || !release.versionCodes?.length) continue;
     const codes = [...new Set(release.versionCodes)].sort(byNumericValue);
     const max = Number(codes[codes.length - 1]);
     if (max > bestMax) {
-      best = codes;
+      best = { codes, name: release.name };
       bestMax = max;
     }
   }
@@ -145,12 +151,47 @@ function maxCode(codes: string[]): number {
   return Math.max(...codes.map(Number));
 }
 
+function codesOf(releases: Release[]): string[] {
+  return [...new Set(releases.flatMap((r) => r.versionCodes ?? []))].sort(byNumericValue);
+}
+
+/**
+ * Every non-draft production release is considered (store-readiness §5 step 1, A57 review):
+ *  - a `halted` release was stopped deliberately — never resume or replace it automatically;
+ *  - an `inProgress` (staged) rollout whose version code is not older than Internal's would be
+ *    overwritten by a release that is, at best, the same build: a downgrade of a live rollout.
+ * Both fail closed, before "nothing to release" is even considered.
+ */
+function productionSafety(production: Track | undefined, internalMax: number): PlanError | undefined {
+  const releases = production?.releases ?? [];
+
+  const halted = releases.filter((r) => r.status === "halted");
+  if (halted.length > 0) {
+    return {
+      action: "error",
+      code: "production-halted",
+      message: `Production has a halted release (version code(s) ${codesOf(halted).join(", ") || "unknown"}). A halted build was stopped deliberately; resume or replace it in Play Console. Nothing was changed.`,
+    };
+  }
+
+  const rollingOut = releases.filter((r) => r.status === "inProgress" && r.versionCodes?.length);
+  const blocking = rollingOut.filter((r) => maxCode(codesOf([r])) >= internalMax);
+  if (blocking.length > 0) {
+    return {
+      action: "error",
+      code: "production-rollout-ahead",
+      message: `Production has a staged rollout (inProgress) of version code ${maxCode(codesOf(blocking))}, not older than Internal testing's ${internalMax}. Releasing would downgrade a live rollout; finish or halt it in Play Console first. Nothing was changed.`,
+    };
+  }
+  return undefined;
+}
+
 export function plan(tracks: PlanInput, listingLanguages: string[], rawNotes: string | undefined): Plan {
   const notes = checkNotes(rawNotes);
   if (!notes.ok) return notes.error;
 
-  const internal = currentCompleted(tracks.internal);
-  if (!internal) {
+  const internalRelease = currentCompleted(tracks.internal);
+  if (!internalRelease) {
     return {
       action: "error",
       code: "no-internal-release",
@@ -158,12 +199,17 @@ export function plan(tracks: PlanInput, listingLanguages: string[], rawNotes: st
         "The Internal testing track has no completed release to promote. Upload a build to Internal testing first.",
     };
   }
+  const internal = internalRelease.codes;
+  const name = internalRelease.name;
 
-  const production = currentCompleted(tracks.production) ?? [];
-  const alpha = currentCompleted(tracks.alpha) ?? [];
+  const unsafe = productionSafety(tracks.production, maxCode(internal));
+  if (unsafe) return unsafe;
+
+  const production = currentCompleted(tracks.production)?.codes ?? [];
+  const alpha = currentCompleted(tracks.alpha)?.codes ?? [];
 
   if (sameCodes(internal, production)) {
-    return { action: "nothing", versionCodes: internal, production, alpha };
+    return { action: "nothing", versionCodes: internal, name, production, alpha };
   }
 
   // Safety net, not in the spec: releasing a lower version code than production already serves
@@ -186,6 +232,7 @@ export function plan(tracks: PlanInput, listingLanguages: string[], rawNotes: st
   return {
     action: "release",
     versionCodes: internal,
+    name,
     languages,
     notes: notes.text,
     bodies: { production: body("production"), alpha: body("alpha") },
