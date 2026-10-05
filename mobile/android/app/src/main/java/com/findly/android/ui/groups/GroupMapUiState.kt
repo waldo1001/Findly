@@ -1,6 +1,7 @@
 package com.findly.android.ui.groups
 
 import com.findly.android.ui.map.CameraCommand
+import com.findly.android.ui.onboarding.OnboardingVariant
 
 /** One group member's live-map entry (001-api-contract.md §12.10). **Position-only** (specs/005-
  * temporary-groups.md §3): deliberately no `deviceId`/`deviceName`/`batteryPct`/`source`/altitude/
@@ -34,7 +35,7 @@ sealed class GroupMapUiState {
      * any later refresh (a confirmed state change, not a failed refresh) — routes to Onboarding
      * instead of rendering a retryable [Error]. Group screens only need a profile, so only the
      * profile-less variant arises here. */
-    data class RouteToOnboarding(val variant: com.findly.android.ui.onboarding.OnboardingVariant) : GroupMapUiState()
+    data class RouteToOnboarding(val variant: OnboardingVariant) : GroupMapUiState()
 
     /** [selectedUserId]/[cameraCommand] mirror [com.findly.android.ui.map.MapUiState.Content]'s
      * fields exactly (specs/010-app-shell-and-screen-ux.md §3.2's "same camera policy through the

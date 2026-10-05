@@ -84,6 +84,33 @@ class MapRefreshWiringStructureTest {
     }
 
     @Test
+    fun `GroupMapRoute routes a RouteToOnboarding state and FindlyNavHost hands it navigateToOnboarding`() {
+        val routeBody = functionBody(source("ui/groups/GroupMapScreen.kt"), "fun GroupMapRoute(")
+        assertTrue(
+            "GroupMapRoute must react to GroupMapUiState.RouteToOnboarding (010 §2.1/§3.6) - the state " +
+                "alone only renders a loading frame",
+            routeBody.contains("GroupMapUiState.RouteToOnboarding") && routeBody.contains("onRouteToOnboarding(it.variant)"),
+        )
+
+        val nav = source("ui/nav/FindlyNavHost.kt")
+        val callStart = nav.indexOf("GroupMapRoute(")
+        assertTrue("expected a GroupMapRoute( call in FindlyNavHost.kt", callStart >= 0)
+        var depth = 0
+        var i = callStart + "GroupMapRoute(".length - 1
+        do {
+            when (nav[i]) {
+                '(' -> depth++
+                ')' -> depth--
+            }
+            i++
+        } while (depth > 0 && i < nav.length)
+        assertTrue(
+            "the GroupMapRoute( call must pass `onRouteToOnboarding = navigateToOnboarding`",
+            nav.substring(callStart, i).contains("onRouteToOnboarding = navigateToOnboarding"),
+        )
+    }
+
+    @Test
     fun `MapViewModel and GroupMapViewModel forward onVisible and onHidden to their state holders`() {
         listOf("ui/map/MapViewModel.kt", "ui/groups/GroupMapViewModel.kt").forEach { file ->
             val text = source(file)

@@ -83,10 +83,19 @@ class MapStateHolder(
         val latest = _state.value as? MapUiState.Content
         val points = members.locatedPoints()
 
+        // A state that is not Content means the map surface is not on screen: Loading (nothing yet)
+        // or Error/RouteToOnboarding, where the Error card replaced the GoogleMap and tore it out of
+        // composition. This success therefore opens a FRESH map surface at the default camera, so
+        // it is a first load of that surface (010 §3.4 trigger 1) — without this the camera policy
+        // (which says "never on an ordinary refresh") would leave it unfitted, with the selection
+        // gone with the sheet (A55 review F1).
+        val freshSurface = latest == null
+
         // specs/010-app-shell-and-screen-ux.md §3.4: decide WHETHER this load/refresh re-runs the
         // camera policy — never on an ordinary refresh, with the one carve-out MapCameraPolicy
         // itself documents.
-        val shouldRun = MapCameraPolicy.shouldRunOnLoadOrRefresh(cameraPolicyState, points.isNotEmpty())
+        val shouldRun = freshSurface ||
+            MapCameraPolicy.shouldRunOnLoadOrRefresh(cameraPolicyState, points.isNotEmpty())
         cameraPolicyState = MapCameraPolicy.nextState(cameraPolicyState, points.isNotEmpty())
         val cameraCommand = if (shouldRun) nextCameraCommand(MapCamera.target(points)) else latest?.cameraCommand
 
@@ -103,6 +112,10 @@ class MapStateHolder(
         // (001 §1.6 — "member") — a confirmed PROFILE_NOT_FOUND/FAMILY_NOT_FOUND routes to
         // Onboarding instead of the dead-end retryable card, whichever trigger saw it.
         val variant = ProfileDeadEndRouting.classify(error, familyScoped = true)
+        // 010 §3.6: a confirmed state change is not a failed refresh — it routes as on a first load
+        // AND ends polling (no timer tick or foreground return fetches again; the Map entry is
+        // about to be popped anyway, this makes it true independently of when navigation lands).
+        if (variant != null) refreshController.endPolling()
         val latest = _state.value
         _state.value = when {
             variant != null -> MapUiState.RouteToOnboarding(variant)

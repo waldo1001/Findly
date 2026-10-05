@@ -14,6 +14,7 @@ import com.findly.android.ui.map.MapRefreshController
 import com.findly.android.ui.map.RefreshRun
 import com.findly.android.ui.map.RefreshTrigger
 import com.findly.android.ui.map.fetchGuarded
+import com.findly.android.ui.onboarding.ProfileDeadEndRouting
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -30,9 +31,12 @@ import kotlinx.coroutines.flow.asStateFlow
  * re-fetch on every return to visible + foregrounded ([onVisible]/[onHidden]), every 30 s while
  * visible, never in the background, one request in flight, a failed periodic refresh keeps the last
  * roster silently, and a response is merged into the *latest* state (a member selected mid-fetch
- * survives it) — see [com.findly.android.ui.map.MapStateHolder]'s class doc for the reasoning. The one difference:
- * `GROUP_EXPIRED` always surfaces as [GroupMapUiState.Expired] — it is a terminal state, not a
- * failed refresh.
+ * survives it) — see [com.findly.android.ui.map.MapStateHolder]'s class doc for the reasoning. The
+ * group map's **confirmed state changes** (010 §3.6) are not failed refreshes, whatever triggered
+ * them: `PROFILE_NOT_FOUND` → [GroupMapUiState.RouteToOnboarding], `GROUP_EXPIRED` →
+ * [GroupMapUiState.Expired], `GROUP_NOT_FOUND` (a removed member, a deleted or swept group) → the
+ * first-load [GroupMapUiState.Error] — each also **ends polling** ([MapRefreshController.endPolling]),
+ * so a kicked member never watches a frozen roster.
  */
 class GroupMapStateHolder(
     private val groupId: String,
@@ -83,7 +87,14 @@ class GroupMapStateHolder(
         val latest = _state.value as? GroupMapUiState.Content
         val points = members.locatedPoints()
 
-        val shouldRun = MapCameraPolicy.shouldRunOnLoadOrRefresh(cameraPolicyState, points.isNotEmpty())
+        // Not Content == the map surface is not on screen (Loading, or an Error card that replaced
+        // the GoogleMap and tore it out of composition): this success opens a FRESH map surface, so
+        // it is a first load of that surface — the camera policy re-runs for it, and the selection
+        // is gone with the sheet (A55 review F1; see MapStateHolder.applyRoster).
+        val freshSurface = latest == null
+
+        val shouldRun = freshSurface ||
+            MapCameraPolicy.shouldRunOnLoadOrRefresh(cameraPolicyState, points.isNotEmpty())
         cameraPolicyState = MapCameraPolicy.nextState(cameraPolicyState, points.isNotEmpty())
         val cameraCommand = if (shouldRun) nextCameraCommand(MapCamera.target(points)) else latest?.cameraCommand
 
@@ -96,11 +107,23 @@ class GroupMapStateHolder(
     }
 
     private fun applyFailure(error: ApiError, explicit: Boolean) {
+        // specs/010 §2.1: group screens only need a profile, so only PROFILE_NOT_FOUND routes here
+        // (familyScoped = false, as in GroupsListStateHolder).
+        val variant = ProfileDeadEndRouting.classify(error, familyScoped = false)
+        val confirmedStateChange =
+            variant != null || error is ApiError.GroupExpired || error is ApiError.GroupNotFound
+        // 010 §3.6: a confirmed state change is not a failed refresh — it routes/surfaces exactly as
+        // on a first load, whichever trigger saw it, AND ends polling for this screen.
+        if (confirmedStateChange) refreshController.endPolling()
+
         val latest = _state.value
         _state.value = when {
-            // GROUP_EXPIRED is a terminal state, not a failed refresh: it surfaces (and bounces the
-            // user to the groups list) whichever trigger saw it.
+            variant != null -> GroupMapUiState.RouteToOnboarding(variant)
+            // GROUP_EXPIRED: surfaces (and bounces the user to the groups list).
             error is ApiError.GroupExpired -> GroupMapUiState.Expired()
+            // GROUP_NOT_FOUND (a removed member — non-membership is masked as 404, 001 §12 — or a
+            // deleted/swept group): the first-load error state, never a silently frozen roster.
+            error is ApiError.GroupNotFound -> GroupMapUiState.Error(error.userMessage())
             // specs/010 §3.6: a periodic/foreground refresh that fails keeps the last data, no
             // error surface. Only the first load (no content yet) or an explicit Refresh reports.
             latest is GroupMapUiState.Content && !explicit -> latest.copy(isRefreshing = false)

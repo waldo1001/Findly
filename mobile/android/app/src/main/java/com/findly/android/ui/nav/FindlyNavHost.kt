@@ -700,6 +700,7 @@ fun FindlyNavHost(
                 viewModel = groupMapViewModel,
                 mapRenderer = container.mapRenderer,
                 onExpired = { navController.popBackStack(Destinations.Groups.route, false) },
+                onRouteToOnboarding = navigateToOnboarding,
             )
         }
     }

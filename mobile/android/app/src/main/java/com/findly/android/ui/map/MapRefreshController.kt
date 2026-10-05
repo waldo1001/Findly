@@ -58,6 +58,9 @@ class RefreshRun(val trigger: RefreshTrigger) {
  *    queued. The one refinement: a dropped [RefreshTrigger.Explicit] *adopts* the running fetch
  *    ([RefreshRun.explicit] becomes true), so that fetch's failure is reported as the user's
  *    Refresh's own instead of vanishing as a silent tick.
+ * 5. **A confirmed state change ends polling** — the holder calls [endPolling] when a response is
+ *    one (010 §3.6): the timer stops for good and [onVisible] no longer fetches or ticks. The
+ *    user's own explicit Retry still fetches.
  *
  * Threading: driven from the main thread (`viewModelScope` is `Dispatchers.Main.immediate`); the
  * small amount of shared state is nevertheless guarded, and the lock is never held across a
@@ -73,6 +76,7 @@ class MapRefreshController(
     private var visible = false
     private var firstVisibleCovered = false
     private var timerJob: Job? = null
+    private var pollingEnded = false
 
     /** First appearance: fetches once, immediately. Call exactly once, from the holder's `init`. */
     fun start() {
@@ -86,6 +90,7 @@ class MapRefreshController(
         synchronized(lock) {
             if (visible) return
             visible = true
+            if (pollingEnded) return
             // The first onVisible after start() is the first appearance, which the initial load
             // already covers — it must not fetch a second time.
             fetchNow = !firstVisibleCovered
@@ -96,7 +101,10 @@ class MapRefreshController(
         // Launched outside the lock; the timer starts from *this* moment, never resuming an older
         // schedule.
         val timer = scope.launch { tickLoop() }
-        synchronized(lock) { timerJob = timer }
+        val endedMeanwhile = synchronized(lock) {
+            if (pollingEnded) true else { timerJob = timer; false }
+        }
+        if (endedMeanwhile) timer.cancel()
         if (fetchNow) scope.launch { request(RefreshTrigger.Visible) }
     }
 
@@ -110,8 +118,20 @@ class MapRefreshController(
         timer?.cancel()
     }
 
-    /** RED SKELETON (A55 review F2): no-op until the green commit. */
-    fun endPolling() {}
+    /**
+     * Ends **polling** for this screen for good (010 §3.6: a confirmed state change "ends polling
+     * for that screen"): cancels the timer and drops every later [RefreshTrigger.Visible] /
+     * [RefreshTrigger.Timer] request, so neither a foreground return nor the 30 s tick fetches
+     * again. An explicit request ([RefreshTrigger.Explicit] — the user's own Retry) still runs: a
+     * tap is not polling. Idempotent.
+     */
+    fun endPolling() {
+        val timer = synchronized(lock) {
+            pollingEnded = true
+            timerJob.also { timerJob = null }
+        }
+        timer?.cancel()
+    }
 
     /**
      * Runs a fetch for [trigger] unless one is already in flight, in which case it is dropped (and,
@@ -122,6 +142,9 @@ class MapRefreshController(
     suspend fun request(trigger: RefreshTrigger): Boolean {
         val run = RefreshRun(trigger)
         synchronized(lock) {
+            // Polling ended (a confirmed state change): the automatic triggers are dead, including
+            // one that was already launched and is only now reaching the gate.
+            if (pollingEnded && (trigger == RefreshTrigger.Visible || trigger == RefreshTrigger.Timer)) return false
             val running = inFlight
             if (running != null) {
                 if (trigger == RefreshTrigger.Explicit) running.explicit = true
