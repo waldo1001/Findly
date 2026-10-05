@@ -302,17 +302,25 @@ jobs:
     # A59 review: bounded like the release job (10 minutes there), with room for a large AAB upload
     # (the tool allows that one request 5 minutes).
     timeout-minutes: 15
-    # A59 review: Google allows one open Play edit per user, and this job and the release job
-    # (_release-android.yml) use the same service account. Overlapping runs would invalidate each
-    # other's edits — the job fails, nothing is cancelled in Play. One shared group makes them take
-    # turns. `cancel-in-progress: false`: a running upload/commit is never killed mid-flight. Note
-    # GitHub keeps at most one *pending* run per group and a newer pending one replaces an older one:
-    # fine for an internal upload (the newer main build supersedes it), but a release dispatch that
-    # was queued behind a running upload can be replaced the same way — re-dispatch it if it shows
-    # as cancelled.
+    # A59 review (§5, "Shared edit lock"): Google allows one open Play edit per user, and this job and
+    # the release job (_release-android.yml) use the same service account. Overlapping runs would
+    # invalidate each other's edits — the job fails, nothing is cancelled in Play. One shared group
+    # makes them take turns; the two blocks MUST stay identical.
+    #   - `cancel-in-progress: false`: a running upload/commit is never killed mid-flight.
+    #   - `queue: max`: waiting runs queue first in, first out (up to 100 pending). With GitHub's
+    #     default (`queue: single`) only one run may be pending and a newer one replaces it, so a
+    #     release queued behind an upload could be silently cancelled by the next main push's upload
+    #     (with `platforms: both`, a split release).
+    # Consequence to know: a release waiting for approval may hold the lock, so internal uploads queue
+    # behind it until it is approved or rejected. The group name is repository-wide.
+    # actionlint does not know `queue` yet: 1.7.12 reports `unexpected key "queue" for "concurrency"
+    # section` (rhysd/actionlint#746). GitHub documents the key (docs.github.com, "Control the
+    # concurrency of workflows and jobs"); the repo does not run actionlint in CI, so that finding is
+    # expected here and in _release-android.yml.
     concurrency:
       group: play-edits
       cancel-in-progress: false
+      queue: max
     permissions:
       contents: read
     steps:

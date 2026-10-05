@@ -43,17 +43,26 @@ jobs:
     # `production` environment secret PLAY_SERVICE_ACCOUNT_JSON available to this job.
     environment: production
     timeout-minutes: 10
-    # A59 review: Google allows one open Play edit per user, and this job shares its service account
-    # with android.yml's `publish-internal` (which uploads on every push to main). Overlapping runs
-    # would invalidate each other's edits — one job fails, nothing is cancelled in Play. The same
-    # group name there makes the two take turns. `cancel-in-progress: false`: a running edit is never
-    # killed mid-flight. GitHub keeps at most one *pending* run per group and a newer pending one
-    # replaces an older one, so a release queued behind a running upload can be replaced by a newer
-    # main-push upload — re-dispatch the release if it shows as cancelled. (release-stores.yml's own
-    # workflow-level `release-stores` group is unchanged.)
+    # A59 review (§5, "Shared edit lock"): Google allows one open Play edit per user, and this job
+    # shares its service account with android.yml's `publish-internal` (which uploads on every push to
+    # main). Overlapping runs would invalidate each other's edits — one job fails, nothing is cancelled
+    # in Play. The same group name there makes the two take turns; the two blocks MUST stay identical.
+    #   - `cancel-in-progress: false`: a running edit is never killed mid-flight.
+    #   - `queue: max`: waiting runs queue first in, first out (up to 100 pending). With GitHub's
+    #     default (`queue: single`) only one run may be pending and a newer one replaces it, so this
+    #     release, queued behind a running upload, could be silently cancelled by the next main push's
+    #     upload (with `platforms: both`, a split release: iOS ships, Android does not).
+    # Consequence to know: a release waiting for approval may hold the lock, so internal uploads queue
+    # behind it until it is approved or rejected. The group name is repository-wide.
+    # actionlint does not know `queue` yet: 1.7.12 reports `unexpected key "queue" for "concurrency"
+    # section` (rhysd/actionlint#746). GitHub documents the key (docs.github.com, "Control the
+    # concurrency of workflows and jobs"); the repo does not run actionlint in CI, so that finding is
+    # expected here and in android.yml. (release-stores.yml's own workflow-level `release-stores` group
+    # is unchanged.)
     concurrency:
       group: play-edits
       cancel-in-progress: false
+      queue: max
     # docs/security-review-checklist.md §2: the only GitHub token scope needed is checkout. Publishing
     # authenticates with its own service-account key, not a GITHUB_TOKEN scope; no id-token here.
     permissions:
