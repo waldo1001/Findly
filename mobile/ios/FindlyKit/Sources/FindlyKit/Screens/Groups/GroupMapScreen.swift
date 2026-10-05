@@ -24,6 +24,9 @@ public struct GroupMapScreen: View {
     @State private var now = Date()
     private static let ticker = Timer.publish(every: 30, on: .main, in: .common).autoconnect()
     private static let isoFormatter = ISO8601DateFormatter()
+    /// specs/010 §3.2/§3.6 (I59) — see `LiveMapScreen.scenePhase`: the group map refreshes under the
+    /// same rules, through the same `MapRefreshDriver`.
+    @Environment(\.scenePhase) private var scenePhase
 
     public init(viewModel: @autoclosure @escaping () -> GroupMapViewModel, renderer: any MapRendering, onExit: @escaping () -> Void) {
         _viewModel = StateObject(wrappedValue: viewModel())
@@ -43,9 +46,18 @@ public struct GroupMapScreen: View {
                 mapWithChromeAndSheet
             }
         }
+        // specs/010 §3.2/§3.6 (rows A55/I59) — identical wiring to `LiveMapScreen`: three lifecycle
+        // signals forwarded to `viewModel.refreshDriver`, which owns every decision. These sit on the
+        // outer `Group`, so they keep running while `.expired` swaps the map for the "group has
+        // ended" card (the view model ends the driver itself on `410 GROUP_EXPIRED`).
         .task {
             syncSheetHeight()
-            await viewModel.load()
+            await viewModel.refreshDriver.appeared(phase: MapRefreshPolicy.ScenePhase(scenePhase))
+        }
+        .onDisappear { viewModel.refreshDriver.disappeared() }
+        .onChange(of: scenePhase) { newPhase in
+            syncSheetHeight()
+            Task { await viewModel.refreshDriver.scenePhaseChanged(MapRefreshPolicy.ScenePhase(newPhase)) }
         }
         .onReceive(Self.ticker) { date in now = date }
     }
