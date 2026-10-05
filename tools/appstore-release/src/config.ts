@@ -2,7 +2,8 @@ import { normalizePrivateKey } from "./jwt";
 
 /** Findly's App Store Connect app (docs/h6-apple-portal-runbook.md Step 3): `com.findly.ios`. */
 export const APP_APPLE_ID = "6797994768";
-export const MAX_NOTES_LENGTH = 4000;
+/** Play's release-notes limit; the same text goes to both stores, so a `both` run can never split. */
+export const MAX_NOTES_LENGTH = 500;
 
 export class ConfigError extends Error {
   constructor(message: string) {
@@ -19,10 +20,9 @@ export interface Config {
   notes: string;
   dryRun: boolean;
   appId: string;
-  summaryPath: string | undefined;
 }
 
-/** Trim; reject empty or longer than Apple's 4000-character What's New limit. */
+/** Trim; reject empty or longer than {@link MAX_NOTES_LENGTH} (Apple itself allows 4000). */
 export function parseNotes(raw: string | undefined): string {
   const notes = (raw ?? "").trim();
   if (notes === "") throw new ConfigError("RELEASE_NOTES must not be empty.");
@@ -79,6 +79,5 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
     notes,
     dryRun,
     appId: APP_APPLE_ID,
-    summaryPath: env.GITHUB_STEP_SUMMARY && env.GITHUB_STEP_SUMMARY !== "" ? env.GITHUB_STEP_SUMMARY : undefined,
   };
 }
