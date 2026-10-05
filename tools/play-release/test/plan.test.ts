@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { MAX_NOTES_LENGTH, plan } from "../src/plan";
 import type { PlanRelease, Track } from "../src/plan";
 import internalCompleted from "./fixtures/internal-completed.json";
+import internalHigherFirst from "./fixtures/internal-higher-first.json";
 import internalMixed from "./fixtures/internal-mixed.json";
 import internalNoCompleted from "./fixtures/internal-no-completed.json";
 import internalMultiCode from "./fixtures/internal-multi-code.json";
@@ -10,7 +11,12 @@ import trackEmpty from "./fixtures/track-empty.json";
 import productionCurrent from "./fixtures/production-current.json";
 import productionOlder from "./fixtures/production-older.json";
 import productionNewer from "./fixtures/production-newer.json";
+import productionDraft from "./fixtures/production-draft.json";
+import productionHalted from "./fixtures/production-halted.json";
+import productionHaltedAndCurrent from "./fixtures/production-halted-and-current.json";
 import productionStaged from "./fixtures/production-staged-rollout.json";
+import productionStagedNewer from "./fixtures/production-staged-newer.json";
+import productionStagedOlder from "./fixtures/production-staged-older.json";
 import alphaOlder from "./fixtures/alpha-older.json";
 import listings from "./fixtures/listings.json";
 
@@ -105,13 +111,44 @@ describe("plan() — what to release", () => {
     expect(release.before).toEqual({ production: ["230"], alpha: ["231"] });
   });
 
-  it("releases when production only has a staged (inProgress) rollout of that version", () => {
-    // Only a `completed` release counts as "already released" (store-readiness §5 step 4).
+  it("takes the highest completed internal release even when Play lists it first (order must not matter)", () => {
     const release = asRelease(
-      plan({ internal: internalCompleted, production: productionStaged, alpha: trackEmpty }, languages, NOTES),
+      plan({ internal: internalHigherFirst, production: trackEmpty, alpha: trackEmpty }, languages, NOTES),
+    );
+    expect(release.versionCodes).toEqual(["234"]);
+    expect(release.name).toBe("1.2.0 (234)");
+  });
+
+  it("carries the name of Internal's release for the summary", () => {
+    const release = asRelease(
+      plan({ internal: internalCompleted, production: trackEmpty, alpha: trackEmpty }, languages, NOTES),
+    );
+    expect(release.name).toBe("1.2.0 (234)");
+  });
+
+  it("has no name when Internal's release carries none", () => {
+    const release = asRelease(
+      plan({ internal: internalMultiCode, production: trackEmpty, alpha: trackEmpty }, languages, NOTES),
+    );
+    expect(release.name).toBe("1.2.0");
+    const nameless: Track = { track: "internal", releases: [{ versionCodes: ["234"], status: "completed" }] };
+    const result = asRelease(plan({ internal: nameless, production: trackEmpty }, languages, NOTES));
+    expect(result.name).toBeUndefined();
+  });
+
+  it("releases when production only has a staged rollout of an OLDER version (it is replaced)", () => {
+    const release = asRelease(
+      plan({ internal: internalCompleted, production: productionStagedOlder, alpha: trackEmpty }, languages, NOTES),
     );
     expect(release.versionCodes).toEqual(["234"]);
     expect(release.before.production).toEqual(["230"]);
+  });
+
+  it("ignores a draft production release, whatever its version code", () => {
+    const release = asRelease(
+      plan({ internal: internalCompleted, production: productionDraft, alpha: trackEmpty }, languages, NOTES),
+    );
+    expect(release.versionCodes).toEqual(["234"]);
   });
 
   it("reports empty before-state for tracks without releases", () => {
@@ -134,7 +171,13 @@ describe("plan() — nothing to release", () => {
       languages,
       NOTES,
     );
-    expect(result).toEqual({ action: "nothing", versionCodes: ["234"], production: ["234"], alpha: ["231"] });
+    expect(result).toEqual({
+      action: "nothing",
+      versionCodes: ["234"],
+      name: "1.2.0 (234)",
+      production: ["234"],
+      alpha: ["231"],
+    });
   });
 
   it("compares version codes as a set — order does not matter", () => {
@@ -155,6 +198,53 @@ describe("plan() — nothing to release", () => {
   it("still validates the notes before reporting nothing to release", () => {
     const result = plan({ internal: internalCompleted, production: productionCurrent }, languages, "  ");
     expect(result).toMatchObject({ action: "error", code: "notes-empty" });
+  });
+});
+
+describe("plan() — production safety (store-readiness §5 step 1, A57 review)", () => {
+  const withProduction = (production: Track) => ({ internal: internalCompleted, production, alpha: trackEmpty });
+
+  it("fails closed when production has a halted release", () => {
+    const result = plan(withProduction(productionHalted), languages, NOTES);
+    expect(result).toMatchObject({ action: "error", code: "production-halted" });
+    expect((result as { message: string }).message).toContain("231");
+  });
+
+  it("a halted release beats 'nothing to release' — even when a completed release already matches", () => {
+    const result = plan(withProduction(productionHaltedAndCurrent), languages, NOTES);
+    expect(result).toMatchObject({ action: "error", code: "production-halted" });
+  });
+
+  it("fails closed when an inProgress rollout carries Internal's own version code", () => {
+    const result = plan(withProduction(productionStaged), languages, NOTES);
+    expect(result).toMatchObject({ action: "error", code: "production-rollout-ahead" });
+  });
+
+  it("fails closed when an inProgress rollout is NEWER than Internal's release", () => {
+    const result = plan(withProduction(productionStagedNewer), languages, NOTES);
+    expect(result).toMatchObject({ action: "error", code: "production-rollout-ahead" });
+    const message = (result as { message: string }).message;
+    expect(message).toContain("240");
+    expect(message).toContain("234");
+  });
+
+  it("an inProgress rollout beats 'nothing to release' too (completed 234 + inProgress 240)", () => {
+    // productionStagedNewer also carries a completed 234 identical to Internal's.
+    expect(plan(withProduction(productionStagedNewer), languages, NOTES).action).toBe("error");
+  });
+
+  it("a halted release on a different track does not matter (alpha is not inspected)", () => {
+    const result = plan({ internal: internalCompleted, production: trackEmpty, alpha: productionHalted }, languages, NOTES);
+    expect(result.action).toBe("release");
+  });
+
+  it("'nothing to release' still needs a COMPLETED production release with exactly Internal's codes", () => {
+    const stagedOnly: Track = {
+      track: "production",
+      releases: [{ versionCodes: ["233"], status: "inProgress", userFraction: 0.5 }],
+    };
+    expect(plan(withProduction(stagedOnly), languages, NOTES).action).toBe("release");
+    expect(plan(withProduction(productionCurrent), languages, NOTES).action).toBe("nothing");
   });
 });
 

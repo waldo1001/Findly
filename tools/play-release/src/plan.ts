@@ -49,7 +49,13 @@ export interface PlanInput {
   alpha?: Track | undefined;
 }
 
-export type PlanErrorCode = "notes-empty" | "notes-too-long" | "no-internal-release" | "production-ahead";
+export type PlanErrorCode =
+  | "notes-empty"
+  | "notes-too-long"
+  | "no-internal-release"
+  | "production-ahead"
+  | "production-halted"
+  | "production-rollout-ahead";
 
 export interface PlanError {
   action: "error";
@@ -60,6 +66,8 @@ export interface PlanError {
 export interface PlanNothing {
   action: "nothing";
   versionCodes: string[];
+  /** Name of Internal's release (e.g. "1.2.0 (234)"), when Play gives one. */
+  name?: string | undefined;
   /** Version codes of the current completed release on each track ([] when none). */
   production: string[];
   alpha: string[];
@@ -68,6 +76,8 @@ export interface PlanNothing {
 export interface PlanRelease {
   action: "release";
   versionCodes: string[];
+  /** Name of Internal's release (e.g. "1.2.0 (234)"), when Play gives one. */
+  name?: string | undefined;
   languages: string[];
   /** The trimmed notes, identical for every language. */
   notes: string;
