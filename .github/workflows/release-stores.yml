@@ -7,9 +7,11 @@ name: release-stores
 # BOTH JOBS ARE DEFINED HERE, NOT IN REUSABLE (`workflow_call`) WORKFLOWS (A60, §5 "Trigger").
 # Observed 2026-10-05 on the first dry run (run 37350957793): a job inside a called workflow that
 # declared `environment: production` did NOT receive that environment's secrets when the caller
-# passed none — both jobs failed closed ("not set or empty") before any store call. Passing them
-# would take `secrets: inherit` (every repository secret) or repository-level copies, both of which
-# the credential-placement rule below forbids. An ordinary job with an `environment:` does receive
+# passed none — both jobs failed closed (Android: "not set or empty"; iOS: "Missing required
+# environment variable(s)") before any store call. A caller job cannot hold environment secrets at
+# all (`uses:` jobs cannot declare `environment`), so not even `secrets: inherit` would forward them;
+# the only workaround would be repository-level copies, which the credential-placement rule below
+# forbids. An ordinary job with an `environment:` does receive
 # its environment's secrets (that is how android.yml's `publish-internal` and ios.yml's `testflight`
 # work). So: no `secrets:`, no `secrets: inherit`, no `workflow_call`.
 #
