@@ -636,6 +636,41 @@ class MapStateHolderTest {
         assertEquals(MapUiState.RouteToOnboarding(OnboardingVariant.ProfileLess), holder.state.value)
     }
 
+    @Test
+    fun `an exception that escapes the API client on a periodic refresh is a silent failed refresh, never a crash`() = runTest {
+        val api = FakeLocationsApi().apply {
+            getLatestLocationsResult = roster(memberWithOneDevice("u1", "Eric", "d1", 51.0, 3.0, "2026-10-05T07:00:00Z"))
+        }
+        val holder = MapStateHolder(api, backgroundScope)
+        runCurrent()
+        holder.onVisible()
+        runCurrent()
+        val before = holder.state.value
+
+        // What a captive portal's 200-with-HTML does to the real client: a non-IOException.
+        api.getLatestLocationsThrowable = IllegalStateException("malformed body")
+        advanceTimeBy(30_000)
+        runCurrent() // an uncaught exception on backgroundScope would fail the test right here
+
+        assertEquals(2, api.getLatestLocationsCallCount)
+        assertEquals("treated as a failed refresh: last data kept, nothing surfaced", before, holder.state.value)
+
+        api.getLatestLocationsThrowable = null
+        advanceTimeBy(30_000)
+        runCurrent()
+        assertEquals("the in-flight gate reopened - the next tick fetches", 3, api.getLatestLocationsCallCount)
+    }
+
+    @Test
+    fun `an exception on the first load shows the error state instead of crashing`() = runTest {
+        val api = FakeLocationsApi().apply { getLatestLocationsThrowable = IllegalStateException("malformed body") }
+
+        val holder = MapStateHolder(api, backgroundScope)
+        runCurrent()
+
+        assertTrue(holder.state.value is MapUiState.Error)
+    }
+
     private fun memberWithOneDevice(
         userId: String,
         displayName: String,

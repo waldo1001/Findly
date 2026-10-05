@@ -371,6 +371,28 @@ class GroupMapStateHolderTest {
         assertEquals(selected.cameraCommand, after.cameraCommand)
     }
 
+    @Test
+    fun `an exception that escapes the API client is a failed refresh - silent on a periodic one, the error state on the first load`() = runTest {
+        val api = FakeGroupsApi().apply { getGroupLatestLocationsThrowable = IllegalStateException("malformed body") }
+        val holder = GroupMapStateHolder(groupId, api, backgroundScope)
+        runCurrent()
+        assertTrue("first load: error state, not a crash", holder.state.value is GroupMapUiState.Error)
+
+        api.getGroupLatestLocationsThrowable = null
+        api.getGroupLatestLocationsResult = roster(memberAt("u1", "Eric", 51.0, 3.0))
+        holder.onVisible()
+        advanceTimeBy(30_000)
+        runCurrent()
+        val loaded = holder.state.value
+        assertTrue(loaded is GroupMapUiState.Content)
+
+        api.getGroupLatestLocationsThrowable = IllegalStateException("malformed body")
+        advanceTimeBy(30_000)
+        runCurrent() // an uncaught exception on backgroundScope would fail the test right here
+
+        assertEquals("periodic: last roster kept, nothing surfaced", loaded, holder.state.value)
+    }
+
     private fun memberAt(userId: String, displayName: String, lat: Double, lon: Double): GroupMemberLocationDto = GroupMemberLocationDto(
         userId = userId,
         displayName = displayName,

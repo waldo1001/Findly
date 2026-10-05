@@ -98,9 +98,14 @@ class FakeGroupsApi : GroupsApi {
      * specs/010 §3.6) — see `FakeLocationsApi.getLatestLocationsGate`. */
     var getGroupLatestLocationsGate: CompletableDeferred<Unit>? = null
 
+    /** When non-null, [getGroupLatestLocations] throws it instead of answering (after the gate) —
+     * see `FakeLocationsApi.getLatestLocationsThrowable`. */
+    var getGroupLatestLocationsThrowable: Throwable? = null
+
     override suspend fun getGroupLatestLocations(groupId: String): ApiResult<GroupLatestLocationsResponseDto> {
         getGroupLatestLocationsCalls.add(groupId)
         getGroupLatestLocationsGate?.await()
+        getGroupLatestLocationsThrowable?.let { throw it }
         return getGroupLatestLocationsResult
     }
 }

@@ -66,9 +66,16 @@ class FakeLocationsApi : LocationsApi {
      * can script the outcome of the held request. */
     var getLatestLocationsGate: CompletableDeferred<Unit>? = null
 
+    /** When non-null, [getLatestLocations] throws it instead of answering (after the gate) — what
+     * the real client does for a non-`IOException` such as a `SerializationException` from a 200
+     * with a malformed body (a captive portal): `FindlyApiClient` only converts `IOException`s into
+     * `ApiResult.Failure`. */
+    var getLatestLocationsThrowable: Throwable? = null
+
     override suspend fun getLatestLocations(): ApiResult<LatestLocationsResponseDto> {
         getLatestLocationsCallCount++
         getLatestLocationsGate?.await()
+        getLatestLocationsThrowable?.let { throw it }
         return getLatestLocationsResult
     }
 
