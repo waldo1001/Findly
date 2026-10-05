@@ -1,5 +1,5 @@
 import type { JsonApiDoc, JsonApiResource } from "./http";
-import type { AppVersion, Build, Localization, OpenSubmission, ReviewDetail } from "./model";
+import type { AppVersion, Build, BuildRef, Localization, OpenSubmission, ReviewDetail, SubmissionRef } from "./model";
 
 /** Pure translation of App Store Connect JSON:API documents into the domain model. */
 
@@ -36,6 +36,7 @@ function toVersion(r: JsonApiResource): AppVersion {
     // appStoreState is deprecated in favour of appVersionState (App Store Connect API 3.7); accept either.
     state: str(r.attributes?.appVersionState) ?? str(r.attributes?.appStoreState),
     releaseType: str(r.attributes?.releaseType),
+    createdDate: str(r.attributes?.createdDate),
   };
 }
 
@@ -65,8 +66,15 @@ export function parseReviewDetail(doc: { data: JsonApiResource | null } | null):
   };
 }
 
-export function parseSubmissionIds(doc: Doc<JsonApiResource[]>): string[] {
-  return doc.data.map((r) => r.id);
+export function parseSubmissions(doc: Doc<JsonApiResource[]>): SubmissionRef[] {
+  return doc.data.map((r) => ({ id: r.id, state: str(r.attributes?.state) ?? "UNKNOWN" }));
+}
+
+/** `GET /v1/appStoreVersions/{id}/build`: the attached build, or null when none (or 404). */
+export function parseBuildRef(doc: { data: JsonApiResource | null } | null): BuildRef | null {
+  const r = doc?.data;
+  if (!r) return null;
+  return { id: r.id, buildNumber: str(r.attributes?.version) ?? "?" };
 }
 
 /** `GET /v1/reviewSubmissions/{id}/items?include=appStoreVersion`. */

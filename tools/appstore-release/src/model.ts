@@ -15,6 +15,20 @@ export interface AppVersion {
   /** appVersionState, falling back to the deprecated appStoreState; null if neither is present. */
   state: string | null;
   releaseType: string | null;
+  /** ISO 8601, used to find the previous live version. */
+  createdDate: string | null;
+}
+
+/** The build attached to a version. */
+export interface BuildRef {
+  id: string;
+  buildNumber: string;
+}
+
+/** A review submission as listed (no items). */
+export interface SubmissionRef {
+  id: string;
+  state: string;
 }
 
 export interface Localization {
