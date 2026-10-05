@@ -31,6 +31,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import com.findly.android.ui.designsystem.FindlyTheme
 import com.findly.android.ui.designsystem.components.FindlyBottomSheet
 import com.findly.android.ui.designsystem.components.FindlyButton
@@ -77,6 +78,18 @@ fun MapRoute(
     onLocateNow: (userId: String, displayName: String) -> Unit = { _, _ -> },
 ) {
     val state by viewModel.state.collectAsState()
+
+    // specs/010 §3.6 (A55): the map's data freshness. LifecycleResumeEffect runs while this
+    // destination's lifecycle is RESUMED — which for a NavBackStackEntry means it is the top
+    // destination AND the host activity is resumed, i.e. exactly "visible and foregrounded" — and
+    // `onPauseOrDispose` fires when it stops being either (another screen pushed, app
+    // backgrounded) or leaves composition. Everything else (the 30 s timer, the first-appearance /
+    // foreground-return / in-flight rules) is the pure, unit-tested MapRefreshController.
+    LifecycleResumeEffect(viewModel) {
+        viewModel.onVisible()
+        onPauseOrDispose { viewModel.onHidden() }
+    }
+
     MapScreen(
         state = state,
         mapRenderer = mapRenderer,

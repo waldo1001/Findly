@@ -31,6 +31,7 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import com.findly.android.ui.designsystem.FindlyTheme
 import com.findly.android.ui.designsystem.components.FindlyBottomSheet
 import com.findly.android.ui.designsystem.components.FindlyButton
@@ -45,6 +46,7 @@ import com.findly.android.ui.designsystem.components.rememberFindlyBottomSheetSt
 import com.findly.android.ui.map.MapRenderer
 import com.findly.android.ui.map.RelativeTimeFormatter
 import com.findly.android.ui.map.RosterAvatarStack
+import com.findly.android.ui.onboarding.OnboardingVariant
 import kotlinx.coroutines.delay
 import java.time.Instant
 
@@ -73,11 +75,23 @@ fun GroupMapRoute(
     mapRenderer: MapRenderer,
     modifier: Modifier = Modifier,
     onExpired: () -> Unit = {},
+    onRouteToOnboarding: (OnboardingVariant) -> Unit = {},
 ) {
     val state by viewModel.state.collectAsState()
     val context = LocalContext.current
 
+    // specs/010 §3.6 / §3.2 (A55): same wiring as MapRoute — RESUMED on this destination's
+    // NavBackStackEntry == visible and foregrounded; the policy itself is the pure
+    // MapRefreshController behind GroupMapStateHolder.
+    LifecycleResumeEffect(viewModel) {
+        viewModel.onVisible()
+        onPauseOrDispose { viewModel.onHidden() }
+    }
+
     LaunchedEffect(state) {
+        // specs/010 §2.1 / §3.6: a confirmed PROFILE_NOT_FOUND — on the first load or any later
+        // refresh — routes to Onboarding instead of a retryable error card.
+        (state as? GroupMapUiState.RouteToOnboarding)?.let { onRouteToOnboarding(it.variant) }
         val expired = state as? GroupMapUiState.Expired ?: return@LaunchedEffect
         Toast.makeText(context, expired.message, Toast.LENGTH_SHORT).show()
         onExpired()
@@ -124,6 +138,9 @@ fun GroupMapScreen(
 
             // Transient — GroupMapRoute's LaunchedEffect is about to navigate away.
             is GroupMapUiState.Expired -> FindlyLoadingState(message = state.message)
+
+            // Transient — GroupMapRoute's LaunchedEffect is about to route to Onboarding.
+            is GroupMapUiState.RouteToOnboarding -> FindlyLoadingState(message = "Loading group locations…")
 
             is GroupMapUiState.Content -> {
                 if (state.members.isEmpty()) {
