@@ -42,13 +42,17 @@ export function renderSummary(report: RunReport): string {
         "| Result | **Nothing to release** |",
         ...modeRow(dryRun),
         `| Version code(s) | ${list(outcome.versionCodes)} |`,
-        `| Production now | ${list(outcome.production)} — already a completed release |`,
-        `| Closed testing – Alpha now | ${list(outcome.alpha)} |`,
+        `| Production now | ${list(outcome.before.production)} — already a completed release |`,
+        `| Closed testing – Alpha now | ${list(outcome.before.alpha)} |`,
       ]),
       "",
       link,
       "",
     ].join("\n");
+  }
+
+  if (outcome.kind === "stopped") {
+    return [title, "", "**Stopped**", "", link, ""].join("\n");
   }
 
   const committed = outcome.kind === "committed";

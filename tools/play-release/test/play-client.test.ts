@@ -5,8 +5,11 @@ import internalCompleted from "./fixtures/internal-completed.json";
 import listings from "./fixtures/listings.json";
 import {
   BASE,
+  COMMIT,
   EDIT_ID,
+  PRODUCTION_RELEASES,
   TOKEN,
+  changesAlreadyInReview,
   createFakePlay,
   emptyResponse,
   jsonResponse,
@@ -96,12 +99,107 @@ describe("PlayClient — requests", () => {
     expect(fake.sequence()).toEqual([`POST /edits/${EDIT_ID}:validate`]);
   });
 
-  it("commit: POST /edits/{id}:commit — no changesNotSentForReview, so the change goes to review", async () => {
+  it("commit: POST /edits/{id}:commit?changesInReviewBehavior=ERROR_IF_IN_REVIEW — never cancels a change in review", async () => {
+    const { fake, play } = client();
+    expect(await play.commit(EDIT_ID)).toBe("committed");
+    expect(fake.sequence()).toEqual([COMMIT]);
+    expect(fake.calls[0]!.url).toBe(`${BASE}/edits/${EDIT_ID}:commit?changesInReviewBehavior=ERROR_IF_IN_REVIEW`);
+  });
+
+  it("commit: never sets changesNotSentForReview (an edit must go to review, not sit unsent)", async () => {
     const { fake, play } = client();
     await play.commit(EDIT_ID);
-    expect(fake.sequence()).toEqual([`POST /edits/${EDIT_ID}:commit`]);
     expect(fake.calls[0]!.url).not.toContain("changesNotSentForReview");
-    expect(fake.calls[0]!.url).not.toContain("?");
+  });
+
+  it("commit: a 400 with reason CHANGES_ALREADY_IN_REVIEW is reported as 'changes-in-review', not thrown", async () => {
+    const { play } = client({ [COMMIT]: changesAlreadyInReview() });
+    expect(await play.commit(EDIT_ID)).toBe("changes-in-review");
+  });
+
+  it("commit: the reason is also recognised in the legacy errors[] list, in any casing", async () => {
+    const legacy = jsonResponse(
+      { error: { code: 400, message: "in review", errors: [{ reason: "changesAlreadyInReview", domain: "global" }] } },
+      400,
+    );
+    const { play } = client({ [COMMIT]: legacy });
+    expect(await play.commit(EDIT_ID)).toBe("changes-in-review");
+  });
+
+  it("commit: a 400 WITHOUT that reason is an error (e.g. 'cannot be sent for review automatically')", async () => {
+    const reason = "Changes cannot be sent for review automatically.";
+    const { play } = client({ [COMMIT]: playError(400, reason) });
+    await expect(play.commit(EDIT_ID)).rejects.toThrow(reason);
+  });
+
+  it("commit: the reason only counts on a 400 — the same reason on a 500 is still an error", async () => {
+    const odd = jsonResponse({ error: { code: 500, message: "boom", details: [{ reason: "CHANGES_ALREADY_IN_REVIEW" }] } }, 500);
+    const { play } = client({ [COMMIT]: odd });
+    await expect(play.commit(EDIT_ID)).rejects.toThrow(/500/);
+  });
+
+  it("commit: a 404 is an error everywhere except tracks.get", async () => {
+    const { play } = client({ [COMMIT]: playError(404, "Edit not found.", "NOT_FOUND") });
+    await expect(play.commit(EDIT_ID)).rejects.toThrow(/404.*Edit not found/);
+  });
+
+  it("a dry-run client refuses to commit — structurally, without sending any request", async () => {
+    const fake = createFakePlay();
+    const play = new PlayClient(fake.fetchFn, TOKEN, "com.findly.android", { dryRun: true });
+    await expect(play.commit(EDIT_ID)).rejects.toThrow(/dry run/i);
+    expect(fake.calls).toHaveLength(0);
+  });
+
+  it("a dry-run client still does everything else (reads, updates, validates, deletes)", async () => {
+    const fake = createFakePlay();
+    const play = new PlayClient(fake.fetchFn, TOKEN, "com.findly.android", { dryRun: true });
+    await play.insertEdit();
+    await play.getTrack(EDIT_ID, "internal");
+    await play.updateTrack(EDIT_ID, { track: "production", releases: [] });
+    await play.validate(EDIT_ID);
+    await play.deleteEdit(EDIT_ID);
+    expect(fake.calls).toHaveLength(5);
+  });
+
+  it("listReleases: GET /tracks/{track}/releases — read-only, outside any edit", async () => {
+    const { fake, play } = client();
+    const releases = await play.listReleases("production");
+    expect(fake.sequence()).toEqual([PRODUCTION_RELEASES]);
+    expect(releases).toEqual([
+      {
+        releaseName: "1.2.0 (234)",
+        track: "production",
+        versionCodes: ["234"],
+        status: "completed",
+        releaseLifecycleState: "RELEASE_LIFECYCLE_STATE_IN_REVIEW",
+        lastUpdateTime: "2026-10-05T10:00:00Z",
+      },
+    ]);
+  });
+
+  it("listReleases: no releases key means none", async () => {
+    const { play } = client({ [PRODUCTION_RELEASES]: jsonResponse({}) });
+    expect(await play.listReleases("production")).toEqual([]);
+  });
+
+  it("listReleases: errors are raised (the caller decides that it is best-effort)", async () => {
+    const { play } = client({ [PRODUCTION_RELEASES]: playError(403, "The caller does not have permission", "PERMISSION_DENIED") });
+    await expect(play.listReleases("production")).rejects.toThrow(/403/);
+  });
+
+  it("404 is an error for updateTrack and validate too — only getTrack reads it as 'no such track'", async () => {
+    const { play } = client({
+      [`PUT /edits/${EDIT_ID}/tracks/production`]: playError(404, "Edit not found.", "NOT_FOUND"),
+      [`POST /edits/${EDIT_ID}:validate`]: playError(404, "Edit not found.", "NOT_FOUND"),
+      [`GET /edits/${EDIT_ID}/listings`]: playError(404, "Edit not found.", "NOT_FOUND"),
+      [`DELETE /edits/${EDIT_ID}`]: playError(404, "Edit not found.", "NOT_FOUND"),
+      "POST /edits": playError(404, "Application not found.", "NOT_FOUND"),
+    });
+    await expect(play.updateTrack(EDIT_ID, { track: "production", releases: [] })).rejects.toThrow(/PUT.*404/);
+    await expect(play.validate(EDIT_ID)).rejects.toThrow(/validate.*404/);
+    await expect(play.listListingLanguages(EDIT_ID)).rejects.toThrow(/404/);
+    await expect(play.deleteEdit(EDIT_ID)).rejects.toThrow(/DELETE.*404/);
+    await expect(play.insertEdit()).rejects.toThrow(/404.*Application not found/);
   });
 
   it("deleteEdit: DELETE /edits/{id}, tolerates the empty 204 body", async () => {
@@ -120,7 +218,7 @@ describe("PlayClient — requests", () => {
 describe("PlayClient — errors", () => {
   it("surfaces Play's own message and the HTTP status, e.g. for a commit refused for review state", async () => {
     const reason = "Changes cannot be sent for review automatically. Please set the query parameter changesNotSentForReview to true.";
-    const { play } = client({ [`POST /edits/${EDIT_ID}:commit`]: playError(400, reason) });
+    const { play } = client({ [COMMIT]: playError(400, reason) });
     const failure = play.commit(EDIT_ID);
     await expect(failure).rejects.toThrow(reason);
     await expect(failure).rejects.toThrow(/400/);
@@ -141,7 +239,7 @@ describe("PlayClient — errors", () => {
 
   it("copes with a non-JSON error body, without echoing it", async () => {
     const { play } = client({
-      [`POST /edits/${EDIT_ID}:commit`]: () => new Response("<html>upstream sensitive-marker</html>", { status: 503 }),
+      [COMMIT]: () => new Response("<html>upstream sensitive-marker</html>", { status: 503 }),
     });
     const failure = play.commit(EDIT_ID);
     await expect(failure).rejects.toThrow(/503/);

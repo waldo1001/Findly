@@ -4,11 +4,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
 import type { FetchFn } from "../src/auth";
+import { buildJwt, parseServiceAccount } from "../src/auth";
 import { run } from "../src/cli";
 import productionCurrent from "./fixtures/production-current.json";
 import {
+  COMMIT,
   EDIT_ID,
   TOKEN,
+  changesAlreadyInReview,
   createFakePlay,
   jsonResponse,
   playError,
@@ -40,6 +43,8 @@ beforeAll(() => {
 interface Harness {
   exitCode: number;
   out: string[];
+  /** Values handed to the mask hook (only collected unless `collectMasks` is false). */
+  masked: string[];
   summary: string | undefined;
   fetched: string[];
 }
@@ -48,6 +53,7 @@ async function runCli(
   envOverrides: Record<string, string | undefined> = {},
   playOverrides: Record<string, Reply> = {},
   tokenReply: Reply = jsonResponse({ access_token: TOKEN, expires_in: 3599, token_type: "Bearer" }),
+  collectMasks = true,
 ): Promise<Harness> {
   const fake = createFakePlay(playOverrides);
   const fetched: string[] = [];
@@ -70,10 +76,18 @@ async function runCli(
     ...envOverrides,
   };
 
-  const exitCode = await run(env, { fetchFn, now: () => 1_760_000_000_000, log: (line) => out.push(line) });
+  const masked: string[] = [];
+  const exitCode = await run(env, {
+    fetchFn,
+    now: () => 1_760_000_000_000,
+    log: (line) => out.push(line),
+    ...(collectMasks ? { mask: (secret: string) => void masked.push(secret) } : {}),
+  });
   const summary = readFileSync(summaryPath, "utf8");
-  return { exitCode, out, summary: summary === "" ? undefined : summary, fetched };
+  return { exitCode, out, masked, summary: summary === "" ? undefined : summary, fetched };
 }
+
+const ASSERTION = () => buildJwt(parseServiceAccount(saJson), 1_760_000_000);
 
 describe("run() — happy paths", () => {
   it("dry run: exits 0, authenticates first, validates, never commits, writes a dry-run summary", async () => {
@@ -126,6 +140,60 @@ describe("run() — happy paths", () => {
     const result = await runCli({ GITHUB_STEP_SUMMARY: "" });
     expect(result.exitCode).toBe(0);
   });
+
+  it("changes already in review: exits 0 (a successful run that changed nothing), 'Stopped' summary, no error annotation", async () => {
+    const result = await runCli({ DRY_RUN: "false" }, { [COMMIT]: changesAlreadyInReview() });
+    expect(result.exitCode).toBe(0);
+    expect(result.summary).toMatch(/Stopped/);
+    expect(result.summary).toMatch(/changes in review/i);
+    expect(result.summary).not.toMatch(/Committed/);
+    expect(result.out.some((line) => line.startsWith("::error::"))).toBe(false);
+    expect(result.fetched.filter((f) => f.includes(":commit"))).toHaveLength(1);
+  });
+
+  it("the committed summary names the release and the production state Play reports", async () => {
+    const result = await runCli({ DRY_RUN: "false" });
+    expect(result.summary).toContain("1.2.0 (234)");
+    expect(result.summary).toContain("IN_REVIEW");
+  });
+
+  it("any other commit refusal fails with the next step in the annotation", async () => {
+    const result = await runCli(
+      { DRY_RUN: "false" },
+      { [COMMIT]: playError(400, "Changes cannot be sent for review automatically.") },
+    );
+    expect(result.exitCode).toBe(1);
+    const annotation = result.out.find((line) => line.startsWith("::error::"))!;
+    expect(annotation).toContain("Changes cannot be sent for review automatically.");
+    expect(annotation).toContain("Publishing overview");
+    expect(annotation).toContain("Send changes for review");
+  });
+});
+
+describe("run() — derived credentials are masked, the token endpoint is pinned", () => {
+  it("masks the signed assertion first and the access token second, before anything else is logged", async () => {
+    const result = await runCli({ DRY_RUN: "true" });
+    expect(result.masked).toEqual([ASSERTION(), TOKEN]);
+  });
+
+  it("without an injected hook, masks go out as ::add-mask:: workflow commands (assertion, then token)", async () => {
+    const result = await runCli({ DRY_RUN: "true" }, {}, undefined, false);
+    const masks = result.out.filter((line) => line.startsWith("::add-mask::"));
+    expect(masks).toEqual([`::add-mask::${ASSERTION()}`, `::add-mask::${TOKEN}`]);
+    // ...and they are the very first thing emitted, ahead of any narration.
+    expect(result.out.indexOf(masks[0]!)).toBeLessThan(result.out.findIndex((l) => !l.startsWith("::add-mask::")));
+  });
+
+  it("a key file whose token_uri is not Google's is rejected before any network call, without echoing it", async () => {
+    const doctored = JSON.stringify({ ...JSON.parse(saJson), token_uri: "https://evil.example/collect" });
+    const result = await runCli({ PLAY_SERVICE_ACCOUNT_JSON: doctored });
+    expect(result.exitCode).toBe(1);
+    expect(result.fetched).toEqual([]);
+    expect(result.masked).toEqual([]);
+    const all = [...result.out, result.summary ?? ""].join("\n");
+    expect(all).toMatch(/token_uri/);
+    expect(all).not.toContain("evil.example");
+  });
 });
 
 describe("run() — input validation happens before any network call", () => {
@@ -171,7 +239,7 @@ describe("run() — failures", () => {
 
   it("a refused commit fails the run and surfaces Play's message in the log and the summary", async () => {
     const reason = "Changes cannot be sent for review automatically.";
-    const result = await runCli({ DRY_RUN: "false" }, { [`POST /edits/${EDIT_ID}:commit`]: playError(400, reason) });
+    const result = await runCli({ DRY_RUN: "false" }, { [COMMIT]: playError(400, reason) });
     expect(result.exitCode).toBe(1);
     expect(result.out.join("\n")).toContain(reason);
     expect(result.summary).toContain(reason);
@@ -186,7 +254,7 @@ describe("run() — failures", () => {
 
   it("escapes the annotation so a hostile message cannot inject workflow commands", async () => {
     const hostile = "boom\n::add-mask::everything 100%\r::set-env::X";
-    const result = await runCli({ DRY_RUN: "false" }, { [`POST /edits/${EDIT_ID}:commit`]: playError(400, hostile) });
+    const result = await runCli({ DRY_RUN: "false" }, { [COMMIT]: playError(400, hostile) });
     const annotation = result.out.find((line) => line.startsWith("::error::"))!;
     expect(annotation).not.toMatch(/[\r\n]/);
     expect(annotation).toContain("%0A");
@@ -220,6 +288,7 @@ describe("run() — secrets never leave the process", () => {
       const result = await runCli(overrides);
       const everything = [...result.out, result.summary ?? ""].join("\n");
       expect(everything).not.toContain(TOKEN);
+      expect(everything).not.toContain(ASSERTION());
       expect(everything).not.toContain(saJson);
       expect(everything).not.toContain("PRIVATE KEY");
       expect(everything).not.toContain(privateKeyPem.split("\n")[1]!);

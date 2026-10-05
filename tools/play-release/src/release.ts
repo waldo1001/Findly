@@ -20,23 +20,46 @@ export class ReleaseError extends Error {
   }
 }
 
-export interface NothingOutcome {
-  kind: "nothing";
+/** One production release as `applications.tracks.releases.list` reports it. */
+export interface ProductionRelease {
+  name?: string | undefined;
   versionCodes: string[];
-  production: string[];
-  alpha: string[];
+  status?: string | undefined;
+  /** e.g. RELEASE_LIFECYCLE_STATE_IN_REVIEW. */
+  lifecycleState?: string | undefined;
 }
 
-export interface ReleasedOutcome {
+interface OutcomeBase {
+  versionCodes: string[];
+  /** Name of Internal's release, e.g. "1.2.0 (234)". */
+  name?: string | undefined;
+  /** Version codes of the current completed release on each track, before this run. */
+  before: { production: string[]; alpha: string[] };
+  /**
+   * Production's releases as Play reports them once the run has settled (read-only, outside the
+   * edit). `undefined` when that read failed — it is best effort and never fails the run.
+   */
+  productionNow: ProductionRelease[] | undefined;
+}
+
+export interface NothingOutcome extends OutcomeBase {
+  kind: "nothing";
+}
+
+/** Play refused the commit because changes are already in review; nothing was changed. */
+export interface StoppedOutcome extends OutcomeBase {
+  kind: "stopped";
+  reason: "changes-in-review";
+}
+
+export interface ReleasedOutcome extends OutcomeBase {
   /** `dry-run`: validated, then discarded. `committed`: sent for review. */
   kind: "dry-run" | "committed";
-  versionCodes: string[];
   languages: string[];
   notesLength: number;
-  before: { production: string[]; alpha: string[] };
 }
 
-export type Outcome = NothingOutcome | ReleasedOutcome;
+export type Outcome = NothingOutcome | StoppedOutcome | ReleasedOutcome;
 
 export interface ReleaseOptions {
   api: PlayApi;
@@ -87,8 +110,9 @@ export async function release(options: ReleaseOptions): Promise<Outcome> {
       return {
         kind: "nothing",
         versionCodes: decision.versionCodes,
-        production: decision.production,
-        alpha: decision.alpha,
+        name: decision.name,
+        before: { production: decision.production, alpha: decision.alpha },
+        productionNow: undefined,
       };
     }
 
@@ -106,9 +130,11 @@ export async function release(options: ReleaseOptions): Promise<Outcome> {
 
     const outcome = {
       versionCodes: decision.versionCodes,
+      name: decision.name,
       languages: decision.languages,
       notesLength: decision.notes.length,
       before: decision.before,
+      productionNow: undefined,
     };
 
     if (dryRun) {

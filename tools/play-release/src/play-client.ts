@@ -33,9 +33,29 @@ export interface PlayApi {
   /** `edits.validate`. */
   validate(editId: string): Promise<void>;
   /** `edits.commit` — without `changesNotSentForReview`, so the change is sent for review. */
-  commit(editId: string): Promise<void>;
+  commit(editId: string): Promise<CommitResult>;
   /** `edits.delete` — discards the edit. */
   deleteEdit(editId: string): Promise<void>;
+  /** `applications.tracks.releases.list` — read-only, outside any edit. */
+  listReleases(track: string): Promise<ReleaseSummary[]>;
+}
+
+/** `changes-in-review`: Play refused (ERROR_IF_IN_REVIEW) because changes are already in review. */
+export type CommitResult = "committed" | "changes-in-review";
+
+/** One entry of `applications.tracks.releases.list`. */
+export interface ReleaseSummary {
+  releaseName?: string;
+  track?: string;
+  versionCodes?: string[];
+  status?: string;
+  releaseLifecycleState?: string;
+  lastUpdateTime?: string;
+}
+
+export interface ClientOptions {
+  /** A dry-run client refuses to commit, structurally — on top of the caller's own flag check. */
+  dryRun?: boolean;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -64,6 +84,7 @@ export class PlayClient implements PlayApi {
     private readonly fetchFn: FetchFn,
     private readonly accessToken: string,
     packageName: string,
+    _options: ClientOptions = {},
   ) {
     this.base = `${API_ROOT}/${encodeURIComponent(packageName)}`;
   }
@@ -149,11 +170,16 @@ export class PlayClient implements PlayApi {
     await this.call("POST", `/edits/${encodeURIComponent(editId)}:validate`);
   }
 
-  async commit(editId: string): Promise<void> {
+  async commit(editId: string): Promise<CommitResult> {
     await this.call("POST", `/edits/${encodeURIComponent(editId)}:commit`);
+    return "committed";
   }
 
   async deleteEdit(editId: string): Promise<void> {
     await this.call("DELETE", `/edits/${encodeURIComponent(editId)}`);
+  }
+
+  async listReleases(_track: string): Promise<ReleaseSummary[]> {
+    throw new Error("not implemented");
   }
 }

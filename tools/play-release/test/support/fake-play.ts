@@ -13,6 +13,12 @@ export const BASE = "https://androidpublisher.googleapis.com/androidpublisher/v3
 export const EDIT_ID = "EDIT123";
 export const TOKEN = "ya29.fake-test-token";
 
+/** The commit route. Play's default would cancel changes already in review, so the tool must say otherwise. */
+export const COMMIT = `POST /edits/${EDIT_ID}:commit?changesInReviewBehavior=ERROR_IF_IN_REVIEW`;
+
+/** The read-only (outside any edit) `applications.tracks.releases.list` route. */
+export const PRODUCTION_RELEASES = "GET /tracks/production/releases";
+
 export type Reply = () => Response;
 
 export interface Recorded {
@@ -37,6 +43,28 @@ export function playError(status: number, message: string, apiStatus = "FAILED_P
   return jsonResponse({ error: { code: status, message, status: apiStatus } }, status);
 }
 
+/** The refusal Play sends for `ERROR_IF_IN_REVIEW` when changes are already in review. */
+export function changesAlreadyInReview(): Reply {
+  return jsonResponse(
+    {
+      error: {
+        code: 400,
+        message: "Changes are already in review.",
+        status: "FAILED_PRECONDITION",
+        details: [
+          {
+            "@type": "type.googleapis.com/google.rpc.ErrorInfo",
+            reason: "CHANGES_ALREADY_IN_REVIEW",
+            domain: "googleapis.com",
+            metadata: { editId: EDIT_ID, method: "google.play.developer.v3.EditsService.CommitEdit", service: "androidpublisher.googleapis.com" },
+          },
+        ],
+      },
+    },
+    400,
+  );
+}
+
 const appEdit = { id: EDIT_ID, expiryTimeSeconds: "1760003600" };
 
 export function defaultRoutes(): Record<string, Reply> {
@@ -49,8 +77,21 @@ export function defaultRoutes(): Record<string, Reply> {
     [`PUT /edits/${EDIT_ID}/tracks/production`]: jsonResponse({ track: "production" }),
     [`PUT /edits/${EDIT_ID}/tracks/alpha`]: jsonResponse({ track: "alpha" }),
     [`POST /edits/${EDIT_ID}:validate`]: jsonResponse(appEdit),
-    [`POST /edits/${EDIT_ID}:commit`]: jsonResponse(appEdit),
+    [COMMIT]: jsonResponse(appEdit),
     [`DELETE /edits/${EDIT_ID}`]: emptyResponse(204),
+    // Default: what production looks like once the new release has been submitted.
+    [PRODUCTION_RELEASES]: jsonResponse({
+      releases: [
+        {
+          releaseName: "1.2.0 (234)",
+          track: "production",
+          versionCodes: ["234"],
+          status: "completed",
+          releaseLifecycleState: "RELEASE_LIFECYCLE_STATE_IN_REVIEW",
+          lastUpdateTime: "2026-10-05T10:00:00Z",
+        },
+      ],
+    }),
   };
 }
 
