@@ -100,7 +100,12 @@ function readJson(text: string): Record<string, unknown> | undefined {
   }
 }
 
-export async function fetchAccessToken(fetchFn: FetchFn, sa: ServiceAccount, nowSeconds: number): Promise<string> {
+export async function fetchAccessToken(
+  fetchFn: FetchFn,
+  sa: ServiceAccount,
+  nowSeconds: number,
+  _mask?: (secret: string) => void,
+): Promise<string> {
   const body = new URLSearchParams({
     grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
     assertion: buildJwt(sa, nowSeconds),

@@ -31,21 +31,45 @@ function decodeSegment(segment: string): unknown {
 }
 
 describe("parseServiceAccount()", () => {
-  it("reads client_email, private key and token_uri", () => {
+  it("reads client_email and the private key", () => {
     const sa = parseServiceAccount(saJson());
-    expect(sa).toEqual({ clientEmail: EMAIL, privateKey: privateKeyPem, tokenUri: TOKEN_URI });
+    expect(sa.clientEmail).toBe(EMAIL);
+    expect(sa.privateKey).toBe(privateKeyPem);
   });
 
-  it("defaults token_uri to Google's token endpoint when absent", () => {
-    expect(parseServiceAccount(saJson({ token_uri: undefined })).tokenUri).toBe(TOKEN_URI);
+  it("accepts a service account without a token_uri (the endpoint is pinned in code anyway)", () => {
+    expect(() => parseServiceAccount(saJson({ token_uri: undefined }))).not.toThrow();
   });
 
-  it("rejects a token_uri that is not https", () => {
-    expect(() => parseServiceAccount(saJson({ token_uri: "http://oauth2.googleapis.com/token" }))).toThrow(/https/);
+  it("accepts exactly Google's token endpoint", () => {
+    expect(() => parseServiceAccount(saJson({ token_uri: "https://oauth2.googleapis.com/token" }))).not.toThrow();
   });
 
-  it("rejects a token_uri that is not a URL", () => {
-    expect(() => parseServiceAccount(saJson({ token_uri: "not a url" }))).toThrow(/token_uri/);
+  it.each([
+    "http://oauth2.googleapis.com/token",
+    "https://oauth2.googleapis.com/token/",
+    "https://oauth2.googleapis.com/token?x=1",
+    "https://oauth2.googleapis.com.evil.example/token",
+    "https://evil.example/token-marker-xyz",
+    "https://accounts.google.com/o/oauth2/token",
+    "not a url",
+    "",
+  ])("rejects any other token_uri (%j) — the signed assertion must never be sent elsewhere", (uri) => {
+    let message = "";
+    try {
+      parseServiceAccount(saJson({ token_uri: uri }));
+    } catch (e) {
+      message = (e as Error).message;
+    }
+    expect(message).toMatch(/token_uri/);
+    expect(message).toContain("https://oauth2.googleapis.com/token");
+    // The offending value is never echoed back.
+    expect(message).not.toContain("evil.example");
+    expect(message).not.toContain("marker-xyz");
+  });
+
+  it("rejects a non-string token_uri", () => {
+    expect(() => parseServiceAccount(saJson({ token_uri: 42 }))).toThrow(/token_uri/);
   });
 
   it.each([undefined, "", "   "])("rejects missing/empty JSON (%j)", (value) => {
@@ -80,7 +104,7 @@ describe("parseServiceAccount()", () => {
 });
 
 describe("buildJwt()", () => {
-  const sa = (): ServiceAccount => ({ clientEmail: EMAIL, privateKey: privateKeyPem, tokenUri: TOKEN_URI });
+  const sa = (): ServiceAccount => parseServiceAccount(saJson());
 
   it("has three base64url segments with no padding", () => {
     const jwt = buildJwt(sa(), NOW);
@@ -104,12 +128,6 @@ describe("buildJwt()", () => {
       exp: NOW + 3600,
     });
     expect(PLAY_SCOPE).toBe("https://www.googleapis.com/auth/androidpublisher");
-  });
-
-  it("aud follows a custom token_uri", () => {
-    const uri = "https://accounts.google.com/o/oauth2/token";
-    const [, claims] = buildJwt({ ...sa(), tokenUri: uri }, NOW).split(".");
-    expect((decodeSegment(claims!) as { aud: string }).aud).toBe(uri);
   });
 
   it("lifetime is at most one hour (Google rejects longer)", () => {
@@ -159,7 +177,30 @@ function tokenResponse(body: unknown, status = 200): Response {
 }
 
 describe("fetchAccessToken()", () => {
-  const sa = (): ServiceAccount => ({ clientEmail: EMAIL, privateKey: privateKeyPem, tokenUri: TOKEN_URI });
+  const sa = (): ServiceAccount => parseServiceAccount(saJson());
+
+  it("registers a mask for the signed assertion BEFORE the token request, and for the access token right after it", async () => {
+    const events: string[] = [];
+    const fetchFn = vi.fn<FetchFn>(async () => {
+      events.push("fetch");
+      return tokenResponse({ access_token: "ya29.fake-test-token", expires_in: 3599, token_type: "Bearer" });
+    });
+    const masked: string[] = [];
+    const token = await fetchAccessToken(fetchFn, sa(), NOW, (secret) => {
+      masked.push(secret);
+      events.push(`mask:${masked.length}`);
+    });
+    expect(token).toBe("ya29.fake-test-token");
+    expect(masked).toEqual([buildJwt(sa(), NOW), "ya29.fake-test-token"]);
+    expect(events).toEqual(["mask:1", "fetch", "mask:2"]);
+  });
+
+  it("still masks the assertion when the exchange fails, and never masks a token that was not issued", async () => {
+    const fetchFn = vi.fn<FetchFn>(async () => tokenResponse({ error: "invalid_grant" }, 400));
+    const masked: string[] = [];
+    await expect(fetchAccessToken(fetchFn, sa(), NOW, (s) => masked.push(s))).rejects.toThrow(/invalid_grant/);
+    expect(masked).toEqual([buildJwt(sa(), NOW)]);
+  });
 
   it("POSTs the signed assertion as a form to token_uri and returns the access token", async () => {
     const fetchFn = vi.fn<FetchFn>(async () =>
