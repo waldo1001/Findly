@@ -28,7 +28,7 @@ export function createStubFetch(routes: Route[] = []): {
   sequence(): string[];
 } {
   const calls: RecordedCall[] = [];
-  const stub = (async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+  const stub = (async (input: Parameters<typeof fetch>[0], init?: RequestInit): Promise<Response> => {
     const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
     const query: Record<string, string> = {};
     url.searchParams.forEach((v, k) => {
