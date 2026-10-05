@@ -30,15 +30,17 @@ jobs:
     # its *own* `env:` block (only workflow/job-level env is visible to a step's own `if:`), so
     # job-level is the only place this works. On forks/external PRs, and before H5 provisions the
     # real secrets, these are empty strings (not missing) — every `if:` below checks `!= ''`.
-    # H10: PLAY_SERVICE_ACCOUNT_JSON (gates + feeds the Play publish step) and MAPS_API_KEY
-    # (every CI-built artifact previously shipped a blank map, docs/implementation-handoff.md
-    # H10) follow the same pattern.
+    # H10: MAPS_API_KEY (every CI-built artifact previously shipped a blank map,
+    # docs/implementation-handoff.md H10) follows the same pattern.
+    # A57 (docs/store-readiness.md §5, credential placement): PLAY_SERVICE_ACCOUNT_JSON is no longer
+    # here. It used to be mapped into this job's env, i.e. visible to every step of every same-repo
+    # pull-request build; it is now an environment secret read only by the `publish-internal` job
+    # below, which never runs on pull_request.
     env:
       ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
       ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
       ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
       ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-      PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
       MAPS_API_KEY: ${{ secrets.MAPS_API_KEY }}
     steps:
       - uses: actions/checkout@v4
@@ -223,20 +225,6 @@ jobs:
       - name: clean up decoded keystore
         if: always()
         run: rm -f "$RUNNER_TEMP/release.jks"
-      # H10 (docs/implementation-handoff.md, docs/store-readiness.md §4 — human prerequisites):
-      # publish the AAB to the Play internal track only. **Deliberately internal-only, forever —
-      # do not add a production (or even closed/open testing) track here.** Automatic publishing
-      # on every green `main` means the household's own devices receive every merge; widening the
-      # gate to a track real strangers can reach would mean an untested merge ships to the public
-      # the same way tonight's dark-mode bug reached a real phone. Promotion beyond internal
-      # testing stays a manual Play Console action, always. Gated the same way as the signing
-      # secrets above: `PLAY_SERVICE_ACCOUNT_JSON` empty (no secret provisioned yet, or a fork/PR
-      # run) is a silent no-op, never a failure.
-      #
-      # Pinned to the v1.1.5 tag's commit SHA (not a mutable tag — this job holds a Play-
-      # publishing service-account credential) — r0adkll/upload-google-play, verified via
-      # `gh api repos/r0adkll/upload-google-play/git/refs/tags/v1.1.5` 2026-08-06; the repo is
-      # unarchived and its most recent release predates that check by under four months.
       # Refuse to publish a build carrying the CI placeholder Firebase config. Build 163 reached
       # the Play internal track that way with sign-in broken. Inspects the file the build actually
       # used, so a failed base64 decode is caught too.
@@ -250,13 +238,88 @@ jobs:
           fi
           echo "Firebase config is the real one."
 
+      # A57 (docs/store-readiness.md §5, credential placement): the Play publish moved out of this
+      # job into `publish-internal` below, so the build — which runs on every pull request and
+      # executes PR-supplied Gradle code — never holds a Play credential. The signed AAB crosses
+      # over as a workflow artifact. Placed AFTER the placeholder-Firebase refusal above: a build
+      # carrying the placeholder fails here, so it never leaves an artifact behind either.
+      # `retention-days: 1`: this is a hand-over between two jobs of one run, not an archive (the
+      # APK artifact above is the debug/sideload convenience; Play keeps the AAB). Pinned by full
+      # SHA — upload-artifact v4.6.2, verified 2026-10-05 via
+      # `gh api repos/actions/upload-artifact/git/refs/tags/v4.6.2` (the moving `v4` tag is the same
+      # commit) — because the file it carries is what the next job ships to Play.
+      - name: upload the signed AAB for the internal-track publish job
+        if: env.ANDROID_KEYSTORE_BASE64 != '' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: findly-release-aab
+          path: mobile/android/app/build/outputs/bundle/release/app-release.aab
+          retention-days: 1
+          if-no-files-found: error
+
+  # A57 (docs/store-readiness.md §5, credential placement; docs/security-review-checklist.md §2):
+  # the internal-track publish, split out of the build job. It is the ONLY job in this workflow that
+  # reads PLAY_SERVICE_ACCOUNT_JSON, and that secret is an *environment* secret of `play-internal`
+  # (no reviewer, deployable from main only) — not a repository secret, which would have reached
+  # every same-repo pull-request build. It never runs on pull_request, and it checks out no code and
+  # runs no project scripts: download the AAB, hand it to the upload action.
+  #
+  # What this does and does not protect (§5): the key is out of reach of PR builds. It is not
+  # approval-gated here — `play-internal` has no reviewer by design, so every green push to main
+  # publishes to internal testing, exactly as before. The account also holds "Release to production"
+  # (§5, user decision 2026-10-05); the production reviewer gates release-stores.yml, not the key.
+  publish-internal:
+    name: android-publish-internal
+    needs: build
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: play-internal
+    permissions:
+      contents: read
+    steps:
+      # H10 (docs/implementation-handoff.md, docs/store-readiness.md §4 — human prerequisites):
+      # publish the AAB to the Play internal track only. **Deliberately internal-only here, forever —
+      # do not add a production (or even closed/open testing) track to this workflow.** Automatic
+      # publishing on every green `main` means the household's own devices receive every merge;
+      # widening the gate to a track real strangers can reach would mean an untested merge ships to
+      # the public the same way tonight's dark-mode bug reached a real phone. (A57: promotion beyond
+      # internal testing is now release-stores.yml, a separate manual workflow behind the
+      # `production` environment's required reviewer — never this one.) Gated like the signing
+      # secrets: an empty `PLAY_SERVICE_ACCOUNT_JSON` (secret not provisioned in `play-internal`
+      # yet) is a silent no-op, never a failure. The check lives in its own tiny step so the secret
+      # is mapped into nothing else's env.
+      - name: check the Play credential is provisioned
+        id: play
+        env:
+          PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+        run: |
+          if [ -n "$PLAY_SERVICE_ACCOUNT_JSON" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "No PLAY_SERVICE_ACCOUNT_JSON secret in the play-internal environment — skipping the Play publish."
+          fi
+      # download-artifact v4.3.0 pinned by full SHA, verified 2026-10-05 via
+      # `gh api repos/actions/download-artifact/git/refs/tags/v4.3.0` (the moving `v4` tag is the
+      # same commit). Same-run artifact: needs no token beyond the job's own.
+      - name: download the signed AAB
+        if: steps.play.outputs.present == 'true'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: findly-release-aab
+          path: aab
+
+      # Pinned to the v1.1.5 tag's commit SHA (not a mutable tag — this job holds a Play-
+      # publishing service-account credential) — r0adkll/upload-google-play, verified via
+      # `gh api repos/r0adkll/upload-google-play/git/refs/tags/v1.1.5` 2026-08-06; the repo is
+      # unarchived and its most recent release predates that check by under four months.
       - name: publish AAB to Play internal track
-        if: env.PLAY_SERVICE_ACCOUNT_JSON != '' && github.ref == 'refs/heads/main'
+        if: steps.play.outputs.present == 'true'
         uses: r0adkll/upload-google-play@e738b9dd8f2476ea806d921b64aacd24f34515a5 # v1.1.5
         with:
-          serviceAccountJsonPlainText: ${{ env.PLAY_SERVICE_ACCOUNT_JSON }}
+          serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
           packageName: com.findly.android
-          releaseFiles: mobile/android/app/build/outputs/bundle/release/app-release.aab
+          releaseFiles: aab/app-release.aab
           track: internal
           status: completed
           # 2026-08-16: without this, committing the edit fails with "Changes cannot be sent for
@@ -268,6 +331,7 @@ jobs:
           # `true` means "commit the edit, but don't send changes for review" — exactly right here.
           # This job only ever uploads an AAB to the *internal* track, which needs no review, and
           # promotion to production plus the review submission are deliberately manual Play Console
-          # actions (see the track comment above, and finish-line-runbook.md B8). So this makes the
-          # internal publish work again without granting CI any ability to submit for review.
+          # actions (see the track comment above, and finish-line-runbook.md B8) — since A57, driven
+          # from release-stores.yml rather than the console. So this makes the internal publish work
+          # again without granting this job any ability to submit for review.
           changesNotSentForReview: true
