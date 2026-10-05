@@ -65,7 +65,7 @@ least privilege).
    §1 above, `waldo1001` / Dynex bv): Invite new user → the service account's email
    (`…@…iam.gserviceaccount.com`) → grant **only** *App access* for `com.findly.android` with
    permission **"Release to testing tracks"** (under Releases). **Do not grant "Release to
-   production"** — that permission is what would let a compromised CI secret ship straight to
+   production"** *(superseded 2026-10-05 by the user's decision; see §5)* — that permission is what would let a compromised CI secret ship straight to
    real users; the whole point of gating CI to the internal track is that even a fully
    compromised `PLAY_SERVICE_ACCOUNT_JSON` still can't reach anyone outside the household without
    a human separately promoting the release in the Play Console.
@@ -120,3 +120,30 @@ but is not a guarantee for all time. **Before deliberately deleting/recreating e
 file:** bump that file's `+ 100` offset past whatever version/build number was most recently
 published to that store, or the very next automated publish gets rejected for reusing (or going
 backward past) an already-used number.
+
+## 5. Releasing to production — the "Release to stores" workflow (A57 / I60, normative)
+
+**Why this exists.** On 2026-10-05 publishing two builds that CI had already built took roughly 25 console screens across Play Console and App Store Connect. Every recurring step has an official API, and CI already holds a credential for each store. This section is the contract the automation implements.
+
+**Trigger.** `.github/workflows/release-stores.yml`, `workflow_dispatch` only — **never** on push. Inputs: `platforms` (`both` | `android` | `ios`, default `both`), `release_notes` (required, plain text, ≤ 500 characters, used for every locale), `dry_run` (boolean, default `false`). Every job that can change a store runs in the GitHub environment **`production`**: required reviewer `waldo1001`, deployable from `main` only. One click to run, one click to approve.
+
+**Dry run.** With `dry_run: true` each platform performs every read and validation it would perform for real and prints the exact plan (what it would set, on which version or build), then changes nothing: Play opens an edit, validates it and deletes it without committing; App Store Connect makes GET requests only. The first run of each platform after any change to these scripts MUST be a dry run.
+
+**Android (A57).** Authenticates with the existing `PLAY_SERVICE_ACCOUNT_JSON`. **Decided by the user 2026-10-05:** that service account is granted **"Release to production"** for `com.findly.android`, superseding §4's testing-tracks-only rule. The accepted trade-off: a leaked key could now publish to production. Mitigation: the production job runs only behind the `production` environment approval, and Play still reviews every release. Steps, in one Play edit:
+1. Read the **Internal testing** track and take the version code(s) of its current `completed` release. If none exist, fail.
+2. Set that release on **Production** (`status: completed`, full rollout) **and on Closed testing – Alpha**, with the release notes in `en-GB` (plus any other language the store listing has).
+3. Validate, then commit, which sends the change for review (managed publishing is off).
+4. If Play reports that production already carries that version code, report "nothing to release" and succeed without committing.
+
+**iOS (I60).** Authenticates with the existing App Store Connect API key (`ASC_KEY_ID` / `ASC_ISSUER_ID` / `ASC_API_KEY_P8`, role **App Manager**) via an ES256 JWT. App `com.findly.ios` (Apple ID `6797994768`).
+1. Pick the newest build whose processing state is `VALID`; its marketing version is the version to release.
+2. Find that `appStoreVersion`, or create it if absent. If it is already waiting for review, in review or released, report the state and stop without changing anything.
+3. Set `whatsNew` on every localization to the release notes.
+4. Attach the build; set release type **automatic after approval**, no phased release.
+5. Verify the App Review details (sign-in required plus demo account) exist; the app carries them forward from the previous version. If they are missing, fail with a clear message rather than guess.
+6. Create a review submission containing the version, and submit it.
+
+**Out of scope, stays manual (Claude in Chrome may read and stage, the user presses submit):** legal agreements, first-time and changed policy declarations (content rating, data safety, age-rating questionnaires, App access), appeals, store listing text and screenshots.
+
+**Output.** Each job writes a GitHub step summary: platform, version or build, what changed, the store state afterwards, and a direct console link.
+
