@@ -278,19 +278,41 @@ jobs:
   # publishes to internal testing, exactly as before. The account also holds "Release to production"
   # (§5, user decision 2026-10-05); the production reviewer gates release-stores.yml, not the key.
   # Since A59 this job also checks out `main` and builds the tool before the credentialed step — the
-  # same exposure as _release-android.yml, stated plainly here as there: `npm ci` installs the tool's
-  # dev dependencies (typescript, vitest and their trees) from the lockfile and `tsc` runs in this job,
-  # so a compromised dev dependency could tamper with `dist/` and so with the code that then receives
-  # the key. The credential is mapped into the last step's env only (the install and build steps cannot
-  # read it), the test runner is not run here (tools.yml runs the tests, in a workflow with no secrets),
-  # and no pull-request code reaches this job. The lockfile + `npm ci` (integrity hashes) is the control
-  # that remains: it narrows the exposure, it does not close it.
+  # same exposure as _release-android.yml, except that unlike the release job nothing approves a push
+  # to main here, so protection of `main` is the control (§5, A58). Stated plainly: `npm ci` installs
+  # the tool's dev dependencies (typescript, vitest and their trees) from the lockfile and `tsc` runs
+  # in this job, so a compromised dev dependency could tamper with `dist/` and so with the code that
+  # then receives the key. The credential is mapped into the env of exactly two steps — the presence
+  # check (which runs before the checkout) and the final upload; the install and build steps cannot
+  # read it. The test runner is not run here (tools.yml runs the tests, in a workflow with no
+  # secrets), and no pull-request code reaches this job. The lockfile + `npm ci` (integrity hashes) is
+  # the control that remains: it narrows the exposure, it does not close it.
+  #
+  # Posture change, accepted in the A59 security review (§5): the old action always committed with
+  # `changesNotSentForReview: true`, so it could never send anything for review; this job's first
+  # commit omits that flag, so Play may send the edit's changes for review. The edit holds only an
+  # Internal-track release (no review needed) and `ERROR_IF_IN_REVIEW` is always set; Play refuses to
+  # auto-send exactly when unsent changes are pending, and then the tool's one retry sets the flag.
   publish-internal:
     name: android-publish-internal
     needs: build
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment: play-internal
+    # A59 review: bounded like the release job (10 minutes there), with room for a large AAB upload
+    # (the tool allows that one request 5 minutes).
+    timeout-minutes: 15
+    # A59 review: Google allows one open Play edit per user, and this job and the release job
+    # (_release-android.yml) use the same service account. Overlapping runs would invalidate each
+    # other's edits — the job fails, nothing is cancelled in Play. One shared group makes them take
+    # turns. `cancel-in-progress: false`: a running upload/commit is never killed mid-flight. Note
+    # GitHub keeps at most one *pending* run per group and a newer pending one replaces an older one:
+    # fine for an internal upload (the newer main build supersedes it), but a release dispatch that
+    # was queued behind a running upload can be replaced the same way — re-dispatch it if it shows
+    # as cancelled.
+    concurrency:
+      group: play-edits
+      cancel-in-progress: false
     permissions:
       contents: read
     steps:

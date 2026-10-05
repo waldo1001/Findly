@@ -43,6 +43,17 @@ jobs:
     # `production` environment secret PLAY_SERVICE_ACCOUNT_JSON available to this job.
     environment: production
     timeout-minutes: 10
+    # A59 review: Google allows one open Play edit per user, and this job shares its service account
+    # with android.yml's `publish-internal` (which uploads on every push to main). Overlapping runs
+    # would invalidate each other's edits — one job fails, nothing is cancelled in Play. The same
+    # group name there makes the two take turns. `cancel-in-progress: false`: a running edit is never
+    # killed mid-flight. GitHub keeps at most one *pending* run per group and a newer pending one
+    # replaces an older one, so a release queued behind a running upload can be replaced by a newer
+    # main-push upload — re-dispatch the release if it shows as cancelled. (release-stores.yml's own
+    # workflow-level `release-stores` group is unchanged.)
+    concurrency:
+      group: play-edits
+      cancel-in-progress: false
     # docs/security-review-checklist.md §2: the only GitHub token scope needed is checkout. Publishing
     # authenticates with its own service-account key, not a GITHUB_TOKEN scope; no id-token here.
     permissions:
