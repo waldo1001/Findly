@@ -19,10 +19,13 @@ struct MapRefreshDriverTests {
         init() {
             let sleeper = self.sleeper
             let recorder = self.recorder
-            driver = MapRefreshDriver(
+            let driver = MapRefreshDriver(
                 sleep: { await sleeper.sleep($0) },
+                adopted: { recorder.adopted() },
                 perform: { await recorder.perform($0) }
             )
+            recorder.readEffectiveTrigger = { [unowned driver] in driver.inFlightTrigger }
+            self.driver = driver
         }
     }
 
@@ -204,11 +207,109 @@ struct MapRefreshDriverTests {
         await f.driver.refresh()
 
         #expect(f.recorder.triggers == [.explicit])
+        #expect(f.recorder.adoptedCount == 0, "nothing was running, so there was nothing to adopt")
     }
 
-    // MARK: - terminal states stop the schedule
+    // MARK: - §3.6 "An explicit Refresh adopts a fetch already in flight" (I59 review F2)
 
-    @Test func ending_cancelsTheTimer_andNothingFetchesAfterwards() async throws {
+    @Test func anExplicitRefresh_arrivingWhileAFetchIsInFlight_adoptsIt_startingNoSecondRequest() async throws {
+        let f = Fixture()
+        let fetchGate = SleepGate()
+        f.recorder.gate = fetchGate
+        let appearing = Task { await f.driver.appeared(phase: .active) }
+        try await waitUntil { f.recorder.triggers == [.firstAppearance] }
+
+        await f.driver.refresh()    // returns at once: it took the running fetch over
+
+        #expect(f.recorder.adoptedCount == 1, "the screen is told to show its refreshing affordance")
+        #expect(f.recorder.triggers == [.firstAppearance], "no second request")
+        #expect(f.driver.inFlightTrigger == .explicit)
+
+        await fetchGate.release()
+        await appearing.value
+
+        #expect(f.recorder.triggers == [.firstAppearance])
+        #expect(f.recorder.effectiveTriggerAtCompletion == [.explicit], "the outcome is read as the Refresh's own, after the await")
+        #expect(f.driver.inFlightTrigger == nil)
+    }
+
+    @Test func aTickFetch_adoptedByAnExplicitRefresh_isReportedAsExplicit() async throws {
+        let f = Fixture()
+        await f.driver.appeared(phase: .active)
+        try await waitUntil { f.sleeper.parkedCount == 1 }
+        let tickGate = SleepGate()
+        f.recorder.gate = tickGate
+        f.sleeper.fire()
+        try await waitUntil { f.recorder.triggers == [.firstAppearance, .periodic] }
+
+        await f.driver.refresh()
+        await tickGate.release()
+        try await waitUntil { f.recorder.effectiveTriggerAtCompletion.count == 2 }
+
+        #expect(f.recorder.adoptedCount == 1)
+        #expect(f.recorder.effectiveTriggerAtCompletion == [.firstAppearance, .explicit])
+        #expect(f.recorder.triggers == [.firstAppearance, .periodic])
+    }
+
+    @Test func anAutomaticTrigger_arrivingWhileAFetchIsInFlight_neitherAdoptsNorUpgradesIt() async throws {
+        let f = Fixture()
+        let fetchGate = SleepGate()
+        f.recorder.gate = fetchGate
+        let appearing = Task { await f.driver.appeared(phase: .active) }
+        try await waitUntil { f.recorder.triggers == [.firstAppearance] }
+        try await waitUntil { f.sleeper.parkedCount == 1 }
+
+        f.sleeper.fire()
+        await f.driver.scenePhaseChanged(.inactive)
+        await f.driver.scenePhaseChanged(.active)
+        try await settle()
+        await fetchGate.release()
+        await appearing.value
+
+        #expect(f.recorder.adoptedCount == 0)
+        #expect(f.recorder.effectiveTriggerAtCompletion == [.firstAppearance])
+    }
+
+    @Test func aSecondExplicitRefresh_whileAnExplicitFetchRuns_doesNotAdoptAgain() async throws {
+        let f = Fixture()
+        let fetchGate = SleepGate()
+        f.recorder.gate = fetchGate
+        let refreshing = Task { await f.driver.refresh() }
+        try await waitUntil { f.recorder.triggers == [.explicit] }
+
+        await f.driver.refresh()
+
+        #expect(f.recorder.adoptedCount == 0, "it is already the user's refresh; nothing to upgrade")
+        await fetchGate.release()
+        await refreshing.value
+        #expect(f.recorder.triggers == [.explicit])
+    }
+
+    // MARK: - §3.6: a stopped timer must not cancel a fetch already running (I59 review F5)
+
+    @Test func aTicksFetch_isNotCancelled_whenTheTimerIsStoppedMidFlight() async throws {
+        let f = Fixture()
+        await f.driver.appeared(phase: .active)
+        try await waitUntil { f.sleeper.parkedCount == 1 }
+        let tickGate = SleepGate()
+        f.recorder.gate = tickGate
+        f.sleeper.fire()
+        try await waitUntil { f.recorder.triggers == [.firstAppearance, .periodic] }
+
+        // The app is covered while the tick's request is on the wire: the timer stops, the request
+        // must be left to finish (Android's behaviour, and what `disappeared()`'s doc promises) — a
+        // cancelled one would be reported as a failure if an explicit Refresh had adopted it.
+        await f.driver.scenePhaseChanged(.inactive)
+        #expect(f.driver.isTimerRunning == false)
+        await tickGate.release()
+        try await waitUntil { f.recorder.cancelledAtCompletion.count == 2 }
+
+        #expect(f.recorder.cancelledAtCompletion == [false, false])
+    }
+
+    // MARK: - terminal states end POLLING (an explicit Retry is not polling)
+
+    @Test func ending_cancelsTheTimer_andNoAutomaticTriggerFetchesAfterwards() async throws {
         let f = Fixture()
         await f.driver.appeared(phase: .active)
         try await waitUntil { f.sleeper.parkedCount == 1 }
@@ -218,11 +319,22 @@ struct MapRefreshDriverTests {
         #expect(f.driver.isTimerRunning == false)
         try await waitUntil { f.sleeper.parkedCount == 0 }
         f.sleeper.fire()
-        await f.driver.refresh()
         await f.driver.scenePhaseChanged(.inactive)
         await f.driver.scenePhaseChanged(.active)
         try await settle()
         #expect(f.recorder.triggers == [.firstAppearance])
+        #expect(f.driver.isTimerRunning == false)
+    }
+
+    @Test func afterPollingEnded_anExplicitRetryStillFetches_withoutRestartingTheTimer() async throws {
+        let f = Fixture()
+        await f.driver.appeared(phase: .active)
+        f.driver.end()
+
+        await f.driver.refresh()
+
+        #expect(f.recorder.triggers == [.firstAppearance, .explicit])
+        #expect(f.driver.isTimerRunning == false)
     }
 
     // MARK: - lifetime

@@ -42,12 +42,16 @@ public final class MapRefreshDriver {
     public init(
         interval: Duration = MapRefreshDriver.defaultInterval,
         sleep: @escaping (Duration) async -> Void = MapRefreshDriver.liveSleep,
+        adopted: @escaping @MainActor () -> Void = {},
         perform: @escaping @MainActor (MapRefreshPolicy.Trigger) async -> Void
     ) {
         self.interval = interval
         self.sleep = sleep
         self.perform = perform
     }
+
+    /// RED STUB (I59 review F2): not exposed yet.
+    public var inFlightTrigger: MapRefreshPolicy.Trigger? { nil }
 
     /// True exactly while a timer task exists (diagnostic/test seam — the policy's `timerShouldRun`
     /// is what decides it).

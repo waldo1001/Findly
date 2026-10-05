@@ -63,7 +63,17 @@ final class ManualSleeper: @unchecked Sendable {
 @MainActor
 final class RefreshRecorder {
     private(set) var triggers: [MapRefreshPolicy.Trigger] = []
+    /// How many times an explicit Refresh adopted a running fetch (`MapRefreshDriver`'s `adopted`).
+    private(set) var adoptedCount = 0
+    /// For each fetch that has finished: whether its task was cancelled at that moment. A tick's
+    /// fetch must survive the timer being stopped (I59 review F5), so this must stay `false`.
+    private(set) var cancelledAtCompletion: [Bool] = []
+    /// For each fetch that has finished: the trigger the policy considered it to be at that moment —
+    /// i.e. the trigger an outcome handler reads AFTER its `await` (it can differ from the one the
+    /// fetch started with once an explicit Refresh adopts it).
+    private(set) var effectiveTriggerAtCompletion: [MapRefreshPolicy.Trigger?] = []
     var gate: SleepGate?
+    var readEffectiveTrigger: (@MainActor () -> MapRefreshPolicy.Trigger?)?
 
     func perform(_ trigger: MapRefreshPolicy.Trigger) async {
         triggers.append(trigger)
@@ -71,5 +81,11 @@ final class RefreshRecorder {
             self.gate = nil
             await gate.wait()
         }
+        cancelledAtCompletion.append(Task.isCancelled)
+        effectiveTriggerAtCompletion.append(readEffectiveTrigger?())
+    }
+
+    func adopted() {
+        adoptedCount += 1
     }
 }
