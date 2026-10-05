@@ -69,7 +69,8 @@ class FirebaseAuthProvider(
         return try {
             user.getIdToken(forceRefresh).await().token
         } catch (e: CancellationException) {
-            // A42 sweep, finding 6: a suspend fun must never absorb cancellation.
+            // A42 sweep, finding 6: a suspend fun must never absorb cancellation. Whether this is the
+            // caller's own cancellation or a cancelled Task is decided by [idTokenOrThrow] (§6.5).
             throw e
         } catch (e: Exception) {
             throw e.toIdTokenException()

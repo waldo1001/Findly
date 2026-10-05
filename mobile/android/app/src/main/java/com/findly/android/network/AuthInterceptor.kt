@@ -24,8 +24,8 @@ import okhttp3.Response
  * thread** — on Android, a process kill, which is how a cached session for a deleted Firebase user
  * crashed the app on every launch. [idTokenOrThrow] already reduces a provider's failure to an
  * [IdTokenException] (an `IOException`) and signs out a deleted/disabled user; the extra catch here
- * contains what that function deliberately does not absorb or cannot foresee (a cancelled
- * Play-services `Task`'s `CancellationException`, an `InterruptedException` out of `runBlocking`).
+ * contains what that function cannot foresee — chiefly an `InterruptedException` out of
+ * `runBlocking`, whose interrupt flag is restored (OkHttp's convention) before it is converted.
  * No request is sent when no token can be obtained.
  */
 class AuthInterceptor(private val authProvider: AuthProvider) : Interceptor {
@@ -44,6 +44,10 @@ class AuthInterceptor(private val authProvider: AuthProvider) : Interceptor {
         runBlocking { authProvider.idTokenOrThrow() }
     } catch (e: IOException) {
         throw e
+    } catch (e: InterruptedException) {
+        // runBlocking consumed the flag when it threw; give it back so the interrupt isn't swallowed.
+        Thread.currentThread().interrupt()
+        throw IdTokenException.Transient(e)
     } catch (e: Exception) {
         throw IdTokenException.Transient(e)
     }
