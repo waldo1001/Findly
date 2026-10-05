@@ -45,8 +45,6 @@ jobs:
     with:
       release_notes: ${{ inputs.release_notes }}
       dry_run: ${{ inputs.dry_run }}
-    # Least privilege: pass only the credentials this job needs, never `secrets: inherit`.
-    secrets:
-      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
-      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
-      ASC_API_KEY_P8: ${{ secrets.ASC_API_KEY_P8 }}
+    # No `secrets:` here either (§5, credential placement): the App Store Connect key is an
+    # environment secret of `production`, read inside the called workflow by the job that declares
+    # that environment. It is never a repository secret and never passed through this caller.

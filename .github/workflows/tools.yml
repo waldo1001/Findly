@@ -32,9 +32,9 @@ jobs:
       matrix:
         package:
           - tools/play-release
-          # TODO(I60): add `tools/appstore-release` here once the iOS release tool lands (a parallel
-          # task). Both packages follow the same contract: `npm ci --ignore-scripts`, `npm test`
-          # (typecheck + unit tests), `npm run build`.
+          - tools/appstore-release
+          # Both packages follow the same contract: `npm ci --ignore-scripts`, `npm run typecheck`,
+          # `npm test`, `npm run build`.
     defaults:
       run:
         working-directory: ${{ matrix.package }}
@@ -49,9 +49,13 @@ jobs:
           node-version: 24
       - name: install
         run: npm ci --ignore-scripts
-      # `npm test` typechecks the tests too (pretest), then runs vitest. Never needs a secret or a
-      # network service: the Play/Google APIs are exercised against stub fetch only.
-      - name: typecheck and unit tests
+      # Every package is type-checked here explicitly: play-release's `npm test` also does it (pretest),
+      # appstore-release's does not. `--if-present` keeps a package without the script from failing.
+      - name: typecheck
+        run: npm run typecheck --if-present
+      # Never needs a secret or a network service: the Play/Google and App Store Connect APIs are
+      # exercised against stub fetch only.
+      - name: unit tests
         run: npm test
       - name: build
         run: npm run build

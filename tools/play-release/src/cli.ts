@@ -23,7 +23,7 @@ export interface CliDeps {
   /** Current time in milliseconds. */
   now: () => number;
   log: (line: string) => void;
-  /** Registers a derived credential (signed assertion, access token) for redaction. Defaults to `::add-mask::`. */
+  /** Registers a derived credential (signed assertion, access token) for redaction. Defaults to `::add-mask::` on GitHub Actions (`GITHUB_ACTIONS=true`) and to a no-op elsewhere. */
   mask: MaskFn;
 }
 
@@ -47,8 +47,12 @@ export async function run(env: Record<string, string | undefined>, deps: Partial
   // messages; a newline in one must not be able to begin a `::workflow-command::` line.
   const log = (line: string): void => sink(line.replace(/[\r\n]+/g, " "));
   // `::add-mask::` makes the runner redact the value from every later log line. The command line is
-  // consumed by the runner, so the value itself is not printed.
-  const mask: MaskFn = deps.mask ?? ((secret: string) => log(`::add-mask::${escapeAnnotation(secret)}`));
+  // consumed by the runner, so the value itself is not printed there. Anywhere else (a local `npm run
+  // release`) nothing consumes it and the terminal would show the credential in clear text, so the
+  // default hook only acts on GitHub Actions.
+  const mask: MaskFn =
+    deps.mask ??
+    (env.GITHUB_ACTIONS === "true" ? (secret: string) => log(`::add-mask::${escapeAnnotation(secret)}`) : () => undefined);
 
   const summaryPath = env.GITHUB_STEP_SUMMARY === undefined || env.GITHUB_STEP_SUMMARY === "" ? undefined : env.GITHUB_STEP_SUMMARY;
   const writeSummary = (markdown: string): void => {

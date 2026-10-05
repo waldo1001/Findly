@@ -1,0 +1,73 @@
+name: _release-ios
+
+# docs/store-readiness.md §5 (I60): submit the newest processed build of com.findly.ios for App Review.
+# Reusable workflow, called only by release-stores.yml (workflow_dispatch, never on push). The logic lives
+# in tools/appstore-release; this file only builds it and runs it.
+#
+# Security posture (docs/security-review-checklist.md §2, I60 security review):
+#  - Credential placement: ASC_KEY_ID / ASC_ISSUER_ID / ASC_API_KEY_P8 are environment secrets of the
+#    `production` environment (required reviewer, deployable from main only) and are read only here, by
+#    the job that declares that environment. They are not repository secrets and are not passed in by
+#    the caller (no workflow_call `secrets:`), so no pull-request build can reach them.
+#  - The credentials are mapped into the env of the LAST step only. Before it, this job runs
+#    `npm ci --ignore-scripts` (no lifecycle scripts) and the TypeScript build (`tsc`, a lockfile-pinned
+#    devDependency). That code executes in the same job but never sees the credentials. The residual risk
+#    is a compromised dev dependency tampering with the build output; the lockfile and `npm ci` are the
+#    mitigation. The tests run in the credential-free tools workflow, never here.
+#  - No dependency cache (cache poisoning), actions pinned by full SHA, checkout without persisted token.
+#  - Job-level permissions are contents: read: App Store Connect auth is its own API key, not a
+#    GITHUB_TOKEN scope.
+#  - Inputs and secrets reach the script via env:, never `${{ }}` inside a run: body.
+#  - ASC_API_KEY_P8 (base64 of the .p8, same convention as ios.yml) is decoded and used in memory by the
+#    script, so no key file is ever written. The script also registers the decoded key and each minted
+#    JWT with ::add-mask::.
+#  - DRY_RUN=true makes the script's HTTP client refuse every non-GET request.
+#  - ubuntu-latest is enough: this job only talks to the App Store Connect API (no Xcode).
+
+on:
+  workflow_call:
+    inputs:
+      release_notes:
+        description: "What's New text, plain, max 500 characters (applied to every localization)"
+        type: string
+        required: true
+      dry_run:
+        description: "Read and validate everything, change nothing (GET requests only)"
+        type: boolean
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  release-ios:
+    name: release-ios
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: read
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: tools/appstore-release
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+      - name: install (no lifecycle scripts)
+        run: npm ci --ignore-scripts
+      - name: build
+        run: npm run build
+      # Writes the Markdown report to $GITHUB_STEP_SUMMARY. Exits non-zero on any failure, including
+      # "this marketing version is already live" (bump MARKETING_VERSION in mobile/ios/project.yml).
+      - name: submit the newest processed build for App Review
+        run: node dist/cli.js
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_API_KEY_P8: ${{ secrets.ASC_API_KEY_P8 }}
+          RELEASE_NOTES: ${{ inputs.release_notes }}
+          DRY_RUN: ${{ inputs.dry_run }}
