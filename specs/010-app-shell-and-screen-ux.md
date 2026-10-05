@@ -112,6 +112,18 @@ Applies to both clients (Android `MapCamera.kt` / `GoogleMapRenderer`, iOS `MapC
 - Tapping the selected member again, or the map background, deselects.
 - This replaces Android's current row-tap behavior (navigate straight to Locate) — Locate is now one deliberate tap further, behind the selection, on both platforms identically.
 
+### 3.6 Data freshness (both platforms, normative — added 2026-10-05, rows A55/I59)
+
+**The problem this section exists to prevent.** Both clients loaded the family roster once — Android when `MapStateHolder` was created, iOS in the map view's `.task` — and afterwards only on the Refresh control. A person reopening Findly after an hour, with the process still alive, saw the positions from the last load, with relative times counting up from them, even when the server held a fix minutes old (observed 2026-10-05: roster "35 min ago" against a 14-minute-old server fix). 000 §D12 already assumed a *polling* foreground map; no section required it.
+
+The family map (and the §3.2 group map) MUST re-fetch its positions (001 §5.2 / §12.6) on each of:
+
+1. **First appearance** of the screen (unchanged).
+2. **Every return to the foreground** while the map is the visible screen, and every navigation back to the map from another screen.
+3. **Every 30 s** while the map is visible **and** the app is in the foreground. The timer stops when either stops being true — **no polling in the background**, ever; the background path is the device runtime's own reporting (009), not this screen.
+
+Rules for those refreshes: at most one request in flight (a trigger arriving while one is running is dropped, not queued); a periodic or foreground refresh that fails keeps the last data on screen with no error surface — only a *first* load failure shows the error state, and an explicit Refresh still reports its own failure; a refresh MUST NOT move the camera (§3.4) or change the selection beyond what §3.5 already allows; relative times keep recomputing on the §3.1 30 s ticker between fetches. Cost: one `GET` per 30 s of viewing, ≈ `2 × members + 1` small partition scans each (002 §2.5) — negligible at family scale, and zero while nobody is looking.
+
 ## 4. Devices screen
 
 **The problem this section exists to prevent.** There is no Devices screen on Android at all — the sync interval renders as read-only text inside Settings and device rename is unreachable UI (the state-holder support has existed since A2, `SettingsStateHolder.updateDeviceSettings`, with no screen calling it). On iOS the interval is a horizontally-scrolling row of chip buttons and the rename field/Save button pair is visibly misaligned (a label-above-field stack jammed beside a bare button — `DeviceSettingsScreen.swift`).
@@ -208,6 +220,7 @@ All codes from the 001 §10 catalog — none added:
 - **Launch resolution:** each row of the §1.1 table; inconclusive probe fails open to the map; a confirmed auth failure — including the client-synthesized `AUTH_INVALID_TOKEN` of a user-invalid token failure — routes to Sign-in, wipes the session and never registers, while any other token-acquisition failure fails open and signs nobody out; confirmed `PROFILE_NOT_FOUND` → Onboarding(profile-less); confirmed `FAMILY_NOT_FOUND` → Onboarding(family-less); device registration attempted only after a confirmed profile, and re-triggered after each of the four bootstrap successes.
 - **Routing rule:** for every feature screen's load path, `PROFILE_NOT_FOUND` produces a route-to-onboarding outcome, not an error state (table-driven over the state holders / view models); mutation-path errors still render inline.
 - **Camera policy (both platforms, identical pure tests):** 0/1/2+ point targets per the §3.4 table; padding is expressed density-aware; policy re-runs only on first-load, fit-all action, and selection — a refresh with changed points yields *no* camera command; selecting a member targets the freshest located device at `SINGLE_POINT_ZOOM`; selecting a member with no located device yields no camera command.
+- **Data freshness (§3.6, both platforms, pure tests on a refresh-trigger policy):** first appearance, foreground return and return-to-map each trigger a fetch; the 30 s timer fetches only while visible **and** foregrounded and never in the background; a trigger during an in-flight fetch is dropped; a failed periodic/foreground refresh keeps the last data with no error, while a failed first load shows the error state; no refresh produces a camera command.
 - **Freshest-device resolution:** newest `recordedAt` among located devices wins; devices without a fix are never chosen.
 - **Relative-time formatter:** thresholds ("just now" / minutes / hours / date), stability against clock skew (never negative ages).
 - **Sheet/detents:** detent changes never re-create view models (regression-tested where a harness exists — Android state-holder identity test; iOS per the I16/I18 status).
