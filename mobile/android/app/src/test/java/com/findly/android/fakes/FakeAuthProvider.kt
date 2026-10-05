@@ -26,12 +26,37 @@ class FakeAuthProvider(
     var forceRefreshCallCount = 0
         private set
 
+    /** Scripted failure thrown by **every** [currentIdToken] call (specs/003 §6.5) — the real
+     * provider throws [com.findly.android.auth.IdTokenException], but tests also script raw
+     * non-`IOException`s here to reproduce what an unmapped SDK exception does to OkHttp. */
+    var tokenFailure: Throwable? = null
+
+    /** Like [tokenFailure] but only for a **forced** refresh (specs/003 §6.4 + §6.5) — lets the
+     * first attempt succeed and the refresh after an `AUTH_TOKEN_EXPIRED` fail. */
+    var refreshFailure: Throwable? = null
+
+    /** Runs at the very start of every [currentIdToken] call — lets a test change who is signed in
+     * while a token fetch is "in flight". */
+    var onTokenFetch: (() -> Unit)? = null
+
+    var currentIdTokenCallCount = 0
+        private set
+
     override suspend fun currentIdToken(forceRefresh: Boolean): String? {
+        currentIdTokenCallCount++
+        onTokenFetch?.invoke()
         if (forceRefresh) {
             forceRefreshCallCount++
+            refreshFailure?.let { throw it }
             tokenAfterRefresh?.let { currentToken = it }
         }
+        tokenFailure?.let { throw it }
         return currentToken
+    }
+
+    /** Test seam: flips [authState] directly, as a Firebase `AuthStateListener` would. */
+    fun setAuthState(newState: AuthState) {
+        state.value = newState
     }
 
     var signOutCallCount = 0
