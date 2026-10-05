@@ -45,7 +45,5 @@ jobs:
     with:
       release_notes: ${{ inputs.release_notes }}
       dry_run: ${{ inputs.dry_run }}
-    secrets:
-      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
-      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
-      ASC_API_KEY_P8: ${{ secrets.ASC_API_KEY_P8 }}
+    # No `secrets:` here: the App Store Connect key is an environment secret of `production`, read
+    # by the called workflow's job that declares that environment (docs/store-readiness.md §5).
