@@ -3,12 +3,23 @@ name: _release-android
 # docs/store-readiness.md §5 (A57): promote the current Internal-testing release of
 # com.findly.android to Production and Closed testing – Alpha, in one Play Developer API edit
 # (tools/play-release). A reusable workflow with no trigger of its own: release-stores.yml calls it
-# (workflow_dispatch only — never on push) and passes exactly the one secret it needs.
+# (workflow_dispatch only — never on push).
 #
-# Everything that can change the store happens in the last step. The steps before it only build and
-# unit-test the tool, and — on purpose — never see the credential: PLAY_SERVICE_ACCOUNT_JSON is
-# mapped into that one step's env, not into the job's, so `npm ci`/`npm test` (which execute
-# dev-dependency code) cannot read it.
+# CREDENTIAL PLACEMENT (§5, normative). PLAY_SERVICE_ACCOUNT_JSON is NOT passed in by the caller and
+# is NOT a repository secret (a repository secret reaches every same-repo pull-request build). It is
+# an *environment* secret of `production`, and GitHub resolves it for the job below because that job
+# declares `environment: production`. So there is deliberately no `workflow_call.secrets` here.
+#
+# What the environment does and does not do — stated plainly, because it is easy to over-read:
+#   - it keeps the key away from pull-request builds (they cannot reference `production`; its
+#     deployment rule is `main` only), and
+#   - it puts one human approval (required reviewer) in front of *this* workflow's use of the key.
+# It does NOT make the key itself approval-gated: the same key is also an environment secret of
+# `play-internal` (no reviewer, main only), read by android.yml's internal-track publish job. Code
+# that runs on `main` can therefore use the key — and, since the account now holds "Release to
+# production", publish to production — without this approval. The accepted trade-off (§5) is that
+# `main` is trusted and that Play still reviews every production release; the approval gates this
+# button, not the key.
 
 on:
   workflow_call:
@@ -21,10 +32,6 @@ on:
         description: "Read and validate everything (Play edit is validated, then deleted); change nothing"
         type: boolean
         required: true
-    secrets:
-      PLAY_SERVICE_ACCOUNT_JSON:
-        description: "Play service-account key JSON, granted Release to production for com.findly.android (store-readiness §5)"
-        required: true
 
 jobs:
   release:
@@ -32,12 +39,12 @@ jobs:
     # match on job names.
     name: android-release
     runs-on: ubuntu-latest
-    # §5: required reviewer (waldo1001), deployable from main only. The approval is the human gate;
-    # the service account's production permission is only reachable through this job.
+    # §5: required reviewer (waldo1001), deployable from main only. This is also what makes the
+    # `production` environment secret PLAY_SERVICE_ACCOUNT_JSON available to this job.
     environment: production
     timeout-minutes: 10
     # docs/security-review-checklist.md §2: the only GitHub token scope needed is checkout. Publishing
-    # authenticates with its own service-account secret, not a GITHUB_TOKEN scope; no id-token here.
+    # authenticates with its own service-account key, not a GITHUB_TOKEN scope; no id-token here.
     permissions:
       contents: read
     defaults:
@@ -55,23 +62,30 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          # No `cache:` — a cache restored into a job that holds a production credential is a
-          # poisoning path, and the dependency tree (typescript + vitest) installs in seconds.
-          node-version: "20"
-      # --ignore-scripts: dev-dependency install hooks have no business running here. The tool has
-      # zero runtime dependencies; vitest/typescript work without them.
+          # Node 24, matching backend.yml. No `cache:` — a cache restored into a job that holds a
+          # production credential is a poisoning path, and the tree installs in seconds.
+          node-version: 24
+      # The tool's tests do NOT run here: they run on every PR and push in tools.yml, a workflow with
+      # no secrets. This job runs only what it must before the credentialed step — an install with
+      # lifecycle scripts off, and the TypeScript build (`tsc`).
+      #
+      # Honest limit: `npm ci` still installs dev dependencies (typescript, vitest, their trees) from
+      # the lockfile, and `tsc` is dev-dependency code executing in this job's filesystem before the
+      # credentialed step. The credential is mapped into that last step's env only, so the install
+      # and build steps cannot read it — but a compromised dev dependency could still tamper with
+      # `dist/` and thereby with the code that later receives the credential. Dropping the test
+      # runner removes the largest dependency tree and the arbitrary test code from this job; it
+      # narrows the supply-chain exposure, it does not close it. The lockfile + `npm ci` (integrity
+      # hashes) is the control that remains.
       - name: install
         run: npm ci --ignore-scripts
-      # `npm test` typechecks the tests too (pretest). A broken tool must fail here, before the
-      # credential is mapped into any step.
-      - name: typecheck and unit tests
-        run: npm test
       - name: build
         run: npm run build
       # docs/security-review-checklist.md §2 (script injection): the dispatcher's free-text release
       # notes and the dry-run flag reach the tool only through `env:`, never interpolated into the
-      # `run:` script. The tool validates all three values before its first network call, and
-      # never prints the credential, the signed assertion or the access token.
+      # `run:` script. The tool validates all three values before its first network call, registers
+      # the signed assertion and the access token with `::add-mask::`, sends them only to
+      # https://oauth2.googleapis.com/token, and never prints the key, the assertion or the token.
       - name: promote Internal testing to Production and Alpha
         env:
           PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
