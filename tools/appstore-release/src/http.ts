@@ -3,11 +3,13 @@
  *
  * Two safety properties are enforced here, not left to callers:
  *  - DRY_RUN => GET only. Any other verb throws {@link DryRunViolationError} before the network is touched.
- *  - The bearer token is only ever sent to the App Store Connect origin: pagination links on another
- *    host are refused, and neither the token nor request headers appear in any error message.
+ *  - The bearer token is only ever sent to the App Store Connect origin (asserted on every request; no
+ *    base-URL override exists; redirects are errors), and neither the token nor request headers appear
+ *    in any error message.
  */
 
 export const ASC_BASE_URL = "https://api.appstoreconnect.apple.com";
+const ASC_ORIGIN = new URL(ASC_BASE_URL).origin;
 const MAX_PAGES = 10;
 const DEFAULT_TIMEOUT_MS = 30_000;
 
@@ -53,7 +55,6 @@ export interface AscClientOptions {
   token: () => string;
   dryRun: boolean;
   fetch?: typeof fetch;
-  baseUrl?: string;
   timeoutMs?: number;
 }
 
@@ -61,11 +62,9 @@ export type Query = Record<string, string>;
 
 export class AscClient {
   private readonly doFetch: typeof fetch;
-  private readonly baseUrl: string;
 
   constructor(private readonly opts: AscClientOptions) {
     this.doFetch = opts.fetch ?? fetch;
-    this.baseUrl = opts.baseUrl ?? ASC_BASE_URL;
   }
 
   get dryRun(): boolean {
@@ -98,7 +97,7 @@ export class AscClient {
       if (!next) break;
       if (n >= MAX_PAGES) throw new Error(`GET ${path}: more than ${MAX_PAGES} pages of results, refusing to continue.`);
       const url = new URL(next);
-      if (url.origin !== new URL(this.baseUrl).origin) {
+      if (url.origin !== ASC_ORIGIN) {
         throw new Error(`GET ${path}: pagination link points at an unexpected host; refusing to send credentials there.`);
       }
       page = (await this.requestUrl("GET", url, path, undefined)) as JsonApiDoc<T[]>;
@@ -120,7 +119,7 @@ export class AscClient {
 
   async request(method: string, path: string, opts: { query?: Query; body?: unknown } = {}): Promise<unknown> {
     if (method.toUpperCase() !== "GET" && this.opts.dryRun) throw new DryRunViolationError(method, path);
-    const url = new URL(path, this.baseUrl);
+    const url = new URL(path, ASC_BASE_URL);
     for (const [k, v] of Object.entries(opts.query ?? {})) url.searchParams.set(k, v);
     return this.requestUrl(method, url, path, opts.body);
   }
@@ -128,11 +127,22 @@ export class AscClient {
   private async requestUrl(method: string, url: URL, label: string, body: unknown): Promise<unknown> {
     const verb = method.toUpperCase();
     if (verb !== "GET" && this.opts.dryRun) throw new DryRunViolationError(verb, label);
+    // Last line of defence for the credential: whatever path or link got us here, the token is only
+    // ever attached to a request for the App Store Connect origin.
+    if (url.origin !== ASC_ORIGIN) {
+      throw new Error(`${verb} ${label}: refusing to send credentials to an unexpected origin.`);
+    }
     const headers: Record<string, string> = {
       Authorization: `Bearer ${this.opts.token()}`,
       Accept: "application/json",
     };
-    const init: RequestInit = { method: verb, headers, signal: AbortSignal.timeout(this.opts.timeoutMs ?? DEFAULT_TIMEOUT_MS) };
+    const init: RequestInit = {
+      method: verb,
+      headers,
+      // A redirect would re-send the Authorization header to wherever it points.
+      redirect: "error",
+      signal: AbortSignal.timeout(this.opts.timeoutMs ?? DEFAULT_TIMEOUT_MS),
+    };
     if (body !== undefined) {
       headers["Content-Type"] = "application/json";
       init.body = JSON.stringify(body);
