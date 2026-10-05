@@ -1,8 +1,35 @@
 name: release-stores
 
-# docs/store-readiness.md §5 (A57/I60): the one-button production release. Manual only — never on
+# docs/store-readiness.md §5 (A57/I60/A60): the one-button production release. Manual only — never on
 # push (android.yml/ios.yml stay internal-track/TestFlight-only). Every job that can change a store
 # runs in the `production` environment: required reviewer, deployable from main only.
+#
+# BOTH JOBS ARE DEFINED HERE, NOT IN REUSABLE (`workflow_call`) WORKFLOWS (A60, §5 "Trigger").
+# Observed 2026-10-05 on the first dry run (run 37350957793): a job inside a called workflow that
+# declared `environment: production` did NOT receive that environment's secrets when the caller
+# passed none — both jobs failed closed ("not set or empty") before any store call. Passing them
+# would take `secrets: inherit` (every repository secret) or repository-level copies, both of which
+# the credential-placement rule below forbids. An ordinary job with an `environment:` does receive
+# its environment's secrets (that is how android.yml's `publish-internal` and ios.yml's `testflight`
+# work). So: no `secrets:`, no `secrets: inherit`, no `workflow_call`.
+#
+# CREDENTIAL PLACEMENT (§5, normative). None of the store credentials (PLAY_SERVICE_ACCOUNT_JSON,
+# ASC_KEY_ID, ASC_ISSUER_ID, ASC_API_KEY_P8) is a repository secret (a repository secret reaches
+# every same-repo pull-request build). Each is an *environment* secret of `production`, and GitHub
+# resolves it for the job that declares `environment: production`. In each job it is mapped into the
+# env of the LAST step only.
+#
+# What the environment does and does not do — stated plainly, because it is easy to over-read:
+#   - it keeps the keys away from pull-request builds (they cannot reference `production`; its
+#     deployment rule is `main` only), and
+#   - it puts one human approval (required reviewer) in front of *this* workflow's use of the keys.
+# It does NOT make the keys themselves approval-gated: the same Play key is also an environment
+# secret of `play-internal` (no reviewer, main only), read by android.yml's internal-track publish
+# job, and the same App Store key is also an environment secret of `testflight` (no reviewer, main
+# only), read by ios.yml's TestFlight job. Code that runs on `main` can therefore use the keys — and,
+# since the Play account holds "Release to production", publish to production — without this
+# approval. The accepted trade-off (§5) is that `main` is trusted and that both stores still review
+# every production release; the approval gates this button, not the keys.
 
 on:
   workflow_dispatch:
@@ -29,22 +56,143 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # docs/store-readiness.md §5 (A57): promote the current Internal-testing release of
+  # com.findly.android to Production and Closed testing – Alpha, in one Play Developer API edit
+  # (tools/play-release).
   android:
+    # Unique job name, same reason as android-build in android.yml: status checks and the run UI
+    # match on job names.
+    name: android-release
     if: inputs.platforms == 'both' || inputs.platforms == 'android'
-    uses: ./.github/workflows/_release-android.yml
-    with:
-      release_notes: ${{ inputs.release_notes }}
-      dry_run: ${{ inputs.dry_run }}
-    # No `secrets:` on purpose (§5, credential placement): PLAY_SERVICE_ACCOUNT_JSON is an
-    # environment secret of `production`, read inside the called workflow by the job that declares
-    # that environment. It is never a repository secret and never passed through this caller.
+    runs-on: ubuntu-latest
+    # §5: required reviewer (waldo1001), deployable from main only. This is also what makes the
+    # `production` environment secret PLAY_SERVICE_ACCOUNT_JSON available to this job.
+    environment: production
+    timeout-minutes: 10
+    # A59 review (§5, "Shared edit lock"): Google allows one open Play edit per user, and this job
+    # shares its service account with android.yml's `publish-internal` (which uploads on every push to
+    # main). Overlapping runs would invalidate each other's edits — one job fails, nothing is cancelled
+    # in Play. The same group name there makes the two take turns; the two blocks MUST stay identical.
+    #   - `cancel-in-progress: false`: a running edit is never killed mid-flight.
+    #   - `queue: max`: waiting runs queue first in, first out (up to 100 pending). With GitHub's
+    #     default (`queue: single`) only one run may be pending and a newer one replaces it, so this
+    #     release, queued behind a running upload, could be silently cancelled by the next main push's
+    #     upload (with `platforms: both`, a split release: iOS ships, Android does not).
+    # Consequence to know: a release waiting for approval may hold the lock, so internal uploads queue
+    # behind it until it is approved or rejected. The group name is repository-wide.
+    # actionlint does not know `queue` yet: 1.7.12 reports `unexpected key "queue" for "concurrency"
+    # section` (rhysd/actionlint#746). GitHub documents the key (docs.github.com, "Control the
+    # concurrency of workflows and jobs"); the repo does not run actionlint in CI, so that finding is
+    # expected here and in android.yml. (The workflow-level `release-stores` group above is separate
+    # and unchanged.)
+    concurrency:
+      group: play-edits
+      cancel-in-progress: false
+      queue: max
+    # docs/security-review-checklist.md §2: the only GitHub token scope needed is checkout. Publishing
+    # authenticates with its own service-account key, not a GITHUB_TOKEN scope; no id-token here.
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: tools/play-release
+    steps:
+      # Both actions are pinned to a full commit SHA (a tag is mutable, and this job sits next to a
+      # production-publishing credential) — stricter than android.yml's first-party `@v4`, which the
+      # checklist's pinning rule (first-party: major version at least) would also allow here.
+      # SHAs verified 2026-10-05 via `gh api repos/actions/<name>/git/refs/tags/v4.4.0`; v4.4.0 is
+      # the latest v4 release of each, and the moving `v4` tag points at the same commits.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # Nothing below pushes; don't leave the checkout token in .git/config for the npm steps.
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          # Node 24, matching backend.yml. No `cache:` — a cache restored into a job that holds a
+          # production credential is a poisoning path, and the tree installs in seconds.
+          node-version: 24
+      # The tool's tests do NOT run here: they run on every PR and push in tools.yml, a workflow with
+      # no secrets. This job runs only what it must before the credentialed step — an install with
+      # lifecycle scripts off, and the TypeScript build (`tsc`).
+      #
+      # Honest limit: `npm ci` still installs dev dependencies (typescript, vitest, their trees) from
+      # the lockfile, and `tsc` is dev-dependency code executing in this job's filesystem before the
+      # credentialed step. The credential is mapped into that last step's env only, so the install
+      # and build steps cannot read it — but a compromised dev dependency could still tamper with
+      # `dist/` and thereby with the code that later receives the credential. Dropping the test
+      # runner removes the largest dependency tree and the arbitrary test code from this job; it
+      # narrows the supply-chain exposure, it does not close it. The lockfile + `npm ci` (integrity
+      # hashes) is the control that remains.
+      - name: install
+        run: npm ci --ignore-scripts
+      - name: build
+        run: npm run build
+      # docs/security-review-checklist.md §2 (script injection): the dispatcher's free-text release
+      # notes and the dry-run flag reach the tool only through `env:`, never interpolated into the
+      # `run:` script. The tool validates all three values before its first network call, registers
+      # the signed assertion and the access token with `::add-mask::`, sends them only to
+      # https://oauth2.googleapis.com/token, and never prints the key, the assertion or the token.
+      - name: promote Internal testing to Production and Alpha
+        env:
+          PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+          RELEASE_NOTES: ${{ inputs.release_notes }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: node dist/cli.js
 
+  # docs/store-readiness.md §5 (I60): submit the newest processed build of com.findly.ios for App
+  # Review. The logic lives in tools/appstore-release; this job only builds it and runs it.
+  #
+  # Security posture (docs/security-review-checklist.md §2, I60 security review):
+  #  - Credential placement: ASC_KEY_ID / ASC_ISSUER_ID / ASC_API_KEY_P8 are environment secrets of
+  #    the `production` environment (required reviewer, deployable from main only) and are read only
+  #    here, by the job that declares that environment. They are not repository secrets and no
+  #    secrets are passed in (no `secrets:` / `secrets: inherit` anywhere in this workflow), so no
+  #    pull-request build can reach them.
+  #  - The credentials are mapped into the env of the LAST step only. Before it, this job runs
+  #    `npm ci --ignore-scripts` (no lifecycle scripts) and the TypeScript build (`tsc`, a
+  #    lockfile-pinned devDependency). That code executes in the same job but never sees the
+  #    credentials. The residual risk is a compromised dev dependency tampering with the build
+  #    output; the lockfile and `npm ci` are the mitigation. The tests run in the credential-free
+  #    tools workflow (tools.yml), never here.
+  #  - No dependency cache (cache poisoning), actions pinned by full SHA, checkout without persisted
+  #    token.
+  #  - Job-level permissions are contents: read: App Store Connect auth is its own API key, not a
+  #    GITHUB_TOKEN scope.
+  #  - Inputs and secrets reach the script via env:, never `${{ }}` inside a run: body.
+  #  - ASC_API_KEY_P8 (base64 of the .p8, same convention as ios.yml) is decoded and used in memory
+  #    by the script, so no key file is ever written. The script also registers the decoded key and
+  #    each minted JWT with ::add-mask::.
+  #  - DRY_RUN=true makes the script's HTTP client refuse every non-GET request.
+  #  - ubuntu-latest is enough: this job only talks to the App Store Connect API (no Xcode).
   ios:
+    name: release-ios
     if: inputs.platforms == 'both' || inputs.platforms == 'ios'
-    uses: ./.github/workflows/_release-ios.yml
-    with:
-      release_notes: ${{ inputs.release_notes }}
-      dry_run: ${{ inputs.dry_run }}
-    # No `secrets:` here either (§5, credential placement): the App Store Connect key is an
-    # environment secret of `production`, read inside the called workflow by the job that declares
-    # that environment. It is never a repository secret and never passed through this caller.
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: read
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: tools/appstore-release
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+      - name: install (no lifecycle scripts)
+        run: npm ci --ignore-scripts
+      - name: build
+        run: npm run build
+      # Writes the Markdown report to $GITHUB_STEP_SUMMARY. Exits non-zero on any failure, including
+      # "this marketing version is already live" (bump MARKETING_VERSION in mobile/ios/project.yml).
+      - name: submit the newest processed build for App Review
+        run: node dist/cli.js
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_API_KEY_P8: ${{ secrets.ASC_API_KEY_P8 }}
+          RELEASE_NOTES: ${{ inputs.release_notes }}
+          DRY_RUN: ${{ inputs.dry_run }}
