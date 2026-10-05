@@ -637,6 +637,135 @@ class MapStateHolderTest {
     }
 
     @Test
+    fun `a confirmed state change on a periodic refresh ends polling - no tick and no foreground return fetches again`() = runTest {
+        listOf(
+            ApiResult.Failure(ApiError.ProfileNotFound("gone", "r_9")) to OnboardingVariant.ProfileLess,
+            ApiResult.Failure(ApiError.FamilyNotFound("gone", "r_9")) to OnboardingVariant.FamilyLess,
+        ).forEach { (failure, variant) ->
+            val api = FakeLocationsApi().apply {
+                getLatestLocationsResult = roster(memberWithOneDevice("u1", "Eric", "d1", 51.0, 3.0, "2026-10-05T07:00:00Z"))
+            }
+            val holder = MapStateHolder(api, backgroundScope)
+            runCurrent()
+            holder.onVisible()
+            runCurrent()
+
+            api.getLatestLocationsResult = failure
+            advanceTimeBy(30_000)
+            runCurrent()
+            assertEquals(MapUiState.RouteToOnboarding(variant), holder.state.value)
+            val callsWhenRouted = api.getLatestLocationsCallCount
+
+            advanceTimeBy(10 * 60_000)
+            runCurrent()
+            holder.onHidden()
+            holder.onVisible()
+            runCurrent()
+
+            assertEquals("$failure: polling ended with the routing", callsWhenRouted, api.getLatestLocationsCallCount)
+        }
+    }
+
+    @Test
+    fun `a transient failure does not end polling - the next tick still fetches`() = runTest {
+        val api = FakeLocationsApi().apply {
+            getLatestLocationsResult = roster(memberWithOneDevice("u1", "Eric", "d1", 51.0, 3.0, "2026-10-05T07:00:00Z"))
+        }
+        val holder = MapStateHolder(api, backgroundScope)
+        runCurrent()
+        holder.onVisible()
+        runCurrent()
+
+        api.getLatestLocationsResult = ApiResult.Failure(ApiError.InternalError("boom", "r_1"))
+        advanceTimeBy(30_000)
+        runCurrent()
+        advanceTimeBy(30_000)
+        runCurrent()
+
+        assertEquals(3, api.getLatestLocationsCallCount)
+    }
+
+    // A55 review F1: an explicit Refresh failure replaces Content with Error, which tears the
+    // GoogleMap out of composition; the next success opens a FRESH map surface at the default
+    // camera unless the holder re-runs the camera policy for it like a first load.
+
+    @Test
+    fun `a success after an explicit failure re-runs the camera policy for the fresh map surface, with no selection`() = runTest {
+        val two = roster(
+            memberWithOneDevice("u1", "Eric", "d1", 51.0, 3.0, "2026-10-05T07:00:00Z"),
+            memberWithOneDevice("u2", "Noor", "d2", 52.0, 4.0, "2026-10-05T07:00:00Z"),
+        )
+        val api = FakeLocationsApi().apply { getLatestLocationsResult = two }
+        val holder = MapStateHolder(api, backgroundScope)
+        runCurrent()
+        holder.selectMember("u2")
+        val beforeSeq = (holder.state.value as MapUiState.Content).cameraCommand!!.seq
+
+        api.getLatestLocationsResult = ApiResult.Failure(ApiError.InternalError("boom", "r_1"))
+        holder.refresh()
+        assertTrue("the Error card replaced the map", holder.state.value is MapUiState.Error)
+
+        api.getLatestLocationsResult = two
+        holder.refresh()
+
+        val after = holder.state.value as MapUiState.Content
+        assertEquals(
+            "the fresh map surface is fitted to everyone, not left at the default camera",
+            MapCamera.target(listOf(51.0 to 3.0, 52.0 to 4.0)),
+            after.cameraCommand?.target,
+        )
+        assertTrue("a NEW command, so the renderer's LaunchedEffect fires", after.cameraCommand!!.seq > beforeSeq)
+        assertNull("the selection died with the torn-down sheet", after.selectedUserId)
+    }
+
+    @Test
+    fun `a success after a failed first load mints the first-load camera command`() = runTest {
+        val api = FakeLocationsApi().apply {
+            getLatestLocationsResult = ApiResult.Failure(ApiError.NetworkFailure(RuntimeException("offline")))
+        }
+        val holder = MapStateHolder(api, backgroundScope)
+        runCurrent()
+        holder.onVisible()
+        runCurrent()
+
+        api.getLatestLocationsResult = roster(memberWithOneDevice("u1", "Eric", "d1", 51.0, 3.0, "2026-10-05T07:00:00Z"))
+        advanceTimeBy(30_000)
+        runCurrent()
+
+        val state = holder.state.value as MapUiState.Content
+        assertEquals(MapCameraTarget.Center(51.0, 3.0, MapCamera.SINGLE_POINT_ZOOM), state.cameraCommand?.target)
+    }
+
+    @Test
+    fun `a success after a silently-failed periodic refresh mints nothing - the map surface was never torn down`() = runTest {
+        val api = FakeLocationsApi().apply {
+            getLatestLocationsResult = roster(
+                memberWithOneDevice("u1", "Eric", "d1", 51.0, 3.0, "2026-10-05T07:00:00Z"),
+                memberWithOneDevice("u2", "Noor", "d2", 52.0, 4.0, "2026-10-05T07:00:00Z"),
+            )
+        }
+        val holder = MapStateHolder(api, backgroundScope)
+        runCurrent()
+        holder.onVisible()
+        holder.selectMember("u2")
+        val before = holder.state.value as MapUiState.Content
+
+        api.getLatestLocationsResult = ApiResult.Failure(ApiError.InternalError("boom", "r_1"))
+        advanceTimeBy(30_000)
+        runCurrent()
+        api.getLatestLocationsResult = roster(
+            memberWithOneDevice("u1", "Eric", "d1", 60.0, 20.0, "2026-10-05T07:30:00Z"),
+            memberWithOneDevice("u2", "Noor", "d2", 61.0, 21.0, "2026-10-05T07:30:00Z"),
+        )
+        advanceTimeBy(30_000)
+        runCurrent()
+
+        val after = holder.state.value as MapUiState.Content
+        assertEquals(before.cameraCommand, after.cameraCommand)
+        assertEquals("u2", after.selectedUserId)
+    }
+
+    @Test
     fun `an exception that escapes the API client on a periodic refresh is a silent failed refresh, never a crash`() = runTest {
         val api = FakeLocationsApi().apply {
             getLatestLocationsResult = roster(memberWithOneDevice("u1", "Eric", "d1", 51.0, 3.0, "2026-10-05T07:00:00Z"))

@@ -134,6 +134,9 @@ fun GroupMapScreen(
             // Transient — GroupMapRoute's LaunchedEffect is about to navigate away.
             is GroupMapUiState.Expired -> FindlyLoadingState(message = state.message)
 
+            // RED SKELETON (A55 review F2): rendered as loading; routing is wired in the green commit.
+            is GroupMapUiState.RouteToOnboarding -> FindlyLoadingState(message = "Loading group locations…")
+
             is GroupMapUiState.Content -> {
                 if (state.members.isEmpty()) {
                     FindlyEmptyState(title = "No members yet", message = "Share the join code to get this group moving.")

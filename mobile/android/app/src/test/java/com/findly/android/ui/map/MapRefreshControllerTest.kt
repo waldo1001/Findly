@@ -243,6 +243,73 @@ class MapRefreshControllerTest {
         assertTrue("the running fetch now answers for the user's Refresh tap", recorder.runs.single().explicit)
     }
 
+    // 010 §3.6 "a confirmed state change ... ends polling for that screen" (A55 review F2).
+
+    @Test
+    fun `ending polling cancels the timer - no tick ever fetches again`() = runTest {
+        val recorder = Recorder()
+        val controller = controller(recorder)
+        controller.start()
+        controller.onVisible()
+        runCurrent()
+        advanceTimeBy(30_000)
+        runCurrent()
+        assertEquals(2, recorder.runs.size)
+
+        controller.endPolling()
+        advanceTimeBy(10 * 60_000)
+        runCurrent()
+
+        assertEquals("no tick after polling ended", 2, recorder.runs.size)
+    }
+
+    @Test
+    fun `after polling ended a return to the foreground neither fetches nor restarts the timer`() = runTest {
+        val recorder = Recorder()
+        val controller = controller(recorder)
+        controller.start()
+        controller.onVisible()
+        runCurrent()
+        controller.endPolling()
+        controller.onHidden()
+
+        controller.onVisible()
+        runCurrent()
+        advanceTimeBy(10 * 60_000)
+        runCurrent()
+
+        assertEquals("only the initial fetch ever ran", listOf(RefreshTrigger.Initial), recorder.triggers)
+    }
+
+    @Test
+    fun `polling ended before the first visible means the first onVisible starts nothing`() = runTest {
+        val recorder = Recorder()
+        val controller = controller(recorder)
+        controller.start()
+        runCurrent()
+        controller.endPolling()
+
+        controller.onVisible()
+        advanceTimeBy(10 * 60_000)
+        runCurrent()
+
+        assertEquals(listOf(RefreshTrigger.Initial), recorder.triggers)
+    }
+
+    @Test
+    fun `an explicit request still fetches after polling ended - the user's Retry is not polling`() = runTest {
+        val recorder = Recorder()
+        val controller = controller(recorder)
+        controller.start()
+        runCurrent()
+        controller.endPolling()
+
+        val ran = controller.request(RefreshTrigger.Explicit)
+
+        assertTrue(ran)
+        assertEquals(listOf(RefreshTrigger.Initial, RefreshTrigger.Explicit), recorder.triggers)
+    }
+
     @Test
     fun `a fetch cancelled mid-flight reopens the gate`() = runTest {
         val recorder = Recorder().apply { gate = CompletableDeferred() }

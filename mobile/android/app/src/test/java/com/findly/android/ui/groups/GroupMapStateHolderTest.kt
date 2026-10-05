@@ -9,6 +9,7 @@ import com.findly.android.network.dto.GroupMemberLocationDto
 import com.findly.android.network.dto.GroupPositionDto
 import com.findly.android.ui.map.MapCamera
 import com.findly.android.ui.map.MapCameraTarget
+import com.findly.android.ui.onboarding.OnboardingVariant
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.advanceTimeBy
@@ -369,6 +370,120 @@ class GroupMapStateHolderTest {
         val after = holder.state.value as GroupMapUiState.Content
         assertEquals("u2", after.selectedUserId)
         assertEquals(selected.cameraCommand, after.cameraCommand)
+    }
+
+    // 010 §3.6 "confirmed state change" (A55 review F2): on the group map GROUP_EXPIRED,
+    // GROUP_NOT_FOUND and the §2.1 PROFILE_NOT_FOUND each surface exactly as on a first load and
+    // end polling.
+
+    @Test
+    fun `GROUP_NOT_FOUND on a periodic refresh surfaces the first-load error state, not a frozen roster, and ends polling`() = runTest {
+        val api = FakeGroupsApi().apply { getGroupLatestLocationsResult = roster(memberAt("u1", "Eric", 51.0, 3.0)) }
+        val holder = GroupMapStateHolder(groupId, api, backgroundScope)
+        runCurrent()
+        holder.onVisible()
+        runCurrent()
+        assertTrue(holder.state.value is GroupMapUiState.Content)
+
+        // A kicked member / a deleted or swept group: 404 GROUP_NOT_FOUND (001 §10, masked per §12).
+        api.getGroupLatestLocationsResult = ApiResult.Failure(ApiError.GroupNotFound("raw debug text", "r_1"))
+        advanceTimeBy(30_000)
+        runCurrent()
+
+        assertEquals(GroupMapUiState.Error("That group couldn't be found."), holder.state.value)
+        val callsWhenSurfaced = api.getGroupLatestLocationsCalls.size
+
+        advanceTimeBy(10 * 60_000)
+        runCurrent()
+        holder.onHidden()
+        holder.onVisible()
+        runCurrent()
+        assertEquals("polling ended", callsWhenSurfaced, api.getGroupLatestLocationsCalls.size)
+    }
+
+    @Test
+    fun `GROUP_EXPIRED also ends polling`() = runTest {
+        val api = FakeGroupsApi().apply { getGroupLatestLocationsResult = roster(memberAt("u1", "Eric", 51.0, 3.0)) }
+        val holder = GroupMapStateHolder(groupId, api, backgroundScope)
+        runCurrent()
+        holder.onVisible()
+        runCurrent()
+
+        api.getGroupLatestLocationsResult = ApiResult.Failure(ApiError.GroupExpired("ended", "r_1"))
+        advanceTimeBy(30_000)
+        runCurrent()
+        assertTrue(holder.state.value is GroupMapUiState.Expired)
+        val callsWhenSurfaced = api.getGroupLatestLocationsCalls.size
+
+        advanceTimeBy(10 * 60_000)
+        runCurrent()
+        holder.onHidden()
+        holder.onVisible()
+        runCurrent()
+
+        assertEquals(callsWhenSurfaced, api.getGroupLatestLocationsCalls.size)
+    }
+
+    @Test
+    fun `PROFILE_NOT_FOUND routes to Onboarding on a first load and on a periodic refresh, and ends polling`() = runTest {
+        // First load (010 §2.1: a load path MUST NOT render a retryable error for it).
+        val firstLoadApi = FakeGroupsApi().apply {
+            getGroupLatestLocationsResult = ApiResult.Failure(ApiError.ProfileNotFound("no profile", "r_1"))
+        }
+        val firstLoad = GroupMapStateHolder(groupId, firstLoadApi, backgroundScope)
+        runCurrent()
+        assertEquals(GroupMapUiState.RouteToOnboarding(OnboardingVariant.ProfileLess), firstLoad.state.value)
+
+        // Periodic refresh (010 §3.6: a confirmed state change, not a failed refresh).
+        val api = FakeGroupsApi().apply { getGroupLatestLocationsResult = roster(memberAt("u1", "Eric", 51.0, 3.0)) }
+        val holder = GroupMapStateHolder(groupId, api, backgroundScope)
+        runCurrent()
+        holder.onVisible()
+        runCurrent()
+        api.getGroupLatestLocationsResult = ApiResult.Failure(ApiError.ProfileNotFound("gone", "r_2"))
+        advanceTimeBy(30_000)
+        runCurrent()
+        assertEquals(GroupMapUiState.RouteToOnboarding(OnboardingVariant.ProfileLess), holder.state.value)
+        val callsWhenRouted = api.getGroupLatestLocationsCalls.size
+
+        advanceTimeBy(10 * 60_000)
+        runCurrent()
+        assertEquals("polling ended", callsWhenRouted, api.getGroupLatestLocationsCalls.size)
+    }
+
+    @Test
+    fun `FAMILY_NOT_FOUND is not a group-map outcome - group screens only need a profile (010 §2_1), so it stays the ordinary error`() = runTest {
+        val api = FakeGroupsApi().apply {
+            getGroupLatestLocationsResult = ApiResult.Failure(ApiError.FamilyNotFound("no family", "r_1"))
+        }
+        val holder = GroupMapStateHolder(groupId, api, backgroundScope)
+        runCurrent()
+
+        assertTrue(holder.state.value is GroupMapUiState.Error)
+    }
+
+    // A55 review F1: see MapStateHolderTest - an Error card tears the map surface down; the next
+    // success is a first load of a fresh one.
+    @Test
+    fun `a success after an explicit failure re-runs the camera policy for the fresh map surface, with no selection`() = runTest {
+        val two = roster(memberAt("u1", "Eric", 51.0, 3.0), memberAt("u2", "Noor", 52.0, 4.0))
+        val api = FakeGroupsApi().apply { getGroupLatestLocationsResult = two }
+        val holder = GroupMapStateHolder(groupId, api, backgroundScope)
+        runCurrent()
+        holder.selectMember("u2")
+        val beforeSeq = (holder.state.value as GroupMapUiState.Content).cameraCommand!!.seq
+
+        api.getGroupLatestLocationsResult = ApiResult.Failure(ApiError.InternalError("boom", "r_1"))
+        holder.refresh()
+        assertTrue(holder.state.value is GroupMapUiState.Error)
+
+        api.getGroupLatestLocationsResult = two
+        holder.refresh()
+
+        val after = holder.state.value as GroupMapUiState.Content
+        assertEquals(MapCamera.target(listOf(51.0 to 3.0, 52.0 to 4.0)), after.cameraCommand?.target)
+        assertTrue(after.cameraCommand!!.seq > beforeSeq)
+        assertNull(after.selectedUserId)
     }
 
     @Test

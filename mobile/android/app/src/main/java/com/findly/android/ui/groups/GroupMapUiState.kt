@@ -30,6 +30,12 @@ sealed class GroupMapUiState {
      * the groups list with a notice, same treatment as [GroupDetailUiState.Expired]. */
     data class Expired(val message: String = "This group has ended.") : GroupMapUiState()
 
+    /** specs/010 §2.1 / §3.6: a confirmed `PROFILE_NOT_FOUND` on this load — on a first load or on
+     * any later refresh (a confirmed state change, not a failed refresh) — routes to Onboarding
+     * instead of rendering a retryable [Error]. Group screens only need a profile, so only the
+     * profile-less variant arises here. */
+    data class RouteToOnboarding(val variant: com.findly.android.ui.onboarding.OnboardingVariant) : GroupMapUiState()
+
     /** [selectedUserId]/[cameraCommand] mirror [com.findly.android.ui.map.MapUiState.Content]'s
      * fields exactly (specs/010-app-shell-and-screen-ux.md §3.2's "same camera policy through the
      * same renderer seam") — position-only, so selection targets the member's own single point

@@ -110,6 +110,9 @@ class MapRefreshController(
         timer?.cancel()
     }
 
+    /** RED SKELETON (A55 review F2): no-op until the green commit. */
+    fun endPolling() {}
+
     /**
      * Runs a fetch for [trigger] unless one is already in flight, in which case it is dropped (and,
      * for [RefreshTrigger.Explicit], adopts the running fetch — see the class doc). Suspends until
