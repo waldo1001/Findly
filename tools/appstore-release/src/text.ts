@@ -11,6 +11,22 @@ export function oneLine(text: string): string {
   return text.replace(LINE_BREAKERS, " ").trim().replace(/^::/, ": :");
 }
 
+const LINE_SPLIT = new RegExp("\\r\\n|[\\r\\n\\u2028\\u2029]");
+
+/** Splits on every kind of line break `oneLine` treats as one (again escaped, never raw, in this source). */
+export function splitLines(text: string): string[] {
+  return text.split(LINE_SPLIT);
+}
+
+/**
+ * GitHub's `::add-mask::` workflow command for a single-line value. Emitted directly (never through
+ * {@link oneLine}, which would defuse it). A multi-line value must be masked line by line.
+ */
+export function maskCommand(value: string): string {
+  if (value === "" || /[\r\n]/.test(value)) throw new Error("maskCommand needs a non-empty single-line value.");
+  return `::add-mask::${value}`;
+}
+
 export function escapeHtml(text: string): string {
   return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }

@@ -1,4 +1,5 @@
 import { appendFileSync } from "node:fs";
+import { oneLine, splitLines } from "./text";
 
 export interface SummaryIo {
   append: (path: string, data: string) => void;
@@ -24,6 +25,7 @@ export function makeSummaryWriter(path: string | undefined, io: SummaryIo = defa
         // fall through to printing
       }
     }
-    io.print(markdown);
+    // Printing to the job log: every line goes through oneLine so none can start a workflow command.
+    io.print(splitLines(markdown).map(oneLine).join("\n"));
   };
 }

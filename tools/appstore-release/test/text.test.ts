@@ -17,7 +17,9 @@ describe("oneLine (log text must never start a workflow command)", () => {
   });
 
   it("collapses CR, LF, tabs, NEL and the Unicode line/paragraph separators to single spaces", () => {
-    expect(oneLine(`a\r\nb\tc\u0085d e f`)).toBe("a b c d e f");
+    const ls = String.fromCharCode(0x2028);
+    const ps = String.fromCharCode(0x2029);
+    expect(oneLine(`a\r\nb\tc\u0085d${ls}e${ps}f`)).toBe("a b c d e f");
   });
 
   it("trims the ends", () => {

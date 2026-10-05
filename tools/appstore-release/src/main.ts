@@ -10,6 +10,8 @@ export interface CliDeps {
   /** Injectable for tests; defaults to the global fetch. */
   fetch?: typeof fetch;
   log: (line: string) => void;
+  /** Register a value with the runner's secret masker (`::add-mask::`). Must be given a single line. */
+  mask: (value: string) => void;
   writeSummary: (markdown: string) => void;
 }
 
@@ -32,8 +34,20 @@ export async function runCli(deps: CliDeps): Promise<number> {
     return 1;
   }
 
+  // Derived secrets are masked before first use: the decoded key (line by line, add-mask is single-line)
+  // and every JWT minted from it. These bypass `log`/oneLine on purpose.
+  for (const line of config.privateKey.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (trimmed !== "" && !trimmed.startsWith("-----")) deps.mask(trimmed);
+  }
+
   const client = new AscClient({
-    token: createTokenProvider({ keyId: config.keyId, issuerId: config.issuerId, privateKey: config.privateKey }),
+    token: createTokenProvider({
+      keyId: config.keyId,
+      issuerId: config.issuerId,
+      privateKey: config.privateKey,
+      onMint: (token) => deps.mask(token),
+    }),
     dryRun: config.dryRun,
     fetch: deps.fetch,
   });

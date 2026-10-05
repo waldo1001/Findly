@@ -80,6 +80,8 @@ export function normalizePrivateKey(raw: string): string {
 export interface TokenProviderOptions extends Omit<TokenOptions, "now"> {
   /** Seconds since the epoch; injectable for tests. */
   clock?: () => number;
+  /** Called with every freshly minted token, before it is returned: the place to register it for masking. */
+  onMint?: (token: string) => void;
 }
 
 /** A function returning a valid token, minted lazily and re-minted shortly before expiry. */
@@ -91,8 +93,15 @@ export function createTokenProvider(opts: TokenProviderOptions): () => string {
   return () => {
     const now = clock();
     if (token === undefined || now >= expiresAt - REFRESH_MARGIN_SECONDS) {
-      token = createToken({ ...opts, now, lifetimeSeconds: lifetime });
+      token = createToken({
+        keyId: opts.keyId,
+        issuerId: opts.issuerId,
+        privateKey: opts.privateKey,
+        now,
+        lifetimeSeconds: lifetime,
+      });
       expiresAt = now + lifetime;
+      opts.onMint?.(token);
     }
     return token;
   };
