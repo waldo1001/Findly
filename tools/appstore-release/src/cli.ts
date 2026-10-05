@@ -1,15 +1,16 @@
 import { runCli } from "./main";
 import { makeSummaryWriter } from "./summaryWriter";
-import { maskCommand } from "./text";
+import { createMasker } from "./text";
 
-// Entry point: `node dist/src/cli.js`. All inputs come from environment variables (see src/config.ts).
+// Entry point: `node dist/cli.js`. All inputs come from environment variables (see src/config.ts).
 // DRY_RUN=true makes the HTTP client refuse every non-GET request.
 const summaryPath = process.env.GITHUB_STEP_SUMMARY;
 
 runCli({
   env: process.env,
   log: (line) => console.log(line),
-  mask: (value) => console.log(maskCommand(value)),
+  // `::add-mask::` only on GitHub Actions; a local run must never print the key or a token.
+  mask: createMasker(process.env, (line) => console.log(line)),
   writeSummary: makeSummaryWriter(summaryPath && summaryPath !== "" ? summaryPath : undefined),
 })
   .then((code) => {

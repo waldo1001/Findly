@@ -39,6 +39,8 @@ const EDITABLE_STATES = new Set([
 /** Review submission states (https://developer.apple.com/documentation/appstoreconnectapi/get-v1-reviewsubmissions). */
 export const OPEN_SUBMISSION_STATE = "READY_FOR_REVIEW";
 const BLOCKING_SUBMISSION_STATES = new Set(["UNRESOLVED_ISSUES", "WAITING_FOR_REVIEW", "IN_REVIEW", "CANCELING", "COMPLETING"]);
+/** Blocking, but resolves itself: say "wait and re-run", not "resolve it". */
+const TRANSIENT_SUBMISSION_STATES = new Set(["CANCELING", "COMPLETING"]);
 /** Every non-terminal state (COMPLETE is terminal): what the runner asks Apple for. */
 export const NON_TERMINAL_SUBMISSION_STATES = [OPEN_SUBMISSION_STATE, ...BLOCKING_SUBMISSION_STATES];
 
@@ -184,18 +186,30 @@ export type EditPlan = { kind: "ops"; ops: Op[] } | { kind: "fail"; message: str
 export function checkSubmissions(submissions: SubmissionRef[]): string | null {
   const blocking = submissions.find((s) => BLOCKING_SUBMISSION_STATES.has(s.state));
   if (!blocking) return null;
+  if (TRANSIENT_SUBMISSION_STATES.has(blocking.state)) {
+    // Apple is still finishing it (canceling / completing): nothing for a human to resolve.
+    return `Review submission ${blocking.id} is ${blocking.state}, which Apple is still processing; wait a few minutes and re-run.`;
+  }
   return `Review submission ${blocking.id} is ${blocking.state}; ${RESOLVE_HINT}. Submitting now could clash with it.`;
 }
 
-/** Why the App Review details cannot be relied on (never includes the account name), or null when they can. */
+/** What is wrong with the App Review details (never includes the account name): nothing, no resource, or no demo account. */
+function reviewDetailGap(detail: ReviewDetail | null): "missing" | "no-demo-account" | null {
+  if (detail === null) return "missing";
+  if (detail.demoAccountRequired !== true || (detail.demoAccountName ?? "").trim() === "") return "no-demo-account";
+  return null;
+}
+
+/** Failure message for an editable version, where the operator can fix its App Review information directly. */
 function reviewDetailProblem(detail: ReviewDetail | null, subject: string): string | null {
-  if (detail === null) {
+  const gap = reviewDetailGap(detail);
+  if (gap === "missing") {
     return (
       `${subject.charAt(0).toUpperCase()}${subject.slice(1)} has no App Review information. Open it in App Store Connect and fill in App Review ` +
       "(sign-in required, demo account); the automation will not invent one."
     );
   }
-  if (detail.demoAccountRequired !== true || (detail.demoAccountName ?? "").trim() === "") {
+  if (gap === "no-demo-account") {
     return (
       `App Review information for ${subject} does not include a demo account (sign-in required, with a ` +
       "demo account name). Set it in App Store Connect; the automation will not invent one."
@@ -234,11 +248,21 @@ export function planCreate(args: {
     };
   }
   if (args.previousLive !== null) {
-    const problem = reviewDetailProblem(args.proxyReviewDetail, `the previous live version ${args.previousLive.versionString}`);
-    if (problem !== null) {
+    const gap = reviewDetailGap(args.proxyReviewDetail);
+    if (gap !== null) {
+      const live = args.previousLive.versionString;
+      const next = args.build.marketingVersion ?? "the new version";
+      const what =
+        gap === "missing"
+          ? "has no App Review information"
+          : "has no demo account in its App Review information (sign-in required, with a demo account name)";
       return {
         kind: "fail",
-        message: `${problem} (A new version inherits its App Review information from the previous one.)`,
+        // A live version is read-only: the fix belongs on the NEW version, not the old one.
+        message:
+          `The previous live version ${live} ${what}, and a new version inherits it. A live version is read-only, so it cannot be fixed there. ` +
+          `Create version ${next} in App Store Connect, fill in its App Review information (sign-in required, demo account), ` +
+          "then re-run: the run then takes the edit path, where this check is authoritative. The automation will not invent a demo account.",
       };
     }
   }

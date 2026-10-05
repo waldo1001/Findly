@@ -27,6 +27,16 @@ export function maskCommand(value: string): string {
   return `::add-mask::${value}`;
 }
 
+/**
+ * The mask hook for the CLI. `::add-mask::` is only meaningful to the GitHub Actions runner, which consumes
+ * the command line. Anywhere else (a local `npm start`) nothing would consume it and the credential, the
+ * decoded `.p8` lines and every JWT, would be printed in clear text, so outside Actions it does nothing.
+ */
+export function createMasker(env: Record<string, string | undefined>, print: (line: string) => void): (value: string) => void {
+  if (env.GITHUB_ACTIONS !== "true") return () => undefined;
+  return (value) => print(maskCommand(value));
+}
+
 export function escapeHtml(text: string): string {
   return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
