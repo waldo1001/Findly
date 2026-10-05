@@ -11,7 +11,7 @@ function testKeyPair(): { privatePem: string; publicKey: KeyObject } {
 const b64urlJson = (segment: string): unknown =>
   JSON.parse(Buffer.from(segment, "base64url").toString("utf8"));
 
-const BASE = { keyId: "WV483G2U79", issuerId: "11111111-2222-3333-4444-555555555555" };
+const BASE = { keyId: "FAKEKEY123", issuerId: "11111111-2222-3333-4444-555555555555" };
 
 describe("createToken (ES256 JWT for App Store Connect)", () => {
   const { privatePem, publicKey } = testKeyPair();
@@ -25,7 +25,7 @@ describe("createToken (ES256 JWT for App Store Connect)", () => {
 
   it("header is exactly {alg: ES256, kid, typ: JWT}", () => {
     const token = createToken({ ...BASE, privateKey: privatePem, now: 1_700_000_000 });
-    expect(b64urlJson(token.split(".")[0]!)).toEqual({ alg: "ES256", kid: "WV483G2U79", typ: "JWT" });
+    expect(b64urlJson(token.split(".")[0]!)).toEqual({ alg: "ES256", kid: "FAKEKEY123", typ: "JWT" });
   });
 
   it("claims are exactly {iss, iat, exp, aud} with aud appstoreconnect-v1", () => {

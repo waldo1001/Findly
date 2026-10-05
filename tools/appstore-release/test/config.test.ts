@@ -13,14 +13,14 @@ describe("parseNotes (RELEASE_NOTES)", () => {
     }
   });
 
-  it("accepts exactly 4000 characters and rejects 4001", () => {
-    expect(MAX_NOTES_LENGTH).toBe(4000);
-    expect(parseNotes("x".repeat(4000))).toHaveLength(4000);
-    expect(() => parseNotes("x".repeat(4001))).toThrow(/4000/);
+  it("accepts exactly 500 characters and rejects 501 (Play's limit, so a `both` run can never split)", () => {
+    expect(MAX_NOTES_LENGTH).toBe(500);
+    expect(parseNotes("x".repeat(500))).toHaveLength(500);
+    expect(() => parseNotes("x".repeat(501))).toThrow(/500/);
   });
 
   it("measures the length after trimming", () => {
-    expect(parseNotes(`  ${"x".repeat(4000)}  `)).toHaveLength(4000);
+    expect(parseNotes(`  ${"x".repeat(500)}  `)).toHaveLength(500);
   });
 });
 
@@ -43,7 +43,7 @@ describe("loadConfig", () => {
   const { privateKey } = generateKeyPairSync("ec", { namedCurve: "prime256v1" });
   const pem = privateKey.export({ type: "pkcs8", format: "pem" }).toString();
   const base = {
-    ASC_KEY_ID: "WV483G2U79",
+    ASC_KEY_ID: "FAKEKEY123",
     ASC_ISSUER_ID: "11111111-2222-3333-4444-555555555555",
     ASC_API_KEY_P8: Buffer.from(pem).toString("base64"),
     RELEASE_NOTES: " Fresh notes ",
@@ -51,14 +51,17 @@ describe("loadConfig", () => {
   };
 
   it("builds the config, decoding the base64 key into a PEM and trimming the notes", () => {
-    const cfg = loadConfig({ ...base, GITHUB_STEP_SUMMARY: "/tmp/summary.md" });
-    expect(cfg.keyId).toBe("WV483G2U79");
+    const cfg = loadConfig(base);
+    expect(cfg.keyId).toBe("FAKEKEY123");
     expect(cfg.issuerId).toBe(base.ASC_ISSUER_ID);
     expect(cfg.privateKey).toBe(pem);
     expect(cfg.notes).toBe("Fresh notes");
     expect(cfg.dryRun).toBe(true);
     expect(cfg.appId).toBe("6797994768");
-    expect(cfg.summaryPath).toBe("/tmp/summary.md");
+  });
+
+  it("does not carry the step-summary path (the CLI entry owns it)", () => {
+    expect("summaryPath" in loadConfig({ ...base, GITHUB_STEP_SUMMARY: "/tmp/summary.md" })).toBe(false);
   });
 
   it("names every missing variable, never any value", () => {

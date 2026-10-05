@@ -21,7 +21,7 @@ const pem = keys.privateKey.export({ type: "pkcs8", format: "pem" }).toString();
 const pemBody = pem.split("\n").filter((l) => !l.startsWith("-----") && l.length > 0).join("");
 
 const ENV = {
-  ASC_KEY_ID: "WV483G2U79",
+  ASC_KEY_ID: "FAKEKEY123",
   ASC_ISSUER_ID: "11111111-2222-3333-4444-555555555555",
   ASC_API_KEY_P8: Buffer.from(pem).toString("base64"),
   RELEASE_NOTES: "Faster map refresh and a fix for ghost devices.",
@@ -79,7 +79,7 @@ describe("runCli", () => {
     const auth = r.stub.calls[0]!.headers.authorization!;
     expect(auth).toMatch(/^Bearer [\w-]+\.[\w-]+\.[\w-]+$/);
     const [h, p, s] = auth.slice("Bearer ".length).split(".") as [string, string, string];
-    expect(JSON.parse(Buffer.from(h, "base64url").toString())).toEqual({ alg: "ES256", kid: "WV483G2U79", typ: "JWT" });
+    expect(JSON.parse(Buffer.from(h, "base64url").toString())).toEqual({ alg: "ES256", kid: "FAKEKEY123", typ: "JWT" });
     expect(JSON.parse(Buffer.from(p, "base64url").toString()).iss).toBe(ENV.ASC_ISSUER_ID);
     const ok = verify("sha256", Buffer.from(`${h}.${p}`), { key: keys.publicKey, dsaEncoding: "ieee-p1363" }, Buffer.from(s, "base64url"));
     expect(ok).toBe(true);
