@@ -1,22 +1,32 @@
 import { describe, expect, it } from "vitest";
-import { PlayApiError, PlayClient } from "../src/play-client";
+import { PlayApiError, PlayClient, requiresChangesNotSentForReview } from "../src/play-client";
 import type { TrackBody } from "../src/plan";
 import internalCompleted from "./fixtures/internal-completed.json";
 import listings from "./fixtures/listings.json";
 import {
   BASE,
   COMMIT,
+  COMMIT_UNSENT,
   EDIT_ID,
+  INTERNAL_PUT,
   PRODUCTION_RELEASES,
   TOKEN,
+  UPLOAD,
+  UPLOADED_VERSION_CODE,
+  UPLOAD_BASE,
+  bundleResponse,
   changesAlreadyInReview,
+  changesAreSentAutomatically,
+  changesCannotBeSentAutomatically,
   createFakePlay,
   emptyResponse,
+  internalUploadRoutes,
   jsonResponse,
   playError,
   releaseSummaries,
   releaseSummary,
 } from "./support/fake-play";
+import type { Reply } from "./support/fake-play";
 
 // The thin HTTP layer: one method per Play Developer API v3 call the release flow needs. Everything
 // here is verified against a stub `fetch` only — never against the real Play API.
@@ -325,4 +335,205 @@ describe("PlayClient — errors", () => {
     await play.insertEdit();
     expect(signal).toBeInstanceOf(AbortSignal);
   });
+});
+
+// --- A59: the internal-track upload (docs/store-readiness.md §5, "Android internal-track upload") ---
+// Verified against a stub `fetch` only; the request shapes follow Google's Discovery document
+// (androidpublisher v3, method edits.bundles.upload: simple media upload at
+// /upload/androidpublisher/v3/applications/{packageName}/edits/{editId}/bundles, accepts
+// application/octet-stream, returns a Bundle { versionCode: int32, sha1, sha256 }).
+
+const BUNDLE = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0xde, 0xad, 0xbe, 0xef]);
+
+function uploadClient(overrides = {}) {
+  const fake = createFakePlay({ ...internalUploadRoutes(), ...overrides });
+  return { fake, play: new PlayClient(fake.fetchFn, TOKEN, "com.findly.android") };
+}
+
+describe("PlayClient.uploadBundle — edits.bundles.upload", () => {
+  it("POSTs the bytes to the media-upload endpoint with uploadType=media, exactly", async () => {
+    const { fake, play } = uploadClient();
+    await play.uploadBundle(EDIT_ID, BUNDLE);
+    expect(fake.sequence()).toEqual([UPLOAD]);
+    expect(fake.calls[0]!.url).toBe(
+      "https://androidpublisher.googleapis.com/upload/androidpublisher/v3/applications/com.findly.android/edits/EDIT123/bundles?uploadType=media",
+    );
+    expect(fake.calls[0]!.url.startsWith(UPLOAD_BASE)).toBe(true);
+  });
+
+  it("sends the file as application/octet-stream, byte for byte, with the bearer token", async () => {
+    const { fake, play } = uploadClient();
+    await play.uploadBundle(EDIT_ID, BUNDLE);
+    const call = fake.calls[0]!;
+    expect(call.headers["content-type"]).toBe("application/octet-stream");
+    expect(call.headers.authorization).toBe(`Bearer ${TOKEN}`);
+    expect(call.url).not.toContain(TOKEN);
+    expect(Array.from(call.bytes ?? [])).toEqual(Array.from(BUNDLE));
+    expect(call.body).toBeUndefined();
+  });
+
+  it("returns the version code Play read from the bundle (Bundle.versionCode, an int32 JSON number)", async () => {
+    const { play } = uploadClient();
+    expect(await play.uploadBundle(EDIT_ID, BUNDLE)).toBe(UPLOADED_VERSION_CODE);
+  });
+
+  it.each([undefined, null, "235", 0, -1, 1.5, "abc"])("a response whose versionCode is %j is an error, not a guess", async (value) => {
+    const { play } = uploadClient({ [UPLOAD]: bundleResponse(value) });
+    await expect(play.uploadBundle(EDIT_ID, BUNDLE)).rejects.toThrow(/version code/i);
+  });
+
+  it("an empty or non-JSON 200 body is an error, not a crash", async () => {
+    const empty = uploadClient({ [UPLOAD]: emptyResponse(200) });
+    await expect(empty.play.uploadBundle(EDIT_ID, BUNDLE)).rejects.toThrow(/version code/i);
+    const html = uploadClient({ [UPLOAD]: () => new Response("<html>sensitive-marker</html>", { status: 200 }) });
+    const failure = html.play.uploadBundle(EDIT_ID, BUNDLE);
+    await expect(failure).rejects.toThrow(/version code/i);
+    await failure.catch((e: Error) => expect(e.message).not.toContain("sensitive-marker"));
+  });
+
+  it("surfaces Play's own message, the HTTP status and the call — never the token or the bytes", async () => {
+    const { play } = uploadClient({ [UPLOAD]: playError(400, "Version code 235 has already been used.") });
+    const failure = play.uploadBundle(EDIT_ID, BUNDLE);
+    await expect(failure).rejects.toBeInstanceOf(PlayApiError);
+    await expect(failure).rejects.toThrow(/POST .*\/bundles failed \(HTTP 400\): Version code 235 has already been used\./);
+    await failure.catch((e: Error) => {
+      expect(e.message).not.toContain(TOKEN);
+      expect(e.message).not.toContain("uploadType");
+    });
+  });
+
+  it("a 404 on the upload is an error too", async () => {
+    const { play } = uploadClient({ [UPLOAD]: playError(404, "Edit not found.", "NOT_FOUND") });
+    await expect(play.uploadBundle(EDIT_ID, BUNDLE)).rejects.toThrow(/404.*Edit not found/);
+  });
+
+  it("a network failure is reported without leaking the bearer token", async () => {
+    const play = new PlayClient(
+      async (_url, init) => {
+        throw new Error(`connect ECONNRESET with ${JSON.stringify(init?.headers)}`);
+      },
+      TOKEN,
+      "com.findly.android",
+    );
+    const failure = play.uploadBundle(EDIT_ID, BUNDLE);
+    await expect(failure).rejects.toThrow(/network error/i);
+    await failure.catch((e: Error) => expect(e.message).not.toContain(TOKEN));
+  });
+
+  it("passes an abort signal, so a hung upload cannot stall the job forever", async () => {
+    const { fake, play } = uploadClient();
+    await play.uploadBundle(EDIT_ID, BUNDLE);
+    expect(fake.calls[0]!.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it("a dry-run client refuses to upload — structurally, without sending any request", async () => {
+    const fake = createFakePlay(internalUploadRoutes());
+    const play = new PlayClient(fake.fetchFn, TOKEN, "com.findly.android", { dryRun: true });
+    await expect(play.uploadBundle(EDIT_ID, BUNDLE)).rejects.toThrow(/dry run/i);
+    expect(fake.calls).toHaveLength(0);
+  });
+
+  it("the JSON calls are unchanged: still application/json, still the regular API root", async () => {
+    const { fake, play } = uploadClient();
+    await play.updateTrack(EDIT_ID, { track: "internal", releases: [{ versionCodes: ["235"], status: "completed" }] });
+    expect(fake.calls[0]!.url).toBe(`${BASE}/edits/${EDIT_ID}/tracks/internal`);
+    expect(fake.calls[0]!.headers["content-type"]).toBe("application/json");
+  });
+});
+
+describe("PlayClient.updateTrack — a release without notes (the internal track)", () => {
+  it("PUTs exactly {track, releases:[{versionCodes, status}]} — no releaseNotes key, nothing else", async () => {
+    const { fake, play } = uploadClient();
+    await play.updateTrack(EDIT_ID, { track: "internal", releases: [{ versionCodes: ["235"], status: "completed" }] });
+    expect(fake.sequence()).toEqual([INTERNAL_PUT]);
+    expect(fake.calls[0]!.body).toEqual({ track: "internal", releases: [{ versionCodes: ["235"], status: "completed" }] });
+  });
+});
+
+describe("PlayClient.commit — the optional changesNotSentForReview (upload-internal's one retry)", () => {
+  it("with changesNotSentForReview: POST …:commit?changesInReviewBehavior=ERROR_IF_IN_REVIEW&changesNotSentForReview=true, exactly", async () => {
+    const { fake, play } = client({ [COMMIT_UNSENT]: jsonResponse({ id: EDIT_ID }) });
+    expect(await play.commit(EDIT_ID, { changesNotSentForReview: true })).toBe("committed");
+    expect(fake.sequence()).toEqual([COMMIT_UNSENT]);
+    expect(fake.calls[0]!.url).toBe(
+      `${BASE}/edits/${EDIT_ID}:commit?changesInReviewBehavior=ERROR_IF_IN_REVIEW&changesNotSentForReview=true`,
+    );
+  });
+
+  it("ERROR_IF_IN_REVIEW is never dropped, flag or no flag — the cancelling default must stay unreachable", async () => {
+    const { fake, play } = client({ [COMMIT_UNSENT]: jsonResponse({ id: EDIT_ID }) });
+    await play.commit(EDIT_ID);
+    await play.commit(EDIT_ID, {});
+    await play.commit(EDIT_ID, { changesNotSentForReview: false });
+    await play.commit(EDIT_ID, { changesNotSentForReview: true });
+    expect(fake.calls).toHaveLength(4);
+    for (const call of fake.calls) expect(call.url).toContain("changesInReviewBehavior=ERROR_IF_IN_REVIEW");
+    for (const call of fake.calls.slice(0, 3)) expect(call.url).not.toContain("changesNotSentForReview");
+  });
+
+  it("CHANGES_ALREADY_IN_REVIEW is still 'changes-in-review' on the retry commit", async () => {
+    const { play } = client({ [COMMIT_UNSENT]: changesAlreadyInReview() });
+    expect(await play.commit(EDIT_ID, { changesNotSentForReview: true })).toBe("changes-in-review");
+  });
+
+  it("any other refusal on the retry commit is an error", async () => {
+    const { play } = client({ [COMMIT_UNSENT]: playError(400, "Version code 235 is invalid.") });
+    await expect(play.commit(EDIT_ID, { changesNotSentForReview: true })).rejects.toThrow(/Version code 235 is invalid/);
+  });
+
+  it("a dry-run client refuses the retry commit as well", async () => {
+    const fake = createFakePlay();
+    const play = new PlayClient(fake.fetchFn, TOKEN, "com.findly.android", { dryRun: true });
+    await expect(play.commit(EDIT_ID, { changesNotSentForReview: true })).rejects.toThrow(/dry run/i);
+    expect(fake.calls).toHaveLength(0);
+  });
+});
+
+describe("requiresChangesNotSentForReview — Play's 'send this one unsent' refusal (the post-rejection state)", () => {
+  const refusal = async (reply: Reply): Promise<unknown> => {
+    const { play } = client({ [COMMIT]: reply });
+    return play.commit(EDIT_ID).catch((e: unknown) => e);
+  };
+
+  it.each([
+    ["the text observed on 2026-08-16", "Changes cannot be sent for review automatically."],
+    ["with the instruction appended", "Changes cannot be sent for review automatically. Please set the query parameter changesNotSentForReview to true."],
+    ["in other casing", "CHANGES CANNOT BE SENT FOR REVIEW AUTOMATICALLY"],
+    ["naming only the parameter", "Please set the query parameter changesNotSentForReview to true."],
+  ])("recognises a 400 %s", async (_label, message) => {
+    expect(requiresChangesNotSentForReview(await refusal(changesCannotBeSentAutomatically(message)))).toBe(true);
+  });
+
+  it("recognises it by a machine-readable reason too (details[] or legacy errors[], any casing)", async () => {
+    const byDetail = jsonResponse(
+      { error: { code: 400, message: "nope", details: [{ reason: "CHANGES_NOT_SENT_FOR_REVIEW_REQUIRED" }] } },
+      400,
+    );
+    const byLegacy = jsonResponse({ error: { code: 400, message: "nope", errors: [{ reason: "changesNotSentForReview" }] } }, 400);
+    expect(requiresChangesNotSentForReview(await refusal(byDetail))).toBe(true);
+    expect(requiresChangesNotSentForReview(await refusal(byLegacy))).toBe(true);
+  });
+
+  it("does NOT match the opposite refusal ('must not be set') — retrying with the flag would be exactly wrong", async () => {
+    expect(requiresChangesNotSentForReview(await refusal(changesAreSentAutomatically()))).toBe(false);
+  });
+
+  it.each([
+    ["an unrelated 400", playError(400, "Version code 235 has already been used.")],
+    ["a 400 without any message", jsonResponse({}, 400)],
+    ["a 403", playError(403, "Changes cannot be sent for review automatically.", "PERMISSION_DENIED")],
+    ["a 409", playError(409, "Changes cannot be sent for review automatically.", "ABORTED")],
+    ["a 500", playError(500, "Changes cannot be sent for review automatically.", "INTERNAL")],
+  ])("does not match %s", async (_label, reply) => {
+    const error = await refusal(reply);
+    expect(error).toBeInstanceOf(PlayApiError);
+    expect(requiresChangesNotSentForReview(error)).toBe(false);
+  });
+
+  it.each([undefined, null, "Changes cannot be sent for review automatically.", new Error("Changes cannot be sent for review automatically.")])(
+    "anything that is not a PlayApiError never matches (%j)",
+    (value) => {
+      expect(requiresChangesNotSentForReview(value)).toBe(false);
+    },
+  );
 });
