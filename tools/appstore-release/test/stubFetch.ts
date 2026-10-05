@@ -10,6 +10,8 @@ export interface RecordedCall {
   query: Record<string, string>;
   headers: Record<string, string>;
   body: unknown;
+  /** `init.redirect` as passed to fetch. */
+  redirect: RequestInit["redirect"];
 }
 
 export interface StubResponse {
@@ -46,6 +48,7 @@ export function createStubFetch(routes: Route[] = []): {
       query,
       headers,
       body: typeof rawBody === "string" ? JSON.parse(rawBody) : undefined,
+      redirect: init?.redirect,
     };
     calls.push(call);
     for (const route of routes) {

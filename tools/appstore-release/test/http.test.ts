@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { AscApiError, AscClient, DryRunViolationError } from "../src/http";
+import { ASC_BASE_URL, AscApiError, AscClient, DryRunViolationError } from "../src/http";
 import { createStubFetch, on } from "./stubFetch";
 
 const TOKEN = "TOKEN-SENTINEL-abc.def.ghi";
@@ -183,5 +183,40 @@ describe("getAll follows links.next", () => {
     ]);
     await expect(client(stub).getAll("/v1/builds")).rejects.toThrow(/pages/i);
     expect(stub.calls.length).toBeLessThanOrEqual(11);
+  });
+});
+
+describe("the bearer token only ever goes to the App Store Connect origin", () => {
+  it("pins the origin", () => {
+    expect(ASC_BASE_URL).toBe("https://api.appstoreconnect.apple.com");
+  });
+
+  for (const evil of ["https://evil.example/steal", "//evil.example/steal", "http://api.appstoreconnect.apple.com/v1/builds", "https://api.appstoreconnect.apple.com.evil.example/v1/builds"]) {
+    it(`refuses a request resolved to ${evil}, before any network call`, async () => {
+      const stub = createStubFetch([() => ({ body: { data: [] } })]);
+      const err = (await client(stub).get(evil).catch((e: unknown) => e)) as Error;
+      expect(err).toBeInstanceOf(Error);
+      expect(err.message).toMatch(/origin/i);
+      expect(err.message).not.toContain(TOKEN);
+      expect(stub.calls).toHaveLength(0);
+    });
+  }
+
+  it("also refuses mutating requests to another origin", async () => {
+    const stub = createStubFetch([() => ({ body: { data: [] } })]);
+    await expect(client(stub).post("https://evil.example/x", {})).rejects.toThrow(/origin/i);
+    expect(stub.calls).toHaveLength(0);
+  });
+
+  it("never follows a redirect (a 3xx would carry the Authorization header elsewhere)", async () => {
+    const stub = createStubFetch([() => ({ body: { data: [] } })]);
+    await client(stub).get("/v1/builds");
+    await client(stub).post("/v1/reviewSubmissions", {});
+    expect(stub.calls.map((c) => c.redirect)).toEqual(["error", "error"]);
+  });
+
+  it("has no way to point the client at another base URL", () => {
+    // @ts-expect-error baseUrl is deliberately not an option
+    new AscClient({ token: () => TOKEN, dryRun: true, baseUrl: "https://evil.example" });
   });
 });
