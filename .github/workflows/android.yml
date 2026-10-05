@@ -261,19 +261,66 @@ jobs:
   # the internal-track publish, split out of the build job. It is the ONLY job in this workflow that
   # reads PLAY_SERVICE_ACCOUNT_JSON, and that secret is an *environment* secret of `play-internal`
   # (no reviewer, deployable from main only) — not a repository secret, which would have reached
-  # every same-repo pull-request build. It never runs on pull_request, and it checks out no code and
-  # runs no project scripts: download the AAB, hand it to the upload action.
+  # every same-repo pull-request build. It never runs on pull_request.
+  #
+  # A59 (docs/store-readiness.md §5, "Android internal-track upload"): the upload is tools/play-release
+  # in its `upload-internal` mode, no longer r0adkll/upload-google-play. Why it was replaced: on
+  # 2026-10-05, with production build 234 in review, Play refused this job's commit (the action's
+  # `changesNotSentForReview: true` -> "Changes are sent for review automatically. The query parameter
+  # changesNotSentForReview must not be set"). That action has no `changesInReviewBehavior` input, so
+  # simply dropping the flag would have committed with Play's documented default,
+  # CANCEL_IN_REVIEW_AND_SUBMIT — an ordinary push to main silently cancelling the production review.
+  # The tool commits with ERROR_IF_IN_REVIEW instead: with a review in progress the upload is deferred
+  # (a notice, exit 0 — the next main build after the review uploads) and nothing is cancelled.
   #
   # What this does and does not protect (§5): the key is out of reach of PR builds. It is not
   # approval-gated here — `play-internal` has no reviewer by design, so every green push to main
   # publishes to internal testing, exactly as before. The account also holds "Release to production"
   # (§5, user decision 2026-10-05); the production reviewer gates release-stores.yml, not the key.
+  # Since A59 this job also checks out `main` and builds the tool before the credentialed step — the
+  # same exposure as _release-android.yml, except that unlike the release job nothing approves a push
+  # to main here, so protection of `main` is the control (§5, A58). Stated plainly: `npm ci` installs
+  # the tool's dev dependencies (typescript, vitest and their trees) from the lockfile and `tsc` runs
+  # in this job, so a compromised dev dependency could tamper with `dist/` and so with the code that
+  # then receives the key. The credential is mapped into the env of exactly two steps — the presence
+  # check (which runs before the checkout) and the final upload; the install and build steps cannot
+  # read it. The test runner is not run here (tools.yml runs the tests, in a workflow with no
+  # secrets), and no pull-request code reaches this job. The lockfile + `npm ci` (integrity hashes) is
+  # the control that remains: it narrows the exposure, it does not close it.
+  #
+  # Posture change, accepted in the A59 security review (§5): the old action always committed with
+  # `changesNotSentForReview: true`, so it could never send anything for review; this job's first
+  # commit omits that flag, so Play may send the edit's changes for review. The edit holds only an
+  # Internal-track release (no review needed) and `ERROR_IF_IN_REVIEW` is always set; Play refuses to
+  # auto-send exactly when unsent changes are pending, and then the tool's one retry sets the flag.
   publish-internal:
     name: android-publish-internal
     needs: build
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment: play-internal
+    # A59 review: bounded like the release job (10 minutes there), with room for a large AAB upload
+    # (the tool allows that one request 5 minutes).
+    timeout-minutes: 15
+    # A59 review (§5, "Shared edit lock"): Google allows one open Play edit per user, and this job and
+    # the release job (_release-android.yml) use the same service account. Overlapping runs would
+    # invalidate each other's edits — the job fails, nothing is cancelled in Play. One shared group
+    # makes them take turns; the two blocks MUST stay identical.
+    #   - `cancel-in-progress: false`: a running upload/commit is never killed mid-flight.
+    #   - `queue: max`: waiting runs queue first in, first out (up to 100 pending). With GitHub's
+    #     default (`queue: single`) only one run may be pending and a newer one replaces it, so a
+    #     release queued behind an upload could be silently cancelled by the next main push's upload
+    #     (with `platforms: both`, a split release).
+    # Consequence to know: a release waiting for approval may hold the lock, so internal uploads queue
+    # behind it until it is approved or rejected. The group name is repository-wide.
+    # actionlint does not know `queue` yet: 1.7.12 reports `unexpected key "queue" for "concurrency"
+    # section` (rhysd/actionlint#746). GitHub documents the key (docs.github.com, "Control the
+    # concurrency of workflows and jobs"); the repo does not run actionlint in CI, so that finding is
+    # expected here and in _release-android.yml.
+    concurrency:
+      group: play-edits
+      cancel-in-progress: false
+      queue: max
     permissions:
       contents: read
     steps:
@@ -286,8 +333,9 @@ jobs:
       # internal testing is now release-stores.yml, a separate manual workflow behind the
       # `production` environment's required reviewer — never this one.) Gated like the signing
       # secrets: an empty `PLAY_SERVICE_ACCOUNT_JSON` (secret not provisioned in `play-internal`
-      # yet) is a silent no-op, never a failure. The check lives in its own tiny step so the secret
-      # is mapped into nothing else's env.
+      # yet) is a silent no-op, never a failure: every step below is gated on this one. The check
+      # lives in its own tiny step so the secret is mapped into only two steps' env — this one and
+      # the final upload.
       - name: check the Play credential is provisioned
         id: play
         env:
@@ -299,6 +347,24 @@ jobs:
             echo "present=false" >> "$GITHUB_OUTPUT"
             echo "No PLAY_SERVICE_ACCOUNT_JSON secret in the play-internal environment — skipping the Play publish."
           fi
+      # A59: the tool (tools/play-release) is checked out and built here, so these three steps come
+      # BEFORE the artifact download — a checkout into a workspace that already holds files can wipe
+      # them. Both actions are pinned to a full commit SHA (a tag is mutable, and this job holds a
+      # Play credential), exactly as in _release-android.yml and tools.yml: v4.4.0 of each, verified
+      # 2026-10-05 via `gh api repos/actions/<name>/git/refs/tags/v4.4.0`.
+      - name: check out the tool
+        if: steps.play.outputs.present == 'true'
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # Nothing below pushes; don't leave the checkout token in .git/config for the npm steps.
+          persist-credentials: false
+      - name: set up Node
+        if: steps.play.outputs.present == 'true'
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          # Node 24, matching backend.yml and the release job. No `cache:` — a cache restored into a job
+          # that holds a Play credential is a poisoning path, and the tree installs in seconds.
+          node-version: 24
       # download-artifact v4.3.0 pinned by full SHA, verified 2026-10-05 via
       # `gh api repos/actions/download-artifact/git/refs/tags/v4.3.0` (the moving `v4` tag is the
       # same commit). Same-run artifact: needs no token beyond the job's own.
@@ -308,30 +374,41 @@ jobs:
         with:
           name: findly-release-aab
           path: aab
-
-      # Pinned to the v1.1.5 tag's commit SHA (not a mutable tag — this job holds a Play-
-      # publishing service-account credential) — r0adkll/upload-google-play, verified via
-      # `gh api repos/r0adkll/upload-google-play/git/refs/tags/v1.1.5` 2026-08-06; the repo is
-      # unarchived and its most recent release predates that check by under four months.
-      - name: publish AAB to Play internal track
+      # The tool's tests do NOT run here: tools.yml runs them on every PR and push, in a workflow with
+      # no secrets. This job runs only what it must before the credentialed step — an install with
+      # lifecycle scripts off, and the TypeScript build. Neither step's env holds the credential.
+      - name: install the upload tool
         if: steps.play.outputs.present == 'true'
-        uses: r0adkll/upload-google-play@e738b9dd8f2476ea806d921b64aacd24f34515a5 # v1.1.5
-        with:
-          serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
-          packageName: com.findly.android
-          releaseFiles: aab/app-release.aab
-          track: internal
-          status: completed
-          # 2026-08-16: without this, committing the edit fails with "Changes cannot be sent for
-          # review automatically" and the upload is discarded — the AAB transfers, the edit never
-          # commits, nothing reaches the internal track. Play refuses to auto-submit an edit while
-          # the app has a review state needing attention, which first became true when build 183 was
-          # rejected on 2026-08-14; before that this workflow had never met the condition.
-          #
-          # `true` means "commit the edit, but don't send changes for review" — exactly right here.
-          # This job only ever uploads an AAB to the *internal* track, which needs no review, and
-          # promotion to production plus the review submission are deliberately manual Play Console
-          # actions (see the track comment above, and finish-line-runbook.md B8) — since A57, driven
-          # from release-stores.yml rather than the console. So this makes the internal publish work
-          # again without granting this job any ability to submit for review.
-          changesNotSentForReview: true
+        working-directory: tools/play-release
+        run: npm ci --ignore-scripts
+      - name: build the upload tool
+        if: steps.play.outputs.present == 'true'
+        working-directory: tools/play-release
+        run: npm run build
+
+      # H10 / A59: upload the AAB to the Play internal track — only. **Deliberately internal-only here,
+      # forever — do not add a production (or even closed/open testing) track to this workflow:** the
+      # tool's `upload-internal` mode has no track input and writes only the `internal` track.
+      # (Promotion is release-stores.yml, behind the `production` environment's reviewer.)
+      #
+      # One edit: upload the bundle, set the Internal track to it, commit with
+      # `changesInReviewBehavior=ERROR_IF_IN_REVIEW`. Outcomes: committed; or — production review in
+      # progress — deferred with a `::notice::` and exit 0 (green job, nothing cancelled, the next
+      # main build uploads); or, if Play insists on it (a review state needing attention, first seen
+      # 2026-08-16 after build 183 was rejected), one retry committing with `changesNotSentForReview`
+      # (still with ERROR_IF_IN_REVIEW) — the internal track needs no review. Anything else fails the job.
+      #
+      # docs/security-review-checklist.md §2 (script injection): the credential, the mode and the AAB
+      # path reach the tool only through this step's `env:` — nothing is interpolated into `run:`.
+      # `github.workspace` is the runner's own path, not event text. The tool validates its input before
+      # its first network call, registers the signed assertion and the access token with `::add-mask::`,
+      # sends them only to https://oauth2.googleapis.com/token and the Play API, and never prints the
+      # key, the assertion, the token or the bundle.
+      - name: upload the AAB to the Play internal track
+        if: steps.play.outputs.present == 'true'
+        working-directory: tools/play-release
+        env:
+          PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+          PLAY_RELEASE_MODE: upload-internal
+          AAB_PATH: ${{ github.workspace }}/aab/app-release.aab
+        run: node dist/cli.js

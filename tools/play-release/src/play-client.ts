@@ -1,14 +1,25 @@
 // Thin HTTP client for the Google Play Developer API v3 (androidpublisher): one method per call the
-// release flow needs, no decisions. Built on an injected `fetch` so the whole thing runs against a
-// stub in unit tests. Error messages carry Play's own `error.message` and the HTTP status, never
-// the request (which holds the bearer token) and never an unparsed response body.
+// release and the internal-upload flows need, no decisions. Built on an injected `fetch` so the whole
+// thing runs against a stub in unit tests. Error messages carry Play's own `error.message` and the
+// HTTP status, never the request (which holds the bearer token) and never an unparsed response body.
 
 import type { FetchFn } from "./auth";
-import type { Track, TrackBody } from "./plan";
+import type { ReleaseNote, Track } from "./plan";
 
 const API_ROOT = "https://androidpublisher.googleapis.com/androidpublisher/v3/applications";
 
+/**
+ * The media-upload twin of API_ROOT. Google's Discovery document (androidpublisher v3, method
+ * `edits.bundles.upload`, `mediaUpload.protocols.simple.path`) puts a bundle upload at
+ * `/upload/androidpublisher/v3/applications/{packageName}/edits/{editId}/bundles`, takes
+ * `application/octet-stream` (max 50 GiB) and answers with a `Bundle { versionCode, sha1, sha256 }`.
+ */
+const UPLOAD_ROOT = "https://androidpublisher.googleapis.com/upload/androidpublisher/v3/applications";
+
 const REQUEST_TIMEOUT_MS = 60_000;
+
+/** Google asks for generous timeouts on this endpoint (the Discovery description recommends 2 minutes). */
+const UPLOAD_TIMEOUT_MS = 300_000;
 
 export class PlayApiError extends Error {
   readonly status: number;
@@ -23,7 +34,16 @@ export class PlayApiError extends Error {
   }
 }
 
-/** The Play Developer API calls the release flow needs, one method each. */
+/**
+ * Request body for `edits.tracks.update`. `TrackBody` (the release flow's: with release notes) fits;
+ * so does a plain release without notes, which is what the internal track gets.
+ */
+export interface TrackUpdate {
+  track: string;
+  releases: { versionCodes: string[]; status: "completed"; releaseNotes?: ReleaseNote[] }[];
+}
+
+/** The Play Developer API calls the release and internal-upload flows need, one method each. */
 export interface PlayApi {
   /** `edits.insert` — returns the new edit's id. */
   insertEdit(): Promise<string>;
@@ -32,11 +52,16 @@ export interface PlayApi {
   /** `edits.listings.list` — the language of every store listing. */
   listListingLanguages(editId: string): Promise<string[]>;
   /** `edits.tracks.update` — replaces the track's releases with `body.releases`. */
-  updateTrack(editId: string, body: TrackBody): Promise<void>;
+  updateTrack(editId: string, body: TrackUpdate): Promise<void>;
+  /** `edits.bundles.upload` — returns the version code Play read from the uploaded bundle. */
+  uploadBundle(editId: string, bundle: Uint8Array): Promise<number>;
   /** `edits.validate`. */
   validate(editId: string): Promise<void>;
-  /** `edits.commit` — without `changesNotSentForReview`, so the change is sent for review. */
-  commit(editId: string): Promise<CommitResult>;
+  /**
+   * `edits.commit` with `changesInReviewBehavior=ERROR_IF_IN_REVIEW` — always. Without
+   * `changesNotSentForReview` unless the caller asks for it, so by default the change is sent for review.
+   */
+  commit(editId: string, options?: CommitOptions): Promise<CommitResult>;
   /** `edits.delete` — discards the edit. */
   deleteEdit(editId: string): Promise<void>;
   /** `applications.tracks.releases.list` — read-only, outside any edit. */
@@ -45,6 +70,15 @@ export interface PlayApi {
 
 /** `changes-in-review`: Play refused (ERROR_IF_IN_REVIEW) because changes are already in review. */
 export type CommitResult = "committed" | "changes-in-review";
+
+export interface CommitOptions {
+  /**
+   * Adds `changesNotSentForReview=true`: commit the edit without sending its changes for review.
+   * Only the internal upload's one retry sets it, after Play refused to submit automatically.
+   * `ERROR_IF_IN_REVIEW` stays on either way.
+   */
+  changesNotSentForReview?: boolean;
+}
 
 /**
  * One entry of `applications.tracks.releases.list`, exactly as Google's Discovery document
@@ -99,11 +133,30 @@ const labelOf = (path: string): string => path.split("?")[0] ?? path;
 const normalizeReason = (reason: string): string => reason.replace(/[^a-z0-9]/gi, "").toLowerCase();
 
 const IN_REVIEW_REASON = normalizeReason("CHANGES_ALREADY_IN_REVIEW");
+const NOT_SENT_REASON = normalizeReason("changesNotSentForReview");
+
+/** The opposite refusal (2026-10-05, for the old flag): "…are sent for review automatically… must not be set". */
+const MUST_NOT_SET = /must not be set|are sent for review automatically/i;
+/** Observed 2026-08-16: "Changes cannot be sent for review automatically"; the parameter's name covers the rest. */
+const NEEDS_NOT_SENT = /cannot be sent for review automatically|changesNotSentForReview/i;
+
+/**
+ * Is this commit refusal Play saying "this edit cannot be submitted for review automatically — commit
+ * it with `changesNotSentForReview`" (the post-rejection state)? A 400 whose message says so (or whose
+ * machine-readable reason names the parameter). Deliberately NOT the opposite refusal ("must not be
+ * set"), which also names the parameter: retrying with the flag there would be exactly wrong.
+ */
+export function requiresChangesNotSentForReview(error: unknown): error is PlayApiError {
+  if (!(error instanceof PlayApiError) || error.status !== 400) return false;
+  if (MUST_NOT_SET.test(error.message)) return false;
+  return NEEDS_NOT_SENT.test(error.message) || error.reasons.some((reason) => normalizeReason(reason).includes(NOT_SENT_REASON));
+}
 
 const optionalString = (value: unknown): string | undefined => (typeof value === "string" ? value : undefined);
 
 export class PlayClient implements PlayApi {
   private readonly base: string;
+  private readonly uploadBase: string;
   private readonly dryRun: boolean;
 
   constructor(
@@ -113,27 +166,32 @@ export class PlayClient implements PlayApi {
     options: ClientOptions = {},
   ) {
     this.base = `${API_ROOT}/${encodeURIComponent(packageName)}`;
+    this.uploadBase = `${UPLOAD_ROOT}/${encodeURIComponent(packageName)}`;
     this.dryRun = options.dryRun === true;
   }
 
+  /** `media`: raw bytes for a media upload (the upload host path, `application/octet-stream`, a longer timeout). */
   private async request(
     method: string,
     path: string,
     body?: unknown,
+    media?: Uint8Array,
   ): Promise<{ status: number; payload: unknown }> {
     const headers: Record<string, string> = {
       authorization: `Bearer ${this.accessToken}`,
       accept: "application/json",
     };
     if (body !== undefined) headers["content-type"] = "application/json";
+    if (media !== undefined) headers["content-type"] = "application/octet-stream";
 
     let response: Response;
     try {
-      response = await this.fetchFn(`${this.base}${path}`, {
+      response = await this.fetchFn(`${media !== undefined ? this.uploadBase : this.base}${path}`, {
         method,
         headers,
         ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        ...(media !== undefined ? { body: media } : {}),
+        signal: AbortSignal.timeout(media !== undefined ? UPLOAD_TIMEOUT_MS : REQUEST_TIMEOUT_MS),
       });
     } catch (error) {
       // Only the error's *name* is kept (e.g. TimeoutError): its message may quote the request.
@@ -160,8 +218,8 @@ export class PlayClient implements PlayApi {
   }
 
   /** Like `request`, but a 404 is an error too. */
-  private async call(method: string, path: string, body?: unknown): Promise<unknown> {
-    const { status, payload } = await this.request(method, path, body);
+  private async call(method: string, path: string, body?: unknown, media?: Uint8Array): Promise<unknown> {
+    const { status, payload } = await this.request(method, path, body, media);
     if (status === 404) throw this.failure(method, path, status, payload);
     return payload;
   }
@@ -193,23 +251,41 @@ export class PlayClient implements PlayApi {
     );
   }
 
-  async updateTrack(editId: string, body: TrackBody): Promise<void> {
+  async updateTrack(editId: string, body: TrackUpdate): Promise<void> {
     await this.call("PUT", `/edits/${encodeURIComponent(editId)}/tracks/${encodeURIComponent(body.track)}`, body);
+  }
+
+  async uploadBundle(editId: string, bundle: Uint8Array): Promise<number> {
+    if (this.dryRun) {
+      // Same structural guard as commit(): a dry-run client changes nothing in Play, not even a draft edit.
+      throw new Error("Refusing to upload: this client was created for a dry run.");
+    }
+    const path = `/edits/${encodeURIComponent(editId)}/bundles?uploadType=media`;
+    const payload = await this.call("POST", path, undefined, bundle);
+    // Bundle.versionCode is an int32, i.e. a JSON *number*; anything else is not a version code.
+    const versionCode = isRecord(payload) ? payload.versionCode : undefined;
+    if (typeof versionCode !== "number" || !Number.isInteger(versionCode) || versionCode <= 0) {
+      throw new PlayApiError(`Play API POST ${labelOf(path)} returned no version code for the uploaded bundle.`, 200);
+    }
+    return versionCode;
   }
 
   async validate(editId: string): Promise<void> {
     await this.call("POST", `/edits/${encodeURIComponent(editId)}:validate`);
   }
 
-  async commit(editId: string): Promise<CommitResult> {
+  async commit(editId: string, options: CommitOptions = {}): Promise<CommitResult> {
     if (this.dryRun) {
       // Structural guard behind the caller's own dry-run flag: no request is even built.
       throw new Error("Refusing to commit: this client was created for a dry run.");
     }
     // Play's default (CANCEL_IN_REVIEW_AND_SUBMIT) would silently cancel changes already in review
-    // and resubmit; ERROR_IF_IN_REVIEW makes Play refuse instead. changesNotSentForReview is
-    // deliberately never set: an edit must go to review, not sit unsent.
-    const path = `/edits/${encodeURIComponent(editId)}:commit?changesInReviewBehavior=ERROR_IF_IN_REVIEW`;
+    // and resubmit; ERROR_IF_IN_REVIEW makes Play refuse instead — on every commit, with or without
+    // the flag below. changesNotSentForReview is set only when the caller asks (the internal upload's
+    // one retry, after Play said it cannot submit automatically); the release flow never does: its
+    // edit must go to review, not sit unsent.
+    const unsent = options.changesNotSentForReview === true ? "&changesNotSentForReview=true" : "";
+    const path = `/edits/${encodeURIComponent(editId)}:commit?changesInReviewBehavior=ERROR_IF_IN_REVIEW${unsent}`;
     try {
       await this.call("POST", path);
       return "committed";
