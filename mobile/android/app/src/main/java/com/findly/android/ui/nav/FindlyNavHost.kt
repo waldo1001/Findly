@@ -30,7 +30,6 @@ import com.findly.android.ui.designsystem.components.rememberFindlyNavDrawerStat
 import androidx.navigation.navArgument
 import androidx.navigation.navDeepLink
 import com.findly.android.AppContainer
-import com.findly.android.auth.AuthState
 import com.findly.android.launch.LaunchGateViewModel
 import com.findly.android.launch.LaunchUiState
 import com.findly.android.network.PlanLimits
@@ -106,8 +105,10 @@ import kotlinx.coroutines.launch
  * [Destinations.Family]/[Destinations.Privacy] below; A36 (specs/010 §5.1/§5.2) retires
  * `Destinations.Invites` in favor of [Destinations.InviteCreate]/[Destinations.InviteAccept].
  * [Destinations.SignIn] (§7) hosts the phone sign-in screen regardless of `container`'s
- * `authProvider` implementation; a [LaunchedEffect] on `authState` pops this screen once sign-in
- * succeeds, since that's when `authState` flips to `SignedIn`.
+ * `authProvider` implementation; a [LaunchedEffect] on `authState` resets the stack to the Map root
+ * once sign-in succeeds, since that's when `authState` flips to `SignedIn` — a reset, **not** a
+ * pop (A53: every move into Sign-in already reset the stack to `[SignIn]`, so a pop had nothing
+ * to return to). The decision is the pure [AuthNavigationPolicy].
  *
  * **010 (2026-08-26): `Home` is deleted.** [Destinations.Map] is now the start destination — the
  * root, ☰-drawer-bearing Family Map — and [launchGateViewModel] (built from the extracted, pure
@@ -217,19 +218,26 @@ fun FindlyNavHost(
 
     val authState by container.authProvider.authState.collectAsState()
     LaunchedEffect(authState) {
-        if (authState is AuthState.SignedIn && navController.currentDestination?.route == Destinations.SignIn.route) {
-            navController.popBackStack()
-        }
+        // The decision itself is the pure [AuthNavigationPolicy] (specs/010 §1.1 as amended by row
+        // A53; unit-tested without Compose) — this effect only applies it.
+        //
+        // A53: sign-in success is a root RESET to the Map, never a pop. Every move into SignIn is a
+        // full-stack reset (resetStackTo pops the graph inclusive), so SignIn is the only entry and
+        // `popBackStack()` had nothing to return to — the user sat on "Signing in…" forever.
+        // LaunchGateViewModel collects the same authState and re-probes for the new user, so the
+        // map root renders Ready or bounces on to Onboarding (010 §1.1's table).
+        //
         // A8 (specs/008-privacy-endpoints.md §4.4; specs/003 §12.4): a successful account
         // deletion calls AuthProvider.signOut() after wiping local state, which flips authState
         // to SignedOut. specs/010-app-shell-and-screen-ux.md §1.1's launch-resolution table:
-        // "Not signed in -> Sign-in" is the root for a signed-out caller, so this now targets
-        // SignIn directly (rather than the retired Home, which used to render its own sign-in
-        // prompt inline) — covers both this cross-screen case and a cold start already
-        // signed-out, since the guard below only skips when already on SignIn.
-        val currentRoute = navController.currentDestination?.route
-        if (authState is AuthState.SignedOut && currentRoute != Destinations.SignIn.route) {
-            resetStackTo(Destinations.SignIn.route)
+        // "Not signed in -> Sign-in" is the root for a signed-out caller, so this targets SignIn
+        // directly (rather than the retired Home, which used to render its own sign-in prompt
+        // inline) — covers both this cross-screen case and a cold start already signed-out, since
+        // the policy skips when already on SignIn.
+        when (AuthNavigationPolicy.decide(navController.currentDestination?.route, authState)) {
+            AuthNavigationAction.ResetToMap -> resetStackTo(Destinations.Map.route)
+            AuthNavigationAction.ResetToSignIn -> resetStackTo(Destinations.SignIn.route)
+            AuthNavigationAction.None -> Unit
         }
     }
 
