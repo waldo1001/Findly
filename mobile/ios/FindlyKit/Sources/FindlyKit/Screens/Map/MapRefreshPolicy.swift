@@ -22,11 +22,14 @@ import Foundation
 ///   `.background` or `.inactive` — the timer was stopped in between, so the data may be stale, and
 ///   one extra small `GET` on a system-dialog blip is cheaper than reasoning about which blips are
 ///   long enough to matter.
-/// - **At most one fetch in flight.** A trigger that arrives while one is running is DROPPED, not
-///   queued: `fetchFinished` never starts anything.
+/// - **At most one fetch in flight.** An automatic trigger that arrives while one is running is
+///   DROPPED, not queued: `fetchFinished` never starts anything. An EXPLICIT Refresh/Retry is not
+///   silently dropped: it ADOPTS the running fetch (no second request; the fetch becomes the
+///   Refresh's own, so its failure is reported — §3.6).
 /// - **A stale tick is ignored.** The timer task is cancelled the moment the phase changes, but a
 ///   tick that was already delivered must still not become a request.
-/// - **`ended`** (a routed 404 / an expired group) stops everything — there is nothing left to refresh.
+/// - **`ended`** (a confirmed state change: a routed 404, an expired or vanished group) ends POLLING —
+///   no automatic trigger fetches again. An explicit Retry still runs: a tap is not polling.
 public struct MapRefreshPolicy: Equatable, Sendable {
     /// Mirrors SwiftUI's `ScenePhase` without importing it, so this stays a plain value type. The
     /// SwiftUI → this mapping is `init(_:)` in `MapRefreshScenePhase+SwiftUI.swift`.
@@ -66,7 +69,9 @@ public struct MapRefreshPolicy: Equatable, Sendable {
     public enum Action: Equatable, Sendable {
         case none
         case fetch(Trigger)
-        /// RED STUB (I59 review F2): not produced yet.
+        /// An explicit Refresh arrived while an automatic fetch was running: no new request — that
+        /// fetch was upgraded to `.explicit` (see `inFlightTrigger`). The caller shows its refreshing
+        /// affordance.
         case adopt
     }
 
@@ -81,12 +86,16 @@ public struct MapRefreshPolicy: Equatable, Sendable {
     /// Assumed `.active` until told otherwise: SwiftUI's `onChange(of: scenePhase)` does not fire for
     /// the value a view starts with, and a screen that is being built is by definition on screen.
     public private(set) var phase: ScenePhase = .active
-    public private(set) var isFetching = false
+    /// What the fetch currently in flight is for, or `nil` when none is running. An explicit Refresh
+    /// that arrives while an automatic fetch runs UPGRADES this to `.explicit` (§3.6 "adopts"), so
+    /// whoever applies the fetch's outcome — which reads this AFTER its `await`, not the trigger it
+    /// was started with — reports a failure as the Refresh's own.
+    public private(set) var inFlightTrigger: Trigger?
+    public var isFetching: Bool { inFlightTrigger != nil }
+    /// Polling has ended (a confirmed state change). Automatic triggers are dead for good; an explicit
+    /// Refresh/Retry still runs — a tap is not polling.
     public private(set) var isEnded = false
     private var hasAppeared = false
-
-    /// RED STUB (I59 review F2): the in-flight trigger is not tracked yet.
-    public var inFlightTrigger: Trigger? { nil }
 
     public init() {}
 
@@ -123,10 +132,21 @@ public struct MapRefreshPolicy: Equatable, Sendable {
             return beginFetch(.periodic)
 
         case .explicitRefresh:
-            return beginFetch(.explicit)
+            // §3.6 "An explicit Refresh adopts a fetch already in flight": no second request, but the
+            // running one becomes the Refresh's own — the caller shows the refreshing affordance now
+            // and, because the outcome is read from `inFlightTrigger`, reports a failure instead of
+            // swallowing it as a silent tick. Not gated by `isEnded`: a Retry on the error state a
+            // confirmed `GROUP_NOT_FOUND` leaves behind must still work.
+            if let running = inFlightTrigger {
+                guard running != .explicit else { return .none }
+                inFlightTrigger = .explicit
+                return .adopt
+            }
+            inFlightTrigger = .explicit
+            return .fetch(.explicit)
 
         case .fetchFinished:
-            isFetching = false
+            inFlightTrigger = nil
             return .none
 
         case .ended:
@@ -139,8 +159,8 @@ public struct MapRefreshPolicy: Equatable, Sendable {
     /// queued)". Starting a fetch IS the act of marking one in flight — there is no separate "fetch
     /// started" event to forget to send.
     private mutating func beginFetch(_ trigger: Trigger) -> Action {
-        guard !isEnded, !isFetching else { return .none }
-        isFetching = true
+        guard !isEnded, inFlightTrigger == nil else { return .none }
+        inFlightTrigger = trigger
         return .fetch(trigger)
     }
 
