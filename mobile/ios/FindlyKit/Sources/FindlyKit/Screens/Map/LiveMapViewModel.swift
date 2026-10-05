@@ -51,9 +51,22 @@ public final class LiveMapViewModel: ObservableObject {
     private let apiClient: FindlyAPIClient
     private var cameraPolicyState = MapCameraPolicyState.initial
     private var cameraSequence = 0
+    private let refreshInterval: Duration
+    private let refreshSleep: (Duration) async -> Void
 
-    public init(apiClient: FindlyAPIClient) {
+    // RED STUB (specs/010 §3.6, I59): the driver exists but performs nothing yet.
+    public private(set) lazy var refreshDriver = MapRefreshDriver(
+        interval: refreshInterval, sleep: refreshSleep, perform: { _ in }
+    )
+
+    public init(
+        apiClient: FindlyAPIClient,
+        refreshInterval: Duration = MapRefreshDriver.defaultInterval,
+        refreshSleep: @escaping (Duration) async -> Void = MapRefreshDriver.liveSleep
+    ) {
         self.apiClient = apiClient
+        self.refreshInterval = refreshInterval
+        self.refreshSleep = refreshSleep
     }
 
     /// The single entry point for both the initial load and the §3.1 Refresh affordance — the

@@ -43,10 +43,24 @@ public final class GroupMapViewModel: ObservableObject {
     public let groupId: String
     private var cameraPolicyState = MapCameraPolicyState.initial
     private var cameraSequence = 0
+    private let refreshInterval: Duration
+    private let refreshSleep: (Duration) async -> Void
 
-    public init(apiClient: FindlyAPIClient, groupId: String) {
+    // RED STUB (specs/010 §3.6, I59): the driver exists but performs nothing yet.
+    public private(set) lazy var refreshDriver = MapRefreshDriver(
+        interval: refreshInterval, sleep: refreshSleep, perform: { _ in }
+    )
+
+    public init(
+        apiClient: FindlyAPIClient,
+        groupId: String,
+        refreshInterval: Duration = MapRefreshDriver.defaultInterval,
+        refreshSleep: @escaping (Duration) async -> Void = MapRefreshDriver.liveSleep
+    ) {
         self.apiClient = apiClient
         self.groupId = groupId
+        self.refreshInterval = refreshInterval
+        self.refreshSleep = refreshSleep
     }
 
     public func load() async {
