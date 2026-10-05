@@ -16,6 +16,9 @@ public final class GroupMapViewModel: ObservableObject {
         case loaded([GroupMemberLocation])
         case error(String)
         case expired
+        /// specs/010 §2.1 / §3.6 — a confirmed `404 PROFILE_NOT_FOUND` on a (re)load. Group screens
+        /// need a PROFILE, not a family, so `FAMILY_NOT_FOUND` is deliberately NOT routed here.
+        case routeToOnboarding(OnboardingVariant)
     }
 
     @Published public private(set) var state: State = .loading

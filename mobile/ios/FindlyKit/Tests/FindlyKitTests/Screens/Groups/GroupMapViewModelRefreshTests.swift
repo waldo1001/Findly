@@ -36,6 +36,22 @@ struct GroupMapViewModelRefreshTests {
             }
         }
 
+        /// The NEXT fetch parks on `gate` and then fails — a request held "in flight".
+        func failAfter(_ gate: SleepGate) {
+            api.getGroupLatestLocationsHandler = { _ in
+                await gate.wait()
+                throw APIError.server(APIErrorBody(code: .internalError, message: "boom", details: nil, requestId: "r1"), httpStatus: 500)
+            }
+        }
+
+        /// The NEXT fetch parks on `gate` and then succeeds with `members`.
+        func serveAfter(_ gate: SleepGate, _ members: [GroupMemberLocation]) {
+            api.getGroupLatestLocationsHandler = { _ in
+                await gate.wait()
+                return TestFeatures.envelope(GroupLatestLocationsResponse(members: members))
+            }
+        }
+
         /// A tick's fetch has fully finished once the timer has re-armed (it sleeps only after the
         /// tick returns), so a parked sleep means "that fetch is done".
         func waitForTimerToRearm() async throws {
@@ -172,6 +188,173 @@ struct GroupMapViewModelRefreshTests {
 
         try await waitUntil { h.viewModel.state == .expired }
         #expect(h.viewModel.refreshDriver.isTimerRunning == false, "an ended group has nothing left to poll")
+    }
+
+    // MARK: - §3.6 "confirmed state change" on the group map (I59 review F1; 001 §12.10, 010 §2.1)
+    // A removed member, a deleted/swept group and a deleted profile are each guaranteed to 404/410 on
+    // every later poll — they must surface exactly as on a first load and END polling, whatever
+    // triggered the fetch, instead of leaving a frozen roster on a 30 s loop.
+
+    @Test func aGroupNotFound_onATimerTick_withDataLoaded_showsTheErrorState_andStopsPolling() async throws {
+        let h = Harness()
+        h.serve([Self.eric])
+        await h.viewModel.refreshDriver.appeared(phase: .active)
+        try await h.waitForTimerToRearm()
+
+        h.fail(.groupNotFound, status: 404)
+        h.sleeper.fire()
+
+        try await waitUntil { h.viewModel.state != .loaded([Self.eric]) }
+        #expect(isError(h.viewModel.state), "the same outcome as a first load of a vanished group — not a frozen roster")
+        #expect(h.viewModel.refreshDriver.isTimerRunning == false)
+        #expect(h.viewModel.annotations.isEmpty)
+    }
+
+    @Test func aGroupNotFound_onAForegroundReturn_alsoSurfacesAndEndsPolling() async throws {
+        let h = Harness()
+        h.serve([Self.eric])
+        await h.viewModel.refreshDriver.appeared(phase: .active)
+        await h.viewModel.refreshDriver.scenePhaseChanged(.background)
+
+        h.fail(.groupNotFound, status: 404)
+        await h.viewModel.refreshDriver.scenePhaseChanged(.active)
+
+        #expect(isError(h.viewModel.state))
+        #expect(h.viewModel.refreshDriver.isTimerRunning == false)
+    }
+
+    @Test func afterAConfirmedGroupNotFound_noFurtherPollFires_butRetryStillWorks() async throws {
+        let h = Harness()
+        h.serve([Self.eric])
+        await h.viewModel.refreshDriver.appeared(phase: .active)
+        try await h.waitForTimerToRearm()
+        h.fail(.groupNotFound, status: 404)
+        h.sleeper.fire()
+        try await waitUntil { self.isError(h.viewModel.state) }
+        let callsAtEnd = h.api.getGroupLatestLocationsCalls.count
+
+        // Backgrounding and returning no longer fetches…
+        await h.viewModel.refreshDriver.scenePhaseChanged(.background)
+        await h.viewModel.refreshDriver.scenePhaseChanged(.active)
+        h.sleeper.fire()
+        try await Task.sleep(nanoseconds: 60_000_000)
+        #expect(h.api.getGroupLatestLocationsCalls.count == callsAtEnd)
+
+        // …but the error card's Retry is a tap, not polling, and must not be a dead button.
+        h.serve([Self.eric])
+        await h.viewModel.load()
+        #expect(h.api.getGroupLatestLocationsCalls.count == callsAtEnd + 1)
+        #expect(h.viewModel.state == .loaded([Self.eric]))
+        #expect(h.viewModel.refreshDriver.isTimerRunning == false, "a Retry does not resume polling")
+    }
+
+    @Test func aProfileNotFound_onATimerTick_routesToOnboarding_andStopsPolling() async throws {
+        let h = Harness()
+        h.serve([Self.eric])
+        await h.viewModel.refreshDriver.appeared(phase: .active)
+        try await h.waitForTimerToRearm()
+
+        h.fail(.profileNotFound, status: 404)
+        h.sleeper.fire()
+
+        try await waitUntil { h.viewModel.state == .routeToOnboarding(.profileLess) }
+        #expect(h.viewModel.refreshDriver.isTimerRunning == false)
+    }
+
+    @Test func aProfileNotFound_onAForegroundReturn_routesToOnboarding_andStopsPolling() async throws {
+        let h = Harness()
+        h.serve([Self.eric])
+        await h.viewModel.refreshDriver.appeared(phase: .active)
+        await h.viewModel.refreshDriver.scenePhaseChanged(.background)
+
+        h.fail(.profileNotFound, status: 404)
+        await h.viewModel.refreshDriver.scenePhaseChanged(.active)
+
+        #expect(h.viewModel.state == .routeToOnboarding(.profileLess))
+        #expect(h.viewModel.refreshDriver.isTimerRunning == false)
+    }
+
+    @Test func aProfileNotFound_onTheFirstLoad_routesToOnboarding() async {
+        let h = Harness()
+        h.fail(.profileNotFound, status: 404)
+
+        await h.viewModel.refreshDriver.appeared(phase: .active)
+
+        #expect(h.viewModel.state == .routeToOnboarding(.profileLess))
+    }
+
+    @Test func aFamilyNotFound_onTheGroupMap_isAnOrdinaryFailure_keepingTheDataAndPollingOn() async throws {
+        // 010 §2.1: group screens need a PROFILE, not a family — a family-less member of a group is
+        // legitimate, so `FAMILY_NOT_FOUND` here is not a confirmed state change.
+        let h = Harness()
+        h.serve([Self.eric])
+        await h.viewModel.refreshDriver.appeared(phase: .active)
+        try await h.waitForTimerToRearm()
+
+        h.fail(.familyNotFound, status: 404)
+        h.sleeper.fire()
+        try await waitUntil { h.api.getGroupLatestLocationsCalls.count == 2 }
+        try await h.waitForTimerToRearm()
+
+        #expect(h.viewModel.state == .loaded([Self.eric]), "silent, with data on screen")
+        #expect(h.emitted.contains(where: isError) == false)
+        #expect(h.viewModel.refreshDriver.isTimerRunning, "still polling")
+    }
+
+    @Test func aFamilyNotFound_onTheGroupMapsFirstLoad_isAnOrdinaryError_notAnOnboardingRoute() async {
+        let h = Harness()
+        h.fail(.familyNotFound, status: 404)
+
+        await h.viewModel.refreshDriver.appeared(phase: .active)
+
+        #expect(isError(h.viewModel.state))
+    }
+
+    // MARK: - §3.6 "An explicit Refresh adopts a fetch already in flight" (I59 review F2)
+
+    @Test func anExplicitRefresh_arrivingDuringATick_adoptsIt_showsTheRefreshingState_andReportsItsFailure() async throws {
+        let h = Harness()
+        h.serve([Self.eric])
+        await h.viewModel.refreshDriver.appeared(phase: .active)
+        try await h.waitForTimerToRearm()
+        let gate = SleepGate()
+        h.failAfter(gate)
+        h.sleeper.fire()
+        try await waitUntil { h.api.getGroupLatestLocationsCalls.count == 2 }
+
+        await h.viewModel.load()
+
+        #expect(h.api.getGroupLatestLocationsCalls.count == 2, "no second request")
+        #expect(h.viewModel.state == .loading)
+
+        await gate.release()
+        try await h.waitForTimerToRearm()
+        #expect(isError(h.viewModel.state), "reported as the Refresh's own failure, never silent")
+    }
+
+    // MARK: - §3.6 / §3.5: a selection made while a fetch is in flight survives it (I59 review F4)
+
+    @Test func aSelectionMadeWhileATickIsInFlight_survivesIt_andMintsNoCameraCommandOfItsOwn() async throws {
+        let h = Harness()
+        h.serve([Self.eric])
+        await h.viewModel.refreshDriver.appeared(phase: .active)
+        try await h.waitForTimerToRearm()
+        let gate = SleepGate()
+        h.serveAfter(gate, Self.ericMovedAndNoorJoined)
+        h.sleeper.fire()
+        try await waitUntil { h.api.getGroupLatestLocationsCalls.count == 2 }
+
+        h.viewModel.selectMember("u1")
+        let sequenceAfterSelection = h.viewModel.cameraCommand?.sequence
+        let regionAfterSelection = h.viewModel.region
+        #expect(h.viewModel.selectedUserId == "u1")
+
+        await gate.release()
+        try await waitUntil { h.viewModel.state == .loaded(Self.ericMovedAndNoorJoined) }
+
+        #expect(h.viewModel.selectedUserId == "u1")
+        #expect(h.viewModel.cameraCommand?.sequence == sequenceAfterSelection)
+        #expect(h.viewModel.region == regionAfterSelection)
     }
 
     @Test func aTimerTick_withChangedPoints_neverMovesTheCamera_orChangesTheSelection() async throws {

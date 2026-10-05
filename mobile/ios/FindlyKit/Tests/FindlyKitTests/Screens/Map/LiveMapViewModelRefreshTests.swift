@@ -36,6 +36,22 @@ struct LiveMapViewModelRefreshTests {
             }
         }
 
+        /// The NEXT fetch parks on `gate` and then fails — a request held "in flight".
+        func failAfter(_ gate: SleepGate) {
+            api.getLatestLocationsHandler = {
+                await gate.wait()
+                throw APIError.server(APIErrorBody(code: .internalError, message: "boom", details: nil, requestId: "r1"), httpStatus: 500)
+            }
+        }
+
+        /// The NEXT fetch parks on `gate` and then succeeds with `members`.
+        func serveAfter(_ gate: SleepGate, _ members: [MemberLocations]) {
+            api.getLatestLocationsHandler = {
+                await gate.wait()
+                return TestFeatures.envelope(LatestLocationsResponse(members: members))
+            }
+        }
+
         /// The point at which a timer tick's fetch has fully finished: the timer re-arms only after
         /// the tick returns, so a parked sleep means "that fetch is done".
         func waitForTimerToRearm() async throws {
@@ -237,6 +253,131 @@ struct LiveMapViewModelRefreshTests {
 
         try await waitUntil { h.viewModel.state == .routeToOnboarding(.familyLess) }
         #expect(h.viewModel.refreshDriver.isTimerRunning == false, "a confirmed dead end has nothing left to poll")
+    }
+
+    // MARK: - §3.6 "An explicit Refresh adopts a fetch already in flight" (I59 review F2)
+
+    @Test func anExplicitRefresh_arrivingDuringATick_adoptsIt_showsTheRefreshingState_andReportsItsFailure() async throws {
+        let h = Harness()
+        h.serve([Self.eric])
+        await h.viewModel.refreshDriver.appeared(phase: .active)
+        try await h.waitForTimerToRearm()
+        let gate = SleepGate()
+        h.failAfter(gate)
+        h.sleeper.fire()
+        try await waitUntil { h.api.getLatestLocationsCallCount == 2 }
+        #expect(h.viewModel.state == .loaded([Self.eric]), "an automatic refresh in flight shows nothing")
+
+        await h.viewModel.load()    // the user taps Refresh now
+
+        #expect(h.api.getLatestLocationsCallCount == 2, "no second request")
+        #expect(h.viewModel.state == .loading, "the refreshing affordance shows at once, as for any explicit Refresh")
+
+        await gate.release()
+        try await h.waitForTimerToRearm()
+        #expect(isError(h.viewModel.state), "the adopted fetch's failure is the Refresh's own — never silent")
+    }
+
+    @Test func anExplicitRefresh_arrivingDuringATick_thatSucceeds_endsInTheFreshRoster() async throws {
+        let h = Harness()
+        h.serve([Self.eric])
+        await h.viewModel.refreshDriver.appeared(phase: .active)
+        try await h.waitForTimerToRearm()
+        let gate = SleepGate()
+        h.serveAfter(gate, Self.ericMovedAndNoorJoined)
+        h.sleeper.fire()
+        try await waitUntil { h.api.getLatestLocationsCallCount == 2 }
+
+        await h.viewModel.load()
+        #expect(h.viewModel.state == .loading)
+        await gate.release()
+
+        try await waitUntil { h.viewModel.state == .loaded(Self.ericMovedAndNoorJoined) }
+        #expect(h.api.getLatestLocationsCallCount == 2)
+    }
+
+    @Test func anExplicitRefresh_arrivingDuringAForegroundReturn_adoptsIt_andReportsItsFailure() async throws {
+        let h = Harness()
+        h.serve([Self.eric])
+        await h.viewModel.refreshDriver.appeared(phase: .active)
+        await h.viewModel.refreshDriver.scenePhaseChanged(.background)
+        let gate = SleepGate()
+        h.failAfter(gate)
+        let returning = Task { await h.viewModel.refreshDriver.scenePhaseChanged(.active) }
+        try await waitUntil { h.api.getLatestLocationsCallCount == 2 }
+
+        await h.viewModel.load()
+        await gate.release()
+        await returning.value
+
+        #expect(h.api.getLatestLocationsCallCount == 2)
+        #expect(isError(h.viewModel.state))
+    }
+
+    @Test func anAdoptedFetch_thatFindsAConfirmedDeadEnd_stillRoutes() async throws {
+        let h = Harness()
+        h.serve([Self.eric])
+        await h.viewModel.refreshDriver.appeared(phase: .active)
+        try await h.waitForTimerToRearm()
+        let gate = SleepGate()
+        h.api.getLatestLocationsHandler = {
+            await gate.wait()
+            throw APIError.server(APIErrorBody(code: .profileNotFound, message: "no profile", details: nil, requestId: "r1"), httpStatus: 404)
+        }
+        h.sleeper.fire()
+        try await waitUntil { h.api.getLatestLocationsCallCount == 2 }
+
+        await h.viewModel.load()
+        await gate.release()
+
+        try await waitUntil { h.viewModel.state == .routeToOnboarding(.profileLess) }
+    }
+
+    // MARK: - §3.6 / §3.5: a selection made while a fetch is in flight survives it (I59 review F4)
+
+    @Test func aSelectionMadeWhileATickIsInFlight_survivesIt_andMintsNoCameraCommandOfItsOwn() async throws {
+        let h = Harness()
+        h.serve([Self.eric])
+        await h.viewModel.refreshDriver.appeared(phase: .active)
+        try await h.waitForTimerToRearm()
+        let gate = SleepGate()
+        h.serveAfter(gate, Self.ericMovedAndNoorJoined)
+        h.sleeper.fire()
+        try await waitUntil { h.api.getLatestLocationsCallCount == 2 }
+
+        // The user taps a member while the poll is on the wire: §3.5's own camera move happens now…
+        h.viewModel.selectMember("u1")
+        let sequenceAfterSelection = h.viewModel.cameraCommand?.sequence
+        let regionAfterSelection = h.viewModel.region
+        #expect(h.viewModel.selectedUserId == "u1")
+
+        await gate.release()
+        try await waitUntil { h.viewModel.state == .loaded(Self.ericMovedAndNoorJoined) }
+
+        // …and the poll's result neither overwrites the selection nor moves the camera again.
+        #expect(h.viewModel.selectedUserId == "u1")
+        #expect(h.viewModel.cameraCommand?.sequence == sequenceAfterSelection)
+        #expect(h.viewModel.region == regionAfterSelection)
+        #expect(h.viewModel.annotations.first { $0.id == "d1" }?.isSelected == true)
+    }
+
+    @Test func aSelectionMadeWhileAForegroundReturnIsInFlight_survivesIt() async throws {
+        let h = Harness()
+        h.serve([Self.eric])
+        await h.viewModel.refreshDriver.appeared(phase: .active)
+        await h.viewModel.refreshDriver.scenePhaseChanged(.background)
+        let gate = SleepGate()
+        h.serveAfter(gate, Self.ericMovedAndNoorJoined)
+        let returning = Task { await h.viewModel.refreshDriver.scenePhaseChanged(.active) }
+        try await waitUntil { h.api.getLatestLocationsCallCount == 2 }
+
+        h.viewModel.selectMember("u1")
+        let sequenceAfterSelection = h.viewModel.cameraCommand?.sequence
+        await gate.release()
+        await returning.value
+
+        #expect(h.viewModel.selectedUserId == "u1")
+        #expect(h.viewModel.cameraCommand?.sequence == sequenceAfterSelection)
     }
 
     // MARK: - §3.6 / §3.4: a refresh never moves the camera or the selection

@@ -195,7 +195,10 @@ public struct GroupMapScreen: View {
     @ViewBuilder
     private func rosterSheetContent(detent: FindlyBottomSheetDetent) -> some View {
         switch viewModel.state {
-        case .loading:
+        case .loading, .routeToOnboarding:
+            // specs/010 §2.1 — MUST NOT render a retryable error card for a confirmed
+            // `PROFILE_NOT_FOUND`; the screen routes away the instant this state is reached, so
+            // this is transient.
             LoadingStateView(message: "Loading map…")
         case .error(let message):
             ErrorStateView(message: message) {
