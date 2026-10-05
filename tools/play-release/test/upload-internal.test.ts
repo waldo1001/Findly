@@ -229,13 +229,11 @@ describe("uploadInternal() — every other failure fails the run and deletes the
 });
 
 describe("uploadInternal() — log hygiene", () => {
-  it("every log line is a single line, even when Play's message tries to start a workflow command", async () => {
-    const { run, log } = setup({
-      [COMMIT]: changesAlreadyInReview(),
-      [DELETE_EDIT]: playError(500, "oops\n::add-mask::everything", "INTERNAL"),
-    });
+  // (Collapsing newlines in what Play says is the CLI's `log` wrapper's job, as in release mode; it is
+  // covered in cli-upload-internal.test.ts.)
+  it("never starts a log line with '::' on its own — workflow commands come only from the CLI", async () => {
+    const { run, log } = setup({ [COMMIT]: changesAlreadyInReview() });
     await run();
-    expect(log.every((l) => !/[\r\n]/.test(l))).toBe(true);
     expect(log.filter((l) => l.startsWith("::"))).toEqual([]);
   });
 

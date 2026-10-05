@@ -110,7 +110,9 @@ export function changesAlreadyInReview(): Reply {
 }
 
 /** `Bundle`, the response of `edits.bundles.upload` (Discovery schema: sha1, sha256, versionCode int32). */
-export function bundleResponse(versionCode: unknown = UPLOADED_VERSION_CODE): Reply {
+export function bundleResponse(...args: [] | [unknown]): Reply {
+  // An explicit `undefined` means "a response without a versionCode" (the key is dropped by JSON), not "the default".
+  const versionCode = args.length === 0 ? UPLOADED_VERSION_CODE : args[0];
   return jsonResponse({ versionCode, sha1: "da39a3ee5e6b4b0d3255bfef95601890afd80709", sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" });
 }
 

@@ -6,10 +6,14 @@
 
 import { CONSOLE_URL, PACKAGE_NAME } from "./config";
 import type { Outcome, ProductionRelease } from "./release";
+import type { InternalOutcome } from "./upload-internal";
 
 export type RunReport =
   | { status: "ok"; outcome: Outcome; dryRun: boolean }
   | { status: "failed"; message: string; dryRun: boolean | undefined };
+
+/** The report of an `upload-internal` run (docs/store-readiness.md §5, "Android internal-track upload"). */
+export type InternalReport = { status: "ok"; outcome: InternalOutcome } | { status: "failed"; message: string };
 
 const TRACKS = "Production, Closed testing – Alpha";
 
@@ -128,6 +132,59 @@ export function renderSummary(report: RunReport): string {
     ]),
     "",
     ...productionBlock(outcome.productionNow),
+    link,
+    "",
+  ].join("\n");
+}
+
+/**
+ * The short summary of an internal-track upload: the version code that was uploaded and the outcome.
+ * Only facts about the upload go in — never a secret; Play's own message appears only in a fenced block.
+ */
+export function renderInternalSummary(report: InternalReport): string {
+  const title = `## Google Play internal upload — ${PACKAGE_NAME}`;
+  const link = `[Open Play Console](${CONSOLE_URL})`;
+
+  if (report.status === "failed") {
+    return [title, "", "**Failed** — the run stopped with this reason:", "", fenced(report.message), "", link, ""].join("\n");
+  }
+
+  const { outcome } = report;
+  const code = String(outcome.versionCode);
+
+  if (outcome.kind === "deferred") {
+    return [
+      title,
+      "",
+      ...table([
+        "| Result | **Deferred — production review in progress** |",
+        `| Version code | ${code} (not published) |`,
+        "| Track | Internal testing |",
+      ]),
+      "",
+      "Play refused to commit because changes are already in review. The tool never cancels a review, so the upload was discarded and nothing was changed. The next main build after the review uploads.",
+      "",
+      link,
+      "",
+    ].join("\n");
+  }
+
+  const unsent = outcome.notSentForReview;
+  return [
+    title,
+    "",
+    ...table([
+      unsent ? "| Result | **Committed — not sent for review** |" : "| Result | **Committed** |",
+      `| Version code | ${code} |`,
+      "| Track | Internal testing |",
+    ]),
+    "",
+    ...(unsent
+      ? [
+          "Play refused to send this change for review automatically, so it was committed with changesNotSentForReview (and still with ERROR_IF_IN_REVIEW).",
+          "",
+        ]
+      : []),
     link,
     "",
   ].join("\n");

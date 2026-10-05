@@ -2,7 +2,7 @@
   "name": "findly-play-release",
   "version": "0.1.0",
   "private": true,
-  "description": "Promote the Internal-testing release of com.findly.android to Production + Closed testing (Alpha) in one Play Developer API edit (docs/store-readiness.md §5)",
+  "description": "Google Play tooling for com.findly.android: promote the Internal-testing release to Production + Closed testing (Alpha) in one Play Developer API edit, and upload an AAB to the Internal track without ever cancelling a review (docs/store-readiness.md §5)",
   "main": "dist/cli.js",
   "engines": {
     "node": ">=20"
