@@ -34,6 +34,11 @@ class MapStateHolder(
         scope.launch { refresh() }
     }
 
+    // RED SKELETON (A55): no-ops until the green commit wires MapRefreshController.
+    fun onVisible() {}
+
+    fun onHidden() {}
+
     /** Re-fetches the whole family roster (§5.2 — one call, one partition scan server-side).
      * Public so the screen's pull-to-refresh / retry action can call it directly. */
     suspend fun refresh() {

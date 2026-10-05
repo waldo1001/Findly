@@ -40,6 +40,11 @@ class GroupMapStateHolder(
         scope.launch { refresh() }
     }
 
+    // RED SKELETON (A55): no-ops until the green commit wires MapRefreshController.
+    fun onVisible() {}
+
+    fun onHidden() {}
+
     suspend fun refresh() {
         val current = _state.value
         if (current is GroupMapUiState.Content) {

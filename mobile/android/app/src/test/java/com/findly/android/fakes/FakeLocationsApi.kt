@@ -7,6 +7,7 @@ import com.findly.android.network.dto.LocationFixDto
 import com.findly.android.network.dto.LocationHistoryResponseDto
 import com.findly.android.network.dto.ReportLocationsResponseDto
 import com.findly.android.network.ports.LocationsApi
+import kotlinx.coroutines.CompletableDeferred
 import java.util.ArrayDeque
 
 /** Test fake — mirrors the backend's `test/fakes/` convention (backend/README.md). Scripts a
@@ -59,8 +60,15 @@ class FakeLocationsApi : LocationsApi {
         return nextResult
     }
 
+    /** When non-null, every [getLatestLocations] call suspends on it before answering (A55,
+     * specs/010 §3.6) — lets a test hold a request "in flight" while it fires more triggers or
+     * changes [getLatestLocationsResult]; the result is read **after** the gate opens, so a test
+     * can script the outcome of the held request. */
+    var getLatestLocationsGate: CompletableDeferred<Unit>? = null
+
     override suspend fun getLatestLocations(): ApiResult<LatestLocationsResponseDto> {
         getLatestLocationsCallCount++
+        getLatestLocationsGate?.await()
         return getLatestLocationsResult
     }
 

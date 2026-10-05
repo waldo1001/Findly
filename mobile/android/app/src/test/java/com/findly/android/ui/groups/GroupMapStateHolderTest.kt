@@ -9,6 +9,9 @@ import com.findly.android.network.dto.GroupMemberLocationDto
 import com.findly.android.network.dto.GroupPositionDto
 import com.findly.android.ui.map.MapCamera
 import com.findly.android.ui.map.MapCameraTarget
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -20,6 +23,7 @@ import org.junit.Test
 /** [GroupMapStateHolder] mirrors [com.findly.android.ui.map.MapStateHolder]'s shape exactly
  * (specs/003-android-client.md §12.2 — "polls ... the same way `MapStateHolder` treats the family
  * map"): an eager `init` load plus a public [GroupMapStateHolder.refresh] for pull-to-refresh. */
+@OptIn(ExperimentalCoroutinesApi::class)
 class GroupMapStateHolderTest {
 
     private val groupId = "grp_9J2Kq7Lm3NpR5sTvWxYz"
@@ -243,6 +247,128 @@ class GroupMapStateHolderTest {
         val after = (holder.state.value as GroupMapUiState.Content).cameraCommand
         assertNotEquals(before?.seq, after?.seq)
         assertTrue(after?.target is MapCameraTarget.Bounds)
+    }
+
+    // specs/010-app-shell-and-screen-ux.md §3.6 (A55) — the group map follows the same freshness
+    // rules through the same MapRefreshController (its own policy tests: MapRefreshControllerTest).
+
+    private fun roster(vararg members: GroupMemberLocationDto) = ApiResult.Success(
+        GroupLatestLocationsResponseDto(members = members.toList()),
+        features = groupsFeatures(),
+    )
+
+    @Test
+    fun `while visible the group roster is re-fetched every 30 s and never in the background`() = runTest {
+        val api = FakeGroupsApi().apply { getGroupLatestLocationsResult = roster(memberAt("u1", "Eric", 51.0, 3.0)) }
+        val holder = GroupMapStateHolder(groupId, api, backgroundScope)
+        runCurrent()
+        advanceTimeBy(5 * 60_000)
+        runCurrent()
+        assertEquals("never visible: only the initial load", 1, api.getGroupLatestLocationsCalls.size)
+
+        holder.onVisible()
+        runCurrent()
+        assertEquals("first appearance fetches once", 1, api.getGroupLatestLocationsCalls.size)
+
+        api.getGroupLatestLocationsResult = roster(memberAt("u1", "Eric", 52.0, 4.0))
+        advanceTimeBy(30_000)
+        runCurrent()
+        assertEquals(2, api.getGroupLatestLocationsCalls.size)
+        assertEquals(52.0, (holder.state.value as GroupMapUiState.Content).members.single().lat)
+
+        holder.onHidden()
+        advanceTimeBy(5 * 60_000)
+        runCurrent()
+        assertEquals("hidden: no timer", 2, api.getGroupLatestLocationsCalls.size)
+
+        holder.onVisible()
+        runCurrent()
+        assertEquals("a foreground return re-fetches", 3, api.getGroupLatestLocationsCalls.size)
+    }
+
+    @Test
+    fun `a failed periodic refresh keeps the last group roster with no error, a failed first load shows the error`() = runTest {
+        val api = FakeGroupsApi().apply {
+            getGroupLatestLocationsResult = ApiResult.Failure(ApiError.NetworkFailure(RuntimeException("offline")))
+        }
+        val holder = GroupMapStateHolder(groupId, api, backgroundScope)
+        runCurrent()
+        assertTrue("a first-load failure shows the error state", holder.state.value is GroupMapUiState.Error)
+        holder.onVisible()
+        runCurrent()
+
+        api.getGroupLatestLocationsResult = roster(memberAt("u1", "Eric", 51.0, 3.0))
+        advanceTimeBy(30_000)
+        runCurrent()
+        val loaded = holder.state.value
+        assertTrue("a periodic success recovers the screen", loaded is GroupMapUiState.Content)
+
+        api.getGroupLatestLocationsResult = ApiResult.Failure(ApiError.InternalError("boom", "r_1"))
+        advanceTimeBy(30_000)
+        runCurrent()
+
+        assertEquals("a failed periodic refresh surfaces nothing", loaded, holder.state.value)
+    }
+
+    @Test
+    fun `an explicit Refresh failure still reports itself over existing group data`() = runTest {
+        val api = FakeGroupsApi().apply { getGroupLatestLocationsResult = roster(memberAt("u1", "Eric", 51.0, 3.0)) }
+        val holder = GroupMapStateHolder(groupId, api, backgroundScope)
+        runCurrent()
+
+        api.getGroupLatestLocationsResult = ApiResult.Failure(ApiError.InternalError("boom", "r_1"))
+        holder.refresh()
+
+        assertTrue(holder.state.value is GroupMapUiState.Error)
+    }
+
+    @Test
+    fun `GROUP_EXPIRED on a periodic refresh still surfaces as Expired - it is a terminal state, not a failed refresh`() = runTest {
+        val api = FakeGroupsApi().apply { getGroupLatestLocationsResult = roster(memberAt("u1", "Eric", 51.0, 3.0)) }
+        val holder = GroupMapStateHolder(groupId, api, backgroundScope)
+        runCurrent()
+        holder.onVisible()
+        runCurrent()
+
+        api.getGroupLatestLocationsResult = ApiResult.Failure(ApiError.GroupExpired("ended", "r_1"))
+        advanceTimeBy(30_000)
+        runCurrent()
+
+        assertTrue(holder.state.value is GroupMapUiState.Expired)
+    }
+
+    @Test
+    fun `periodic refreshes never move the group camera or drop the selection, even one selected mid-fetch`() = runTest {
+        val api = FakeGroupsApi().apply {
+            getGroupLatestLocationsResult = roster(memberAt("u1", "Eric", 51.0, 3.0), memberAt("u2", "Noor", 52.0, 4.0))
+        }
+        val holder = GroupMapStateHolder(groupId, api, backgroundScope)
+        runCurrent()
+        holder.onVisible()
+        runCurrent()
+        val firstLoad = holder.state.value as GroupMapUiState.Content
+
+        api.getGroupLatestLocationsResult = roster(memberAt("u1", "Eric", 60.0, 20.0), memberAt("u2", "Noor", 61.0, 21.0))
+        advanceTimeBy(30_000)
+        runCurrent()
+        val afterTick = holder.state.value as GroupMapUiState.Content
+        assertEquals("a tick mints no camera command", firstLoad.cameraCommand, afterTick.cameraCommand)
+        assertEquals(60.0, afterTick.members.first { it.userId == "u1" }.lat)
+
+        val gate = CompletableDeferred<Unit>()
+        api.getGroupLatestLocationsGate = gate
+        advanceTimeBy(30_000)
+        runCurrent()
+        assertEquals("the next tick's fetch is held in flight", 3, api.getGroupLatestLocationsCalls.size)
+
+        holder.selectMember("u2") // tapped while the request is out
+        val selected = holder.state.value as GroupMapUiState.Content
+        gate.complete(Unit)
+        runCurrent()
+
+        val after = holder.state.value as GroupMapUiState.Content
+        assertEquals("u2", after.selectedUserId)
+        assertEquals(selected.cameraCommand, after.cameraCommand)
     }
 
     private fun memberAt(userId: String, displayName: String, lat: Double, lon: Double): GroupMemberLocationDto = GroupMemberLocationDto(

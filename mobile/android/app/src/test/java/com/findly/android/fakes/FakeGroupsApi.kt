@@ -9,6 +9,7 @@ import com.findly.android.network.dto.ListGroupsResponseDto
 import com.findly.android.network.dto.RotateGroupCodeResponseDto
 import com.findly.android.network.dto.UpdateGroupRequestDto
 import com.findly.android.network.ports.GroupsApi
+import kotlinx.coroutines.CompletableDeferred
 
 /** Test fake — mirrors the backend's `test/fakes/` convention (backend/README.md), same shape as
  * [FakeFamilyApi]/[FakeGeofenceApi]. Used by A5's groups-screen StateHolder tests
@@ -93,8 +94,13 @@ class FakeGroupsApi : GroupsApi {
         return removeGroupMemberResult
     }
 
+    /** When non-null, every [getGroupLatestLocations] call suspends on it before answering (A55,
+     * specs/010 §3.6) — see `FakeLocationsApi.getLatestLocationsGate`. */
+    var getGroupLatestLocationsGate: CompletableDeferred<Unit>? = null
+
     override suspend fun getGroupLatestLocations(groupId: String): ApiResult<GroupLatestLocationsResponseDto> {
         getGroupLatestLocationsCalls.add(groupId)
+        getGroupLatestLocationsGate?.await()
         return getGroupLatestLocationsResult
     }
 }
