@@ -8,17 +8,24 @@ import { createSign } from "node:crypto";
 
 export const PLAY_SCOPE = "https://www.googleapis.com/auth/androidpublisher";
 
-const DEFAULT_TOKEN_URI = "https://oauth2.googleapis.com/token";
+/**
+ * Google's token endpoint — the only place the signed assertion is ever sent. Pinned in code
+ * rather than taken from the key file's `token_uri`: a key file is data, and a doctored one must
+ * not be able to redirect a freshly signed credential to another host (store-readiness §5).
+ */
+export const TOKEN_URI = "https://oauth2.googleapis.com/token";
 
 /** Google rejects assertions that live longer than an hour. */
 const JWT_LIFETIME_SECONDS = 3600;
 
 export type FetchFn = (url: string, init?: RequestInit) => Promise<Response>;
 
+/** Called with every derived credential (signed assertion, access token) so the caller can mask it in logs. */
+export type MaskFn = (secret: string) => void;
+
 export interface ServiceAccount {
   clientEmail: string;
   privateKey: string;
-  tokenUri: string;
 }
 
 function nonEmptyString(value: unknown): value is string {
@@ -48,19 +55,12 @@ export function parseServiceAccount(json: string | undefined): ServiceAccount {
   if (!nonEmptyString(fields.private_key)) {
     throw new Error("Service account JSON has no private_key.");
   }
-
-  const tokenUri = fields.token_uri === undefined ? DEFAULT_TOKEN_URI : fields.token_uri;
-  let url: URL;
-  try {
-    url = new URL(String(tokenUri));
-  } catch {
-    throw new Error("Service account token_uri is not a valid URL.");
-  }
-  if (url.protocol !== "https:") {
-    throw new Error("Service account token_uri must use https.");
+  if (fields.token_uri !== undefined && fields.token_uri !== TOKEN_URI) {
+    // The offending value is not echoed: it comes from the secret.
+    throw new Error(`Service account token_uri is not Google's token endpoint (${TOKEN_URI}); refusing to use this key.`);
   }
 
-  return { clientEmail: fields.client_email, privateKey: fields.private_key, tokenUri: url.toString() };
+  return { clientEmail: fields.client_email, privateKey: fields.private_key };
 }
 
 function base64url(value: string | Buffer): string {
@@ -73,7 +73,7 @@ export function buildJwt(sa: ServiceAccount, nowSeconds: number): string {
     JSON.stringify({
       iss: sa.clientEmail,
       scope: PLAY_SCOPE,
-      aud: sa.tokenUri,
+      aud: TOKEN_URI,
       iat: nowSeconds,
       exp: nowSeconds + JWT_LIFETIME_SECONDS,
     }),
@@ -104,16 +104,19 @@ export async function fetchAccessToken(
   fetchFn: FetchFn,
   sa: ServiceAccount,
   nowSeconds: number,
-  _mask?: (secret: string) => void,
+  mask: MaskFn = () => undefined,
 ): Promise<string> {
+  const assertion = buildJwt(sa, nowSeconds);
+  // Registered before the request leaves: from here on, any accidental echo is redacted by the runner.
+  mask(assertion);
   const body = new URLSearchParams({
     grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
-    assertion: buildJwt(sa, nowSeconds),
+    assertion,
   });
 
   let response: Response;
   try {
-    response = await fetchFn(sa.tokenUri, {
+    response = await fetchFn(TOKEN_URI, {
       method: "POST",
       headers: { "content-type": "application/x-www-form-urlencoded" },
       body: body.toString(),
@@ -137,5 +140,6 @@ export async function fetchAccessToken(
   if (!nonEmptyString(token)) {
     throw new Error("Token exchange response has no access_token.");
   }
+  mask(token);
   return token;
 }
