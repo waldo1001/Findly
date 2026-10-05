@@ -4,6 +4,7 @@ import { runCli } from "../src/main";
 import {
   APP_ID,
   buildLinkageDoc,
+  buildRefDoc,
   buildsDoc,
   errorDoc,
   localizationsDoc,
@@ -33,6 +34,7 @@ function routes(versions: VersionFx[]): Route[] {
   return [
     on("GET", "/v1/builds", { body: buildsDoc([{ id: "b240", buildNumber: "240", marketingVersion: "1.2.0" }]) }),
     on("GET", `/v1/apps/${APP_ID}/appStoreVersions`, { body: versionsDoc(versions) }),
+    on("GET", `/v1/appStoreVersions/${v.id}/build`, { body: buildRefDoc("b240", "240") }),
     on("GET", `/v1/appStoreVersions/${v.id}/appStoreVersionLocalizations`, { body: localizationsDoc([{ id: "l1", locale: "en-GB" }]) }),
     on("GET", `/v1/appStoreVersions/${v.id}/relationships/build`, { body: buildLinkageDoc(null) }),
     on("GET", `/v1/appStoreVersions/${v.id}/appStoreReviewDetail`, {
