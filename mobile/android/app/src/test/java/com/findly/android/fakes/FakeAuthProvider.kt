@@ -39,11 +39,7 @@ class FakeAuthProvider(
      * while a token fetch is "in flight". */
     var onTokenFetch: (() -> Unit)? = null
 
-    var currentIdTokenCallCount = 0
-        private set
-
     override suspend fun currentIdToken(forceRefresh: Boolean): String? {
-        currentIdTokenCallCount++
         onTokenFetch?.invoke()
         if (forceRefresh) {
             forceRefreshCallCount++
