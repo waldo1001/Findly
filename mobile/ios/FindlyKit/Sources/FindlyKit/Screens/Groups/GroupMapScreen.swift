@@ -20,6 +20,11 @@ public struct GroupMapScreen: View {
     @StateObject private var viewModel: GroupMapViewModel
     private let renderer: any MapRendering
     private let onExit: () -> Void
+    /// specs/010-app-shell-and-screen-ux.md §2.1 / §3.6 (I59 review F1) — fires once
+    /// `viewModel.state` reaches `.routeToOnboarding`: a confirmed `404 PROFILE_NOT_FOUND` (group
+    /// screens need a profile, not a family — `FAMILY_NOT_FOUND` is an ordinary failure here), seen
+    /// on the first load OR on any later refresh. `RootView` resets the stack to the Onboarding root.
+    private let onProfileDeadEnd: (OnboardingVariant) -> Void
     @State private var sheetDetent: FindlyBottomSheetDetent = .standard
     @State private var now = Date()
     private static let ticker = Timer.publish(every: 30, on: .main, in: .common).autoconnect()
@@ -28,14 +33,26 @@ public struct GroupMapScreen: View {
     /// same rules, through the same `MapRefreshDriver`.
     @Environment(\.scenePhase) private var scenePhase
 
-    public init(viewModel: @autoclosure @escaping () -> GroupMapViewModel, renderer: any MapRendering, onExit: @escaping () -> Void) {
+    public init(
+        viewModel: @autoclosure @escaping () -> GroupMapViewModel,
+        renderer: any MapRendering,
+        onExit: @escaping () -> Void,
+        onProfileDeadEnd: @escaping (OnboardingVariant) -> Void = { _ in }
+    ) {
         _viewModel = StateObject(wrappedValue: viewModel())
         self.renderer = renderer
         self.onExit = onExit
+        self.onProfileDeadEnd = onProfileDeadEnd
     }
 
     public var body: some View {
-        Group {
+        // A `ZStack`, not a `Group` (I59 review F6): the §3.6 lifecycle modifiers below must describe
+        // the SCREEN, whichever branch is showing. A `Group` hands its modifiers to its children, so
+        // swapping the map for the "group has ended" card could read as one view disappearing and
+        // another appearing (a stray `disappeared()` + a fresh `appeared()`); a `ZStack` is one stable
+        // view whose identity survives the swap. With a single child per branch it lays out exactly
+        // like the bare child did.
+        ZStack {
             switch viewModel.state {
             case .expired:
                 // 005 §2.3 — the group ended while this screen was open; there's nothing to
@@ -47,9 +64,10 @@ public struct GroupMapScreen: View {
             }
         }
         // specs/010 §3.2/§3.6 (rows A55/I59) — identical wiring to `LiveMapScreen`: three lifecycle
-        // signals forwarded to `viewModel.refreshDriver`, which owns every decision. These sit on the
-        // outer `Group`, so they keep running while `.expired` swaps the map for the "group has
-        // ended" card (the view model ends the driver itself on `410 GROUP_EXPIRED`).
+        // signals forwarded to `viewModel.refreshDriver`, which owns every decision. They sit on the
+        // stable `ZStack` above, so they keep describing the screen while `.expired` swaps the map for
+        // the "group has ended" card (the view model ends polling itself on every confirmed state
+        // change — `410 GROUP_EXPIRED`, `404 GROUP_NOT_FOUND`, `404 PROFILE_NOT_FOUND`).
         .task {
             syncSheetHeight()
             await viewModel.refreshDriver.appeared(phase: MapRefreshPolicy.ScenePhase(scenePhase))
@@ -59,7 +77,15 @@ public struct GroupMapScreen: View {
             syncSheetHeight()
             Task { await viewModel.refreshDriver.scenePhaseChanged(MapRefreshPolicy.ScenePhase(newPhase)) }
         }
+        .onChange(of: routingVariant) { variant in
+            if let variant { onProfileDeadEnd(variant) }
+        }
         .onReceive(Self.ticker) { date in now = date }
+    }
+
+    private var routingVariant: OnboardingVariant? {
+        if case .routeToOnboarding(let variant) = viewModel.state { return variant }
+        return nil
     }
 
     /// specs/010 §3.4 "Occlusion model" (I49) — mirrors `LiveMapScreen.syncSheetHeight` exactly.

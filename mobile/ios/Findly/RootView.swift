@@ -482,7 +482,10 @@ struct RootView: View {
                     renderer: defaultMapRenderer,
                     // Same unwind rationale as `GroupDetailScreen`'s `onExit` above — this fires
                     // when the group has expired, so it must not stay reachable behind the list.
-                    onExit: { coordinator.popTo(.groupsList) }
+                    onExit: { coordinator.popTo(.groupsList) },
+                    // specs/010 §2.1 / §3.6 — a confirmed `PROFILE_NOT_FOUND` on the first load or any
+                    // later refresh routes to Onboarding, like every other profile-scoped screen.
+                    onProfileDeadEnd: { variant in coordinator.showOnboarding(variant) }
                 )
 
             // MARK: - I8 privacy routes (specs/004 §3.6; specs/008-privacy-endpoints.md)
