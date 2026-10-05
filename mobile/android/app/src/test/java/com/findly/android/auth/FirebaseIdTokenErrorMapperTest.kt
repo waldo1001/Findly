@@ -30,6 +30,10 @@ class FirebaseIdTokenErrorMapperTest {
         )
         for ((code, message) in codes) {
             val original = FirebaseAuthInvalidUserException(code, message)
+            val asThrowable: Throwable = original
+            // The root cause of A52 in one assertion: neither Firebase type is an IOException, so
+            // OkHttp's dispatcher rethrows it (and Android kills the process) unless it is mapped.
+            assertFalse("$code is not an IOException - that is the crash", asThrowable is IOException)
 
             val mapped = original.toIdTokenException()
 
@@ -41,6 +45,8 @@ class FirebaseIdTokenErrorMapperTest {
     @Test
     fun `FirebaseNetworkException is Transient - an offline device is not a deleted user`() {
         val original = FirebaseNetworkException("A network error (such as timeout, interrupted connection or unreachable host) has occurred.")
+        val asThrowable: Throwable = original
+        assertFalse("FirebaseNetworkException is not an IOException either", asThrowable is IOException)
 
         val mapped = original.toIdTokenException()
 

@@ -1,6 +1,8 @@
 package com.findly.android.network
 
 import com.findly.android.auth.AuthProvider
+import com.findly.android.auth.IdTokenException
+import com.findly.android.auth.idTokenOrThrow
 import com.findly.android.network.dto.*
 import com.findly.android.network.ports.DevicesApi
 import com.findly.android.network.ports.FamilyApi
@@ -40,13 +42,39 @@ class FindlyApiClient(
     private suspend fun <T> withAuthRetry(attempt: suspend () -> ApiResult<T>): ApiResult<T> {
         val result = attempt()
         val error = (result as? ApiResult.Failure)?.error
-        return if (error is ApiError.AuthTokenExpired) {
-            authProvider.currentIdToken(forceRefresh = true)
-            attempt()
-        } else {
-            result
+        if (error !is ApiError.AuthTokenExpired) return result
+        // specs/003 §6.5 (A52): the forced refresh is a plain suspend call, not inside OkHttp, so a
+        // failure here would otherwise escape this method into the caller's coroutine. It is
+        // reported exactly like a failure to obtain the token for the request itself — and NOT
+        // replaced by the original AuthTokenExpired, which 010 §1.1 treats as a confirmed auth
+        // failure and would sign a merely-offline user out.
+        try {
+            authProvider.idTokenOrThrow(forceRefresh = true)
+        } catch (e: IdTokenException) {
+            return ioFailure(e)
         }
+        return attempt()
     }
+
+    /**
+     * The single mapping of an `IOException` caught around a Retrofit call to an [ApiResult]
+     * (specs/003 §6.5 rule 5) — every catch in this class goes through it, so no path can treat the
+     * two token failures differently. [IdTokenException.UserInvalid] (Firebase says the user is
+     * deleted/disabled; [idTokenOrThrow] has already signed them out) is a client-synthesized,
+     * **confirmed** [ApiError.AuthInvalidToken] — no response, so no `requestId` — which 010 §1.1
+     * routes to Sign-in. Everything else, including [IdTokenException.Transient], is a
+     * [ApiError.NetworkFailure]: inconclusive, never a sign-out.
+     */
+    private fun ioFailure(e: IOException): ApiResult.Failure = ApiResult.Failure(
+        if (e is IdTokenException.UserInvalid) {
+            ApiError.AuthInvalidToken(
+                message = "Firebase reports the signed-in user no longer exists or is disabled",
+                requestId = null,
+            )
+        } else {
+            ApiError.NetworkFailure(e)
+        },
+    )
 
     private suspend fun <T> unwrapOnce(call: suspend () -> Response<Envelope<T>>): ApiResult<T> = try {
         val response = call()
@@ -61,7 +89,7 @@ class FindlyApiClient(
             ApiResult.Failure(parseError(response.errorBody()?.string()))
         }
     } catch (e: IOException) {
-        ApiResult.Failure(ApiError.NetworkFailure(e))
+        ioFailure(e)
     }
 
     private suspend fun <T> unwrap(call: suspend () -> Response<Envelope<T>>): ApiResult<T> =
@@ -84,7 +112,7 @@ class FindlyApiClient(
                     ApiResult.Failure(parseError(response.errorBody()?.string()))
                 }
             } catch (e: IOException) {
-                ApiResult.Failure(ApiError.NetworkFailure(e))
+                ioFailure(e)
             }
         }
 
@@ -211,7 +239,7 @@ class FindlyApiClient(
                     else -> ApiResult.Failure(parseError(response.errorBody()?.string()))
                 }
             } catch (e: IOException) {
-                ApiResult.Failure(ApiError.NetworkFailure(e))
+                ioFailure(e)
             }
         }
 
@@ -233,7 +261,7 @@ class FindlyApiClient(
                 ApiResult.Failure(parseError(response.errorBody()?.string()))
             }
         } catch (e: IOException) {
-            ApiResult.Failure(ApiError.NetworkFailure(e))
+            ioFailure(e)
         }
     }
 
@@ -317,7 +345,7 @@ class FindlyApiClient(
                 ApiResult.Failure(parseError(response.errorBody()?.string()))
             }
         } catch (e: IOException) {
-            ApiResult.Failure(ApiError.NetworkFailure(e))
+            ioFailure(e)
         }
     }
 
