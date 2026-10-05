@@ -2,8 +2,8 @@ name: tools
 
 # docs/store-readiness.md §5, "Tool CI and the privileged job": the release tools' unit tests run on
 # every pull request and every push to main, in THIS workflow — which holds no secrets, no
-# environment and no write scope. The credentialed release jobs (_release-android.yml, and the iOS
-# counterpart) deliberately do not run the test runner; this is where the tests run instead.
+# environment and no write scope. The credentialed release jobs (release-stores.yml's `android` and
+# `ios` jobs) deliberately do not run the test runner; this is where the tests run instead.
 #
 # Plain `pull_request` (never `pull_request_target`): fork and PR code runs with a read-only token
 # and nothing else. Nothing here can publish anything.
@@ -39,7 +39,7 @@ jobs:
       run:
         working-directory: ${{ matrix.package }}
     steps:
-      # Pinned by full SHA exactly as in _release-android.yml (v4.4.0 of each; see the notes there).
+      # Pinned by full SHA exactly as in release-stores.yml (v4.4.0 of each; see the notes there).
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false

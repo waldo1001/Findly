@@ -212,7 +212,7 @@ jobs:
       run:
         working-directory: mobile/ios
     steps:
-      # Pinned by commit SHA (same as _release-ios.yml): this job holds the App Store credential.
+      # Pinned by commit SHA (same as release-stores.yml's `ios` job): this job holds the App Store credential.
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
