@@ -62,6 +62,7 @@ public final class LiveMapViewModel: ObservableObject {
     public private(set) lazy var refreshDriver = MapRefreshDriver(
         interval: refreshInterval,
         sleep: refreshSleep,
+        adopted: { [weak self] in self?.showRefreshing() },
         perform: { [weak self] trigger in await self?.performRefresh(trigger) }
     )
 
@@ -77,7 +78,9 @@ public final class LiveMapViewModel: ObservableObject {
 
     /// An EXPLICIT load: the §3.1 Refresh control and an error state's Retry (and every test that
     /// wants "load the roster now"). Goes through `refreshDriver` so the §3.6 one-request-in-flight
-    /// rule covers it too — it returns immediately, doing nothing, if a fetch is already running.
+    /// rule covers it too — and so that, if an automatic fetch is already running, this ADOPTS it
+    /// instead of silently doing nothing: no second request, `showRefreshing()` runs now, and the
+    /// fetch's failure is reported as this Refresh's own (§3.6 "adopts a fetch already in flight").
     ///
     /// Shows `.loading` while it runs and reports its own failure as `.error`, exactly as before
     /// §3.6; the periodic/foreground refreshes `refreshDriver` schedules do neither (see
@@ -112,10 +115,24 @@ public final class LiveMapViewModel: ObservableObject {
                 refreshDriver.end()
                 return
             }
-            switch MapRefreshPolicy.failureOutcome(for: trigger, hasDataOnScreen: hasDataOnScreen) {
+            // The trigger as it is NOW, not as the fetch started: an explicit Refresh that adopted
+            // this fetch while it ran upgraded it, and its failure must then surface (§3.6).
+            let effectiveTrigger = refreshDriver.inFlightTrigger ?? trigger
+            switch MapRefreshPolicy.failureOutcome(for: effectiveTrigger, hasDataOnScreen: hasDataOnScreen) {
             case .keepLastData: break
             case .showError: state = .error(userFacingMessage(for: error))
             }
+        }
+    }
+
+    /// §3.6 adoption: an explicit Refresh took over a fetch that was running invisibly, so show the
+    /// refreshing affordance now, exactly as a Refresh that started its own fetch would
+    /// (`performRefresh` flips an `.explicit` fetch to `.loading`). Only from the two states a Refresh
+    /// control/Retry can be tapped in.
+    private func showRefreshing() {
+        switch state {
+        case .loaded, .error: state = .loading
+        case .loading, .routeToOnboarding: break
         }
     }
 

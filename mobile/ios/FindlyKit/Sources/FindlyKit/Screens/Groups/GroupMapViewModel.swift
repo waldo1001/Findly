@@ -54,6 +54,7 @@ public final class GroupMapViewModel: ObservableObject {
     public private(set) lazy var refreshDriver = MapRefreshDriver(
         interval: refreshInterval,
         sleep: refreshSleep,
+        adopted: { [weak self] in self?.showRefreshing() },
         perform: { [weak self] trigger in await self?.performRefresh(trigger) }
     )
 
@@ -71,14 +72,23 @@ public final class GroupMapViewModel: ObservableObject {
 
     /// An EXPLICIT load (Refresh / Retry) — mirrors `LiveMapViewModel.load()`: goes through
     /// `refreshDriver` so the §3.6 one-request-in-flight rule covers it, shows `.loading` while it
-    /// runs and reports its own failure.
+    /// runs and reports its own failure; if an automatic fetch is already running it ADOPTS it (no
+    /// second request, `showRefreshing()` now, the failure reported as its own).
     public func load() async {
         await refreshDriver.refresh()
     }
 
     /// One fetch of the group roster for `trigger` — mirrors `LiveMapViewModel.performRefresh`
-    /// (specs/010 §3.2/§3.6). `410 GROUP_EXPIRED` is terminal for every trigger: the screen swaps to
-    /// "This group has ended" (005 §2.3) and the refresh schedule ends — there is nothing to poll.
+    /// (specs/010 §3.2/§3.6).
+    ///
+    /// A CONFIRMED STATE CHANGE is not a failed refresh, whatever triggered the fetch (§3.6; 001
+    /// §12.10): each surfaces exactly as on a first load and ENDS polling, because every later poll
+    /// would get the same answer —
+    /// - `410 GROUP_EXPIRED` → `.expired` (005 §2.3: the screen swaps to "This group has ended");
+    /// - `404 GROUP_NOT_FOUND` (a removed member, a deleted or swept group) → the first-load error
+    ///   outcome, `.error` (its Retry still works — a tap is not polling);
+    /// - `404 PROFILE_NOT_FOUND` → route to Onboarding (010 §2.1). Group screens need a profile, not
+    ///   a family, so `FAMILY_NOT_FOUND` is deliberately NOT here: it is an ordinary failure.
     private func performRefresh(_ trigger: MapRefreshPolicy.Trigger) async {
         let hasDataOnScreen: Bool
         if case .loaded = state { hasDataOnScreen = true } else { hasDataOnScreen = false }
@@ -87,15 +97,37 @@ public final class GroupMapViewModel: ObservableObject {
             let envelope = try await apiClient.getGroupLatestLocations(groupId: groupId)
             apply(envelope.data.members)
         } catch {
-            if (error as? APIError)?.serverCode == .groupExpired {
+            switch (error as? APIError)?.serverCode {
+            case .groupExpired:
                 state = .expired
                 refreshDriver.end()
                 return
+            case .groupNotFound:
+                state = .error(userFacingMessage(for: error))
+                refreshDriver.end()
+                return
+            case .profileNotFound:
+                state = .routeToOnboarding(.profileLess)
+                refreshDriver.end()
+                return
+            default:
+                break
             }
-            switch MapRefreshPolicy.failureOutcome(for: trigger, hasDataOnScreen: hasDataOnScreen) {
+            // The trigger as it is NOW, not as the fetch started: an explicit Refresh that adopted
+            // this fetch while it ran upgraded it, and its failure must then surface (§3.6).
+            let effectiveTrigger = refreshDriver.inFlightTrigger ?? trigger
+            switch MapRefreshPolicy.failureOutcome(for: effectiveTrigger, hasDataOnScreen: hasDataOnScreen) {
             case .keepLastData: break
             case .showError: state = .error(userFacingMessage(for: error))
             }
+        }
+    }
+
+    /// §3.6 adoption — mirrors `LiveMapViewModel.showRefreshing()`.
+    private func showRefreshing() {
+        switch state {
+        case .loaded, .error: state = .loading
+        case .loading, .expired, .routeToOnboarding: break
         }
     }
 
