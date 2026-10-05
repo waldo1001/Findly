@@ -72,7 +72,7 @@ class MapStateHolder(
                 _state.value = current.copy(isRefreshing = true)
             }
         }
-        when (val result = locationsApi.getLatestLocations()) {
+        when (val result = fetchGuarded { locationsApi.getLatestLocations() }) {
             is ApiResult.Success -> applyRoster(result.data.members.map { it.toUi() })
             is ApiResult.Failure -> applyFailure(result.error, explicit = run.explicit)
         }

@@ -13,6 +13,7 @@ import com.findly.android.ui.map.MapCameraTarget
 import com.findly.android.ui.map.MapRefreshController
 import com.findly.android.ui.map.RefreshRun
 import com.findly.android.ui.map.RefreshTrigger
+import com.findly.android.ui.map.fetchGuarded
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -70,7 +71,7 @@ class GroupMapStateHolder(
                 _state.value = current.copy(isRefreshing = true)
             }
         }
-        when (val result = groupsApi.getGroupLatestLocations(groupId)) {
+        when (val result = fetchGuarded { groupsApi.getGroupLatestLocations(groupId) }) {
             is ApiResult.Success -> applyRoster(result.data.members.map { it.toUi() })
             is ApiResult.Failure -> applyFailure(result.error, explicit = run.explicit)
         }
