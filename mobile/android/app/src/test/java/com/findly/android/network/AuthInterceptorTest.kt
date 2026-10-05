@@ -1,5 +1,6 @@
 package com.findly.android.network
 
+import com.findly.android.auth.AuthProvider
 import com.findly.android.auth.IdTokenException
 import com.findly.android.fakes.FakeAuthProvider
 import java.io.IOException
@@ -9,6 +10,7 @@ import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.awaitCancellation
 import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.Dispatcher
@@ -171,5 +173,38 @@ class AuthInterceptorTest {
 
         assertTrue("was $thrownUserInvalid", thrownUserInvalid is IdTokenException.UserInvalid)
         assertTrue("was $thrownTransient", thrownTransient is IdTokenException.Transient)
+    }
+
+    @Test
+    fun `an interrupt while waiting for the token surfaces as an IOException with the interrupt flag restored`() {
+        // The token source suspends, so runBlocking is genuinely parked when the interrupt arrives
+        // (an interrupt set before the call proved vacuous: okio noticed it later and threw its own).
+        val tokenFetchStarted = CountDownLatch(1)
+        val waiting = object : AuthProvider by FakeAuthProvider() {
+            override suspend fun currentIdToken(forceRefresh: Boolean): String? {
+                tokenFetchStarted.countDown()
+                awaitCancellation()
+            }
+        }
+        val client = OkHttpClient.Builder().addInterceptor(AuthInterceptor(waiting)).build()
+        var thrown: Throwable? = null
+        var interruptFlagAfterwards = false
+        val caller = Thread {
+            thrown = runCatching { client.newCall(request()).execute() }.exceptionOrNull()
+            interruptFlagAfterwards = Thread.currentThread().isInterrupted
+        }
+
+        caller.start()
+        assertTrue("the token fetch never started", tokenFetchStarted.await(10, TimeUnit.SECONDS))
+        caller.interrupt()
+        caller.join(10_000)
+
+        assertFalse("the caller thread is still blocked", caller.isAlive)
+        assertTrue("an interrupt must surface as an IOException, was $thrown", thrown is IOException)
+        assertTrue(
+            "the interrupt flag must be restored (OkHttp's convention) - swallowing it hides the interrupt from the caller",
+            interruptFlagAfterwards,
+        )
+        assertEquals("no request may be sent", 0, server.requestCount)
     }
 }

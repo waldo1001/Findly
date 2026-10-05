@@ -3,12 +3,14 @@ package com.findly.android.auth
 import com.findly.android.fakes.FakeAuthProvider
 import java.io.IOException
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
-import org.junit.Assert.fail
 import org.junit.Test
 
 /**
@@ -117,16 +119,39 @@ class IdTokenOrThrowTest {
     }
 
     @Test
-    fun `coroutine cancellation passes through unconverted and signs nobody out`() = runTest {
-        val cancellation = CancellationException("scope cancelled")
-        val provider = FakeAuthProvider().apply { tokenFailure = cancellation }
+    fun `a CancellationException raised under an active caller is a failed fetch - Transient, not a cancellation`() = runTest {
+        // What a cancelled Play-services Task looks like: a CancellationException the CALLER did not
+        // cause. Letting it propagate would silently end a coroutine that was never cancelled
+        // (e.g. the launch gate's authState collector) - so it must be a failure, like any other.
+        val foreign = CancellationException("Task was cancelled")
+        val provider = FakeAuthProvider().apply { tokenFailure = foreign }
 
-        try {
-            provider.idTokenOrThrow()
-            fail("expected the cancellation to propagate")
-        } catch (e: CancellationException) {
-            assertSame("a suspend fun must not absorb or wrap cancellation", cancellation, e)
-        }
+        val thrown = runCatching { provider.idTokenOrThrow() }.exceptionOrNull()
+
+        assertTrue("was $thrown", thrown is IdTokenException.Transient)
+        assertSame(foreign, thrown!!.cause)
         assertEquals(0, provider.signOutCallCount)
+    }
+
+    @Test
+    fun `the calling coroutine's own cancellation still propagates unconverted and signs nobody out`() = runTest {
+        val fetchStarted = CompletableDeferred<Unit>()
+        val fake = FakeAuthProvider()
+        val provider = object : AuthProvider by fake {
+            override suspend fun currentIdToken(forceRefresh: Boolean): String? {
+                fetchStarted.complete(Unit)
+                awaitCancellation()
+            }
+        }
+        var outcome: Result<String?>? = null
+        val caller = launch { outcome = runCatching { provider.idTokenOrThrow() } }
+
+        fetchStarted.await()
+        caller.cancel()
+        caller.join()
+
+        val thrown = outcome!!.exceptionOrNull()
+        assertTrue("a genuine cancellation must propagate as one, was $thrown", thrown is CancellationException)
+        assertEquals(0, fake.signOutCallCount)
     }
 }
