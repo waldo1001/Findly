@@ -1,11 +1,14 @@
 import { runCli } from "./main";
+import { makeSummaryWriter } from "./summaryWriter";
 
 // Entry point: `node dist/src/cli.js`. All inputs come from environment variables (see src/config.ts).
+// DRY_RUN=true makes the HTTP client refuse every non-GET request.
+const summaryPath = process.env.GITHUB_STEP_SUMMARY;
+
 runCli({
   env: process.env,
   log: (line) => console.log(line),
-  // The step summary is added later (summary writer wiring); until then it is printed.
-  writeSummary: (md) => console.log(md),
+  writeSummary: makeSummaryWriter(summaryPath && summaryPath !== "" ? summaryPath : undefined),
 })
   .then((code) => {
     process.exitCode = code;
