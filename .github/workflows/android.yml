@@ -278,15 +278,15 @@ jobs:
   # publishes to internal testing, exactly as before. The account also holds "Release to production"
   # (§5, user decision 2026-10-05); the production reviewer gates release-stores.yml, not the key.
   # Since A59 this job also checks out `main` and builds the tool before the credentialed step — the
-  # same exposure as _release-android.yml, except that unlike the release job nothing approves a push
-  # to main here, so protection of `main` is the control (§5, A58). Stated plainly: `npm ci` installs
-  # the tool's dev dependencies (typescript, vitest and their trees) from the lockfile and `tsc` runs
-  # in this job, so a compromised dev dependency could tamper with `dist/` and so with the code that
-  # then receives the key. The credential is mapped into the env of exactly two steps — the presence
-  # check (which runs before the checkout) and the final upload; the install and build steps cannot
-  # read it. The test runner is not run here (tools.yml runs the tests, in a workflow with no
-  # secrets), and no pull-request code reaches this job. The lockfile + `npm ci` (integrity hashes) is
-  # the control that remains: it narrows the exposure, it does not close it.
+  # same exposure as release-stores.yml's `android` job, except that unlike the release job nothing
+  # approves a push to main here, so protection of `main` is the control (§5, A58). Stated plainly:
+  # `npm ci` installs the tool's dev dependencies (typescript, vitest and their trees) from the
+  # lockfile and `tsc` runs in this job, so a compromised dev dependency could tamper with `dist/`
+  # and so with the code that then receives the key. The credential is mapped into the env of exactly
+  # two steps — the presence check (which runs before the checkout) and the final upload; the install
+  # and build steps cannot read it. The test runner is not run here (tools.yml runs the tests, in a
+  # workflow with no secrets), and no pull-request code reaches this job. The lockfile + `npm ci`
+  # (integrity hashes) is the control that remains: it narrows the exposure, it does not close it.
   #
   # Posture change, accepted in the A59 security review (§5): the old action always committed with
   # `changesNotSentForReview: true`, so it could never send anything for review; this job's first
@@ -303,8 +303,8 @@ jobs:
     # (the tool allows that one request 5 minutes).
     timeout-minutes: 15
     # A59 review (§5, "Shared edit lock"): Google allows one open Play edit per user, and this job and
-    # the release job (_release-android.yml) use the same service account. Overlapping runs would
-    # invalidate each other's edits — the job fails, nothing is cancelled in Play. One shared group
+    # the release job (release-stores.yml's `android` job) use the same service account. Overlapping
+    # runs would invalidate each other's edits — the job fails, nothing is cancelled in Play. One shared group
     # makes them take turns; the two blocks MUST stay identical.
     #   - `cancel-in-progress: false`: a running upload/commit is never killed mid-flight.
     #   - `queue: max`: waiting runs queue first in, first out (up to 100 pending). With GitHub's
@@ -316,7 +316,7 @@ jobs:
     # actionlint does not know `queue` yet: 1.7.12 reports `unexpected key "queue" for "concurrency"
     # section` (rhysd/actionlint#746). GitHub documents the key (docs.github.com, "Control the
     # concurrency of workflows and jobs"); the repo does not run actionlint in CI, so that finding is
-    # expected here and in _release-android.yml.
+    # expected here and in release-stores.yml's `android` job.
     concurrency:
       group: play-edits
       cancel-in-progress: false
@@ -350,7 +350,7 @@ jobs:
       # A59: the tool (tools/play-release) is checked out and built here, so these three steps come
       # BEFORE the artifact download — a checkout into a workspace that already holds files can wipe
       # them. Both actions are pinned to a full commit SHA (a tag is mutable, and this job holds a
-      # Play credential), exactly as in _release-android.yml and tools.yml: v4.4.0 of each, verified
+      # Play credential), exactly as in release-stores.yml and tools.yml: v4.4.0 of each, verified
       # 2026-10-05 via `gh api repos/actions/<name>/git/refs/tags/v4.4.0`.
       - name: check out the tool
         if: steps.play.outputs.present == 'true'
