@@ -137,7 +137,7 @@ backward past) an already-used number.
 
 **iOS (I60).** Authenticates with the existing App Store Connect API key (`ASC_KEY_ID` / `ASC_ISSUER_ID` / `ASC_API_KEY_P8`, role **App Manager**) via an ES256 JWT. App `com.findly.ios` (Apple ID `6797994768`).
 1. Pick the newest build whose processing state is `VALID`; its marketing version is the version to release.
-2. Find that `appStoreVersion`, or create it if absent. If it is already waiting for review, in review or released, report the state and stop without changing anything.
+2. Find that `appStoreVersion`, or create it if absent. If it is already **in flight** (waiting for review, in review, accepted, pending release, processing), report the state and stop without changing anything, as a successful run. If it is already **live** (released or replaced), **fail** without changing anything, with the hint "bump MARKETING_VERSION in mobile/ios/project.yml": a green run that shipped nothing would hide the I56 mistake. *(Clarified 2026-10-05, I60.)*
 3. Set `whatsNew` on every localization to the release notes.
 4. Attach the build; set release type **automatic after approval**, no phased release.
 5. Verify the App Review details (sign-in required plus demo account) exist; the app carries them forward from the previous version. If they are missing, fail with a clear message rather than guess.
