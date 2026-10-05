@@ -1,5 +1,6 @@
 package com.findly.android.ui.map
 
+import com.findly.android.network.ApiError
 import com.findly.android.network.ApiResult
 import com.findly.android.network.dto.LatestDeviceDto
 import com.findly.android.network.dto.LatestMemberDto
@@ -10,12 +11,25 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.launch
 
 /**
  * The live-map screen's pure state machine (001-api-contract.md §5.2). Constructor-injected
  * [CoroutineScope] so tests supply a `TestScope`/`backgroundScope` — mirrors [HomeStateHolder]'s
  * pattern (specs/003-android-client.md §12/§14). [MapViewModel] is the thin `ViewModel` wrapper.
+ *
+ * **Data freshness (specs/010 §3.6, row A55).** WHEN the roster is fetched — first appearance, every
+ * return to visible + foregrounded, every 30 s while visible, one request in flight — is the pure
+ * [MapRefreshController]'s decision; this class supplies WHAT a fetch does with its response, and
+ * the screen only reports visibility through [onVisible]/[onHidden]. Two rules ride on that:
+ * - **Failure.** A periodic/foreground refresh that fails leaves the [MapUiState.Content] on
+ *   screen untouched — no error surface; with no content yet (the first load failed) the
+ *   [MapUiState.Error] state stays and the next tick retries; an explicit Refresh still reports
+ *   its own failure. A confirmed `PROFILE_NOT_FOUND`/`FAMILY_NOT_FOUND` routes to Onboarding for
+ *   *any* trigger (010 §2.1 — a confirmed state change, not a failed refresh).
+ * - **Merge into the latest state.** A response is applied to `_state.value` as it is *when the
+ *   response arrives*, never to a snapshot taken when the request started. With a background timer
+ *   a request is routinely in flight when the user taps a member; a stale snapshot would erase that
+ *   selection and swap its camera command for an older one, which the renderer would replay.
  */
 class MapStateHolder(
     private val locationsApi: LocationsApi,
@@ -30,54 +44,72 @@ class MapStateHolder(
     private var cameraPolicyState = CameraPolicyState.INITIAL
     private var cameraSeq = 0L
 
+    private val refreshController = MapRefreshController(scope, fetch = ::fetchRoster)
+
     init {
-        scope.launch { refresh() }
+        refreshController.start()
     }
 
-    // RED SKELETON (A55): no-ops until the green commit wires MapRefreshController.
-    fun onVisible() {}
+    /** specs/010 §3.6: the map became visible **and** foregrounded (its destination is the top of
+     * the stack and the activity is resumed). */
+    fun onVisible() = refreshController.onVisible()
 
-    fun onHidden() {}
+    /** specs/010 §3.6: the map stopped being visible or the app left the foreground — stops the
+     * 30 s timer; nothing is fetched in the background. */
+    fun onHidden() = refreshController.onHidden()
 
-    /** Re-fetches the whole family roster (§5.2 — one call, one partition scan server-side).
-     * Public so the screen's pull-to-refresh / retry action can call it directly. */
+    /** The user's own Refresh / Retry (§5.2 — one call, one partition scan server-side). Public so
+     * the screen's refresh/retry action can call it directly. Dropped, but adopting the running
+     * fetch, if one is already in flight (010 §3.6 — see [MapRefreshController.request]). */
     suspend fun refresh() {
-        val current = _state.value
-        if (current is MapUiState.Content) {
-            _state.value = current.copy(isRefreshing = true)
+        refreshController.request(RefreshTrigger.Explicit)
+    }
+
+    private suspend fun fetchRoster(run: RefreshRun) {
+        if (run.explicit) {
+            val current = _state.value
+            if (current is MapUiState.Content) {
+                _state.value = current.copy(isRefreshing = true)
+            }
         }
         when (val result = locationsApi.getLatestLocations()) {
-            is ApiResult.Success -> {
-                val members = result.data.members.map { it.toUi() }
-                val points = members.locatedPoints()
+            is ApiResult.Success -> applyRoster(result.data.members.map { it.toUi() })
+            is ApiResult.Failure -> applyFailure(result.error, explicit = run.explicit)
+        }
+    }
 
-                // specs/010-app-shell-and-screen-ux.md §3.4: decide WHETHER this load/refresh
-                // re-runs the camera policy — never on an ordinary refresh, with the one carve-out
-                // MapCameraPolicy itself documents.
-                val shouldRun = MapCameraPolicy.shouldRunOnLoadOrRefresh(cameraPolicyState, points.isNotEmpty())
-                cameraPolicyState = MapCameraPolicy.nextState(cameraPolicyState, points.isNotEmpty())
-                val previousCommand = (current as? MapUiState.Content)?.cameraCommand
-                val cameraCommand = if (shouldRun) nextCameraCommand(MapCamera.target(points)) else previousCommand
+    private fun applyRoster(members: List<RosterMemberUi>) {
+        // The state as it is NOW, after the request — see the class doc ("merge into the latest").
+        val latest = _state.value as? MapUiState.Content
+        val points = members.locatedPoints()
 
-                val previousSelected = (current as? MapUiState.Content)?.selectedUserId
-                    ?.takeIf { id -> members.any { it.userId == id } }
-                _state.value = MapUiState.Content(
-                    members = members,
-                    selectedUserId = previousSelected,
-                    cameraCommand = cameraCommand,
-                )
-            }
-            is ApiResult.Failure -> {
-                // specs/010-app-shell-and-screen-ux.md §2.1: GET /locations/latest is family-scoped
-                // (001 §1.6 — "member") — a confirmed PROFILE_NOT_FOUND/FAMILY_NOT_FOUND routes to
-                // Onboarding instead of the dead-end retryable card.
-                val variant = ProfileDeadEndRouting.classify(result.error, familyScoped = true)
-                _state.value = if (variant != null) {
-                    MapUiState.RouteToOnboarding(variant)
-                } else {
-                    MapUiState.Error(result.error.userMessage())
-                }
-            }
+        // specs/010-app-shell-and-screen-ux.md §3.4: decide WHETHER this load/refresh re-runs the
+        // camera policy — never on an ordinary refresh, with the one carve-out MapCameraPolicy
+        // itself documents.
+        val shouldRun = MapCameraPolicy.shouldRunOnLoadOrRefresh(cameraPolicyState, points.isNotEmpty())
+        cameraPolicyState = MapCameraPolicy.nextState(cameraPolicyState, points.isNotEmpty())
+        val cameraCommand = if (shouldRun) nextCameraCommand(MapCamera.target(points)) else latest?.cameraCommand
+
+        val selected = latest?.selectedUserId?.takeIf { id -> members.any { it.userId == id } }
+        _state.value = MapUiState.Content(
+            members = members,
+            selectedUserId = selected,
+            cameraCommand = cameraCommand,
+        )
+    }
+
+    private fun applyFailure(error: ApiError, explicit: Boolean) {
+        // specs/010-app-shell-and-screen-ux.md §2.1: GET /locations/latest is family-scoped
+        // (001 §1.6 — "member") — a confirmed PROFILE_NOT_FOUND/FAMILY_NOT_FOUND routes to
+        // Onboarding instead of the dead-end retryable card, whichever trigger saw it.
+        val variant = ProfileDeadEndRouting.classify(error, familyScoped = true)
+        val latest = _state.value
+        _state.value = when {
+            variant != null -> MapUiState.RouteToOnboarding(variant)
+            // specs/010 §3.6: a periodic/foreground refresh that fails keeps the last data, no
+            // error surface. Only the first load (no content yet) or an explicit Refresh reports.
+            latest is MapUiState.Content && !explicit -> latest.copy(isRefreshing = false)
+            else -> MapUiState.Error(error.userMessage())
         }
     }
 

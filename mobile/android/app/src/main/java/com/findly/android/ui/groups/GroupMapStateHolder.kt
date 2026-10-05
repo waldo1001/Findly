@@ -10,18 +10,28 @@ import com.findly.android.ui.map.CameraPolicyState
 import com.findly.android.ui.map.MapCamera
 import com.findly.android.ui.map.MapCameraPolicy
 import com.findly.android.ui.map.MapCameraTarget
+import com.findly.android.ui.map.MapRefreshController
+import com.findly.android.ui.map.RefreshRun
+import com.findly.android.ui.map.RefreshTrigger
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.launch
 
 /**
  * The group-map screen's pure state machine (001-api-contract.md §12.10). Constructor-injected
  * [CoroutineScope] — mirrors [com.findly.android.ui.map.MapStateHolder]'s exact shape
  * (specs/003-android-client.md §12.2: "`GroupMapStateHolder` polls ... the same way
- * `MapStateHolder` treats the family map") — an eager `init` load plus a public [refresh] for
- * pull-to-refresh, not a real timer-driven poll loop (family map doesn't have one either).
+ * `MapStateHolder` treats the family map").
+ *
+ * **Data freshness (specs/010 §3.6, which §3.2 extends to this screen; row A55).** Exactly the
+ * family map's rules, through the same pure [MapRefreshController]: an eager `init` load, a
+ * re-fetch on every return to visible + foregrounded ([onVisible]/[onHidden]), every 30 s while
+ * visible, never in the background, one request in flight, a failed periodic refresh keeps the last
+ * roster silently, and a response is merged into the *latest* state (a member selected mid-fetch
+ * survives it) — see [com.findly.android.ui.map.MapStateHolder]'s class doc for the reasoning. The one difference:
+ * `GROUP_EXPIRED` always surfaces as [GroupMapUiState.Expired] — it is a terminal state, not a
+ * failed refresh.
  */
 class GroupMapStateHolder(
     private val groupId: String,
@@ -36,39 +46,64 @@ class GroupMapStateHolder(
     private var cameraPolicyState = CameraPolicyState.INITIAL
     private var cameraSeq = 0L
 
+    private val refreshController = MapRefreshController(scope, fetch = ::fetchRoster)
+
     init {
-        scope.launch { refresh() }
+        refreshController.start()
     }
 
-    // RED SKELETON (A55): no-ops until the green commit wires MapRefreshController.
-    fun onVisible() {}
+    /** specs/010 §3.6 / §3.2: the group map became visible **and** foregrounded. */
+    fun onVisible() = refreshController.onVisible()
 
-    fun onHidden() {}
+    /** specs/010 §3.6: stops the 30 s timer — nothing is fetched in the background. */
+    fun onHidden() = refreshController.onHidden()
 
+    /** The user's own Refresh / Retry — see [com.findly.android.ui.map.MapStateHolder.refresh]. */
     suspend fun refresh() {
-        val current = _state.value
-        if (current is GroupMapUiState.Content) {
-            _state.value = current.copy(isRefreshing = true)
+        refreshController.request(RefreshTrigger.Explicit)
+    }
+
+    private suspend fun fetchRoster(run: RefreshRun) {
+        if (run.explicit) {
+            val current = _state.value
+            if (current is GroupMapUiState.Content) {
+                _state.value = current.copy(isRefreshing = true)
+            }
         }
         when (val result = groupsApi.getGroupLatestLocations(groupId)) {
-            is ApiResult.Success -> {
-                val members = result.data.members.map { it.toUi() }
-                val points = members.locatedPoints()
+            is ApiResult.Success -> applyRoster(result.data.members.map { it.toUi() })
+            is ApiResult.Failure -> applyFailure(result.error, explicit = run.explicit)
+        }
+    }
 
-                val shouldRun = MapCameraPolicy.shouldRunOnLoadOrRefresh(cameraPolicyState, points.isNotEmpty())
-                cameraPolicyState = MapCameraPolicy.nextState(cameraPolicyState, points.isNotEmpty())
-                val previousCommand = (current as? GroupMapUiState.Content)?.cameraCommand
-                val cameraCommand = if (shouldRun) nextCameraCommand(MapCamera.target(points)) else previousCommand
+    private fun applyRoster(members: List<GroupMapMemberUi>) {
+        // The state as it is NOW, after the request — never a snapshot from when it started (see
+        // MapStateHolder's class doc: a selection made while the fetch was in flight must survive).
+        val latest = _state.value as? GroupMapUiState.Content
+        val points = members.locatedPoints()
 
-                val previousSelected = (current as? GroupMapUiState.Content)?.selectedUserId
-                    ?.takeIf { id -> members.any { it.userId == id } }
-                _state.value = GroupMapUiState.Content(
-                    members = members,
-                    selectedUserId = previousSelected,
-                    cameraCommand = cameraCommand,
-                )
-            }
-            is ApiResult.Failure -> _state.value = result.error.toMapState()
+        val shouldRun = MapCameraPolicy.shouldRunOnLoadOrRefresh(cameraPolicyState, points.isNotEmpty())
+        cameraPolicyState = MapCameraPolicy.nextState(cameraPolicyState, points.isNotEmpty())
+        val cameraCommand = if (shouldRun) nextCameraCommand(MapCamera.target(points)) else latest?.cameraCommand
+
+        val selected = latest?.selectedUserId?.takeIf { id -> members.any { it.userId == id } }
+        _state.value = GroupMapUiState.Content(
+            members = members,
+            selectedUserId = selected,
+            cameraCommand = cameraCommand,
+        )
+    }
+
+    private fun applyFailure(error: ApiError, explicit: Boolean) {
+        val latest = _state.value
+        _state.value = when {
+            // GROUP_EXPIRED is a terminal state, not a failed refresh: it surfaces (and bounces the
+            // user to the groups list) whichever trigger saw it.
+            error is ApiError.GroupExpired -> GroupMapUiState.Expired()
+            // specs/010 §3.6: a periodic/foreground refresh that fails keeps the last data, no
+            // error surface. Only the first load (no content yet) or an explicit Refresh reports.
+            latest is GroupMapUiState.Content && !explicit -> latest.copy(isRefreshing = false)
+            else -> GroupMapUiState.Error(error.userMessage())
         }
     }
 
@@ -124,6 +159,3 @@ private fun GroupMemberLocationDto.toUi(): GroupMapMemberUi = GroupMapMemberUi(
     recordedAt = location?.recordedAt,
     isStale = location?.isStale,
 )
-
-private fun ApiError.toMapState(): GroupMapUiState =
-    if (this is ApiError.GroupExpired) GroupMapUiState.Expired() else GroupMapUiState.Error(userMessage())

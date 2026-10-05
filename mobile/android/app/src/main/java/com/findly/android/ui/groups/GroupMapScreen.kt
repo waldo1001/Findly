@@ -31,6 +31,7 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import com.findly.android.ui.designsystem.FindlyTheme
 import com.findly.android.ui.designsystem.components.FindlyBottomSheet
 import com.findly.android.ui.designsystem.components.FindlyButton
@@ -76,6 +77,14 @@ fun GroupMapRoute(
 ) {
     val state by viewModel.state.collectAsState()
     val context = LocalContext.current
+
+    // specs/010 §3.6 / §3.2 (A55): same wiring as MapRoute — RESUMED on this destination's
+    // NavBackStackEntry == visible and foregrounded; the policy itself is the pure
+    // MapRefreshController behind GroupMapStateHolder.
+    LifecycleResumeEffect(viewModel) {
+        viewModel.onVisible()
+        onPauseOrDispose { viewModel.onHidden() }
+    }
 
     LaunchedEffect(state) {
         val expired = state as? GroupMapUiState.Expired ?: return@LaunchedEffect

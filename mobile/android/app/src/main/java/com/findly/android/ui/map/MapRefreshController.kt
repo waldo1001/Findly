@@ -1,40 +1,150 @@
 package com.findly.android.ui.map
 
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /** What caused a fetch (specs/010-app-shell-and-screen-ux.md §3.6). */
-enum class RefreshTrigger { Initial, Visible, Timer, Explicit }
+enum class RefreshTrigger {
+    /** First appearance of the screen — the holder's own `init` load. */
+    Initial,
 
-/** One fetch in progress. */
+    /** A return to the foreground while the map is the visible screen, or a navigation back to the
+     * map from another screen (010 §3.6 bullet 2). */
+    Visible,
+
+    /** The 30 s timer, which only ticks while the map is visible **and** foregrounded (bullet 3). */
+    Timer,
+
+    /** The user's own Refresh / Retry tap. */
+    Explicit,
+}
+
+/**
+ * One fetch in progress, handed to the controller's `fetch` callback. The callback consults
+ * [explicit] **when the response arrives** (not when the request started) to decide whether a
+ * failure is surfaced: an explicit Refresh "still reports its own failure" (010 §3.6), while a
+ * periodic or foreground failure is silent.
+ */
 class RefreshRun(val trigger: RefreshTrigger) {
+    /** True for an explicit Refresh — and flips to true if one is [adopted][MapRefreshController.request]
+     * while this fetch is already running. */
+    @Volatile
     var explicit: Boolean = trigger == RefreshTrigger.Explicit
         internal set
 }
 
 /**
- * RED SKELETON (A55): behaves like the pre-A55 holders — one unconditional fetch per call, no
- * timer, no visibility handling, no in-flight gate — so the new tests fail on the shipped bug.
+ * The pure trigger policy of specs/010-app-shell-and-screen-ux.md §3.6 (rows A55/I59): WHEN the
+ * family map (and, per §3.2, the group map) re-fetches its positions. No Android or Compose
+ * dependency — the timer is an injected-[scope] `delay` loop, so tests drive it with
+ * `kotlinx-coroutines-test` virtual time; the only lifecycle wiring is `MapRoute`'s/
+ * `GroupMapRoute`'s `LifecycleResumeEffect` calling [onVisible]/[onHidden]. WHAT a fetch does with
+ * its response (keep-last-data on a silent failure, camera, selection) is the holder's concern, not
+ * this class's.
+ *
+ * The rules (010 §3.6):
+ * 1. **First appearance** — [start] fetches once, immediately ([RefreshTrigger.Initial]). The first
+ *    [onVisible] after it is the *same* appearance, so it only starts the timer — no second fetch.
+ * 2. **Every return to visible + foregrounded** — [onVisible] (after a [onHidden]) fetches at once
+ *    ([RefreshTrigger.Visible]). The caller passes "visible and foregrounded" as a single signal:
+ *    the map's `NavBackStackEntry` lifecycle being `RESUMED` (true only while it is the top
+ *    destination *and* the activity is resumed).
+ * 3. **Every [intervalMillis] while visible** — [RefreshTrigger.Timer], restarted from each
+ *    [onVisible]. [onHidden] stops it, so **nothing is ever fetched in the background**. A fetch
+ *    already in flight when the screen is hidden is left to finish (it started while visible).
+ * 4. **At most one request in flight** — a trigger arriving while one runs is dropped, never
+ *    queued. The one refinement: a dropped [RefreshTrigger.Explicit] *adopts* the running fetch
+ *    ([RefreshRun.explicit] becomes true), so that fetch's failure is reported as the user's
+ *    Refresh's own instead of vanishing as a silent tick.
+ *
+ * Threading: driven from the main thread (`viewModelScope` is `Dispatchers.Main.immediate`); the
+ * small amount of shared state is nevertheless guarded, and the lock is never held across a
+ * suspension.
  */
 class MapRefreshController(
     private val scope: CoroutineScope,
-    @Suppress("unused") private val intervalMillis: Long = REFRESH_INTERVAL_MILLIS,
+    private val intervalMillis: Long = REFRESH_INTERVAL_MILLIS,
     private val fetch: suspend (RefreshRun) -> Unit,
 ) {
+    private val lock = Any()
+    private var inFlight: RefreshRun? = null
+    private var visible = false
+    private var firstVisibleCovered = false
+    private var timerJob: Job? = null
+
+    /** First appearance: fetches once, immediately. Call exactly once, from the holder's `init`. */
     fun start() {
+        synchronized(lock) { firstVisibleCovered = true }
         scope.launch { request(RefreshTrigger.Initial) }
     }
 
-    fun onVisible() {}
+    /** The screen became visible **and** foregrounded. Idempotent while already visible. */
+    fun onVisible() {
+        val fetchNow: Boolean
+        synchronized(lock) {
+            if (visible) return
+            visible = true
+            // The first onVisible after start() is the first appearance, which the initial load
+            // already covers — it must not fetch a second time.
+            fetchNow = !firstVisibleCovered
+            firstVisibleCovered = false
+            timerJob?.cancel()
+            timerJob = null
+        }
+        // Launched outside the lock; the timer starts from *this* moment, never resuming an older
+        // schedule.
+        val timer = scope.launch { tickLoop() }
+        synchronized(lock) { timerJob = timer }
+        if (fetchNow) scope.launch { request(RefreshTrigger.Visible) }
+    }
 
-    fun onHidden() {}
+    /** The screen stopped being visible, or the app left the foreground: stop the timer. An
+     * in-flight fetch is not cancelled. */
+    fun onHidden() {
+        val timer = synchronized(lock) {
+            visible = false
+            timerJob.also { timerJob = null }
+        }
+        timer?.cancel()
+    }
 
+    /**
+     * Runs a fetch for [trigger] unless one is already in flight, in which case it is dropped (and,
+     * for [RefreshTrigger.Explicit], adopts the running fetch — see the class doc). Suspends until
+     * the fetch it ran completes. Returns whether this call ran a fetch. The in-flight gate always
+     * reopens, including when the fetch is cancelled or throws.
+     */
     suspend fun request(trigger: RefreshTrigger): Boolean {
-        fetch(RefreshRun(trigger))
+        val run = RefreshRun(trigger)
+        synchronized(lock) {
+            val running = inFlight
+            if (running != null) {
+                if (trigger == RefreshTrigger.Explicit) running.explicit = true
+                return false
+            }
+            inFlight = run
+        }
+        try {
+            fetch(run)
+        } finally {
+            synchronized(lock) { if (inFlight === run) inFlight = null }
+        }
         return true
     }
 
+    private suspend fun tickLoop() {
+        while (true) {
+            delay(intervalMillis)
+            // A separate coroutine, not awaited here: hiding cancels this loop (no more ticks) but
+            // must not cancel a fetch that is already running.
+            scope.launch { request(RefreshTrigger.Timer) }
+        }
+    }
+
     companion object {
+        /** specs/010 §3.6: one `GET` per 30 s of viewing. */
         const val REFRESH_INTERVAL_MILLIS = 30_000L
     }
 }
