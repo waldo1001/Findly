@@ -66,6 +66,8 @@ public struct MapRefreshPolicy: Equatable, Sendable {
     public enum Action: Equatable, Sendable {
         case none
         case fetch(Trigger)
+        /// RED STUB (I59 review F2): not produced yet.
+        case adopt
     }
 
     public enum FailureOutcome: Equatable, Sendable {
@@ -82,6 +84,9 @@ public struct MapRefreshPolicy: Equatable, Sendable {
     public private(set) var isFetching = false
     public private(set) var isEnded = false
     private var hasAppeared = false
+
+    /// RED STUB (I59 review F2): the in-flight trigger is not tracked yet.
+    public var inFlightTrigger: Trigger? { nil }
 
     public init() {}
 

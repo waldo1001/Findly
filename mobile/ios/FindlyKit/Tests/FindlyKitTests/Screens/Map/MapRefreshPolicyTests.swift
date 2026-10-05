@@ -191,11 +191,63 @@ struct MapRefreshPolicyTests {
         #expect(policy.handle(.appeared) == .none)
     }
 
-    @Test func anExplicitRefresh_arrivingWhileAFetchIsRunning_isDropped() {
+    @Test func inFlightTrigger_tracksWhatStartedTheRunningFetch_andClearsWhenItFinishes() {
+        var policy = MapRefreshPolicy()
+        #expect(policy.inFlightTrigger == nil)
+
+        policy.handle(.appeared)
+        #expect(policy.inFlightTrigger == .firstAppearance)
+
+        // A dropped automatic trigger neither replaces nor upgrades it.
+        policy.handle(.timerTick)
+        #expect(policy.inFlightTrigger == .firstAppearance)
+
+        policy.handle(.fetchFinished)
+        #expect(policy.inFlightTrigger == nil)
+    }
+
+    // MARK: - §3.6 "An explicit Refresh adopts a fetch already in flight" (I59 review F2)
+
+    @Test(arguments: [MapRefreshPolicy.Trigger.periodic, .foregroundReturn])
+    func anExplicitRefresh_arrivingWhileAnAutomaticFetchIsRunning_adoptsIt_withoutASecondRequest(_ running: MapRefreshPolicy.Trigger) {
+        var policy = steadyState()
+        switch running {
+        case .periodic:
+            #expect(policy.handle(.timerTick) == .fetch(.periodic))
+        default:
+            policy.handle(.scenePhaseChanged(.inactive))
+            #expect(policy.handle(.scenePhaseChanged(.active)) == .fetch(.foregroundReturn))
+        }
+
+        #expect(policy.handle(.explicitRefresh) == .adopt, "no second request — the running one is taken over")
+        #expect(policy.inFlightTrigger == .explicit, "so its outcome is reported as the Refresh's own")
+        #expect(policy.isFetching == true)
+    }
+
+    @Test func anExplicitRefresh_adoptingTheFirstAppearanceFetch_upgradesIt() {
         var policy = MapRefreshPolicy()
         policy.handle(.appeared)
 
+        #expect(policy.handle(.explicitRefresh) == .adopt)
+        #expect(policy.inFlightTrigger == .explicit)
+    }
+
+    @Test func aSecondExplicitRefresh_whileAnExplicitFetchRuns_hasNothingLeftToDo() {
+        var policy = steadyState()
+        #expect(policy.handle(.explicitRefresh) == .fetch(.explicit))
+
         #expect(policy.handle(.explicitRefresh) == .none)
+        #expect(policy.inFlightTrigger == .explicit)
+    }
+
+    @Test func anAdoptedFetch_isStillOneFetch_finishingItFreesTheNextTrigger() {
+        var policy = steadyState()
+        policy.handle(.timerTick)
+        policy.handle(.explicitRefresh)
+        policy.handle(.fetchFinished)
+
+        #expect(policy.inFlightTrigger == nil)
+        #expect(policy.handle(.timerTick) == .fetch(.periodic), "the upgrade does not outlive the fetch it adopted")
     }
 
     @Test func aDroppedTrigger_isNotQueued_finishingTheFetchStartsNothing() {
@@ -227,18 +279,30 @@ struct MapRefreshPolicyTests {
 
     // MARK: - terminal states (routed 404, expired group): the schedule stops
 
-    @Test func afterTheScreenEnds_nothingFetchesAndTheTimerStops() {
+    @Test func afterTheScreenEnds_noAutomaticTriggerFetches_andTheTimerStops() {
         var policy = steadyState()
         policy.handle(.ended)
 
         #expect(policy.isEnded == true)
         #expect(policy.timerShouldRun == false)
         #expect(policy.handle(.timerTick) == .none)
-        #expect(policy.handle(.explicitRefresh) == .none)
         policy.handle(.scenePhaseChanged(.background))
         #expect(policy.handle(.scenePhaseChanged(.active)) == .none)
         policy.handle(.disappeared)
         #expect(policy.handle(.appeared) == .none)
+    }
+
+    @Test func afterTheScreenEnds_anExplicitRetryStillFetches_becauseATapIsNotPolling() {
+        // A confirmed `GROUP_NOT_FOUND` ends polling but leaves the error state's Retry on screen
+        // (I59 review F1) — the Retry must not be a dead button. Mirrors Android's
+        // `MapRefreshController.endPolling` ("an explicit request still runs").
+        var policy = steadyState()
+        policy.handle(.ended)
+
+        #expect(policy.handle(.explicitRefresh) == .fetch(.explicit))
+        policy.handle(.fetchFinished)
+        #expect(policy.timerShouldRun == false, "a Retry does not resume polling")
+        #expect(policy.handle(.timerTick) == .none)
     }
 
     // MARK: - §3.6: which failures may surface an error
