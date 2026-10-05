@@ -25,11 +25,14 @@ export class ReleaseError extends Error {
   }
 }
 
-/** One production release as `applications.tracks.releases.list` reports it. */
+/**
+ * One production release as `applications.tracks.releases.list` reports it (schema `ReleaseSummary`):
+ * its name, the version codes of its active artifacts, and its lifecycle state.
+ */
 export interface ProductionRelease {
   name?: string | undefined;
+  /** From `activeArtifacts[].versionCode` (int32 numbers), as strings like everywhere else here. */
   versionCodes: string[];
-  status?: string | undefined;
   /** e.g. RELEASE_LIFECYCLE_STATE_IN_REVIEW. */
   lifecycleState?: string | undefined;
 }
@@ -76,19 +79,37 @@ export interface ReleaseOptions {
 const list = (codes: string[]): string => (codes.length > 0 ? codes.join(", ") : "none");
 
 const NEXT_STEP = "Next step: in Play Console open Publishing overview and choose Send changes for review.";
+const NOT_COMMITTED = "Nothing was committed; re-run later.";
+const NOT_CONFIRMED =
+  "Play did not confirm the commit; re-run later (if it had gone through, the re-run reports nothing to release or stops on the change in review).";
 
-/** Any commit refusal other than "already in review" tells the operator what to do by hand. */
+/**
+ * What the operator should do after a commit failed, by kind of failure:
+ *  - a precondition-style refusal (400 FAILED_PRECONDITION / INVALID_ARGUMENT, 409, 412): the edit
+ *    was valid but Play will not submit it as it stands — "Send changes for review" in the Console
+ *    is the way forward;
+ *  - a server error or a network failure (5xx, no response): the commit may or may not have been
+ *    applied, so nothing is claimed either way — a re-run is safe and tells;
+ *  - any other 4xx (401/403 auth, 404 edit gone, 429 quota, …): Play rejected the request itself, so
+ *    nothing was committed, and the Play Console step would be the wrong advice.
+ * The original Play message is always kept.
+ */
 function withNextStep(error: unknown): unknown {
-  if (!(error instanceof PlayApiError) || error.status === 0) return error;
+  if (!(error instanceof PlayApiError)) return error;
+  const suffix = [400, 409, 412].includes(error.status)
+    ? NEXT_STEP
+    : error.status === 0 || error.status >= 500
+      ? NOT_CONFIRMED
+      : NOT_COMMITTED;
   const end = /[.!?]$/.test(error.message) ? "" : ".";
-  return new PlayApiError(`${error.message}${end} ${NEXT_STEP}`, error.status, error.reasons);
+  return new PlayApiError(`${error.message}${end} ${suffix}`, error.status, error.reasons);
 }
 
+/** Google's `ReleaseSummary` carries artifacts as `activeArtifacts[].versionCode` (int32 numbers). */
 function toProductionRelease(summary: ReleaseSummary): ProductionRelease {
   return {
     name: summary.releaseName,
-    versionCodes: summary.versionCodes ?? [],
-    status: summary.status,
+    versionCodes: (summary.activeArtifacts ?? []).map((artifact) => String(artifact.versionCode)),
     lifecycleState: summary.releaseLifecycleState,
   };
 }

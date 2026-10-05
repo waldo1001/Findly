@@ -46,15 +46,19 @@ export interface PlayApi {
 /** `changes-in-review`: Play refused (ERROR_IF_IN_REVIEW) because changes are already in review. */
 export type CommitResult = "committed" | "changes-in-review";
 
-/** One entry of `applications.tracks.releases.list`. */
+/**
+ * One entry of `applications.tracks.releases.list`, exactly as Google's Discovery document
+ * (androidpublisher v3, schema `ReleaseSummary`) defines it: `releaseName`, `track`,
+ * `activeArtifacts[]` (each `ArtifactSummary { versionCode: int32 }`) and `releaseLifecycleState`.
+ * Nothing else exists on this schema — `versionCodes`, `status` and `lastUpdateTime` belong to the
+ * edits API's `TrackRelease`, not here.
+ */
 export interface ReleaseSummary {
   releaseName?: string;
   track?: string;
   activeArtifacts?: { versionCode: number }[];
-  versionCodes?: string[];
-  status?: string;
+  /** e.g. RELEASE_LIFECYCLE_STATE_IN_REVIEW. */
   releaseLifecycleState?: string;
-  lastUpdateTime?: string;
 }
 
 export interface ClientOptions {
@@ -228,21 +232,21 @@ export class PlayClient implements PlayApi {
     const releases = isRecord(payload) && Array.isArray(payload.releases) ? payload.releases : [];
     return releases.flatMap((entry: unknown): ReleaseSummary[] => {
       if (!isRecord(entry)) return [];
-      const versionCodes = Array.isArray(entry.versionCodes)
-        ? entry.versionCodes.filter((code): code is string => typeof code === "string")
-        : undefined;
       const summary: ReleaseSummary = {};
       const releaseName = optionalString(entry.releaseName);
       const trackName = optionalString(entry.track);
-      const status = optionalString(entry.status);
       const releaseLifecycleState = optionalString(entry.releaseLifecycleState);
-      const lastUpdateTime = optionalString(entry.lastUpdateTime);
       if (releaseName !== undefined) summary.releaseName = releaseName;
       if (trackName !== undefined) summary.track = trackName;
-      if (versionCodes !== undefined) summary.versionCodes = versionCodes;
-      if (status !== undefined) summary.status = status;
+      if (Array.isArray(entry.activeArtifacts)) {
+        // ArtifactSummary.versionCode is an int32, i.e. a JSON *number*; anything else is not a version code.
+        summary.activeArtifacts = entry.activeArtifacts.flatMap((artifact: unknown) =>
+          isRecord(artifact) && typeof artifact.versionCode === "number" && Number.isInteger(artifact.versionCode)
+            ? [{ versionCode: artifact.versionCode }]
+            : [],
+        );
+      }
       if (releaseLifecycleState !== undefined) summary.releaseLifecycleState = releaseLifecycleState;
-      if (lastUpdateTime !== undefined) summary.lastUpdateTime = lastUpdateTime;
       return [summary];
     });
   }

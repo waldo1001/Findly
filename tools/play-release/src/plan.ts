@@ -177,10 +177,17 @@ function productionSafety(production: Track | undefined, internalMax: number): P
   const rollingOut = releases.filter((r) => r.status === "inProgress" && r.versionCodes?.length);
   const blocking = rollingOut.filter((r) => maxCode(codesOf([r])) >= internalMax);
   if (blocking.length > 0) {
+    const rolling = maxCode(codesOf(blocking));
+    // Same build as Internal's: releasing it would not downgrade anything, it would silently push
+    // the staged rollout to 100% of users. A newer one really would be a downgrade.
+    const consequence =
+      rolling > internalMax
+        ? "Releasing would downgrade a live rollout"
+        : "Releasing would force that rollout to 100% of users";
     return {
       action: "error",
       code: "production-rollout-ahead",
-      message: `Production has a staged rollout (inProgress) of version code ${maxCode(codesOf(blocking))}, not older than Internal testing's ${internalMax}. Releasing would downgrade a live rollout; finish or halt it in Play Console first. Nothing was changed.`,
+      message: `Production has a staged rollout (inProgress) of version code ${rolling}, not older than Internal testing's ${internalMax}. ${consequence}; finish or halt it in Play Console first. Nothing was changed.`,
     };
   }
   return undefined;
