@@ -7,4 +7,5 @@
 -->
 <full-backup-content>
     <exclude domain="sharedpref" path="findly_pending_link.xml"/>
+    <exclude domain="sharedpref" path="findly_app_lock.xml"/>
 </full-backup-content>

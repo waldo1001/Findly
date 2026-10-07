@@ -1,5 +1,7 @@
 package com.findly.android.ui.settings
 
+import com.findly.android.applock.AppLockStore
+import com.findly.android.applock.InMemoryAppLockPersistence
 import com.findly.android.fakes.InMemoryDeviceIdStore
 import com.findly.android.fakes.InMemoryGeofenceConfigStateStore
 import com.findly.android.location.InMemoryPermissionDisclosureStore
@@ -38,6 +40,7 @@ class LocalStateWiperTest {
         geofenceConfigStateStore: InMemoryGeofenceConfigStateStore = InMemoryGeofenceConfigStateStore(),
         permissionDisclosureStore: InMemoryPermissionDisclosureStore = InMemoryPermissionDisclosureStore(),
         pendingLinkStore: PendingLinkStore = PendingLinkStore(InMemoryPendingLinkPersistence()),
+        appLockStore: AppLockStore = AppLockStore(InMemoryAppLockPersistence()),
     ) = DefaultLocalStateWiper(
         fixQueueStore,
         deviceIdStore,
@@ -46,6 +49,7 @@ class LocalStateWiperTest {
         geofenceConfigStateStore,
         permissionDisclosureStore,
         pendingLinkStore,
+        appLockStore,
     )
 
     @Test
@@ -159,6 +163,7 @@ class LocalStateWiperTest {
             geofenceConfigStateStore,
             permissionDisclosureStore,
             PendingLinkStore(InMemoryPendingLinkPersistence()),
+            AppLockStore(InMemoryAppLockPersistence()),
         ).wipeAll("uid-1")
 
         assertTrue("the throwing step was actually attempted", throwingFixQueueStore.clearAllCallCount > 0)
@@ -202,6 +207,7 @@ class LocalStateWiperTest {
             throwingConfigStore,
             InMemoryPermissionDisclosureStore(),
             PendingLinkStore(InMemoryPendingLinkPersistence()),
+            AppLockStore(InMemoryAppLockPersistence()),
         ).wipeAll("uid-1")
 
         assertEquals("the fix queue - which runs BEFORE the throwing step - still gets cleared", 0, fixQueueStore.pendingCount())
@@ -221,6 +227,18 @@ class LocalStateWiperTest {
         assertNull(persistence.read())
     }
 
+
+    @Test
+    fun `wipeAll clears the app lock setting and background timestamp (specs 010 section 1-4)`() = runTest {
+        val appLockStore = AppLockStore(InMemoryAppLockPersistence())
+        appLockStore.setEnabled(true)
+        appLockStore.recordBackgrounded(5L)
+
+        wiper(appLockStore = appLockStore).wipeAll("uid-1")
+
+        assertFalse(appLockStore.enabled.value)
+        assertNull(appLockStore.backgroundedAt())
+    }
 }
 
 /** Throws from [clearAll] every time (simulating a Room `deleteAll()` disk I/O error) while

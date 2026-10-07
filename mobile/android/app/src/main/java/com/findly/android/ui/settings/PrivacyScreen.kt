@@ -1,11 +1,23 @@
 package com.findly.android.ui.settings
 
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.findly.android.applock.LocalAppLocked
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Switch
+import androidx.compose.runtime.rememberCoroutineScope
+import com.findly.android.applock.AppLockController
+import kotlinx.coroutines.launch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -40,6 +52,7 @@ import com.findly.android.ui.onboarding.OnboardingVariant
 fun PrivacyRoute(
     viewModel: PrivacyViewModel,
     modifier: Modifier = Modifier,
+    appLockController: AppLockController? = null,
     onRouteToOnboarding: (OnboardingVariant) -> Unit = {},
 ) {
     val state by viewModel.state.collectAsState()
@@ -58,8 +71,32 @@ fun PrivacyRoute(
         state.exportRouteToOnboarding?.let(onRouteToOnboarding)
     }
 
+    // A63 (specs/010 section 1.4): the app-lock toggle. Enabling needs one successful
+    // authentication (the controller prompts); the result needs no extra UI - a cancelled
+    // attempt simply leaves the switch off.
+    val appLockScope = rememberCoroutineScope()
+    val appLockEnabled = appLockController?.enabled?.collectAsState()?.value ?: false
+    // Re-read on every resume: the user may come back from setting (or removing) a screen lock.
+    var appLockResumeEpoch by remember { mutableIntStateOf(0) }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) appLockResumeEpoch++
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    val appLockRow = appLockController?.let { controller ->
+        AppLockRowState(
+            checked = appLockEnabled,
+            interactive = remember(appLockResumeEpoch, appLockEnabled) { controller.toggleInteractive() },
+            onToggle = { on -> appLockScope.launch { controller.setEnabled(on) } },
+        )
+    }
+
     PrivacyScreen(
         state = state,
+        appLock = appLockRow,
         onExportSelf = viewModel::exportSelf,
         onExportMember = viewModel::exportMember,
         onDismissExportError = viewModel::dismissExportResult,
@@ -80,6 +117,7 @@ fun PrivacyRoute(
 fun PrivacyScreen(
     state: PrivacyUiState,
     modifier: Modifier = Modifier,
+    appLock: AppLockRowState? = null,
     onExportSelf: () -> Unit = {},
     onExportMember: (userId: String) -> Unit = {},
     onDismissExportError: () -> Unit = {},
@@ -102,6 +140,7 @@ fun PrivacyScreen(
                 .padding(FindlyTheme.spacing.md),
             verticalArrangement = Arrangement.spacedBy(FindlyTheme.spacing.md),
         ) {
+            if (appLock != null) AppLockRow(appLock)
             PrivacySection(
                 state = state,
                 onExportSelf = onExportSelf,
@@ -119,6 +158,25 @@ fun PrivacyScreen(
             )
         }
     }
+}
+
+/** The app-lock toggle's inputs (specs/010 section 1.4). [interactive] is false only when the
+ * device has no screen lock and the toggle is off; a lock that is on can always be switched off. */
+data class AppLockRowState(val checked: Boolean, val interactive: Boolean, val onToggle: (Boolean) -> Unit)
+
+@Composable
+private fun AppLockRow(row: AppLockRowState) {
+    FindlyListRow(
+        title = "Require screen lock to open Findly",
+        subtitle = if (row.interactive) {
+            "Ask for your fingerprint, face or screen lock when Findly opens"
+        } else {
+            "Set a screen lock on this phone first."
+        },
+        trailing = {
+            Switch(checked = row.checked, onCheckedChange = row.onToggle, enabled = row.interactive)
+        },
+    )
 }
 
 /**
@@ -201,7 +259,8 @@ private fun PrivacySection(
         )
     }
 
-    DeleteAccountDialogs(
+    // A63: app dialogs are not composed while the lock is up; they reappear after unlock.
+    if (!LocalAppLocked.current) DeleteAccountDialogs(
         flow = state.deleteAccountFlow,
         onAdvance = onAdvanceDeleteAccountConfirmation,
         onCancel = onCancelDeleteAccount,
@@ -209,7 +268,7 @@ private fun PrivacySection(
         onSignOutAfterFirebaseFailure = onSignOutAfterFirebaseFailure,
     )
 
-    DeleteFamilyDialog(
+    if (!LocalAppLocked.current) DeleteFamilyDialog(
         flow = state.deleteFamilyFlow,
         onTypedNameChange = onUpdateDeleteFamilyTypedName,
         onCancel = onCancelDeleteFamily,

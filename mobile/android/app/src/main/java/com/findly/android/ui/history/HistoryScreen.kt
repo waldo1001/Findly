@@ -1,5 +1,6 @@
 package com.findly.android.ui.history
 
+import com.findly.android.applock.LocalAppLocked
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -161,7 +162,7 @@ fun HistoryScreen(
         }
     }
 
-    if (showFromPicker) {
+    if (showFromPicker && !LocalAppLocked.current) {
         val pickerState = rememberDatePickerState()
         DatePickerDialog(
             onDismissRequest = { showFromPicker = false },
@@ -178,7 +179,7 @@ fun HistoryScreen(
         ) { DatePicker(state = pickerState) }
     }
 
-    if (showToPicker) {
+    if (showToPicker && !LocalAppLocked.current) {
         val pickerState = rememberDatePickerState()
         DatePickerDialog(
             onDismissRequest = { showToPicker = false },

@@ -28,7 +28,7 @@ class BackupExclusionStructureTest {
             .map { it.getAttribute("path") }
     }
 
-    private val expected = listOf("findly_pending_link.xml")
+    private val expected = listOf("findly_pending_link.xml", "findly_app_lock.xml")
 
     @Test
     fun `full-backup rules exclude the pending link file`() {

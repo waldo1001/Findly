@@ -1,5 +1,6 @@
 package com.findly.android.ui.groups
 
+import com.findly.android.applock.LocalAppLocked
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -155,7 +156,7 @@ fun CreateGroupScreen(
         }
     }
 
-    if (showDatePicker) {
+    if (showDatePicker && !LocalAppLocked.current) {
         val pickerState = rememberDatePickerState()
         DatePickerDialog(
             onDismissRequest = { showDatePicker = false },
