@@ -83,6 +83,34 @@ public struct DeviceLocation: Decodable, Equatable {
     public let trackingEnabled: Bool
     public let syncIntervalMinutes: Int
     public let isStale: Bool?
+    /// 001 §5.2 (011 §2) — server-computed, always a boolean; absent -> `false`.
+    public var isDormant: Bool = false
+}
+
+extension DeviceLocation {
+    private enum CodingKeys: String, CodingKey {
+        case deviceId, deviceName, lat, lon, accuracyM, recordedAt, receivedAt, batteryPct, source
+        case trackingEnabled, syncIntervalMinutes, isStale, isDormant
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            deviceId: try c.decode(String.self, forKey: .deviceId),
+            deviceName: try c.decode(String.self, forKey: .deviceName),
+            lat: try c.decodeIfPresent(Double.self, forKey: .lat),
+            lon: try c.decodeIfPresent(Double.self, forKey: .lon),
+            accuracyM: try c.decodeIfPresent(Double.self, forKey: .accuracyM),
+            recordedAt: try c.decodeIfPresent(String.self, forKey: .recordedAt),
+            receivedAt: try c.decodeIfPresent(String.self, forKey: .receivedAt),
+            batteryPct: try c.decodeIfPresent(Int.self, forKey: .batteryPct),
+            source: try c.decodeIfPresent(FixSource.self, forKey: .source),
+            trackingEnabled: try c.decode(Bool.self, forKey: .trackingEnabled),
+            syncIntervalMinutes: try c.decode(Int.self, forKey: .syncIntervalMinutes),
+            isStale: try c.decodeIfPresent(Bool.self, forKey: .isStale),
+            isDormant: try c.decodeIfPresent(Bool.self, forKey: .isDormant) ?? false
+        )
+    }
 }
 
 public struct MemberLocations: Decodable, Equatable {
