@@ -1,5 +1,13 @@
 package com.findly.android.ui.settings
 
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.findly.android.applock.LocalAppLocked
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -68,10 +76,20 @@ fun PrivacyRoute(
     // attempt simply leaves the switch off.
     val appLockScope = rememberCoroutineScope()
     val appLockEnabled = appLockController?.enabled?.collectAsState()?.value ?: false
+    // Re-read on every resume: the user may come back from setting (or removing) a screen lock.
+    var appLockResumeEpoch by remember { mutableIntStateOf(0) }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) appLockResumeEpoch++
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
     val appLockRow = appLockController?.let { controller ->
         AppLockRowState(
             checked = appLockEnabled,
-            interactive = controller.toggleInteractive(),
+            interactive = remember(appLockResumeEpoch, appLockEnabled) { controller.toggleInteractive() },
             onToggle = { on -> appLockScope.launch { controller.setEnabled(on) } },
         )
     }
@@ -241,7 +259,8 @@ private fun PrivacySection(
         )
     }
 
-    DeleteAccountDialogs(
+    // A63: app dialogs are not composed while the lock is up; they reappear after unlock.
+    if (!LocalAppLocked.current) DeleteAccountDialogs(
         flow = state.deleteAccountFlow,
         onAdvance = onAdvanceDeleteAccountConfirmation,
         onCancel = onCancelDeleteAccount,
@@ -249,7 +268,7 @@ private fun PrivacySection(
         onSignOutAfterFirebaseFailure = onSignOutAfterFirebaseFailure,
     )
 
-    DeleteFamilyDialog(
+    if (!LocalAppLocked.current) DeleteFamilyDialog(
         flow = state.deleteFamilyFlow,
         onTypedNameChange = onUpdateDeleteFamilyTypedName,
         onCancel = onCancelDeleteFamily,

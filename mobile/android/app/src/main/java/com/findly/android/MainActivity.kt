@@ -10,6 +10,9 @@ import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import com.findly.android.applock.AppLockAuth
 import com.findly.android.applock.AppLockHost
+import com.findly.android.applock.LocalAppLocked
+import com.findly.android.applock.hiddenWhenLocked
+import androidx.compose.runtime.CompositionLocalProvider
 import com.findly.android.auth.AuthState
 import android.content.Intent
 import android.net.Uri
@@ -160,6 +163,8 @@ class MainActivity : FragmentActivity() {
 
         setContent {
             FindlyTheme {
+                val appLocked by container.appLockController.locked.collectAsState()
+                CompositionLocalProvider(LocalAppLocked provides appLocked) {
                 // The app draws edge-to-edge, so without this the top bar renders UNDER the system
                 // status bar: the screen title collides with the clock, and the top ~90px of the
                 // back chevron sits in the status bar's own tap region — taps there go to the
@@ -175,7 +180,8 @@ class MainActivity : FragmentActivity() {
                     modifier = Modifier
                         .statusBarsPadding()
                         .displayCutoutPadding()
-                        .navigationBarsPadding(),
+                        .navigationBarsPadding()
+                        .hiddenWhenLocked(appLocked),
                 ) {
                 // specs/009 §7 — the disclosure gate. Re-read on every recomposition triggered by
                 // `permissionEpoch` (a permission result) and by `ON_RESUME` below, which is §7's
@@ -261,11 +267,12 @@ class MainActivity : FragmentActivity() {
                 // the OS prompt; it raises this exact dialog instead (009 §3.2: "explain AND
                 // offer").
                 val batteryRationaleDialogRequested by container.batteryRationaleDialogRequested.collectAsState()
-                if (BatteryOptimizationPromptPolicy.shouldOffer(
+                // A63: not while locked (its Continue opens system Settings); it shows after unlock.
+                if (!appLocked && (BatteryOptimizationPromptPolicy.shouldOffer(
                         presenceRequired = presenceRequiredForBattery,
                         alreadyAnswered = container.batteryOptimizationPromptStore.hasAnswered(),
                         backgroundPermissionGrantedThisSession = container.backgroundLocationPermissionGrantedThisSession,
-                    ) || batteryRationaleDialogRequested
+                    ) || batteryRationaleDialogRequested)
                 ) {
                     BatteryOptimizationRationaleDialog(
                         onContinue = {
@@ -337,6 +344,7 @@ class MainActivity : FragmentActivity() {
                 // A63 (specs/010 section 1.4): above everything, including the permission
                 // disclosure (which returns early from the Box above) and any dialog/sheet.
                 AppLockHost(controller = container.appLockController, onBack = { moveTaskToBack(true) })
+                }
             }
         }
     }

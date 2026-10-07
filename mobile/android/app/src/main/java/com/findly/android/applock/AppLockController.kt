@@ -24,7 +24,7 @@ class AppLockController(
     private var authenticating = false
 
     // Enabled cold start: the cover is up from the very first frame, before auth restore resolves.
-    private val _locked = MutableStateFlow(AppLockPolicy.isEffective(store.enabled.value, authenticator.canAuthenticate()))
+    private val _locked = MutableStateFlow(AppLockPolicy.isEffective(store.enabled.value, authenticator.status()))
 
     /** Whether the opaque lock screen must be showing (also the `locked` input of the pending link). */
     val locked: StateFlow<Boolean> = _locked.asStateFlow()
@@ -37,10 +37,10 @@ class AppLockController(
     }
 
     /** Whether the toggle can be touched at all (on, so it can be turned off; or available). */
-    fun toggleInteractive(): Boolean = AppLockPolicy.toggleInteractive(store.enabled.value, authenticator.canAuthenticate())
+    fun toggleInteractive(): Boolean = AppLockPolicy.toggleInteractive(store.enabled.value, authenticator.status())
 
     /** Whether the toggle may be switched on: the device can authenticate its owner. */
-    fun isAvailable(): Boolean = authenticator.canAuthenticate()
+    fun isAvailable(): Boolean = authenticator.status() == DeviceAuthStatus.Available
 
     /** Feed every auth-state change. Resolves the cold-start decision once restore finishes. */
     fun onAuthState(auth: AppLockAuth) {
@@ -97,7 +97,7 @@ class AppLockController(
             setLocked(false)
             return EnableResult.Disabled
         }
-        if (!authenticator.canAuthenticate()) return EnableResult.Unavailable
+        if (!isAvailable()) return EnableResult.Unavailable
         if (authenticating) return EnableResult.NotAuthenticated
         authenticating = true
         val outcome = try {
@@ -110,11 +110,10 @@ class AppLockController(
         return EnableResult.Enabled
     }
 
-    // `enabled` also requires a usable device credential: if the user removed their screen lock the
-    // phone itself is open, and a lock nobody can pass would trap them out of the app.
+    // The lock lapses only on a positive "no screen lock" signal (AppLockPolicy.isEffective).
     private fun shouldLock(signedIn: Boolean, isColdStart: Boolean, backgroundedAt: Long?, now: Long) =
         AppLockPolicy.shouldLock(
-            enabled = AppLockPolicy.isEffective(store.enabled.value, authenticator.canAuthenticate()),
+            enabled = AppLockPolicy.isEffective(store.enabled.value, authenticator.status()),
             signedIn = signedIn,
             isColdStart = isColdStart,
             backgroundedAt = backgroundedAt,

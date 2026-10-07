@@ -12,11 +12,11 @@ import org.junit.Test
 class AppLockControllerTest {
 
     private class FakeAuthenticator(
-        var available: Boolean = true,
+        var status: DeviceAuthStatus = DeviceAuthStatus.Available,
         var outcome: AuthOutcome = AuthOutcome.Success,
     ) : AppLockAuthenticator {
         var calls = 0
-        override fun canAuthenticate() = available
+        override fun status() = status
         override suspend fun authenticate(): AuthOutcome {
             calls++
             return outcome
@@ -82,10 +82,37 @@ class AppLockControllerTest {
     }
 
     @Test
-    fun `enabled but device credential gone - fails open instead of trapping the user`() {
-        val c = controller(enabled = true, auth = FakeAuthenticator(available = false))
+    fun `enabled but the screen lock was removed - does not lock, and the cover lifts`() {
+        val c = controller(enabled = true, auth = FakeAuthenticator(status = DeviceAuthStatus.NoScreenLock))
+        assertFalse(c.locked.value)
         c.onAuthState(AppLockAuth.SignedIn)
         assertFalse(c.locked.value)
+    }
+
+    @Test
+    fun `enabled with a transient availability failure still locks`() {
+        val c = controller(enabled = true, auth = FakeAuthenticator(status = DeviceAuthStatus.Unavailable))
+        assertTrue(c.locked.value)
+        c.onAuthState(AppLockAuth.SignedIn)
+        assertTrue(c.locked.value)
+    }
+
+    @Test
+    fun `transient failure still re-locks after a long background`() = runTest {
+        val auth = FakeAuthenticator()
+        val c = controller(enabled = true, auth = auth)
+        c.onAuthState(AppLockAuth.SignedIn)
+        c.unlock()
+        auth.status = DeviceAuthStatus.Unavailable
+        c.onBackgrounded(t0)
+        c.onForegrounded(signedIn = true, now = t0 + 5 * minute)
+        assertTrue(c.locked.value)
+    }
+
+    @Test
+    fun `toggle stays interactive while on even with no screen lock`() {
+        val c = controller(enabled = true, auth = FakeAuthenticator(status = DeviceAuthStatus.NoScreenLock))
+        assertTrue(c.toggleInteractive())
     }
 
     // ---- background / foreground -------------------------------------------------------------
@@ -218,8 +245,8 @@ class AppLockControllerTest {
     }
 
     @Test
-    fun `enabling is unavailable without a device credential and never prompts`() = runTest {
-        val auth = FakeAuthenticator(available = false)
+    fun `enabling is unavailable without a strict Available status and never prompts`() = runTest {
+        val auth = FakeAuthenticator(status = DeviceAuthStatus.Unavailable)
         val c = controller(enabled = false, auth = auth)
         assertFalse(c.isAvailable())
         assertEquals(EnableResult.Unavailable, c.setEnabled(true))

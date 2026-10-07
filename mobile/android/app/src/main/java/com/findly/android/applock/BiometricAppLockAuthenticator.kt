@@ -22,12 +22,13 @@ class BiometricAppLockAuthenticator(
     private val activityProvider: () -> FragmentActivity?,
 ) : AppLockAuthenticator {
 
-    override fun canAuthenticate(): Boolean =
-        BiometricManager.from(context).canAuthenticate(AUTHENTICATORS) == BiometricManager.BIOMETRIC_SUCCESS
+    override fun status(): DeviceAuthStatus =
+        AppLockPolicy.statusFor(BiometricManager.from(context).canAuthenticate(AUTHENTICATORS))
 
     override suspend fun authenticate(): AuthOutcome {
         val activity = activityProvider() ?: return AuthOutcome.Failed
         return suspendCancellableCoroutine { cont ->
+            try {
             val prompt = BiometricPrompt(
                 activity,
                 ContextCompat.getMainExecutor(activity),
@@ -52,6 +53,10 @@ class BiometricAppLockAuthenticator(
                 .build()
             prompt.authenticate(info)
             cont.invokeOnCancellation { prompt.cancelAuthentication() }
+            } catch (e: Exception) {
+                // e.g. IllegalStateException after the Activity saved its state: the lock stays up.
+                if (cont.isActive) cont.resume(AuthOutcome.Failed)
+            }
         }
     }
 

@@ -1,5 +1,6 @@
 package com.findly.android.ui.devices
 
+import com.findly.android.applock.LocalAppLocked
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -308,7 +309,7 @@ private fun DeviceCard(
             )
         }
 
-        if (device.isConfirmingRemoval) {
+        if (device.isConfirmingRemoval && !LocalAppLocked.current) {
             AlertDialog(
                 onDismissRequest = onCancelRemove,
                 title = { Text(DeviceLifecyclePolicy.removeDialogTitle(device.deviceName)) },

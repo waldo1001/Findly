@@ -1,5 +1,6 @@
 package com.findly.android.ui.groups
 
+import com.findly.android.applock.LocalAppLocked
 import android.content.Intent
 import android.widget.Toast
 import androidx.compose.foundation.Image
@@ -316,7 +317,7 @@ fun GroupDetailScreen(
     }
 
     val action = pendingAction
-    if (action != null) {
+    if (action != null && !LocalAppLocked.current) {
         GroupActionConfirmDialog(
             action = action,
             onConfirm = {

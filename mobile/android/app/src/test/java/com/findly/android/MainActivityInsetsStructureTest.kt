@@ -120,4 +120,18 @@ class MainActivityInsetsStructureTest {
             depth > 0,
         )
     }
+
+    @Test
+    fun `the root Box hides its content from accessibility while the app lock is up`() {
+        val boxOpen = rootBoxOpenIndex()
+        val modifierChain = source.substring(boxOpen, source.indexOf("{", startIndex = boxOpen))
+        assertTrue(
+            "root Box must apply hiddenWhenLocked(...) so TalkBack cannot reach the content under the lock (A63)",
+            modifierChain.contains("hiddenWhenLocked("),
+        )
+        assertTrue(
+            "MainActivity must provide LocalAppLocked so app-owned dialogs are not composed above the lock (A63)",
+            source.contains("LocalAppLocked provides"),
+        )
+    }
 }

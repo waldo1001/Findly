@@ -1,5 +1,7 @@
 package com.findly.android.applock
 
+import androidx.biometric.BiometricManager
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -53,17 +55,35 @@ class AppLockPolicyTest {
     fun `clock moved backwards fails safe and locks`() = assertTrue(lock(backgroundedAt = t0 + minute))
 
     @Test
-    fun `lock is effective only while the device can still authenticate its owner`() {
-        assertTrue(AppLockPolicy.isEffective(enabled = true, deviceCanAuthenticate = true))
-        assertFalse(AppLockPolicy.isEffective(enabled = true, deviceCanAuthenticate = false))
-        assertFalse(AppLockPolicy.isEffective(enabled = false, deviceCanAuthenticate = true))
+    fun `lock lapses only on the positive no-screen-lock signal`() {
+        assertTrue(AppLockPolicy.isEffective(enabled = true, status = DeviceAuthStatus.Available))
+        assertFalse(AppLockPolicy.isEffective(enabled = true, status = DeviceAuthStatus.NoScreenLock))
+        // A transient or unknown failure must still lock (spec 010 1.4): an unopenable lock is
+        // recoverable, an opened gate is not.
+        assertTrue(AppLockPolicy.isEffective(enabled = true, status = DeviceAuthStatus.Unavailable))
+        assertFalse(AppLockPolicy.isEffective(enabled = false, status = DeviceAuthStatus.Available))
     }
 
     @Test
-    fun `toggle is interactive when available, or when on so it can be switched off`() {
-        assertTrue(AppLockPolicy.toggleInteractive(enabled = false, deviceCanAuthenticate = true))
-        assertFalse(AppLockPolicy.toggleInteractive(enabled = false, deviceCanAuthenticate = false))
-        assertTrue(AppLockPolicy.toggleInteractive(enabled = true, deviceCanAuthenticate = false))
-        assertTrue(AppLockPolicy.toggleInteractive(enabled = true, deviceCanAuthenticate = true))
+    fun `toggle is interactive when strictly available, or when on so it can be switched off`() {
+        assertTrue(AppLockPolicy.toggleInteractive(enabled = false, status = DeviceAuthStatus.Available))
+        assertFalse(AppLockPolicy.toggleInteractive(enabled = false, status = DeviceAuthStatus.NoScreenLock))
+        assertFalse(AppLockPolicy.toggleInteractive(enabled = false, status = DeviceAuthStatus.Unavailable))
+        assertTrue(AppLockPolicy.toggleInteractive(enabled = true, status = DeviceAuthStatus.NoScreenLock))
+        assertTrue(AppLockPolicy.toggleInteractive(enabled = true, status = DeviceAuthStatus.Unavailable))
+    }
+
+    @Test
+    fun `BiometricManager result codes map to a status - only NONE_ENROLLED is NoScreenLock`() {
+        assertEquals(DeviceAuthStatus.Available, AppLockPolicy.statusFor(BiometricManager.BIOMETRIC_SUCCESS))
+        assertEquals(DeviceAuthStatus.NoScreenLock, AppLockPolicy.statusFor(BiometricManager.BIOMETRIC_ERROR_NONE_ENROLLED))
+        listOf(
+            BiometricManager.BIOMETRIC_ERROR_HW_UNAVAILABLE,
+            BiometricManager.BIOMETRIC_ERROR_NO_HARDWARE,
+            BiometricManager.BIOMETRIC_ERROR_SECURITY_UPDATE_REQUIRED,
+            BiometricManager.BIOMETRIC_ERROR_UNSUPPORTED,
+            BiometricManager.BIOMETRIC_STATUS_UNKNOWN,
+            12345,
+        ).forEach { assertEquals("code $it", DeviceAuthStatus.Unavailable, AppLockPolicy.statusFor(it)) }
     }
 }
