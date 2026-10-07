@@ -56,9 +56,13 @@ Accept flow (001 §3.4): point read → validate → **ETag-guarded merge** sett
 
 | PK | RK | Properties |
 |---|---|---|
-| `{ownerUserId}` | `device:{deviceId}` | `platform`, `model`, `appVersion`, `deviceName`, `pushToken`, `pushInvalid` (bool), `syncIntervalMinutes`, `trackingEnabled`, `registeredAt`, `lastSeenAt` |
+| `{ownerUserId}` | `device:{deviceId}` | `platform`, `model`, `appVersion`, `deviceName`, `pushToken`, `pushInvalid` (bool), `syncIntervalMinutes`, `trackingEnabled`, `registeredAt`, `lastSeenAt`, `staleNudgeEnabled` (bool), `lastNudgedAt` |
 
 Devices belong to **users**, not families (family-less users register devices too — 001 §1.5/§4.1): the partition is the owner, making the `X-Device-Id` ownership check (001 §1.2) a point read in the caller's own partition, and the `maxDevices` cap a per-user partition count (001 §4.1). Family-wide reads — the 001 §4.2 listing, the push fan-out list (001 §8.2/8.4), and the §4.1 registration-time `deviceIdInUse` conflict check (against every other member, not just the caller) — are the `Families` roster scan plus one small per-member partition scan each, issued in parallel (bounded by family size). `lastSeenAt` is updated at most once per minute per device (write-skipping to save transactions).
+
+**Added 2026-10-07 (011, 000 §D20):** `staleNudgeEnabled` — the owner's opt-out for the stale nudge (001 §4.3); written `true` on first registration; **a row without the property (every row written before this amendment) MUST read as `true`**, so no backfill is needed. `lastNudgedAt` — UTC time of the last stale-nudge claim (§4.3), absent until the first nudge; written only by the `staleNudger` as a timestamp-only Merge (it must never carry a stale snapshot of any other field — the `lastSeenAt` rule).
+
+**Device removal (001 §4.4), in order:** (1) the `Devices` row — device-originated calls now fail `DEVICE_NOT_FOUND` and ingest stops; (2) the `LastKnown` row (§2.5); (3) the device's `IdempotencyMarkers` partition (§2.8). Each step swallows not-found **including a never-created table** (§2's list-tolerance rule), so a crash mid-way is fixed by calling again — though the API answers a repeat with `404` (step 1 is gone), the leftover rows are harmless: `LastKnown` without a `Devices` row is never joined into a read (§2.5's join is driven by the device rows), and markers are inert. History blobs (§3) and `GroupLastKnown` (§2.12) are deliberately untouched (011 §1). The same write-time device-existence guard as §4.2's account deletion applies to an in-flight `POST /locations` from the removed device: it re-verifies the `Devices` row before writing and abandons the batch if it is gone.
 
 ### 2.5 `LastKnown` — keyed by owner
 
@@ -241,6 +245,12 @@ The guard narrows but cannot mathematically eliminate the window (any check-then
 **Events filtered rewrite (per-subject erasure from interleaved `events/` blobs):** for each `events/{familyId}/{y}/{M}/{d}.jsonl` blob: read all lines + capture the ETag; if no line carries the subject's `userId`, skip; else delete the blob with `If-Match` (a `412` — concurrent append — re-reads and retries, bounded like the §2.9 loop), recreate via create-if-not-exists (swallowing `409` — a §3.2 writer may have recreated it first), and re-append the filtered lines. No line of any *other* member is ever lost: the recreate-race unions the concurrent writer's fresh lines with the re-appended filtered history, and readers already sort (§3.2). Only the current UTC day-blob can race at all — past days are append-dead.
 
 Cost bound: ≤ ~800 small blob reads + the table partition deletes — seconds at family scale (§5), well inside consumption-plan limits. The export read path (001 §13.1) walks the same inventory read-only and is bounded identically.
+
+### 4.3 Stale nudger (second timer-triggered function — 011 §4)
+
+*(Added 2026-10-07.)*
+
+`staleNudger`, timer `0 */30 * * * *`, gated by the `STALE_NUDGE_ENABLED` app setting (sends only when it is exactly `"true"`). Per run: one full scan of `Devices` (the table holds a handful of rows per member — at 48 runs/day this is noise against §5), evaluate 011 §4.1 per row in pure domain code, and for each due device write `lastNudgedAt = now` as a timestamp-only Merge **before** the 001 §8.8 send. Claim-before-send trades a possibly lost nudge (retried 24 h later) for never sending a duplicate. An `invalidToken` outcome sets `pushInvalid: true` (001 §8.5) via the same timestamp-only discipline (a Merge of that one field). No other table is read or written. Same consumption-plan schedule-lock notes as §4.1 (H3).
 
 ## 5. Cost model (order of magnitude)
 

@@ -89,7 +89,8 @@ A **profile** (the caller's `Users` row, 002 §2.2) and a **family** are distinc
 | 3.6 | `DELETE /api/v1/families/me/members/{userId}` | parent |
 | 4.1 | `POST /api/v1/devices` | member (registers/updates own device) |
 | 4.2 | `GET /api/v1/devices` | member |
-| 4.3 | `PATCH /api/v1/devices/{deviceId}` | parent; owner for `pushToken` only |
+| 4.3 | `PATCH /api/v1/devices/{deviceId}` | parent; owner for `pushToken` and `staleNudgeEnabled` only |
+| 4.4 | `DELETE /api/v1/devices/{deviceId}` | parent (any family device); owner (own device) |
 | 5.1 | `POST /api/v1/locations` | member, own device (`X-Device-Id`) |
 | 5.2 | `GET /api/v1/locations/latest` | member |
 | 5.3 | `GET /api/v1/locations/history` | member |
@@ -245,8 +246,11 @@ Clients MUST call this on: first launch after sign-in, every FCM token refresh, 
 // 201 (created) / 200 (updated) → data
 { "deviceId": "…", "ownerUserId": "<uid>", "platform": "android",
   "deviceName": "Noor's phone", "model": "Pixel 8", "appVersion": "1.0.0",
-  "syncIntervalMinutes": 15, "trackingEnabled": true, "pushInvalid": false }
+  "syncIntervalMinutes": 15, "trackingEnabled": true, "pushInvalid": false,
+  "staleNudgeEnabled": true }
 ```
+
+`staleNudgeEnabled` (added 2026-10-07, 011 §4) is the owner's opt-out for the §8.8 stale-nudge push: `true` on first registration, owner-managed afterwards (§4.3), and — like the parent-managed settings — never reset by a later re-registration.
 
 New registrations count against `features.limits.maxDevices` — a **per-user** cap: the count is the registering user's own devices (→ `402 LIMIT_EXCEEDED`, `details.limit: "maxDevices"`); upserts of an existing `deviceId` never do. Push tokens (`pushToken`, `locationPushToken`) are write-only: they never appear in any response. Devices are stored per-owner (002 §2.4) — registration does not require a family.
 
@@ -268,15 +272,27 @@ Open family: all members see all devices and their settings (only parents can ch
 ```json
 // request — at least one field
 { "syncIntervalMinutes": 30, "trackingEnabled": false,
-  "deviceName": "Noor's tablet", "pushToken": "new-token…" }
+  "deviceName": "Noor's tablet", "pushToken": "new-token…",
+  "staleNudgeEnabled": false }
 ```
 
 - **Parent:** may set any field. Setting `trackingEnabled: false` is the "pause" button.
-- **Owner (non-parent, in a family):** may set **only** `pushToken`; any other field → `403 AUTH_FORBIDDEN`.
+- **Owner (non-parent, in a family):** may set **only** `pushToken` and `staleNudgeEnabled`; any other field → `403 AUTH_FORBIDDEN`.
+- **`staleNudgeEnabled` (added 2026-10-07, 011 §4.4) is owner-only, in every role:** the owner may set it on their own device whether parent, member or family-less; anyone else — including a parent on another member's device — gets `403 AUTH_FORBIDDEN`. It is the owner's own notification preference, not a family setting. Changing it sends no `SETTINGS_CHANGED` push: only the server's §8.8 timer reads it, never the device.
 - **Family-less owner:** may set **any field** of their own device — with no family there is no parent, so the user is their own admin. (Pause stays device-global: a paused device reports to no family and no group — 005 §3.)
 - On any change to `syncIntervalMinutes` / `trackingEnabled`, the backend sends a `SETTINGS_CHANGED` push (§8.3) to that device so it can apply immediately. The push is a best-effort accelerator — the guaranteed pickup paths are defined in §5.1 (piggyback for active devices, settings poll for paused ones).
 
 `200` → data: updated device object (§4.1 shape).
+
+### 4.4 Remove a device — `DELETE /devices/{deviceId}`
+
+*(Added 2026-10-07 — 011 §1, 000 §D20. Before this, a reinstalled or replaced phone left a registration nothing could remove.)*
+
+- **Parent:** may remove any device of any member of their family. **Owner:** may remove their own device in every role (member, parent, family-less). Anyone else → `403 AUTH_FORBIDDEN`.
+- Resolution is §4.3's: the caller's own partition first, then — for a parent — the family-wide per-member scan. Unknown `deviceId`, a device outside the caller's family, or one already removed → `404 DEVICE_NOT_FOUND`.
+- Deletes the device's `Devices` row, `LastKnown` row and `IdempotencyMarkers` partition, in that order (002 §2.4). Does **not** delete history or geofence events (they age out under 002 §4) and does not touch `GroupLastKnown` (per member, 002 §2.12).
+- The device immediately stops counting toward `maxDevices` (§4.1). A later device-originated call from the removed device → `404 DEVICE_NOT_FOUND`, which makes a still-running app re-register (009 §9) — removal is cleanup, not a remote kill (011 §1).
+- No push is sent. `204` on success (bare, no envelope — the §3.6 convention).
 
 ---
 
@@ -331,11 +347,12 @@ One call returns the whole family (roster scan + per-member `Devices`/`LastKnown
           "recordedAt": "2026-07-19T09:05:12Z", "receivedAt": "2026-07-19T09:05:14Z",
           "batteryPct": 78, "source": "periodic",
           "trackingEnabled": true, "syncIntervalMinutes": 15,
-          "isStale": false } ] } ] }
+          "isStale": false, "isDormant": false } ] } ] }
 ```
 
 - Members with no registered devices are included with `"devices": []` — every member always appears on the map roster.
 - Devices with no report yet are included with `lat`/`lon`/`recordedAt`/`isStale` as `null` — the "no location yet" state, rendered identically by both apps.
+- `isDormant` (added 2026-10-07, 011 §2) MUST be computed server-side as `now − (lastSeenAt ?? registeredAt) > 30 days` (002 §2.4 fields) and is **always a boolean** — also on never-reported devices, whose other fix fields are `null`. Clients exclude dormant devices from markers, the camera fit and the roster chips (010 §3, 011 §2); dormancy is presentation only and changes no other behavior.
 - `isStale` MUST be computed server-side as `now − recordedAt > 2 × syncIntervalMinutes` — defined here once so both apps render identically. Note (amended 2026-09-06): devices on 60+ intervals, force-quit iOS apps, and phones in Low Power Mode will legitimately show `isStale: true` much of the time (000 §O2 as superseded by D19); devices on ≤ 30-minute intervals with background permission are expected to stay fresh (009 §1.3).
 
 ### 5.3 History — `GET /locations/history`
@@ -583,6 +600,24 @@ FCM v1 send requires a Google service account (`FCM_SERVICE_ACCOUNT_JSON` app se
 
 The `data.type` values `GROUP_MEMBER_JOINED` and `GROUP_ENDING_SOON` are **reserved** for future group notifications (005 §5, 000 §O14). No v1 backend sends them; clients MUST ignore unknown `data.type` values (they already must, §1.1 forward compatibility).
 
+
+### 8.8 `STALE_NUDGE` (to one quiet device — **user-visible**, normal priority)
+
+*(Added 2026-10-07 — 011 §4, 000 §D20.)* Sent by the `staleNudger` timer (002 §4.3) to a device that meets 011 §4.1's eligibility rule; at most once per device per 24 h.
+
+```json
+{ "message": { "token": "<deviceToken>",
+  "notification": { "title": "Findly isn't sharing your location",
+                    "body": "Open Findly to start sharing again." },
+  "android": { "priority": "normal",
+               "notification": { "channel_id": "findly_sharing_status" } },
+  "apns": { "headers": { "apns-priority": "5", "apns-push-type": "alert" },
+            "payload": { "aps": { "sound": "default" } } },
+  "data": { "type": "STALE_NUDGE" } } }
+```
+
+Unlike §8.1, this message carries an FCM `notification` block on Android too: the target is by definition an app that is not running, so the OS must display it without the app's help. Fixed English text (000 §O8), no personal data. Clients suppress it while in the foreground (011 §4.4); tapping it only opens the app.
+
 ---
 
 ## 9. Entitlements & `features`
@@ -650,7 +685,7 @@ Envelope format: §1.3. `message` is for logs/debugging only; clients map `code`
 - Envelope: every success includes `features`; every error matches §1.3 with a `requestId`; §3.6/§12.5/§12.8/§12.9/§13.2/§13.3 return bare `204`; §13.1 returns the unenveloped export document.
 - Auth: each 401 variant; role matrix per §1.6; no-family allowance (§1.5.3); pause enforcement on §5.1/§7.3 (with `deviceSettings` in `details`) but **not** §6.3.
 - Family: create → creator parent + entitlements `free`; double-create/join → `FAMILY_ALREADY_MEMBER`; invite single-use under concurrency; expiry; last-parent protection.
-- Devices: defaults on first registration; upsert preserves parent-managed settings; device cap counts only new registrations; owner-PATCH restricted to `pushToken`. **Amended 2026-09-06 (§4.2):** `lastSeenAt` is refreshed by `POST /locations`, `POST /geofence-events` and `/fulfill` as well as `POST /devices`, write-skipped to at most once per minute per device (002 §2.4) and applied **before** downstream rejection (a `TRACKING_PAUSED` report is still a device-originated call); the refresh MUST be a timestamp-only write that cannot rewrite parent-managed settings (`syncIntervalMinutes`, `trackingEnabled`, `deviceName`, `pushToken`, `pushInvalid`) from a stale in-request snapshot.
+- Devices: defaults on first registration; upsert preserves parent-managed settings **and `staleNudgeEnabled`**; device cap counts only new registrations; owner-PATCH restricted to `pushToken` and `staleNudgeEnabled`, and `staleNudgeEnabled` owner-only even for a parent (§4.3). **Removal (§4.4, 011 §6):** the parent/owner/other authorization matrix; `Devices` + `LastKnown` + `IdempotencyMarkers` deleted, history and `GroupLastKnown` untouched; cap freed; second delete `404`. **`isDormant` (§5.2)** at the 30-day boundary with the `registeredAt` fallback. **`STALE_NUDGE` (§8.8)** shape and the 011 §4.1 eligibility rule. **Amended 2026-09-06 (§4.2):** `lastSeenAt` is refreshed by `POST /locations`, `POST /geofence-events` and `/fulfill` as well as `POST /devices`, write-skipped to at most once per minute per device (002 §2.4) and applied **before** downstream rejection (a `TRACKING_PAUSED` report is still a device-originated call); the refresh MUST be a timestamp-only write that cannot rewrite parent-managed settings (`syncIntervalMinutes`, `trackingEnabled`, `deviceName`, `pushToken`, `pushInvalid`) from a stale in-request snapshot.
 - Locations: batch idempotency (`batchId` replay; marker only on accept); batch immutability + split rules; empty-batch rejection; clock-skew rejection; last-known only-newer rule; piggybacked `deviceSettings` + `geofenceEtag`; batch size cap.
 - Latest: whole family incl. device-less members (`devices: []`) and never-reported devices (all-`null` incl. `isStale`); `isStale` formula.
 - History: date-span cap, retention window (`historyDays`), cursor round-trip, ascending order, `deviceId` merge.
