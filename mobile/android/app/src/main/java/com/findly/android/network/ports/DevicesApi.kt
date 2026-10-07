@@ -11,4 +11,7 @@ interface DevicesApi {
     suspend fun registerDevice(request: RegisterDeviceRequestDto): ApiResult<DeviceDto>
     suspend fun listDevices(): ApiResult<ListDevicesResponseDto>
     suspend fun updateDevice(deviceId: String, request: UpdateDeviceRequestDto): ApiResult<DeviceDto>
+
+    /** 001 §4.4 — bare 204 (011 §1). */
+    suspend fun deleteDevice(deviceId: String): ApiResult<Unit>
 }
