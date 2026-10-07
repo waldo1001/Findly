@@ -97,6 +97,9 @@ struct RootView: View {
     /// dismissed the banner would see it again on their next tap.
     @StateObject private var permissionFlow: PermissionFlowViewModel
 
+    // specs/011-device-lifecycle-and-staleness.md §3 (I62) — the one-time force-quit explainer.
+    @State private var showForceQuitExplainer = false
+
     init(
         coordinator: AppCoordinator,
         config: AppConfig,
@@ -158,6 +161,13 @@ struct RootView: View {
                 onDismiss: { permissionFlow.dismissBanner() }
             )
             content
+        }
+        // specs/011 §3 — single action, no nagging; the decision (flag + tracking + interval + shown
+        // once) lives in `ForceQuitExplainerPresenter`, evaluated when the Family Map appears.
+        .alert(ForceQuitExplainer.title, isPresented: $showForceQuitExplainer) {
+            Button(ForceQuitExplainer.actionTitle, role: .cancel) {}
+        } message: {
+            Text(ForceQuitExplainer.body)
         }
         // The disclosure is a full-screen cover, not a sheet: it must be answered before the OS
         // prompt fires, and a swipe-to-dismiss sheet would let the user skip past the explanation
@@ -299,6 +309,13 @@ struct RootView: View {
                     },
                     onProfileDeadEnd: { variant in coordinator.showOnboarding(variant) }
                 )
+                // specs/011 §3 (I62) — "after launch resolution has landed on the Family Map".
+                // Idempotent: the presenter clears the flag in every branch.
+                .onAppear {
+                    if locationRuntimeContainer.shouldShowForceQuitExplainer() {
+                        showForceQuitExplainer = true
+                    }
+                }
 
             // MARK: - specs/010-app-shell-and-screen-ux.md §2.2 (I34) — replaces the retired Home
             // hub's `.profileless`/`.familyless` branches. A root: no back, no drawer.
