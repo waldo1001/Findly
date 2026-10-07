@@ -10,6 +10,8 @@ public enum PushMessageType: Equatable {
     case settingsChanged
     case geofenceEvent
     case geofenceConfigChanged
+    /// 001 §8.8 / 009 §5.6 - a visible, OS-rendered push; no data handler (the tap just opens the app).
+    case staleNudge
     case unrecognized(String)
 
     /// `data` is the raw FCM data payload (all string values, per 001 §8: "all `data` values are
@@ -22,6 +24,7 @@ public enum PushMessageType: Equatable {
         case "SETTINGS_CHANGED": return .settingsChanged
         case "GEOFENCE_EVENT": return .geofenceEvent
         case "GEOFENCE_CONFIG_CHANGED": return .geofenceConfigChanged
+        case "STALE_NUDGE": return .staleNudge
         default: return .unrecognized(data["type"] ?? "")
         }
     }
