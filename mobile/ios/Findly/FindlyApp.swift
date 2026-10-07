@@ -69,6 +69,9 @@ struct FindlyApp: App {
     // `self.familyContextCache` this early — before `body`/`WindowGroup` ever runs — is not a
     // reliable way to reach a `@StateObject`'s real, SwiftUI-installed storage.
     @StateObject private var familyContextCache: FamilyContextCache
+    // specs/010 §1.4 (I64) — the app lock; the presenter owns the above-everything overlay window.
+    @StateObject private var appLock: AppLockController
+    private let appLockPresenter: AppLockWindowPresenter
 
     init() {
         // specs/004 §8 — real deployment values come from this target's Info.plist (iOS's
@@ -123,6 +126,20 @@ struct FindlyApp: App {
         let pendingLinks = PendingLinkSlot(store: UserDefaultsPendingLinkStore())
         let coordinator = AppCoordinator(joinLinkHost: config.joinLinkHost, pendingLinks: pendingLinks)
         _coordinator = StateObject(wrappedValue: coordinator)
+
+        // specs/010 §1.4 (I64) — the optional app lock (off by default; setting + background time in
+        // app-private `UserDefaults`, cleared by `EndOfSessionRoutine`). `isSignedIn` reads
+        // `currentUserId` (i.e. `Auth.auth()`), so it is only ever invoked from `RootView`'s `.task`
+        // and scene-phase changes — never from here (004 §2.6). Deep links wait for unlock through
+        // `AppCoordinator.setLocked` and replay through the §1.3 pending slot.
+        let appLock = AppLockController(
+            authenticator: SystemAppLockAuthenticator(),
+            store: UserDefaultsAppLockSettingsStore(),
+            isSignedIn: { [weak authProvider] in authProvider?.currentUserId != nil },
+            onLockChanged: { [weak coordinator] locked in coordinator?.setLocked(locked) }
+        )
+        _appLock = StateObject(wrappedValue: appLock)
+        appLockPresenter = AppLockWindowPresenter(controller: appLock)
 
         // specs/010-app-shell-and-screen-ux.md §1.2 — declared as a local here (same reasoning as
         // `coordinator` above) so `LocationRuntimeContainer`'s init below can be handed the SAME
@@ -316,6 +333,7 @@ struct FindlyApp: App {
                     appVersionTracker: appVersionTracker,
                     exportArtifactStore: exportArtifactStore,
                     pendingLinks: pendingLinks,
+                    appLock: appLock,
                     wipeLocalState: { await LocationRuntimeContainerHolder.shared.container?.wipeLocalState() }
                 )
                 await coordinator?.showSignIn()
@@ -431,7 +449,8 @@ struct FindlyApp: App {
                 appVersionTracker: appVersionTracker,
                 locationRuntimeContainer: locationRuntimeContainer,
                 onSignedIn: onSignedIn,
-                familyContextCache: familyContextCache
+                familyContextCache: familyContextCache,
+                appLock: appLock
             )
                 // specs/004-ios-client.md §3.4/§3.5 — both the `findly://group-join?code=…` deep
                 // link and, since specs/007, the `https://{joinLinkHost}/g#CODE` universal link are

@@ -68,6 +68,8 @@ struct RootView: View {
     // `@StateObject`: this is one long-lived instance handed in from outside, never constructed by
     // this view itself.
     @ObservedObject private var familyContextCache: FamilyContextCache
+    // specs/010 §1.4 (I64) — the one long-lived app-lock controller, built in `FindlyApp.init()`.
+    @ObservedObject private var appLock: AppLockController
     // I17 (001 §1.5.3) — the display name typed once on the Onboarding screen's profile-less
     // variant, carried (still editable at the destination) to whichever of the four bootstrap paths the
     // user picks — same "remembered local state instead of a nav-graph argument" pattern Android's
@@ -107,7 +109,8 @@ struct RootView: View {
         appVersionTracker: AppVersionRegistrationTracking,
         locationRuntimeContainer: LocationRuntimeContainer,
         onSignedIn: @escaping () async -> Void,
-        familyContextCache: FamilyContextCache
+        familyContextCache: FamilyContextCache,
+        appLock: AppLockController
     ) {
         self.coordinator = coordinator
         self.joinLinkHost = config.joinLinkHost
@@ -119,6 +122,7 @@ struct RootView: View {
         self.locationRuntimeContainer = locationRuntimeContainer
         self.onSignedIn = onSignedIn
         self.familyContextCache = familyContextCache
+        self.appLock = appLock
         // specs/009 §7. Built from the container's read-only seams rather than a second
         // CLLocationManager, so the authorization this reports is the one the capture stack uses.
         //
@@ -221,6 +225,7 @@ struct RootView: View {
             appVersionTracker: appVersionTracker,
             exportArtifactStore: exportArtifactStore,
             pendingLinks: coordinator.pendingLinks,
+            appLock: appLock,
             wipeLocalState: { await locationRuntimeContainer.wipeLocalState() },
             options: .init(clearsStoredSession: false)
         )
@@ -494,6 +499,7 @@ struct RootView: View {
             case .privacySettings:
                 PrivacySettingsScreen(
                     viewModel: PrivacySettingsViewModel(apiClient: apiClient),
+                    appLock: appLock,
                     onSelectExport: { coordinator.showExportData() },
                     onSelectDeleteAccount: { coordinator.showDeleteAccount() },
                     onSelectDeleteFamily: { coordinator.showDeleteFamily() }
@@ -511,6 +517,7 @@ struct RootView: View {
                         exportArtifactStore: exportArtifactStore,
                         appVersionTracker: appVersionTracker,
                         pendingLinks: coordinator.pendingLinks,
+                        appLock: appLock,
                         // Post-review (security review, High finding): the ONE consolidated
                         // LocationRuntimeContainer.wipeLocalState() — covers the fix queue,
                         // geofence-event queue, cached geofence config/ETag, cached device
@@ -553,6 +560,11 @@ struct RootView: View {
         // registration, and never for a signed-out caller) and resolves through the full
         // launch-resolution table, failing open to the Family Map on anything inconclusive.
         .task {
+            // specs/010 §1.4 — the cold-start lock goes up HERE, before the launch probe and before
+            // `resolveLaunch` renders the map, so nothing the launch renders is ever visible
+            // unlocked. Idempotent (a re-run `.task` does not re-lock). Safe to read the auth session
+            // now (`UIApplication.shared` exists, 004 §2.6).
+            appLock.start(scenePhase: AppLockScenePhase(scenePhase))
             let destination = await AppLaunchResolver.resolve(
                 apiClient: apiClient, isSignedIn: authProvider.currentUserId != nil, cache: familyContextCache,
                 onConfirmedAuthFailure: { await clearSessionOnConfirmedAuthFailure() }
@@ -588,6 +600,11 @@ struct RootView: View {
         // The single-parameter closure form (not the iOS 17+ two-parameter one) — this target's
         // deploymentTarget is iOS 16 (project.yml).
         .onChange(of: scenePhase) { newPhase in
+            // specs/010 §1.4 — records the background time, drives the app-switcher cover, and
+            // re-locks after ≥ 5 min away. Unaffected by design: everything below (009 foreground
+            // trigger, permission refresh) keeps running, and push/notification handling never
+            // consults the lock (the LOCATE_REQUEST notification must display while locked).
+            appLock.scenePhaseChanged(AppLockScenePhase(newPhase))
             guard newPhase == .active else { return }
             Task { await locationRuntimeContainer.onAppForeground() }
             // specs/009 §7 — permission MUST be re-checked on every foreground: the user can revoke
@@ -625,5 +642,16 @@ struct RootView: View {
         formatter.dateFormat = "yyyy-MM-dd"
         formatter.timeZone = TimeZone(identifier: "UTC")
         return formatter.string(from: date)
+    }
+}
+
+
+private extension AppLockScenePhase {
+    init(_ phase: ScenePhase) {
+        switch phase {
+        case .active: self = .active
+        case .background: self = .background
+        default: self = .inactive
+        }
     }
 }
