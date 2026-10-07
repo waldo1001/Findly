@@ -120,6 +120,44 @@ export class TableDeviceRepo implements DeviceRepo {
     });
   }
 
+  /** Full scan of every owner partition (stale nudger, 002 §4.3). Only device rows — the
+   * `device:` RowKey range — though today `Devices` holds nothing else. List-tolerant. */
+  async listAllDevices(): Promise<DeviceRecord[]> {
+    const entities = await collectEntitiesTolerant(
+      this.client.listEntities({
+        queryOptions: { filter: odata`RowKey ge ${DEVICE_PREFIX} and RowKey lt ${"device;"}` },
+      }),
+    );
+    return entities.map((entity) => toRecord(String(entity.rowKey).slice(DEVICE_PREFIX.length), entity));
+  }
+
+  /** Timestamp-only claim (002 §2.4/§4.3): update-only Merge of `lastNudgedAt`. A 404 (row
+   * removed since the scan, or table gone) writes nothing and reports false. */
+  async claimNudge(ownerUserId: string, deviceId: string, lastNudgedAt: string): Promise<boolean> {
+    try {
+      await this.client.updateEntity(
+        { partitionKey: ownerUserId, rowKey: `${DEVICE_PREFIX}${deviceId}`, lastNudgedAt },
+        "Merge",
+      );
+      return true;
+    } catch (err) {
+      if (isNotFound(err)) return false;
+      throw err;
+    }
+  }
+
+  /** One-field update-only Merge of `pushInvalid: true` (001 §8.5). Tolerates a removed row. */
+  async markPushInvalid(ownerUserId: string, deviceId: string): Promise<void> {
+    try {
+      await this.client.updateEntity(
+        { partitionKey: ownerUserId, rowKey: `${DEVICE_PREFIX}${deviceId}`, pushInvalid: true },
+        "Merge",
+      );
+    } catch (err) {
+      if (!isNotFound(err)) throw err;
+    }
+  }
+
   async countDevices(ownerUserId: string): Promise<number> {
     const devices = await this.listDevices(ownerUserId);
     return devices.length;

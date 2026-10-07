@@ -4,7 +4,8 @@ export type PushMessageType =
   | "LOCATE_REQUEST"
   | "GEOFENCE_EVENT"
   | "SETTINGS_CHANGED"
-  | "GEOFENCE_CONFIG_CHANGED";
+  | "GEOFENCE_CONFIG_CHANGED"
+  | "STALE_NUDGE";
 
 interface PushMessageBase {
   token: string;
@@ -39,6 +40,13 @@ export interface GeofenceConfigChangedPushMessage extends PushMessageBase {
   type: "GEOFENCE_CONFIG_CHANGED";
 }
 
+/** §8.8 — user-visible (FCM `notification` block on Android too), fixed server-composed English
+ * text built in src/domain/push/fcmMessageBodies.ts: no title field, and the builder emits
+ * only `data.type` (011 §4.3 — no personal data in the payload). */
+export interface StaleNudgePushMessage extends PushMessageBase {
+  type: "STALE_NUDGE";
+}
+
 /**
  * Discriminated union on `type` (B28): `notificationTitle` is a REQUIRED string for the two
  * "alert" shapes (§8.1 LOCATE_REQUEST, §8.2 GEOFENCE_EVENT) and structurally ABSENT — not
@@ -51,7 +59,8 @@ export type PushMessage =
   | LocateRequestPushMessage
   | GeofenceEventPushMessage
   | SettingsChangedPushMessage
-  | GeofenceConfigChangedPushMessage;
+  | GeofenceConfigChangedPushMessage
+  | StaleNudgePushMessage;
 
 export type PushSendOutcome = "ok" | "invalidToken" | "error";
 

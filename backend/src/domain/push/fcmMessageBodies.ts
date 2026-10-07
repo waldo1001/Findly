@@ -15,6 +15,7 @@ import type {
   LocateRequestPushMessage,
   PushMessage,
   SettingsChangedPushMessage,
+  StaleNudgePushMessage,
 } from "../../ports/pushSender";
 
 function buildLocateRequestBody(message: LocateRequestPushMessage): Record<string, unknown> {
@@ -89,6 +90,28 @@ function buildDataOnlyBackgroundBody(
   };
 }
 
+function buildStaleNudgeBody(message: StaleNudgePushMessage): Record<string, unknown> {
+  // specs/001 §8.8, 011 §4.3 — visible on both platforms: an FCM `notification` block (the OS
+  // shows it for an app that is not running — the whole point), Android channel
+  // `findly_sharing_status`, iOS alert at priority 5. Fixed English text (000 §O8), and the
+  // data block is fixed too: message.data is deliberately NOT forwarded — no personal data.
+  return {
+    message: {
+      token: message.token,
+      notification: {
+        title: "Findly isn't sharing your location",
+        body: "Open Findly to start sharing again.",
+      },
+      android: { priority: "normal", notification: { channel_id: "findly_sharing_status" } },
+      apns: {
+        headers: { "apns-priority": "5", "apns-push-type": "alert" },
+        payload: { aps: { sound: "default" } },
+      },
+      data: { type: "STALE_NUDGE" },
+    },
+  };
+}
+
 export function buildFcmBody(message: PushMessage): Record<string, unknown> {
   switch (message.type) {
     case "LOCATE_REQUEST":
@@ -98,6 +121,8 @@ export function buildFcmBody(message: PushMessage): Record<string, unknown> {
     case "SETTINGS_CHANGED":
     case "GEOFENCE_CONFIG_CHANGED":
       return buildDataOnlyBackgroundBody(message);
+    case "STALE_NUDGE":
+      return buildStaleNudgeBody(message);
     default: {
       // The four cases above exhaust PushMessage (B28), so `message` is `never` here for any
       // value that actually typechecks — this branch only runs for a value that reached us

@@ -51,6 +51,27 @@ export class InMemoryDeviceRepo implements DeviceRepo {
     return roster ? [...roster.values()].map((d) => ({ ...d })) : [];
   }
 
+  async listAllDevices(): Promise<DeviceRecord[]> {
+    return [...this.devices.values()].flatMap((roster) => [...roster.values()].map((d) => ({ ...d })));
+  }
+
+  /** Mirrors TableDeviceRepo.claimNudge: update-only one-field Merge into the CURRENT row. */
+  async claimNudge(ownerUserId: string, deviceId: string, lastNudgedAt: string): Promise<boolean> {
+    const roster = this.partition(ownerUserId);
+    const current = roster.get(deviceId);
+    if (!current) return false;
+    roster.set(deviceId, { ...current, lastNudgedAt });
+    return true;
+  }
+
+  /** Mirrors TableDeviceRepo.markPushInvalid: update-only one-field Merge. */
+  async markPushInvalid(ownerUserId: string, deviceId: string): Promise<void> {
+    const roster = this.partition(ownerUserId);
+    const current = roster.get(deviceId);
+    if (!current) return;
+    roster.set(deviceId, { ...current, pushInvalid: true });
+  }
+
   async countDevices(ownerUserId: string): Promise<number> {
     return this.devices.get(ownerUserId)?.size ?? 0;
   }

@@ -197,6 +197,16 @@ export interface DeviceRepo {
    * when it is gone (never an upsert). Used where a read-modify-write could otherwise resurrect
    * a device removed by a concurrent DELETE (001 §4.4) — PATCH (001 §4.3). */
   replaceExistingDevice(ownerUserId: string, device: DeviceRecord): Promise<boolean>;
+  /** Full-table scan of `Devices` across every owner partition (the stale nudger, 002 §4.3).
+   * List-tolerant: a never-created table resolves to []. */
+  listAllDevices(): Promise<DeviceRecord[]>;
+  /** Stale-nudge claim (002 §2.4/§4.3): update-only, timestamp-only Merge of `lastNudgedAt`.
+   * Returns false — and writes nothing — when the row no longer exists (removed since the scan;
+   * a Merge must never resurrect it). */
+  claimNudge(ownerUserId: string, deviceId: string, lastNudgedAt: string): Promise<boolean>;
+  /** 001 §8.5 token hygiene: update-only, one-field Merge of `pushInvalid: true`. Tolerates a
+   * removed row (no-op); never rewrites any other field. */
+  markPushInvalid(ownerUserId: string, deviceId: string): Promise<void>;
   /** Deletes one `Devices` row — device removal step 1 (001 §4.4, 002 §2.4). Idempotent. */
   deleteDevice(ownerUserId: string, deviceId: string): Promise<void>;
   /** Removes every device registration in the owner's partition (001 §3.6). */

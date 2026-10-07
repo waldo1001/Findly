@@ -6,6 +6,7 @@
     "TABLES_ENDPOINT": "http://127.0.0.1:10002/devstoreaccount1",
     "BLOB_ENDPOINT": "http://127.0.0.1:10000/devstoreaccount1",
     "FIREBASE_PROJECT_ID": "your-firebase-project-id",
-    "AUTH_MODE": "insecure-local"
+    "AUTH_MODE": "insecure-local",
+    "STALE_NUDGE_ENABLED": "false"
   }
 }
