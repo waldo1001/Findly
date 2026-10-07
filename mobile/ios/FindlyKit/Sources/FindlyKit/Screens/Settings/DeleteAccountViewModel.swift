@@ -127,12 +127,15 @@ public final class DeleteAccountViewModel: ObservableObject {
     /// test) must consciously wire this, since a silently-absent wipe is exactly the bug this fix
     /// closes.
     private let wipeLocalState: () async -> Void
+    /// specs/010 §1.3 (I63) — cleared by `EndOfSessionRoutine` on both paths. Required, no default.
+    private let pendingLinks: PendingLinkSlot
     private var pendingWipeUserId: String?
 
     public init(
         apiClient: FindlyAPIClient, authProvider: AuthProviding, deviceIdProvider: DeviceIdProviding,
         exportArtifactStore: ExportArtifactStoring = InMemoryExportArtifactStore(),
         appVersionTracker: AppVersionRegistrationTracking,
+        pendingLinks: PendingLinkSlot,
         wipeLocalState: @escaping () async -> Void
     ) {
         self.apiClient = apiClient
@@ -141,6 +144,7 @@ public final class DeleteAccountViewModel: ObservableObject {
         self.exportArtifactStore = exportArtifactStore
         self.appVersionTracker = appVersionTracker
         self.wipeLocalState = wipeLocalState
+        self.pendingLinks = pendingLinks
     }
 
     public func load() async {
@@ -228,6 +232,7 @@ public final class DeleteAccountViewModel: ObservableObject {
             deviceIdProvider: deviceIdProvider,
             appVersionTracker: appVersionTracker,
             exportArtifactStore: exportArtifactStore,
+            pendingLinks: pendingLinks,
             wipeLocalState: wipeLocalState
         )
         phase = .signedOutForRetry
@@ -245,6 +250,7 @@ public final class DeleteAccountViewModel: ObservableObject {
             deviceIdProvider: deviceIdProvider,
             appVersionTracker: appVersionTracker,
             exportArtifactStore: exportArtifactStore,
+            pendingLinks: pendingLinks,
             wipeLocalState: wipeLocalState
         )
         phase = .completed
