@@ -17,6 +17,13 @@ class GroupMapViewModel(groupId: String, groupsApi: GroupsApi) : ViewModel() {
         viewModelScope.launch { stateHolder.refresh() }
     }
 
+    /** specs/010 §3.6 / §3.2 (A55): the group map became visible **and** foregrounded —
+     * `GroupMapRoute`'s `LifecycleResumeEffect` is the only caller. */
+    fun onVisible() = stateHolder.onVisible()
+
+    /** specs/010 §3.6 (A55): the group map stopped being visible / the app left the foreground. */
+    fun onHidden() = stateHolder.onHidden()
+
     /** specs/010 §3.5 — select/deselect a member (toggling); position-only, so a located member's
      * own point is the zoom target directly. */
     fun selectMember(userId: String) = stateHolder.selectMember(userId)

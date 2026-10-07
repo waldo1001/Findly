@@ -1,0 +1,21 @@
+{
+  "track": "internal",
+  "releases": [
+    {
+      "name": "1.3.0 (235)",
+      "versionCodes": ["235"],
+      "status": "draft"
+    },
+    {
+      "name": "1.2.0 (234)",
+      "versionCodes": ["234"],
+      "status": "completed",
+      "releaseNotes": [{ "language": "en-GB", "text": "Internal build" }]
+    },
+    {
+      "name": "1.1.0 (230)",
+      "versionCodes": ["230"],
+      "status": "halted"
+    }
+  ]
+}

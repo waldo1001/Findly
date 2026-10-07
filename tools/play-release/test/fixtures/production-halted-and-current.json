@@ -1,0 +1,15 @@
+{
+  "track": "production",
+  "releases": [
+    {
+      "name": "1.2.0 (234)",
+      "versionCodes": ["234"],
+      "status": "completed"
+    },
+    {
+      "name": "1.1.1 (231)",
+      "versionCodes": ["231"],
+      "status": "halted"
+    }
+  ]
+}

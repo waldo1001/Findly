@@ -18,6 +18,13 @@ class MapViewModel(locationsApi: LocationsApi) : ViewModel() {
         viewModelScope.launch { stateHolder.refresh() }
     }
 
+    /** specs/010 §3.6 (A55): the map became visible **and** foregrounded — `MapRoute`'s
+     * `LifecycleResumeEffect` is the only caller. */
+    fun onVisible() = stateHolder.onVisible()
+
+    /** specs/010 §3.6 (A55): the map stopped being visible / the app left the foreground. */
+    fun onHidden() = stateHolder.onHidden()
+
     /** specs/010 §3.5 — select/deselect a member (toggling), zooming to their freshest located
      * device when one exists. */
     fun selectMember(userId: String) = stateHolder.selectMember(userId)

@@ -59,8 +59,23 @@ class FirebaseAuthProvider(
     private fun mapUser(user: FirebaseUser?): AuthState =
         if (user != null) AuthState.SignedIn(user.uid) else AuthState.SignedOut
 
-    override suspend fun currentIdToken(forceRefresh: Boolean): String? =
-        firebaseAuth.currentUser?.getIdToken(forceRefresh)?.await()?.token
+    /** Any SDK failure is reported as an [IdTokenException] (specs/003 §6.5, A52) — never as the raw
+     * Firebase type: a `FirebaseAuthInvalidUserException` (deleted/disabled user) used to escape
+     * here, through `AuthInterceptor`, and kill the process on OkHttp's dispatcher thread. The
+     * sign-out that follows [IdTokenException.UserInvalid] is [idTokenOrThrow]'s job, not this
+     * adapter's, so that policy stays unit-testable. */
+    override suspend fun currentIdToken(forceRefresh: Boolean): String? {
+        val user = firebaseAuth.currentUser ?: return null
+        return try {
+            user.getIdToken(forceRefresh).await().token
+        } catch (e: CancellationException) {
+            // A42 sweep, finding 6: a suspend fun must never absorb cancellation. Whether this is the
+            // caller's own cancellation or a cancelled Task is decided by [idTokenOrThrow] (§6.5).
+            throw e
+        } catch (e: Exception) {
+            throw e.toIdTokenException()
+        }
+    }
 
     override suspend fun signOut() {
         firebaseAuth.signOut()

@@ -69,18 +69,11 @@ jobs:
     # real xcodebuild CI, not a structure check. Needs a real macOS/Xcode runner.
     runs-on: macos-26
     # H10 (docs/security-review-checklist.md §2): explicit, minimal, job-level permissions.
-    # TestFlight publishing (below) authenticates with its own App Store Connect API key secret,
-    # not a GITHUB_TOKEN scope, so `contents: read` stays correct even with publishing added.
+    # I60 security review (docs/store-readiness.md §5, "Credential placement"): this job runs on
+    # pull requests too, so it holds NO App Store Connect credential. The TestFlight upload lives
+    # in the `testflight` job below, which reads the key from the `testflight` environment.
     permissions:
       contents: read
-    # H10: the three App Store Connect secrets, mapped to job-level env so a step's `if:` can
-    # read them (same reasoning as android.yml's ANDROID_KEYSTORE_BASE64 — see that file's A7
-    # comment). Empty on forks/PRs and before a human provisions the real secrets
-    # (docs/store-readiness.md §2) — every `if:` below checks `!= ''`.
-    env:
-      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
-      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
-      ASC_API_KEY_P8: ${{ secrets.ASC_API_KEY_P8 }}
     defaults:
       run:
         working-directory: mobile/ios
@@ -192,6 +185,128 @@ jobs:
       # compiles and the extension embeds — without depending on secrets CI deliberately lacks.
       - name: build
         run: xcodebuild build -scheme Findly -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO
+
+  testflight:
+    # I60 security review (docs/store-readiness.md §5, "Credential placement"): the App Store Connect
+    # key must not be a repository secret, because repository secrets reach every same-repo pull-request
+    # build. ASC_KEY_ID / ASC_ISSUER_ID / ASC_API_KEY_P8 are environment secrets in `testflight` (main
+    # only, no reviewer) and are read ONLY by this job, which never runs on pull_request. macOS minutes
+    # are free on this public repo, so it checks out and regenerates the project itself instead of
+    # sharing artifacts with the build job. Behaviour is otherwise unchanged from H10.
+    name: ios-testflight
+    needs: build
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: macos-26
+    environment: testflight
+    permissions:
+      contents: read
+    # H10: the three App Store Connect secrets, mapped to job-level env so a step's `if:` can
+    # read them (same reasoning as android.yml's ANDROID_KEYSTORE_BASE64 — see that file's A7
+    # comment). Empty before a human provisions the real secrets in the `testflight` environment
+    # (docs/store-readiness.md §4) — every `if:` below checks `!= ''`.
+    env:
+      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+      ASC_API_KEY_P8: ${{ secrets.ASC_API_KEY_P8 }}
+    defaults:
+      run:
+        working-directory: mobile/ios
+    steps:
+      # Pinned by commit SHA (same as release-stores.yml's `ios` job): this job holds the App Store credential.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      # Same Xcode-selection logic as the `package` job above (H1 CI note) — kept in sync
+      # deliberately rather than factored out, since each job's `defaults.run.working-directory`
+      # differs and a shared step needs its own working-directory handling either way.
+      - name: select a Swift-6-capable Xcode
+        run: |
+          # Apple rejects uploads built with an SDK older than iOS 26 (Xcode 26+), so pick the
+          # NEWEST Xcode on the image rather than pinning a major — a pinned Xcode_16* is what
+          # made a full archive+export succeed and then fail at upload with a 409 SDK error.
+          XCODE_APP=$(ls -d /Applications/Xcode_*.app 2>/dev/null | sort -V | tail -1)
+          if [ -z "$XCODE_APP" ]; then
+            echo "::error::No Xcode found on this runner. Available Xcode installs:"
+            ls -d /Applications/Xcode*.app 2>/dev/null
+            exit 1
+          fi
+          echo "Selecting $XCODE_APP"
+          sudo xcode-select -s "$XCODE_APP/Contents/Developer"
+          xcodebuild -version
+      # The Firebase SPM packages (FirebaseCore/FirebaseAuth/FirebaseMessaging,
+      # specs/004 §4.1, mobile/ios/project.yml) are linked into the Findly target, so
+      # mobile/ios/GoogleService-Info.plist IS consumed by the build below (mirroring android.yml's
+      # "generate placeholder google-services.json" step) — this job doesn't silently depend on an
+      # untracked, gitignored file. Obviously-fake throughout (docs/security-review-checklist.md
+      # §1 — no `AIza…`-prefixed key, which the checklist's own secret-scan grep matches); this
+      # file never authenticates against anything real. The real file (gitignored,
+      # developer-machine only) has the actual `com.findly.ios` / `findly-71f7b` project values.
+      #
+      # I47 (docs/implementation-handoff.md): the API_KEY below MUST be format-valid — 39
+      # characters, starting with "A", base64-URL-safe charset — because `FirebaseAuthProvider`
+      # now validates that format itself (`FirebaseAPIKeyValidator`, FindlyKit) before calling
+      # `FirebaseApp.configure()`, and Firebase's OWN internals (`+[FIRInstallations
+      # validateAPIKey:]`) enforce the identical format and previously SIGABRT'd on this exact
+      # placeholder — the earlier literal here was 34 characters and didn't start with "A". A
+      # format-invalid key meant this placeholder build compiled but could never actually launch,
+      # which is precisely what let three consecutive agents (I39, I45, I46) misdiagnose the crash
+      # as a Simulator/automation limitation. The value below satisfies the format while spelling
+      # out "FAKE...NOT REAL...DO NOT USE" in its own characters, so it can never be mistaken for a
+      # live credential — it must never work against any real Firebase project.
+      - name: write GoogleService-Info.plist (real when available, placeholder otherwise)
+        env:
+          IOS_GOOGLE_SERVICE_INFO_PLIST: ${{ secrets.IOS_GOOGLE_SERVICE_INFO_PLIST }}
+        run: |
+          # H10 follow-up, 2026-08-07. Harmless while this job only COMPILED; H10 made the same
+          # job upload to TestFlight, so build 170 reached a real iPhone with a fake Firebase
+          # config and aborted at launch (FirebaseApp.configure() raised an NSException inside
+          # App.main()). This step's own earlier comment predicted it; the dependency landed and
+          # nobody revisited it. Real config comes from a secret now; the placeholder survives
+          # only so forks and secret-less PRs still compile.
+          #
+          # The heredoc body and its PLIST terminator MUST stay at this exact indentation. YAML
+          # strips the block's base indent, so these land at column 0 in the real script, which
+          # is what <<'PLIST' requires. Indenting them one level deeper to sit "inside" the else
+          # is what broke run 31172279053 with "syntax error: unexpected end of file".
+          if [ -n "$IOS_GOOGLE_SERVICE_INFO_PLIST" ]; then
+            echo "$IOS_GOOGLE_SERVICE_INFO_PLIST" | base64 -d > GoogleService-Info.plist
+            echo "Using the real GoogleService-Info.plist from secrets."
+          else
+          echo "No IOS_GOOGLE_SERVICE_INFO_PLIST secret — writing the CI placeholder (compile-only)."
+          cat > GoogleService-Info.plist <<'PLIST'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>API_KEY</key>
+            <string>AFAKE-NOT-REAL-KEY-DO-NOT-USE-IN-PROD00</string>
+            <key>GCM_SENDER_ID</key>
+            <string>000000000000</string>
+            <key>PLIST_VERSION</key>
+            <string>1</string>
+            <key>BUNDLE_ID</key>
+            <string>com.findly.ios</string>
+            <key>PROJECT_ID</key>
+            <string>findly-ci-placeholder</string>
+            <key>STORAGE_BUCKET</key>
+            <string>findly-ci-placeholder.appspot.com</string>
+            <key>IS_ADS_ENABLED</key>
+            <false/>
+            <key>IS_ANALYTICS_ENABLED</key>
+            <false/>
+            <key>IS_APPINVITE_ENABLED</key>
+            <true/>
+            <key>IS_GCM_ENABLED</key>
+            <true/>
+            <key>IS_SIGNIN_ENABLED</key>
+            <true/>
+            <key>GOOGLE_APP_ID</key>
+            <string>1:000000000000:ios:0000000000000000000000</string>
+          </dict>
+          </plist>
+          PLIST
+          fi
+          plutil -lint GoogleService-Info.plist
       # H10 (docs/implementation-handoff.md): same build-number reasoning as android.yml's
       # "compute release version code" step — Apple rejects a reused CURRENT_PROJECT_VERSION the
       # same way Play rejects a reused versionCode, and this workflow's own `github.run_number`
