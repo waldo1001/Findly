@@ -170,6 +170,12 @@ export interface DeviceRecord {
   trackingEnabled: boolean;
   registeredAt: string;
   lastSeenAt: string;
+  /** Owner's opt-out for the stale nudge (001 §4.1/§4.3, 002 §2.4). Absent = a row written
+   * before 2026-10-07 and MUST read as true; readers use `!== false`. */
+  staleNudgeEnabled?: boolean;
+  /** UTC time of the last stale-nudge claim (002 §2.4/§4.3). Written only by the nudger
+   * (B37); carried through full-row writes so they never drop it. Never in any response. */
+  lastNudgedAt?: string;
 }
 
 export interface DeviceRepo {
@@ -187,6 +193,8 @@ export interface DeviceRepo {
   listDevices(ownerUserId: string): Promise<DeviceRecord[]>;
   /** Partition scan count = the per-user device-cap check (001 §4.1). */
   countDevices(ownerUserId: string): Promise<number>;
+  /** Deletes one `Devices` row — device removal step 1 (001 §4.4, 002 §2.4). Idempotent. */
+  deleteDevice(ownerUserId: string, deviceId: string): Promise<void>;
   /** Removes every device registration in the owner's partition (001 §3.6). */
   deleteDevicesByOwner(ownerUserId: string): Promise<void>;
 }
@@ -218,6 +226,9 @@ export interface LastKnownRepo {
   upsertIfNewer(ownerUserId: string, record: LastKnownRecord): Promise<boolean>;
   /** One owner's partition scan (001 §5.2 fan-out input). */
   listByOwner(ownerUserId: string): Promise<LastKnownRecord[]>;
+  /** Deletes one device's row — device removal step 2 (001 §4.4, 002 §2.4). Idempotent,
+   * including a never-created table. */
+  delete(ownerUserId: string, deviceId: string): Promise<void>;
   /** Wipes the owner's whole partition — account deletion (001 §13.2, 002 §4.2 step 2, B18).
    * Idempotent. */
   deleteByOwner(ownerUserId: string): Promise<void>;

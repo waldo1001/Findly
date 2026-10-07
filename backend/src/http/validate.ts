@@ -90,13 +90,15 @@ export const patchDeviceSettingsRequestSchema = z
     trackingEnabled: z.boolean().optional(),
     deviceName: z.string().min(1).max(40).optional(),
     pushToken: z.string().min(1).optional(),
+    staleNudgeEnabled: z.boolean().optional(),
   })
   .refine(
     (data) =>
       data.syncIntervalMinutes !== undefined ||
       data.trackingEnabled !== undefined ||
       data.deviceName !== undefined ||
-      data.pushToken !== undefined,
+      data.pushToken !== undefined ||
+      data.staleNudgeEnabled !== undefined,
   );
 export type PatchDeviceSettingsRequest = z.infer<typeof patchDeviceSettingsRequestSchema>;
 

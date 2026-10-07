@@ -120,7 +120,7 @@ describe("domain/device/listMyDevices", () => {
     const entitlementsRepo = new InMemoryEntitlementsRepo(); // deliberately not seeded
 
     await expectAppError(
-      listMyDevices({ uid: "u1", familyId: FAMILY_ID }, { deviceRepo, familyRepo, userRepo, entitlementsRepo }),
+      listMyDevices({ uid: "u1", familyId: FAMILY_ID }, { deviceRepo, familyRepo, userRepo, entitlementsRepo, clock: new FixedClock(new Date()) }),
       "INTERNAL_ERROR",
     );
   });

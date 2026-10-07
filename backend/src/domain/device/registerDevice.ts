@@ -107,6 +107,7 @@ export async function registerDevice(
       trackingEnabled: true,
       registeredAt: now,
       lastSeenAt: now,
+      staleNudgeEnabled: true,
     };
     await deps.deviceRepo.putDevice(ownerUserId, record);
     return { created: true, device: toDeviceView(record), features };
@@ -137,6 +138,9 @@ export async function registerDevice(
     syncIntervalMinutes: existing.syncIntervalMinutes,
     trackingEnabled: existing.trackingEnabled,
     deviceName: existing.deviceName,
+    // Owner-managed (001 §4.1) and nudger-written fields survive an upsert untouched:
+    staleNudgeEnabled: existing.staleNudgeEnabled,
+    lastNudgedAt: existing.lastNudgedAt,
   };
   await deps.deviceRepo.putDevice(ownerUserId, updated);
   return { created: false, device: toDeviceView(updated), features };
