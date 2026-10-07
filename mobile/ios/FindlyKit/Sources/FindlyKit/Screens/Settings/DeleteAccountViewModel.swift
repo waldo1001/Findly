@@ -129,6 +129,8 @@ public final class DeleteAccountViewModel: ObservableObject {
     private let wipeLocalState: () async -> Void
     /// specs/010 §1.3 (I63) — cleared by `EndOfSessionRoutine` on both paths. Required, no default.
     private let pendingLinks: PendingLinkSlot
+    /// specs/010 §1.4 (I64) — cleared by `EndOfSessionRoutine` on both paths. Required, no default.
+    private let appLock: AppLockController
     private var pendingWipeUserId: String?
 
     public init(
@@ -136,8 +138,10 @@ public final class DeleteAccountViewModel: ObservableObject {
         exportArtifactStore: ExportArtifactStoring = InMemoryExportArtifactStore(),
         appVersionTracker: AppVersionRegistrationTracking,
         pendingLinks: PendingLinkSlot,
+        appLock: AppLockController,
         wipeLocalState: @escaping () async -> Void
     ) {
+        self.appLock = appLock
         self.apiClient = apiClient
         self.authProvider = authProvider
         self.deviceIdProvider = deviceIdProvider
@@ -233,6 +237,7 @@ public final class DeleteAccountViewModel: ObservableObject {
             appVersionTracker: appVersionTracker,
             exportArtifactStore: exportArtifactStore,
             pendingLinks: pendingLinks,
+            appLock: appLock,
             wipeLocalState: wipeLocalState
         )
         phase = .signedOutForRetry
@@ -251,6 +256,7 @@ public final class DeleteAccountViewModel: ObservableObject {
             appVersionTracker: appVersionTracker,
             exportArtifactStore: exportArtifactStore,
             pendingLinks: pendingLinks,
+            appLock: appLock,
             wipeLocalState: wipeLocalState
         )
         phase = .completed

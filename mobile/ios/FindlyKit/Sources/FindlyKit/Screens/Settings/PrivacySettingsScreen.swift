@@ -12,17 +12,21 @@ public struct PrivacySettingsScreen: View {
     // in-app navigation; `@StateObject` + `@autoclosure` keeps the first instance for this view's
     // lifetime instead of silently discarding the one `.task` observes.
     @StateObject private var viewModel: PrivacySettingsViewModel
+    // specs/010 §1.4 (I64) — the one long-lived controller, handed in from the app target.
+    @ObservedObject private var appLock: AppLockController
     private let onSelectExport: () -> Void
     private let onSelectDeleteAccount: () -> Void
     private let onSelectDeleteFamily: () -> Void
 
     public init(
         viewModel: @autoclosure @escaping () -> PrivacySettingsViewModel,
+        appLock: AppLockController,
         onSelectExport: @escaping () -> Void,
         onSelectDeleteAccount: @escaping () -> Void,
         onSelectDeleteFamily: @escaping () -> Void
     ) {
         _viewModel = StateObject(wrappedValue: viewModel())
+        self.appLock = appLock
         self.onSelectExport = onSelectExport
         self.onSelectDeleteAccount = onSelectDeleteAccount
         self.onSelectDeleteFamily = onSelectDeleteFamily
@@ -35,6 +39,24 @@ public struct PrivacySettingsScreen: View {
         }
         .background(theme.colors.surfaceVariant)
         .task { await viewModel.load() }
+    }
+
+    /// specs/010 §1.4 — the app-lock toggle, off by default. Switching on runs one authentication
+    /// (`setEnabled`), and a failed/cancelled one leaves it off (the binding snaps back because
+    /// `setEnabled` republishes); switching off needs none. Disabled with a caption when the device
+    /// has no screen lock.
+    private var appLockRow: some View {
+        let state = appLock.toggleState
+        return FindlyToggleRow(
+            title: state.label,
+            subtitle: state.caption,
+            isOn: Binding(
+                get: { appLock.isEnabled },
+                set: { newValue in Task { _ = await appLock.setEnabled(newValue) } }
+            )
+        )
+        .disabled(!state.isInteractive)
+        .clipShape(RoundedRectangle(cornerRadius: theme.corner.lg))
     }
 
     /// specs/008-privacy-endpoints.md §4.4 (review finding #3) — Export and Delete-account are
@@ -51,6 +73,7 @@ public struct PrivacySettingsScreen: View {
                         Task { await viewModel.load() }
                     }
                 }
+                appLockRow
                 let entries = viewModel.visibleEntries
                 if entries.contains(.export) {
                     FindlyListRow(title: "Export my data", subtitle: "Download everything Findly holds about you") {

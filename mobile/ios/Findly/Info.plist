@@ -52,6 +52,8 @@
 	<string>kind-plant-0fb99b003.7.azurestaticapps.net</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
+	<key>NSFaceIDUsageDescription</key>
+	<string>Findly uses Face ID to unlock the app.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
 	<string>Findly periodically shares your location with your family in the background, on the interval you choose in Settings, so everyone can see where everyone is even when the app isn't open.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>

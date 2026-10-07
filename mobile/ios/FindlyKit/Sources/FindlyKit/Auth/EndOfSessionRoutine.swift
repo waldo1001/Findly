@@ -73,6 +73,7 @@ public enum EndOfSessionRoutine {
         appVersionTracker: AppVersionRegistrationTracking,
         exportArtifactStore: ExportArtifactStoring,
         pendingLinks: PendingLinkSlot,
+        appLock: AppLockController,
         wipeLocalState: () async -> Void,
         options: Options = Options()
     ) async {
@@ -91,6 +92,10 @@ public enum EndOfSessionRoutine {
         // Finding 3), so this may run in any position relative to them; kept here so the local wipe
         // always happens even when `authProvider` is `nil` and every step below is skipped.
         await wipeLocalState()
+        // specs/010 §1.4 (I64) — the app-lock setting and background timestamp are cleared too, and a
+        // lock screen up for the previous user comes down, so the next person to sign in on this
+        // phone starts with the lock off. AFTER the local wipe: no unlocked window over old UI.
+        appLock.endSession()
         if options.clearsStoredSession {
             authProvider?.clearStoredSession()
         }
