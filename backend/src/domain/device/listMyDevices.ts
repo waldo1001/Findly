@@ -69,7 +69,7 @@ export async function listMyDevices(input: ListMyDevicesInput, deps: ListMyDevic
       ...toDeviceView(device),
       ownerDisplayName,
       lastSeenAt: device.lastSeenAt,
-        isDormant: isDormant(device, now),
+      isDormant: isDormant(device, now),
     })),
     features,
   };

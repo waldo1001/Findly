@@ -193,6 +193,10 @@ export interface DeviceRepo {
   listDevices(ownerUserId: string): Promise<DeviceRecord[]>;
   /** Partition scan count = the per-user device-cap check (001 §4.1). */
   countDevices(ownerUserId: string): Promise<number>;
+  /** Update-only full-row write: replaces the row ONLY if it still exists, returning false
+   * when it is gone (never an upsert). Used where a read-modify-write could otherwise resurrect
+   * a device removed by a concurrent DELETE (001 §4.4) — PATCH (001 §4.3). */
+  replaceExistingDevice(ownerUserId: string, device: DeviceRecord): Promise<boolean>;
   /** Deletes one `Devices` row — device removal step 1 (001 §4.4, 002 §2.4). Idempotent. */
   deleteDevice(ownerUserId: string, deviceId: string): Promise<void>;
   /** Removes every device registration in the owner's partition (001 §3.6). */

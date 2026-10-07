@@ -576,4 +576,39 @@ describe("domain/device/patchDeviceSettings", () => {
 
     expect(result.device.staleNudgeEnabled).toBe(true);
   });
+
+  // PATCH-vs-DELETE race (001 §4.4): a PATCH that read the device before a concurrent
+  // removal must not resurrect it by writing the row back.
+  it("a device removed between the PATCH's read and its write is DEVICE_NOT_FOUND and is NOT resurrected", async () => {
+    const deps = buildDeps();
+    seedDevice(deps, { ownerUserId: "u1" });
+    const realGet = deps.deviceRepo.getDevice.bind(deps.deviceRepo);
+    deps.deviceRepo.getDevice = async (owner, id) => {
+      const found = await realGet(owner, id);
+      await deps.deviceRepo.deleteDevice(owner, id); // concurrent DELETE lands right after the read
+      return found;
+    };
+
+    await expectAppError(
+      patchDeviceSettings(
+        { uid: "u1", familyId: FAMILY_ID, role: "parent", deviceId: DEVICE_ID, body: { deviceName: "x" } },
+        deps,
+      ),
+      "DEVICE_NOT_FOUND",
+    );
+    expect(await realGet("u1", DEVICE_ID)).toBeNull();
+  });
+
+  it("an owner-only PATCH (pushToken) message for a forbidden field mentions staleNudgeEnabled", async () => {
+    const deps = buildDeps();
+    await seedFamily(deps);
+    seedDevice(deps, { ownerUserId: "u2" });
+
+    await expect(
+      patchDeviceSettings(
+        { uid: "u2", familyId: FAMILY_ID, role: "member", deviceId: DEVICE_ID, body: { deviceName: "x" } },
+        deps,
+      ),
+    ).rejects.toMatchObject({ code: "AUTH_FORBIDDEN", message: expect.stringContaining("staleNudgeEnabled") });
+  });
 });

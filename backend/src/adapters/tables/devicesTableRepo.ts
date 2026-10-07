@@ -47,28 +47,41 @@ export class TableDeviceRepo implements DeviceRepo {
     }
   }
 
+  private toEntity(ownerUserId: string, device: DeviceRecord) {
+    return {
+      partitionKey: ownerUserId,
+      rowKey: `${DEVICE_PREFIX}${device.deviceId}`,
+      ownerUserId: device.ownerUserId,
+      platform: device.platform,
+      model: device.model,
+      appVersion: device.appVersion,
+      deviceName: device.deviceName,
+      pushToken: device.pushToken ?? null,
+      locationPushToken: device.locationPushToken ?? null,
+      pushInvalid: device.pushInvalid,
+      syncIntervalMinutes: device.syncIntervalMinutes,
+      trackingEnabled: device.trackingEnabled,
+      registeredAt: device.registeredAt,
+      lastSeenAt: device.lastSeenAt,
+      staleNudgeEnabled: device.staleNudgeEnabled ?? true,
+      lastNudgedAt: device.lastNudgedAt ?? null,
+    };
+  }
+
   async putDevice(ownerUserId: string, device: DeviceRecord): Promise<void> {
-    await this.client.upsertEntity(
-      {
-        partitionKey: ownerUserId,
-        rowKey: `${DEVICE_PREFIX}${device.deviceId}`,
-        ownerUserId: device.ownerUserId,
-        platform: device.platform,
-        model: device.model,
-        appVersion: device.appVersion,
-        deviceName: device.deviceName,
-        pushToken: device.pushToken ?? null,
-        locationPushToken: device.locationPushToken ?? null,
-        pushInvalid: device.pushInvalid,
-        syncIntervalMinutes: device.syncIntervalMinutes,
-        trackingEnabled: device.trackingEnabled,
-        registeredAt: device.registeredAt,
-        lastSeenAt: device.lastSeenAt,
-        staleNudgeEnabled: device.staleNudgeEnabled ?? true,
-        lastNudgedAt: device.lastNudgedAt ?? null,
-      },
-      "Replace",
-    );
+    await this.client.upsertEntity(this.toEntity(ownerUserId, device), "Replace");
+  }
+
+  /** Update-only Replace (DeviceRepo.replaceExistingDevice): a 404 means the row was removed
+   * since the caller read it, so nothing is written and the row is never resurrected. */
+  async replaceExistingDevice(ownerUserId: string, device: DeviceRecord): Promise<boolean> {
+    try {
+      await this.client.updateEntity(this.toEntity(ownerUserId, device), "Replace");
+      return true;
+    } catch (err) {
+      if (isNotFound(err)) return false;
+      throw err;
+    }
   }
 
   /** Timestamp-only write (002 §2.4, DeviceRepo.touchLastSeen): a field-level Merge that

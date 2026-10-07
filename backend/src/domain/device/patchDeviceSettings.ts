@@ -76,7 +76,7 @@ export async function patchDeviceSettings(
       const restrictedFieldRequested =
         patch.syncIntervalMinutes !== undefined || patch.trackingEnabled !== undefined || patch.deviceName !== undefined;
       if (restrictedFieldRequested) {
-        throw new AppError("AUTH_FORBIDDEN", "a non-parent owner may only update pushToken");
+        throw new AppError("AUTH_FORBIDDEN", "a non-parent owner may only update pushToken and staleNudgeEnabled");
       }
     }
   }
@@ -122,7 +122,12 @@ export async function patchDeviceSettings(
   };
   // Write back into the DEVICE OWNER's own partition (002 §2.4) — not necessarily the
   // caller's, since a parent may be editing another member's device.
-  await deps.deviceRepo.putDevice(updated.ownerUserId, updated);
+  // Update-only: a concurrent DELETE /devices/{id} (001 §4.4) after our read must not be
+  // undone by this write resurrecting the row.
+  const written = await deps.deviceRepo.replaceExistingDevice(updated.ownerUserId, updated);
+  if (!written) {
+    throw new AppError("DEVICE_NOT_FOUND", "device was removed mid-request");
+  }
 
   if (settingsChanged && updated.pushToken && !updated.pushInvalid) {
     try {
@@ -136,7 +141,7 @@ export async function patchDeviceSettings(
         },
       });
       if (outcome === "invalidToken") {
-        await deps.deviceRepo.putDevice(updated.ownerUserId, { ...updated, pushInvalid: true });
+        await deps.deviceRepo.replaceExistingDevice(updated.ownerUserId, { ...updated, pushInvalid: true });
       }
     } catch {
       // Best-effort accelerator (§4.3) — never fails the request (§10 PUSH_DELIVERY_FAILED note).
