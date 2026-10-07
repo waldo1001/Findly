@@ -262,8 +262,11 @@ Open family: all members see all devices and their settings (only parents can ch
 
 ```json
 // 200 → data
-{ "devices": [ { /* §4.1 response object */, "ownerDisplayName": "Noor", "lastSeenAt": "2026-07-19T09:05:14Z" } ] }
+{ "devices": [ { /* §4.1 response object */, "ownerDisplayName": "Noor", "lastSeenAt": "2026-07-19T09:05:14Z",
+                  "isDormant": false } ] }
 ```
+
+`isDormant` (added 2026-10-07, 011 §2 — corrected the same day: first added to §5.2 only, which left the Devices screen, the one place dormant devices are *listed*, with no way to know) is the identical server-computed boolean as §5.2's, always present. `lastSeenAt` MAY be absent on a legacy row that predates its refresh rule; clients then omit the "Last seen" line (011 §1.1).
 
 `lastSeenAt` = server receive time of the device's most recent **device-originated** call — `POST /devices` (§4.1), `POST /locations` (§5.1), `POST /geofence-events` (§7.3) and `POST /locate-requests/{id}/fulfill` (§6.3) MUST all refresh it (write-skipped to once per minute, 002 §2.4). *(Amended 2026-09-06: the shipped backend refreshed it only on registration, so §6.1's "most-recently-seen" target choice could pick a member's old phone over the one actually reporting.)*
 
