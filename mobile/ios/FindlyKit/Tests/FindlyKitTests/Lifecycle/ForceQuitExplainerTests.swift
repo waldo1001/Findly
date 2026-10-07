@@ -43,6 +43,7 @@ struct ForceQuitExplainerTests {
         let store = InMemoryForceQuitExplainerStore()
         #expect(ForceQuitExplainerPresenter.evaluate(store: store, settings: settings(interval: 15, tracking: true)) == false)
         #expect(store.hasShownExplainer == false, "no flag, nothing consumed — the one-time slot stays open")
+        #expect(store.isExplainerDue == false)
     }
 
     @Test func doesNotShow_whenTrackingPaused_andClearsFlagSilently() {
@@ -59,19 +60,47 @@ struct ForceQuitExplainerTests {
         #expect(store.hasShownExplainer == false)
     }
 
-    @Test func shown_clearsFlagAndRecordsShown() {
+    @Test func decision_consumesFlag_andPersistsDue_butDoesNotRecordShownUntilAcknowledged() {
         let store = flaggedStore()
         _ = ForceQuitExplainerPresenter.evaluate(store: store, settings: settings(interval: 15, tracking: true))
         #expect(store.isTerminationFlagSet == false)
+        #expect(store.isExplainerDue == true)
+        #expect(store.hasShownExplainer == false, "a dropped/interrupted presentation must not burn the one-time slot")
+    }
+
+    @Test func droppedPresentation_retriesOnTheNextEvaluation_withoutAFlag() {
+        let store = flaggedStore()
+        #expect(ForceQuitExplainerPresenter.evaluate(store: store, settings: settings(interval: 15, tracking: true)) == true)
+        // The alert never appeared (sheet/cover on top); the next Family Map appearance asks again.
+        #expect(ForceQuitExplainerPresenter.evaluate(store: store, settings: settings(interval: 15, tracking: true)) == true)
+        #expect(store.isExplainerDue == true)
+    }
+
+    @Test func acknowledge_recordsShown_clearsDue_andStopsFurtherPresentations() {
+        let store = flaggedStore()
+        _ = ForceQuitExplainerPresenter.evaluate(store: store, settings: settings(interval: 15, tracking: true))
+        ForceQuitExplainerPresenter.acknowledge(store: store)
         #expect(store.hasShownExplainer == true)
+        #expect(store.isExplainerDue == false)
+        #expect(ForceQuitExplainerPresenter.evaluate(store: store, settings: settings(interval: 15, tracking: true)) == false)
     }
 
     @Test func neverShownTwice_evenAfterLaterSwipes_andFlagIsStillCleared() {
         let store = flaggedStore()
         #expect(ForceQuitExplainerPresenter.evaluate(store: store, settings: settings(interval: 15, tracking: true)) == true)
+        ForceQuitExplainerPresenter.acknowledge(store: store)
         store.setTerminationFlag()
         #expect(ForceQuitExplainerPresenter.evaluate(store: store, settings: settings(interval: 15, tracking: true)) == false)
         #expect(store.isTerminationFlagSet == false, "flag cleared in every branch")
+        #expect(store.isExplainerDue == false)
+    }
+
+    @Test func laterSwipe_whileStillDue_staysDue_andFlagIsCleared() {
+        let store = flaggedStore()
+        _ = ForceQuitExplainerPresenter.evaluate(store: store, settings: settings(interval: 15, tracking: true))
+        store.setTerminationFlag()
+        #expect(ForceQuitExplainerPresenter.evaluate(store: store, settings: settings(interval: 15, tracking: true)) == true)
+        #expect(store.isTerminationFlagSet == false)
     }
 
     @Test func unknownCachedSettings_followRuntimeDefaults_trackingOnAndInterval15() {
@@ -92,12 +121,15 @@ struct ForceQuitExplainerTests {
         #expect(store.isTerminationFlagSet == false)
         #expect(store.hasShownExplainer == false)
         store.setTerminationFlag()
+        store.setExplainerDue()
         store.markExplainerShown()
+        #expect(UserDefaultsForceQuitExplainerStore(defaults: defaults).isExplainerDue == true)
         #expect(UserDefaultsForceQuitExplainerStore(defaults: defaults).isTerminationFlagSet == true)
         #expect(UserDefaultsForceQuitExplainerStore(defaults: defaults).hasShownExplainer == true)
 
         store.clear()
         #expect(store.isTerminationFlagSet == false)
+        #expect(store.isExplainerDue == false)
         #expect(store.hasShownExplainer == false)
     }
 
@@ -106,6 +138,7 @@ struct ForceQuitExplainerTests {
     @MainActor @Test func wipeLocalState_clearsBothKeys() async {
         let store = InMemoryForceQuitExplainerStore()
         store.setTerminationFlag()
+        store.setExplainerDue()
         store.markExplainerShown()
         let container = LocationRuntimeContainer(
             apiClient: FakeAPIClient(), deviceId: { "device-1" },
@@ -115,6 +148,7 @@ struct ForceQuitExplainerTests {
         await container.wipeLocalState()
 
         #expect(store.isTerminationFlagSet == false)
+        #expect(store.isExplainerDue == false)
         #expect(store.hasShownExplainer == false, "a different user on the phone sees the explainer once too")
     }
 }

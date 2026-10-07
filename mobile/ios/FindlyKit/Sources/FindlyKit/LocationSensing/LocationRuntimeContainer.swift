@@ -61,10 +61,15 @@ public final class LocationRuntimeContainer {
     /// specs/011 §3 (I62) — the force-quit explainer's two local keys, cleared by `wipeLocalState()`.
     public let forceQuitExplainerStore: ForceQuitExplainerStoring
 
-    /// specs/011 §3 (I62) — call once after launch resolution lands on the Family Map. `true` means
-    /// "show the one-time explainer now"; the flag is cleared in every branch.
+    /// specs/011 §3 (I62) — call whenever the Family Map appears. `true` means the explainer is due (it stays due
+    /// until acknowledged); the termination flag is cleared in every branch.
     public func shouldShowForceQuitExplainer() -> Bool {
         ForceQuitExplainerPresenter.evaluate(store: forceQuitExplainerStore, settings: stateStore.current())
+    }
+
+    /// The user tapped "Got it" — only now is the one-time explainer recorded as shown.
+    public func acknowledgeForceQuitExplainer() {
+        ForceQuitExplainerPresenter.acknowledge(store: forceQuitExplainerStore)
     }
 
     /// specs/009-device-runtime.md §3.4, specs/008-privacy-endpoints.md §4.4 (I26) — held as a

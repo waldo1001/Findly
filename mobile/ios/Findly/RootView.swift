@@ -98,7 +98,9 @@ struct RootView: View {
     @StateObject private var permissionFlow: PermissionFlowViewModel
 
     // specs/011-device-lifecycle-and-staleness.md §3 (I62) — the one-time force-quit explainer.
-    @State private var showForceQuitExplainer = false
+    // `forceQuitExplainerDue` mirrors the persisted due state; the alert itself is hosted by
+    // `LiveMapScreen`'s sheet content and additionally gated on the permission cover being down.
+    @State private var forceQuitExplainerDue = false
 
     init(
         coordinator: AppCoordinator,
@@ -161,13 +163,6 @@ struct RootView: View {
                 onDismiss: { permissionFlow.dismissBanner() }
             )
             content
-        }
-        // specs/011 §3 — single action, no nagging; the decision (flag + tracking + interval + shown
-        // once) lives in `ForceQuitExplainerPresenter`, evaluated when the Family Map appears.
-        .alert(ForceQuitExplainer.title, isPresented: $showForceQuitExplainer) {
-            Button(ForceQuitExplainer.actionTitle, role: .cancel) {}
-        } message: {
-            Text(ForceQuitExplainer.body)
         }
         // The disclosure is a full-screen cover, not a sheet: it must be answered before the OS
         // prompt fires, and a swipe-to-dismiss sheet would let the user skip past the explanation
@@ -308,14 +303,24 @@ struct RootView: View {
                         // "Locate now" routes into the EXISTING Locate screen (001 §6, unchanged).
                         coordinator.showLocate(target: .user(userId), targetDisplayName: displayName)
                     },
-                    onProfileDeadEnd: { variant in coordinator.showOnboarding(variant) }
+                    onProfileDeadEnd: { variant in coordinator.showOnboarding(variant) },
+                    // specs/011 §3: never while the permission disclosure cover is up (deferred,
+                    // not dropped: the binding turns true again once the cover is gone).
+                    forceQuitExplainerPresented: Binding(
+                        get: { forceQuitExplainerDue && permissionFlow.disclosure == nil },
+                        set: { if !$0 { forceQuitExplainerDue = false } }
+                    ),
+                    // Only the "Got it" tap records the one-time slot as used.
+                    onForceQuitExplainerAcknowledged: {
+                        locationRuntimeContainer.acknowledgeForceQuitExplainer()
+                        forceQuitExplainerDue = false
+                    }
                 )
                 // specs/011 §3 (I62) — "after launch resolution has landed on the Family Map".
-                // Idempotent: the presenter clears the flag in every branch.
+                // Idempotent: the presenter clears the flag in every branch and stays "due" until
+                // acknowledged, so a presentation that never reached the screen retries here.
                 .onAppear {
-                    if locationRuntimeContainer.shouldShowForceQuitExplainer() {
-                        showForceQuitExplainer = true
-                    }
+                    forceQuitExplainerDue = locationRuntimeContainer.shouldShowForceQuitExplainer()
                 }
 
             // MARK: - specs/010-app-shell-and-screen-ux.md §2.2 (I34) — replaces the retired Home
