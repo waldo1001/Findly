@@ -43,8 +43,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.findly.android.ui.designsystem.FindlyTheme
 import com.findly.android.queue.worker.LocationForegroundService
-import com.findly.android.ui.groups.GroupJoinHttpsLinkParser
-import com.findly.android.ui.invites.FamilyInviteHttpsLinkParser
+import com.findly.android.pendinglink.IncomingLinkEvent
+import com.findly.android.pendinglink.JoinLinkParser
 import com.findly.android.launch.LaunchGateViewModel
 import com.findly.android.launch.LaunchGateViewModelFactory
 import com.findly.android.ui.nav.FindlyNavHost
@@ -136,32 +136,17 @@ class MainActivity : ComponentActivity() {
         // prompt-before-explanation inversion, one permission over. It now runs from the composable
         // below, only once no disclosure is pending.
 
-        val launchingUri = intent?.data
-        val httpsJoinLinkResult = GroupJoinHttpsLinkParser.parseIfFreshLaunch(
-            isFreshLaunch = savedInstanceState == null,
-            scheme = launchingUri?.scheme,
-            host = launchingUri?.host,
-            path = launchingUri?.path,
-            fragment = launchingUri?.fragment,
-            joinLinkHost = container.appConfig.joinLinkHost,
-        )
-        // A36 (specs/007-public-join-links.md §1/§4 as amended 2026-08-26, specs/010 §5.2): the
-        // public https://{JOIN_LINK_HOST}/f#CODE family-invite link, checked the same way and for
-        // the same reason as httpsJoinLinkResult above (fragment-carried codes aren't matched by
-        // Navigation Compose's own uriPattern placeholder syntax) -- same freshness guard, so
-        // rotation/recreation never re-fires the one-time navigation to the accept-invite screen.
-        val httpsFamilyInviteLinkResult = FamilyInviteHttpsLinkParser.parseIfFreshLaunch(
-            isFreshLaunch = savedInstanceState == null,
-            scheme = launchingUri?.scheme,
-            host = launchingUri?.host,
-            path = launchingUri?.path,
-            fragment = launchingUri?.fragment,
-            joinLinkHost = container.appConfig.joinLinkHost,
-        )
+        // A62 (specs/010 section 1.3, 007 section 4): every join/invite link form is parsed here
+        // (the fragment-carried https forms need Uri.getFragment(), and the findly:// forms are no
+        // longer left to Navigation's own deep-link handling, which would navigate - or be wiped by
+        // the Sign-in reset - before the app can act). Fresh launch only, so a rotation or process
+        // restore never re-delivers the same intent. The code is never logged.
+        val incomingLinkEvent = if (savedInstanceState == null) nextLinkEvent(intent) else null
+        incomingLink.value = incomingLinkEvent
         // specs/009-device-runtime.md §3.2: the foreground-service notification's tap action
         // opens the device-settings screen -- specs/010-app-shell-and-screen-ux.md §4.1's new
         // Devices route (the retired Settings monolith's replacement). Same freshness guard as
-        // httpsJoinLinkResult above (savedInstanceState == null) so a rotation/recreation doesn't
+        // the link parsing above (savedInstanceState == null) so a rotation/recreation doesn't
         // re-fire the navigation.
         val openDevicesOnLaunch = savedInstanceState == null &&
             intent?.getBooleanExtra(LocationForegroundService.EXTRA_OPEN_DEVICES, false) == true
@@ -337,8 +322,7 @@ class MainActivity : ComponentActivity() {
                 FindlyNavHost(
                     container = container,
                     launchGateViewModel = launchGateViewModel,
-                    httpsJoinLinkResult = httpsJoinLinkResult,
-                    httpsFamilyInviteLinkResult = httpsFamilyInviteLinkResult,
+                    incomingLinkEvent = incomingLink.value,
                     openDevicesOnLaunch = openDevicesOnLaunch,
                 )
                 }
@@ -394,6 +378,30 @@ class MainActivity : ComponentActivity() {
                 Uri.fromParts("package", packageName, null),
             ),
         )
+    }
+
+    /** The latest link delivered to this Activity (A62); read by the Compose tree. */
+    private val incomingLink = mutableStateOf<IncomingLinkEvent?>(null)
+    private var linkSeq = 0L
+
+    private fun nextLinkEvent(source: Intent?): IncomingLinkEvent? {
+        val uri = source?.data ?: return null
+        val link = JoinLinkParser.parse(
+            scheme = uri.scheme,
+            host = uri.host,
+            path = uri.path,
+            fragment = uri.fragment,
+            codeQueryParam = if (uri.isHierarchical) uri.getQueryParameter("code") else null,
+            joinLinkHost = container.appConfig.joinLinkHost,
+        ) ?: return null
+        return IncomingLinkEvent(++linkSeq, link)
+    }
+
+    /** A62: a link delivered to an already-running Activity goes through the same capture path. */
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        nextLinkEvent(intent)?.let { incomingLink.value = it }
     }
 
     override fun onDestroy() {

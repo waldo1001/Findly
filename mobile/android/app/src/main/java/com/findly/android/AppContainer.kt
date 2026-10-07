@@ -82,6 +82,9 @@ import com.findly.android.queue.worker.SharedPreferencesLastCaptureDateStore
 import com.findly.android.ui.map.GoogleMapRenderer
 import com.findly.android.ui.map.MapRenderer
 import com.findly.android.ui.settings.ColdStartExportCleanup
+import com.findly.android.pendinglink.PendingLinkCoordinator
+import com.findly.android.pendinglink.PendingLinkStore
+import com.findly.android.pendinglink.SharedPreferencesPendingLinkPersistence
 import com.findly.android.ui.settings.DefaultLocalStateWiper
 import com.findly.android.ui.settings.ExportArtifactCleaner
 import com.findly.android.ui.settings.ExportFileWriter
@@ -684,6 +687,11 @@ class AppContainer(context: Context) {
      * account-deletion wipe, and [coldStartExportCleanup]'s process-restart wipe. */
     private val exportArtifactCleaner = ExportArtifactCleaner { ExportFileWriter.clearArtifacts(context) }
 
+    /** A62 (specs/010 section 1.3): the one pending join/invite link slot. */
+    val pendingLinkCoordinator = PendingLinkCoordinator(
+        PendingLinkStore(SharedPreferencesPendingLinkPersistence(context)),
+    )
+
     /** A8 (specs/008-privacy-endpoints.md §4.4/§3.1; specs/003-android-client.md §12.4): wipes
      * local state — fix queue, deviceId, export artifacts, and (A11) the geofence-event queue and
      * cached geofence config/ETag — after a successful account deletion. See
@@ -697,6 +705,7 @@ class AppContainer(context: Context) {
         // A25 (specs/009 §7): a different user on the same device MUST see the disclosure again —
         // code-review fix, this was previously documented but never wired to any caller.
         permissionDisclosureStore = permissionDisclosureStore,
+        pendingLinkStore = pendingLinkCoordinator.store,
     )
 
     /** 008 §3.1 rule 2 (amended)'s cold-start trigger — see [ColdStartExportCleanup]'s doc for why
