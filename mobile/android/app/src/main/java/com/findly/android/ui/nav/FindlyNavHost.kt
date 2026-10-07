@@ -256,11 +256,12 @@ fun FindlyNavHost(
     // stored on the first composition is considered by the replay effect right after.
     val launchState by launchGateViewModel.state.collectAsState()
     val currentRoute = currentBackStackEntry?.destination?.route
-    // `locked` is always false until the app lock (A63) supplies it.
+    // A63: the lock screen (specs/010 section 1.4); replay waits through it and fires on unlock.
+    val appLocked by container.appLockController.locked.collectAsState()
     val linkAppState = LinkAppState(
         signedIn = authState is AuthState.SignedIn,
         launchResolved = PendingLinkPolicy.isLaunchResolved(launchState, currentRoute),
-        locked = false,
+        locked = appLocked,
     )
     val pendingLinkCoordinator = container.pendingLinkCoordinator
 
@@ -521,7 +522,11 @@ fun FindlyNavHost(
                     localStateWiper = container.localStateWiper,
                 ),
             )
-            PrivacyRoute(viewModel = privacyViewModel, onRouteToOnboarding = navigateToOnboarding)
+            PrivacyRoute(
+                viewModel = privacyViewModel,
+                appLockController = container.appLockController,
+                onRouteToOnboarding = navigateToOnboarding,
+            )
         }
 
         // A36 (specs/010 §5.1): parent-only, reached from the drawer's "Invite someone" item.

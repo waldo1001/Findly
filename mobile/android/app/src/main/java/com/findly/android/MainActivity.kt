@@ -4,7 +4,13 @@ import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
-import androidx.activity.ComponentActivity
+import androidx.fragment.app.FragmentActivity
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.onEach
+import com.findly.android.applock.AppLockAuth
+import com.findly.android.applock.AppLockHost
+import com.findly.android.auth.AuthState
 import android.content.Intent
 import android.net.Uri
 import android.provider.Settings
@@ -83,7 +89,7 @@ import com.findly.android.ui.nav.FindlyNavHost
  * `https://{JOIN_LINK_HOST}/f#CODE` family-invite link via [FamilyInviteHttpsLinkParser] — same
  * fragment-based reasoning, same [savedInstanceState]-gated freshness guard, routing to
  * [com.findly.android.ui.nav.Destinations.InviteAccept] instead of `GroupJoin`. */
-class MainActivity : ComponentActivity() {
+class MainActivity : FragmentActivity() {
 
     private val container get() = (application as FindlyApplication).container
 
@@ -131,6 +137,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
 
         container.onActivityStarted(this)
+        startAppLock()
         // NOT requested here any more (specs/009 §7). Firing it from onCreate put the system
         // notification dialog on screen on top of the location disclosure — the same
         // prompt-before-explanation inversion, one permission over. It now runs from the composable
@@ -327,8 +334,42 @@ class MainActivity : ComponentActivity() {
                 )
                 }
                 }
+                // A63 (specs/010 section 1.4): above everything, including the permission
+                // disclosure (which returns early from the Box above) and any dialog/sheet.
+                AppLockHost(controller = container.appLockController, onBack = { moveTaskToBack(true) })
             }
         }
+    }
+
+    /** A63: feeds the lock the auth state, and keeps the OS task-switcher snapshot blank while the
+     * lock is enabled (API 33+; below that the call does not exist). */
+    private fun startAppLock() {
+        val lock = container.appLockController
+        container.authProvider.authState.onEach { state ->
+            lock.onAuthState(
+                when (state) {
+                    AuthState.Loading -> AppLockAuth.Loading
+                    AuthState.SignedOut -> AppLockAuth.SignedOut
+                    is AuthState.SignedIn -> AppLockAuth.SignedIn
+                },
+            )
+        }.launchIn(lifecycleScope)
+        lock.enabled.onEach { enabled ->
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) setRecentsScreenshotEnabled(!enabled)
+        }.launchIn(lifecycleScope)
+    }
+
+    override fun onStart() {
+        super.onStart()
+        container.appLockController.onForegrounded(
+            signedIn = container.authProvider.authState.value is AuthState.SignedIn,
+            now = System.currentTimeMillis(),
+        )
+    }
+
+    override fun onStop() {
+        container.appLockController.onBackgrounded(System.currentTimeMillis())
+        super.onStop()
     }
 
     /** Snapshot of everything [PermissionFlowPolicy] needs, read fresh (never cached — §7). */
