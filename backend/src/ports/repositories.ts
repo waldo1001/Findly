@@ -176,6 +176,10 @@ export interface DeviceRecord {
   /** UTC time of the last stale-nudge claim (002 §2.4/§4.3). Written only by the nudger
    * (B37); carried through full-row writes so they never drop it. Never in any response. */
   lastNudgedAt?: string;
+  /** Opaque storage version of the row this record was read from (Table Storage ETag). Read-side
+   * metadata, NEVER persisted or sent in a response; it makes the repo's conditional writes
+   * (`claimNudge`, `replaceExistingDevice`, 002 §4.3) possible. Absent on records built in memory. */
+  etag?: string;
 }
 
 export interface DeviceRepo {
@@ -194,16 +198,19 @@ export interface DeviceRepo {
   /** Partition scan count = the per-user device-cap check (001 §4.1). */
   countDevices(ownerUserId: string): Promise<number>;
   /** Update-only full-row write: replaces the row ONLY if it still exists, returning false
-   * when it is gone (never an upsert). Used where a read-modify-write could otherwise resurrect
+   * when it is gone (never an upsert). ETag-guarded on `device.etag` (002 §4.3): on a 412 it
+   * re-reads the row and retries (bounded) with `reconcileStaleReplace` so a concurrent
+   * `lastNudgedAt`/`pushInvalid`/`lastSeenAt` write is never reverted. Used where a read-modify-write could otherwise resurrect
    * a device removed by a concurrent DELETE (001 §4.4) — PATCH (001 §4.3). */
   replaceExistingDevice(ownerUserId: string, device: DeviceRecord): Promise<boolean>;
   /** Full-table scan of `Devices` across every owner partition (the stale nudger, 002 §4.3).
    * List-tolerant: a never-created table resolves to []. */
   listAllDevices(): Promise<DeviceRecord[]>;
-  /** Stale-nudge claim (002 §2.4/§4.3): update-only, timestamp-only Merge of `lastNudgedAt`.
-   * Returns false — and writes nothing — when the row no longer exists (removed since the scan;
-   * a Merge must never resurrect it). */
-  claimNudge(ownerUserId: string, deviceId: string, lastNudgedAt: string): Promise<boolean>;
+  /** Stale-nudge claim (002 §2.4/§4.3): ETag-conditional, timestamp-only, update-only Merge of
+   * `lastNudgedAt`. `etag` is the version the scan read. Returns false — and writes nothing —
+   * when another writer got there first (412: another run claimed, or any write intervened) or
+   * the row no longer exists (404: a Merge must never resurrect it). */
+  claimNudge(ownerUserId: string, deviceId: string, lastNudgedAt: string, etag: string): Promise<boolean>;
   /** 001 §8.5 token hygiene: update-only, one-field Merge of `pushInvalid: true`. Tolerates a
    * removed row (no-op); never rewrites any other field. */
   markPushInvalid(ownerUserId: string, deviceId: string): Promise<void>;

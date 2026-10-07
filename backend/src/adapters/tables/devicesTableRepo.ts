@@ -2,14 +2,21 @@
 // no unit tests here (thin adapter, excluded from mutation).
 
 import { odata, RestError } from "@azure/data-tables";
+import { reconcileStaleReplace } from "../../domain/device/deviceWrite";
 import { createTableClient } from "./tableClientFactory";
 import { collectEntitiesTolerant } from "./listTolerant";
 import type { DevicePlatform, DeviceRecord, DeviceRepo } from "../../ports/repositories";
 
 const DEVICE_PREFIX = "device:";
+/** Bound on re-read-and-retry after a 412 in replaceExistingDevice (002 §4.3). */
+const MAX_REPLACE_ATTEMPTS = 5;
 
 function isNotFound(err: unknown): boolean {
   return err instanceof RestError && err.statusCode === 404;
+}
+
+function isPreconditionFailed(err: unknown): boolean {
+  return err instanceof RestError && err.statusCode === 412;
 }
 
 function toRecord(deviceId: string, entity: Record<string, unknown>): DeviceRecord {
@@ -31,6 +38,7 @@ function toRecord(deviceId: string, entity: Record<string, unknown>): DeviceReco
     // 002 §2.4: a row without the property reads as true (no backfill).
     staleNudgeEnabled: entity.staleNudgeEnabled == null ? true : Boolean(entity.staleNudgeEnabled),
     lastNudgedAt: entity.lastNudgedAt != null ? String(entity.lastNudgedAt) : undefined,
+    etag: typeof entity.etag === "string" ? entity.etag : undefined,
   };
 }
 
@@ -73,15 +81,29 @@ export class TableDeviceRepo implements DeviceRepo {
   }
 
   /** Update-only Replace (DeviceRepo.replaceExistingDevice): a 404 means the row was removed
-   * since the caller read it, so nothing is written and the row is never resurrected. */
+   * since the caller read it, so nothing is written and the row is never resurrected. ETag-
+   * guarded on `device.etag` (002 §4.3): a 412 means a concurrent writer (the nudger's claim or
+   * pushInvalid Merge, a lastSeenAt touch, another PATCH) got in first — re-read and retry,
+   * bounded, with the system-written fields carried over so they are never reverted. */
   async replaceExistingDevice(ownerUserId: string, device: DeviceRecord): Promise<boolean> {
-    try {
-      await this.client.updateEntity(this.toEntity(ownerUserId, device), "Replace");
-      return true;
-    } catch (err) {
-      if (isNotFound(err)) return false;
-      throw err;
+    let candidate = device;
+    for (let attempt = 0; attempt < MAX_REPLACE_ATTEMPTS; attempt += 1) {
+      try {
+        await this.client.updateEntity(
+          this.toEntity(ownerUserId, candidate),
+          "Replace",
+          candidate.etag === undefined ? undefined : { etag: candidate.etag },
+        );
+        return true;
+      } catch (err) {
+        if (isNotFound(err)) return false;
+        if (!isPreconditionFailed(err)) throw err;
+        const fresh = await this.getDevice(ownerUserId, candidate.deviceId);
+        if (fresh === null) return false;
+        candidate = reconcileStaleReplace(fresh, candidate);
+      }
     }
+    throw new Error("replaceExistingDevice: too many concurrent writers");
   }
 
   /** Timestamp-only write (002 §2.4, DeviceRepo.touchLastSeen): a field-level Merge that
@@ -131,17 +153,19 @@ export class TableDeviceRepo implements DeviceRepo {
     return entities.map((entity) => toRecord(String(entity.rowKey).slice(DEVICE_PREFIX.length), entity));
   }
 
-  /** Timestamp-only claim (002 §2.4/§4.3): update-only Merge of `lastNudgedAt`. A 404 (row
-   * removed since the scan, or table gone) writes nothing and reports false. */
-  async claimNudge(ownerUserId: string, deviceId: string, lastNudgedAt: string): Promise<boolean> {
+  /** Timestamp-only claim (002 §2.4/§4.3): ETag-conditional update-only Merge of `lastNudgedAt`
+   * on the version the scan read. 412 (another run claimed, or any write intervened) and 404
+   * (row removed since the scan, or table gone) write nothing and report false. */
+  async claimNudge(ownerUserId: string, deviceId: string, lastNudgedAt: string, etag: string): Promise<boolean> {
     try {
       await this.client.updateEntity(
         { partitionKey: ownerUserId, rowKey: `${DEVICE_PREFIX}${deviceId}`, lastNudgedAt },
         "Merge",
+        { etag },
       );
       return true;
     } catch (err) {
-      if (isNotFound(err)) return false;
+      if (isNotFound(err) || isPreconditionFailed(err)) return false;
       throw err;
     }
   }

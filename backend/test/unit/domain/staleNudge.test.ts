@@ -189,3 +189,16 @@ describe("isNudgeDue — conditions are independent", () => {
     expect(isNudgeDue(dev({ pushInvalid: true, trackingEnabled: false }), NOW)).toBe(false);
   });
 });
+
+describe("isNudgeDue — a corrupt stored timestamp fails closed (no nudge)", () => {
+  it("unparseable lastSeenAt", () => {
+    expect(isNudgeDue(dev({ lastSeenAt: "not-a-date" }), NOW)).toBe(false);
+  });
+  it("unparseable registeredAt when lastSeenAt is absent", () => {
+    const { lastSeenAt: _omit, ...rest } = dev({ registeredAt: "garbage" });
+    expect(isNudgeDue(rest, NOW)).toBe(false);
+  });
+  it("unparseable lastNudgedAt", () => {
+    expect(isNudgeDue(dev({ lastNudgedAt: "garbage" }), NOW)).toBe(false);
+  });
+});

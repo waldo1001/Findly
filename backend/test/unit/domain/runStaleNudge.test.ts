@@ -30,6 +30,14 @@ function device(deviceId: string, overrides: Partial<DeviceRecord> = {}): Device
   };
 }
 
+/** Reads carry a storage etag (002 §4.3); the assertions below are about the stored fields. */
+async function stored(repo: InMemoryDeviceRepo, id: string) {
+  const row = await repo.getDevice("u1", id);
+  if (!row) return row;
+  const { etag: _etag, ...fields } = row;
+  return fields;
+}
+
 function setup() {
   const deviceRepo = new InMemoryDeviceRepo();
   const pushSender = new FakePushSender();
@@ -65,7 +73,7 @@ describe("runStaleNudge — gate (STALE_NUDGE_ENABLED must be exactly \"true\")"
       const result = await run(setting);
       expect(pushSender.sent).toHaveLength(0);
       expect((await deviceRepo.getDevice("u1", "d1"))?.lastNudgedAt).toBeUndefined();
-      expect(result).toEqual({ enabled: false, evaluated: 0, due: 0, sent: 0, failed: 0 });
+      expect(result).toEqual({ enabled: false, evaluated: 0, due: 0, sent: 0, failed: 0, skipped: 0 });
     },
   );
 });
@@ -78,7 +86,7 @@ describe("runStaleNudge — scan and send", () => {
     deviceRepo.seed("u2", device("fresh", { ownerUserId: "u2", lastSeenAt: ago(HOUR) }));
     const result = await run();
     expect(pushSender.sent.map((m) => (m as { token: string }).token).sort()).toEqual(["tok-due1", "tok-due2"]);
-    expect(result).toEqual({ enabled: true, evaluated: 3, due: 2, sent: 2, failed: 0 });
+    expect(result).toEqual({ enabled: true, evaluated: 3, due: 2, sent: 2, failed: 0, skipped: 0 });
   });
 
   it("sends a STALE_NUDGE message carrying only data.type", async () => {
@@ -116,23 +124,7 @@ describe("runStaleNudge — scan and send", () => {
     const before = device("d1", { deviceName: "Original", syncIntervalMinutes: 30 });
     deviceRepo.seed("u1", before);
     await run();
-    expect(await deviceRepo.getDevice("u1", "d1")).toEqual({ ...before, lastNudgedAt: NOW.toISOString() });
-  });
-
-  it("the claim merges into the CURRENT row, not the scanned snapshot", async () => {
-    const { deviceRepo, pushSender, run } = setup();
-    deviceRepo.seed("u1", device("d1"));
-    const original = deviceRepo.listAllDevices.bind(deviceRepo);
-    deviceRepo.listAllDevices = async () => {
-      const rows = await original();
-      // A parent pauses the device after the scan snapshot was taken.
-      const current = await deviceRepo.getDevice("u1", "d1");
-      if (current) await deviceRepo.putDevice("u1", { ...current, deviceName: "Renamed" });
-      return rows;
-    };
-    await run();
-    expect((await deviceRepo.getDevice("u1", "d1"))?.deviceName).toBe("Renamed");
-    expect(pushSender.sent).toHaveLength(1);
+    expect(await stored(deviceRepo, "d1")).toEqual({ ...before, lastNudgedAt: NOW.toISOString() });
   });
 
   it("a device removed between scan and claim is not sent to and not resurrected", async () => {
@@ -147,7 +139,42 @@ describe("runStaleNudge — scan and send", () => {
     const result = await run();
     expect(pushSender.sent).toHaveLength(0);
     expect(await deviceRepo.getDevice("u1", "d1")).toBeNull();
-    expect(result).toEqual({ enabled: true, evaluated: 1, due: 1, sent: 0, failed: 0 });
+    expect(result).toEqual({ enabled: true, evaluated: 1, due: 1, sent: 0, failed: 0, skipped: 1 });
+  });
+});
+
+describe("runStaleNudge — overlapping runs (002 §4.3 ETag-conditional claim)", () => {
+  it("two runs that scanned the same version: exactly one claims and sends, the other skips", async () => {
+    const { deviceRepo, pushSender, run } = setup();
+    deviceRepo.seed("u1", device("d1"));
+    const [a, b] = await Promise.all([run(), run()]);
+    expect(pushSender.sent).toHaveLength(1);
+    expect(a.sent + b.sent).toBe(1);
+    expect(a.skipped + b.skipped).toBe(1);
+  });
+
+  it("sent + failed + skipped always equals due", async () => {
+    const { deviceRepo, pushSender, run } = setup();
+    deviceRepo.seed("u1", device("d1"));
+    deviceRepo.seed("u1", device("d2"));
+    deviceRepo.seed("u1", device("d3"));
+    pushSender.setOutcome("error");
+    const r = await run();
+    expect(r.sent + r.failed + r.skipped).toBe(r.due);
+  });
+
+  it("a write between scan and claim (stale ETag) makes the claim lose: skipped, no send", async () => {
+    const { deviceRepo, pushSender, run } = setup();
+    deviceRepo.seed("u1", device("d1"));
+    const original = deviceRepo.listAllDevices.bind(deviceRepo);
+    deviceRepo.listAllDevices = async () => {
+      const rows = await original();
+      await deviceRepo.touchLastSeen("u1", "d1", ago(60_000)); // device calls in after the scan
+      return rows;
+    };
+    const result = await run();
+    expect(pushSender.sent).toHaveLength(0);
+    expect(result.skipped).toBe(1);
   });
 });
 
@@ -158,12 +185,12 @@ describe("runStaleNudge — outcomes (001 §8.5)", () => {
     deviceRepo.seed("u1", before);
     pushSender.setOutcome("invalidToken");
     const result = await run();
-    expect(await deviceRepo.getDevice("u1", "d1")).toEqual({
+    expect(await stored(deviceRepo, "d1")).toEqual({
       ...before,
       pushInvalid: true,
       lastNudgedAt: NOW.toISOString(),
     });
-    expect(result).toEqual({ enabled: true, evaluated: 1, due: 1, sent: 0, failed: 1 });
+    expect(result).toEqual({ enabled: true, evaluated: 1, due: 1, sent: 0, failed: 1, skipped: 0 });
   });
 
   it("invalidToken on a device removed meanwhile does not resurrect it", async () => {
@@ -187,7 +214,7 @@ describe("runStaleNudge — outcomes (001 §8.5)", () => {
     const row = await deviceRepo.getDevice("u1", "d1");
     expect(row?.pushInvalid).toBe(false);
     expect(row?.lastNudgedAt).toBe(NOW.toISOString());
-    expect(result).toEqual({ enabled: true, evaluated: 1, due: 1, sent: 0, failed: 1 });
+    expect(result).toEqual({ enabled: true, evaluated: 1, due: 1, sent: 0, failed: 1, skipped: 0 });
   });
 
   it("a thrown transport failure is counted failed and does not stop the other devices", async () => {
@@ -202,13 +229,13 @@ describe("runStaleNudge — outcomes (001 §8.5)", () => {
       return "ok";
     };
     const result = await run();
-    expect(result).toEqual({ enabled: true, evaluated: 2, due: 2, sent: 1, failed: 1 });
+    expect(result).toEqual({ enabled: true, evaluated: 2, due: 2, sent: 1, failed: 1, skipped: 0 });
   });
 
   it("the result carries counts only", async () => {
     const { deviceRepo, run } = setup();
     deviceRepo.seed("u1", device("d1"));
     const result = await run();
-    expect(Object.keys(result).sort()).toEqual(["due", "enabled", "evaluated", "failed", "sent"]);
+    expect(Object.keys(result).sort()).toEqual(["due", "enabled", "evaluated", "failed", "sent", "skipped"]);
   });
 });

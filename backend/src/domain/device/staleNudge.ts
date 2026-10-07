@@ -50,14 +50,17 @@ export function isNudgeDue(device: NudgeCandidate, now: Date): boolean {
   if (!device.pushToken || device.pushInvalid) return false;
 
   const quietMs = now.getTime() - new Date(device.lastSeenAt ?? device.registeredAt).getTime();
+  // A corrupt stored timestamp fails closed: no nudge rather than a wrong one.
+  if (Number.isNaN(quietMs)) return false;
   // 4. quiet strictly longer than 120 min
   if (quietMs <= NUDGE_QUIET_MINUTES * MINUTE_MS) return false;
   // 5. not given up: quiet at most 7 days
   if (quietMs > NUDGE_GIVE_UP_DAYS * DAY_MS) return false;
   // 6. rate limit: at most one per 24 h
-  const sinceNudgeMs =
-    device.lastNudgedAt === undefined ? Infinity : now.getTime() - new Date(device.lastNudgedAt).getTime();
-  if (sinceNudgeMs < NUDGE_RATE_LIMIT_HOURS * HOUR_MS) return false;
+  if (device.lastNudgedAt !== undefined) {
+    const sinceNudgeMs = now.getTime() - new Date(device.lastNudgedAt).getTime();
+    if (Number.isNaN(sinceNudgeMs) || sinceNudgeMs < NUDGE_RATE_LIMIT_HOURS * HOUR_MS) return false;
+  }
   // 7. quiet hours: [08:00, 21:00) Europe/Brussels
   const hour = localHour(now);
   return hour >= WINDOW_START_HOUR && hour < WINDOW_END_HOUR;
@@ -78,15 +81,18 @@ export interface StaleNudgeResult {
   due: number;
   sent: number;
   failed: number;
+  /** Lost claims (412/404: another run won, or the device was removed) — so
+   * sent + failed + skipped === due. */
+  skipped: number;
 }
 
 export async function runStaleNudge(deps: StaleNudgeDeps): Promise<StaleNudgeResult> {
   if (deps.enabledSetting !== STALE_NUDGE_ENABLED_VALUE) {
-    return { enabled: false, evaluated: 0, due: 0, sent: 0, failed: 0 };
+    return { enabled: false, evaluated: 0, due: 0, sent: 0, failed: 0, skipped: 0 };
   }
   const now = deps.clock.now();
   const devices = await deps.deviceRepo.listAllDevices();
-  const result: StaleNudgeResult = { enabled: true, evaluated: devices.length, due: 0, sent: 0, failed: 0 };
+  const result: StaleNudgeResult = { enabled: true, evaluated: devices.length, due: 0, sent: 0, failed: 0, skipped: 0 };
 
   for (const device of devices) {
     if (!isNudgeDue(device, now)) continue;
@@ -94,8 +100,17 @@ export async function runStaleNudge(deps: StaleNudgeDeps): Promise<StaleNudgeRes
     try {
       // Claim BEFORE the send (011 §4.2): a crash in between loses one nudge, never duplicates
       // one. Update-only, so a device removed since the scan is neither nudged nor recreated.
-      const claimed = await deps.deviceRepo.claimNudge(device.ownerUserId, device.deviceId, now.toISOString());
-      if (!claimed) continue;
+      // ETag-conditional on the scanned version: of two overlapping runs only one wins.
+      const claimed = await deps.deviceRepo.claimNudge(
+        device.ownerUserId,
+        device.deviceId,
+        now.toISOString(),
+        device.etag as string,
+      );
+      if (!claimed) {
+        result.skipped += 1;
+        continue;
+      }
       const outcome = await deps.pushSender.send({
         type: "STALE_NUDGE",
         // isNudgeDue guarantees a non-empty token.
