@@ -34,8 +34,17 @@ public final class AppCoordinator: ObservableObject {
     /// the app target passes a `UserDefaultsPendingLinkStore`-backed slot.
     public let pendingLinks: PendingLinkSlot
 
-    /// specs/010 §1.4 (I64 seam) — while `true`, links are stored rather than navigated.
+    /// specs/010 §1.4 — while `true`, links are stored rather than navigated. Driven by
+    /// `setLocked(_:)` (called from `AppLockController`'s `onLockChanged`).
     public var isLocked = false
+
+    /// specs/010 §1.4 "Deep links while locked go through the §1.3 pending slot and replay after
+    /// unlock": locking only flips the flag (the stack is untouched); unlocking replays the pending
+    /// link, which itself waits if launch resolution has not finished.
+    public func setLocked(_ locked: Bool) {
+        isLocked = locked
+        if !locked { replayPendingLinkIfPossible() }
+    }
 
     public init(
         route: AppRoute = .launching,

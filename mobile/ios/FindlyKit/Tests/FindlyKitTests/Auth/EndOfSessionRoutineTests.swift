@@ -36,6 +36,7 @@ struct EndOfSessionRoutineTests {
             appVersionTracker: InMemoryAppVersionRegistrationTracker(),
             exportArtifactStore: exportArtifactStore,
             pendingLinks: PendingLinkSlot(store: InMemoryPendingLinkStore()),
+            appLock: AppLockController(authenticator: FakeAppLockAuthenticator()),
             wipeLocalState: {}
         )
 
@@ -57,6 +58,7 @@ struct EndOfSessionRoutineTests {
             appVersionTracker: appVersionTracker,
             exportArtifactStore: InMemoryExportArtifactStore(),
             pendingLinks: PendingLinkSlot(store: InMemoryPendingLinkStore()),
+            appLock: AppLockController(authenticator: FakeAppLockAuthenticator()),
             wipeLocalState: {}
         )
 
@@ -76,6 +78,7 @@ struct EndOfSessionRoutineTests {
             appVersionTracker: InMemoryAppVersionRegistrationTracker(),
             exportArtifactStore: InMemoryExportArtifactStore(),
             pendingLinks: PendingLinkSlot(store: InMemoryPendingLinkStore()),
+            appLock: AppLockController(authenticator: FakeAppLockAuthenticator()),
             wipeLocalState: { await recorder.wipe() }
         )
 
@@ -113,6 +116,7 @@ struct EndOfSessionRoutineTests {
             appVersionTracker: InMemoryAppVersionRegistrationTracker(),
             exportArtifactStore: exportArtifactStore,
             pendingLinks: PendingLinkSlot(store: InMemoryPendingLinkStore()),
+            appLock: AppLockController(authenticator: FakeAppLockAuthenticator()),
             wipeLocalState: { await recorder.wipe() },
             options: .init(clearsStoredSession: false)
         )
@@ -140,6 +144,7 @@ struct EndOfSessionRoutineTests {
             appVersionTracker: appVersionTracker,
             exportArtifactStore: InMemoryExportArtifactStore(),
             pendingLinks: PendingLinkSlot(store: InMemoryPendingLinkStore()),
+            appLock: AppLockController(authenticator: FakeAppLockAuthenticator()),
             wipeLocalState: { await recorder.wipe() }
         )
 
@@ -157,6 +162,7 @@ struct EndOfSessionRoutineTests {
             appVersionTracker: InMemoryAppVersionRegistrationTracker(),
             exportArtifactStore: InMemoryExportArtifactStore(),
             pendingLinks: PendingLinkSlot(store: InMemoryPendingLinkStore()),
+            appLock: AppLockController(authenticator: FakeAppLockAuthenticator()),
             wipeLocalState: { await recorder.wipe() }
         )
 
@@ -179,11 +185,42 @@ struct EndOfSessionRoutineTests {
             appVersionTracker: InMemoryAppVersionRegistrationTracker(),
             exportArtifactStore: InMemoryExportArtifactStore(),
             pendingLinks: slot,
+            appLock: AppLockController(authenticator: FakeAppLockAuthenticator()),
             wipeLocalState: {}
         )
 
         #expect(store.load() == nil)
         let ready = LinkActState(isSignedIn: true, isLaunchResolved: true, isLocked: false)
         #expect(slot.take(ready) == nil)
+    }
+
+    // MARK: - specs/010 §1.4 (I64) — "The setting and the background timestamp are cleared by the
+    // end-of-session local wipe"
+
+    @Test func run_clearsTheAppLockSettingAndBackgroundTimestamp_andDropsALockedState() async {
+        let store = InMemoryAppLockSettingsStore()
+        store.isEnabled = true
+        store.backgroundedAt = Date()
+        let appLock = AppLockController(authenticator: FakeAppLockAuthenticator(), store: store, isSignedIn: { true })
+        appLock.start(scenePhase: .active)
+        #expect(appLock.isLocked)
+        let auth = FakeAuthProviding()
+        auth.currentUserId = "u1"
+
+        await EndOfSessionRoutine.run(
+            currentUserId: auth.currentUserId,
+            authProvider: auth,
+            deviceIdProvider: InMemoryDeviceIdProvider(),
+            appVersionTracker: InMemoryAppVersionRegistrationTracker(),
+            exportArtifactStore: InMemoryExportArtifactStore(),
+            pendingLinks: PendingLinkSlot(store: InMemoryPendingLinkStore()),
+            appLock: appLock,
+            wipeLocalState: {}
+        )
+
+        #expect(!store.isEnabled)
+        #expect(store.backgroundedAt == nil)
+        #expect(!appLock.isEnabled)
+        #expect(!appLock.isLocked, "the next person to sign in must not meet the previous user's lock screen")
     }
 }

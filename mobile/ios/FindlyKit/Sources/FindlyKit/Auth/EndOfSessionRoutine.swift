@@ -73,6 +73,7 @@ public enum EndOfSessionRoutine {
         appVersionTracker: AppVersionRegistrationTracking,
         exportArtifactStore: ExportArtifactStoring,
         pendingLinks: PendingLinkSlot,
+        appLock: AppLockController,
         wipeLocalState: () async -> Void,
         options: Options = Options()
     ) async {
@@ -87,6 +88,10 @@ public enum EndOfSessionRoutine {
         // specs/010 §1.3 (I63) — a join/invite link captured for one person must never replay for
         // the next person to sign in on this phone. Clears memory and `UserDefaults` alike.
         pendingLinks.clear()
+        // specs/010 §1.4 (I64) — the app-lock setting and background timestamp are cleared too, and a
+        // lock screen up for the previous user comes down, so the next person to sign in on this
+        // phone starts with the lock off.
+        appLock.endSession()
         // Independent of every clear above — no data dependency in either direction (A37 review,
         // Finding 3), so this may run in any position relative to them; kept here so the local wipe
         // always happens even when `authProvider` is `nil` and every step below is skipped.
