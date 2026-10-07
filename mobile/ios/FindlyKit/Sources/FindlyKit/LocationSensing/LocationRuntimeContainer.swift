@@ -58,6 +58,20 @@ public final class LocationRuntimeContainer {
     /// on the account-deletion path, instead of a documented-but-uncalled promise.
     public let permissionDisclosureStore: PermissionDisclosureStateStoring
 
+    /// specs/011 §3 (I62) — the force-quit explainer's two local keys, cleared by `wipeLocalState()`.
+    public let forceQuitExplainerStore: ForceQuitExplainerStoring
+
+    /// specs/011 §3 (I62) — call whenever the Family Map appears. `true` means the explainer is due (it stays due
+    /// until acknowledged); the termination flag is cleared in every branch.
+    public func shouldShowForceQuitExplainer() -> Bool {
+        ForceQuitExplainerPresenter.evaluate(store: forceQuitExplainerStore, settings: stateStore.current())
+    }
+
+    /// The user tapped "Got it" — only now is the one-time explainer recorded as shown.
+    public func acknowledgeForceQuitExplainer() {
+        ForceQuitExplainerPresenter.acknowledge(store: forceQuitExplainerStore)
+    }
+
     /// specs/009-device-runtime.md §3.4, specs/008-privacy-endpoints.md §4.4 (I26) — held as a
     /// property (previously a bare `init` parameter used only to build `syncRunner`, unreachable
     /// from anywhere else in this class) so `wipeLocalState()` below can be `clear()`'s one real
@@ -142,6 +156,7 @@ public final class LocationRuntimeContainer {
         geofenceEventStore: GeofenceEventQueueStoring = InMemoryGeofenceEventQueueStore(),
         lastQueuedFixAtStore: LastQueuedFixAtStoring = InMemoryLastQueuedFixAtStore(),
         permissionDisclosureStore: PermissionDisclosureStateStoring = InMemoryPermissionDisclosureStore(),
+        forceQuitExplainerStore: ForceQuitExplainerStoring = InMemoryForceQuitExplainerStore(),
         familyContextCache: FamilyContextCache? = nil,
         isPermissionGranted: @escaping () -> Bool = { false },
         // I57 (specs/004 §7 "Battery level") — feeds `GeofenceTransitionHandler`'s `batteryPct`. The
@@ -159,6 +174,7 @@ public final class LocationRuntimeContainer {
         self.geofenceConfigStore = geofenceConfigStore
         self.geofenceRegistrar = geofenceRegistrar
         self.permissionDisclosureStore = permissionDisclosureStore
+        self.forceQuitExplainerStore = forceQuitExplainerStore
         self.lastQueuedFixAtStore = lastQueuedFixAtStore
         self.familyContextCache = familyContextCache
 
@@ -592,6 +608,8 @@ public final class LocationRuntimeContainer {
         await geofenceEventQueue.clearAll()
         geofenceConfigStore.clear()
         permissionDisclosureStore.clear()
+        // specs/011 §3 (I62) — both force-quit-explainer keys belong to the end-of-session wipe.
+        forceQuitExplainerStore.clear()
         // specs/010-app-shell-and-screen-ux.md §1.2 (I34 review fix) — see this property's doc for
         // why a signed-out-then-different-user-signs-in sequence needed this: the drawer header
         // must never keep showing the previous caller's family name/display name/role.

@@ -48,6 +48,14 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         return true
     }
 
+    /// specs/011-device-lifecycle-and-staleness.md §3 (I62) — iOS delivers this when the user swipes
+    /// away an app that is still running in the background (the presence session guarantees that
+    /// for intervals <= 30), not for a suspended app or an OS memory kill. It has a few seconds
+    /// and no network, so it ONLY writes the local flag; the next launch decides whether to explain.
+    func applicationWillTerminate(_ application: UIApplication) {
+        UserDefaultsForceQuitExplainerStore().setTerminationFlag()
+    }
+
     func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
         // I33 — Firebase method swizzling is ON (default), so Firebase's own interceptor forwards
         // this token to BOTH Messaging and Auth, and it does so crash-safely because that
