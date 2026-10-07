@@ -97,22 +97,7 @@ public struct PermissionDisclosureScreen: View {
 
     /// The three things a disclosure has to answer: what is collected, what it is used for, and who
     /// can see it. Written plainly — a family member reads this, not a lawyer.
-    private var points: [String] {
-        switch kind {
-        case .foreground:
-            return [
-                "Findly collects this device's location so it can appear on your family's map.",
-                "Only people in the families and groups you have joined can see it. It is never sold or shared with anyone else.",
-                "You can pause sharing at any time in Settings, and delete your history and account from inside the app.",
-            ]
-        case .background:
-            return [
-                "To keep the map up to date, Findly needs to collect your location even when the app is closed or not in use.",
-                "This is what lets your family see where you are without you opening the app, and what makes arrival and departure alerts work for places like home or school.",
-                "Background updates follow the interval you choose in Settings, and stop entirely when you pause sharing.",
-            ]
-        }
-    }
+    private var points: [String] { PermissionDisclosureCopy.points(for: kind) }
 
     private var closing: String {
         switch kind {

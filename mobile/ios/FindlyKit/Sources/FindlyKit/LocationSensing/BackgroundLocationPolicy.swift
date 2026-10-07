@@ -22,6 +22,13 @@ public enum BackgroundLocationPolicy {
         authorization == .always
     }
 
+    /// specs/009 §3.4 / §7 "Ongoing visibility" (H12, I62; 000 §D20): the blue background-location
+    /// indicator is shown on every manager that may run in the background — the iOS counterpart of
+    /// Android's persistent foreground-service notification. Same predicate as background updates.
+    public static func showsBackgroundLocationIndicator(for authorization: LocationAuthorization) -> Bool {
+        allowsBackgroundLocationUpdates(for: authorization)
+    }
+
     /// specs/009 §3.4 "Significant-location-change monitoring": "MUST be started only with Always
     /// authorization (When-In-Use cannot wake a suspended app; starting it earlier only misleads
     /// the permission banner logic)." Also governs `startMonitoringVisits()` (§3.4's second cheap
