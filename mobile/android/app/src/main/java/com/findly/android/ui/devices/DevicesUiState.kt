@@ -30,6 +30,17 @@ data class DeviceCardUi(
      * "Battery settings" action and vendor-OEM link (009 §3.2) are Android-runtime-local settings,
      * so they only make sense on this card, never a family member's remote device. */
     val isThisDevice: Boolean = false,
+    /** 001 §4.2 / 011 §2 — server-computed; renders the Inactive chip. */
+    val isDormant: Boolean = false,
+    /** 001 §4.1 / 011 §4.4 — the owner's reminder opt-out. */
+    val staleNudgeEnabled: Boolean = true,
+    /** True when the signed-in caller owns this device (`ownerUserId` == caller uid) — gates the
+     * nudge toggle (011 §4.4) and, with the parent role, the Remove action (011 §1.1). */
+    val isOwnedByCaller: Boolean = false,
+    /** 011 §1.1, computed by [DeviceLifecyclePolicy.canRemove]. */
+    val canRemove: Boolean = false,
+    /** True while the Remove confirmation dialog is open for this card. */
+    val isConfirmingRemoval: Boolean = false,
 )
 
 /**

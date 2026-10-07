@@ -457,9 +457,12 @@ fun FindlyNavHost(
             // screen visit, even after sign-in completes. DevicesStateHolder now calls the
             // supplier fresh on every load().
             val devicesViewModel: DevicesViewModel = viewModel(
-                factory = DevicesViewModelFactory(container.findlyApiClient, isParent) {
-                    container.localDeviceIdOrNull()
-                },
+                factory = DevicesViewModelFactory(
+                    container.findlyApiClient,
+                    isParent,
+                    localDeviceId = { container.localDeviceIdOrNull() },
+                    localUserId = { container.localUserIdOrNull() },
+                ),
             )
             // A41 (specs/010 §4.2, specs/009 §3.2): Android-runtime-local settings (which OS
             // dialog/settings page to open, whether this OEM needs the dontkillmyapp.com link) -

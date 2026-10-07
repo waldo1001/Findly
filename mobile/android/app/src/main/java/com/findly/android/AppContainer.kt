@@ -391,6 +391,10 @@ class AppContainer(context: Context) {
      * when nobody is signed in (mirrors [currentDeviceIdOrNull]'s own doc). */
     fun localDeviceIdOrNull(): String? = currentDeviceIdOrNull()
 
+    /** A61 (specs/011 §1.1, §4.4): the signed-in caller's uid — matches a device's `ownerUserId`;
+     * `null` when nobody is signed in. */
+    fun localUserIdOrNull(): String? = (authProvider.authState.value as? AuthState.SignedIn)?.uid
+
     /** True when this device's configured interval needs background reporting (003 §11.3). */
     suspend fun requiresBackgroundLocation(): Boolean =
         deviceSettingsStateStore.current()?.trackingEnabled != false

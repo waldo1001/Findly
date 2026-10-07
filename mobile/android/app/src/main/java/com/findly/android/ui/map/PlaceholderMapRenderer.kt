@@ -41,7 +41,7 @@ class PlaceholderMapRenderer : MapRenderer {
         sheetDetent: FindlyBottomSheetDetent,
     ) {
         val markers = members.flatMap { member ->
-            member.devices.filter { it.hasLocation }.map { device -> member to device }
+            member.shownDevices.filter { it.hasLocation }.map { device -> member to device }
         }
 
         Column(

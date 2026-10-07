@@ -14,6 +14,8 @@ import com.findly.android.network.ports.DevicesApi
 class FakeDevicesApi : DevicesApi {
     val registerDeviceCalls = mutableListOf<RegisterDeviceRequestDto>()
     val updateDeviceCalls = mutableListOf<Pair<String, UpdateDeviceRequestDto>>()
+    val deleteDeviceCalls = mutableListOf<String>()
+    var deleteDeviceResult: ApiResult<Unit> = ApiResult.Success(Unit, features = null)
     var listDevicesCallCount = 0
         private set
 
@@ -65,5 +67,10 @@ class FakeDevicesApi : DevicesApi {
     override suspend fun updateDevice(deviceId: String, request: UpdateDeviceRequestDto): ApiResult<DeviceDto> {
         updateDeviceCalls.add(deviceId to request)
         return updateDeviceResult
+    }
+
+    override suspend fun deleteDevice(deviceId: String): ApiResult<Unit> {
+        deleteDeviceCalls.add(deviceId)
+        return deleteDeviceResult
     }
 }

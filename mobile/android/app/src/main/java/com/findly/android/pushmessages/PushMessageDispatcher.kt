@@ -29,6 +29,7 @@ class PushMessageDispatcher(
             is PushMessageType.GeofenceEvent -> geofenceEventHandler.handle(data)
             is PushMessageType.LocateRequest,
             is PushMessageType.GeofenceConfigChanged,
+            is PushMessageType.StaleNudge,
             is PushMessageType.Unrecognized,
             -> Unit
         }
