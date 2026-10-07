@@ -220,6 +220,7 @@ struct RootView: View {
             deviceIdProvider: deviceIdProvider,
             appVersionTracker: appVersionTracker,
             exportArtifactStore: exportArtifactStore,
+            pendingLinks: coordinator.pendingLinks,
             wipeLocalState: { await locationRuntimeContainer.wipeLocalState() },
             options: .init(clearsStoredSession: false)
         )
@@ -509,6 +510,7 @@ struct RootView: View {
                         deviceIdProvider: deviceIdProvider,
                         exportArtifactStore: exportArtifactStore,
                         appVersionTracker: appVersionTracker,
+                        pendingLinks: coordinator.pendingLinks,
                         // Post-review (security review, High finding): the ONE consolidated
                         // LocationRuntimeContainer.wipeLocalState() — covers the fix queue,
                         // geofence-event queue, cached geofence config/ETag, cached device

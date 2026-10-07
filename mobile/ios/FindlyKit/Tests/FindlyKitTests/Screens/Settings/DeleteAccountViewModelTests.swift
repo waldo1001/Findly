@@ -27,12 +27,13 @@ struct DeleteAccountViewModelTests {
         deviceIdProvider: DeviceIdProviding = InMemoryDeviceIdProvider(),
         exportArtifactStore: InMemoryExportArtifactStore = InMemoryExportArtifactStore(),
         appVersionTracker: AppVersionRegistrationTracking = InMemoryAppVersionRegistrationTracker(),
+        pendingLinks: PendingLinkSlot? = nil,
         wipeLocalState: @escaping () async -> Void = {}
     ) -> DeleteAccountViewModel {
         DeleteAccountViewModel(
             apiClient: api, authProvider: auth, deviceIdProvider: deviceIdProvider,
             exportArtifactStore: exportArtifactStore, appVersionTracker: appVersionTracker,
-            wipeLocalState: wipeLocalState
+            pendingLinks: pendingLinks ?? PendingLinkSlot(store: InMemoryPendingLinkStore()), wipeLocalState: wipeLocalState
         )
     }
 

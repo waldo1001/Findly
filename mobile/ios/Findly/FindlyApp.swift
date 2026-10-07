@@ -118,7 +118,10 @@ struct FindlyApp: App {
         //
         // So: nothing in this initializer may touch `FirebaseAuth`. `configureFirebaseIfNeeded()`
         // above is fine — it touches `FirebaseApp` only and constructs no `Auth`.
-        let coordinator = AppCoordinator(joinLinkHost: config.joinLinkHost)
+        // specs/010 §1.3 (I63) — the pending join/invite link survives process death in
+        // app-private `UserDefaults`; `EndOfSessionRoutine` clears it (below).
+        let pendingLinks = PendingLinkSlot(store: UserDefaultsPendingLinkStore())
+        let coordinator = AppCoordinator(joinLinkHost: config.joinLinkHost, pendingLinks: pendingLinks)
         _coordinator = StateObject(wrappedValue: coordinator)
 
         // specs/010-app-shell-and-screen-ux.md §1.2 — declared as a local here (same reasoning as
@@ -312,6 +315,7 @@ struct FindlyApp: App {
                     deviceIdProvider: deviceIdProvider,
                     appVersionTracker: appVersionTracker,
                     exportArtifactStore: exportArtifactStore,
+                    pendingLinks: pendingLinks,
                     wipeLocalState: { await LocationRuntimeContainerHolder.shared.container?.wipeLocalState() }
                 )
                 await coordinator?.showSignIn()

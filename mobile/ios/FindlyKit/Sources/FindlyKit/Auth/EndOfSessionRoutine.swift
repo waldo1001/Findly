@@ -72,6 +72,7 @@ public enum EndOfSessionRoutine {
         deviceIdProvider: DeviceIdProviding,
         appVersionTracker: AppVersionRegistrationTracking,
         exportArtifactStore: ExportArtifactStoring,
+        pendingLinks: PendingLinkSlot,
         wipeLocalState: () async -> Void,
         options: Options = Options()
     ) async {
@@ -83,6 +84,9 @@ public enum EndOfSessionRoutine {
         // export artifact must not outlive the session it was written for. Unconditional as of
         // I45b — no call site has deferred this since I44.
         exportArtifactStore.removeCurrentArtifact()
+        // specs/010 §1.3 (I63) — a join/invite link captured for one person must never replay for
+        // the next person to sign in on this phone. Clears memory and `UserDefaults` alike.
+        pendingLinks.clear()
         // Independent of every clear above — no data dependency in either direction (A37 review,
         // Finding 3), so this may run in any position relative to them; kept here so the local wipe
         // always happens even when `authProvider` is `nil` and every step below is skipped.
