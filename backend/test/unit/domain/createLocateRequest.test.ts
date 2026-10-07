@@ -627,4 +627,19 @@ describe("domain/locate/createLocateRequest", () => {
 
     expect(await deps.usageRepo.get(FAMILY_ID, "locateRequests", "2026-07-19")).toBe(1);
   });
+
+  it("an invalidToken for a target device removed concurrently still yields pushFailed but does NOT resurrect the device", async () => {
+    const deps = buildDeps();
+    await seedFamily(deps);
+    deps.deviceRepo.seed(TARGET_UID, device({ pushToken: "fcm-token-a" }));
+    deps.pushSender.send = async () => {
+      await deps.deviceRepo.deleteDevice(TARGET_UID, DEVICE_A); // concurrent DELETE
+      return "invalidToken";
+    };
+
+    const result = await createLocateRequest(baseInput(), deps);
+
+    expect(result.status).toBe("pushFailed");
+    expect(await deps.deviceRepo.getDevice(TARGET_UID, DEVICE_A)).toBeNull();
+  });
 });

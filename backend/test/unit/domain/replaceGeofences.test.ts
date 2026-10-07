@@ -387,4 +387,18 @@ describe("domain/geofence/replaceGeofences", () => {
 
     expect(result.version).toBe(1);
   });
+
+  it("an invalidToken for a device removed concurrently (before the pushInvalid write) does NOT resurrect it", async () => {
+    const deps = buildDeps();
+    await seedFamily(deps);
+    deps.deviceRepo.seed("u1", device({ deviceId: "device-a" }));
+    deps.pushSender.send = async () => {
+      await deps.deviceRepo.deleteDevice("u1", "device-a"); // concurrent DELETE /devices/{id}
+      return "invalidToken";
+    };
+
+    await replaceGeofences(baseInput(), deps);
+
+    expect(await deps.deviceRepo.getDevice("u1", "device-a")).toBeNull();
+  });
 });
