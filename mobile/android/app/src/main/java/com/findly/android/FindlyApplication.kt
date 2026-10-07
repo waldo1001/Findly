@@ -2,6 +2,7 @@ package com.findly.android
 
 import android.app.Application
 import androidx.work.Configuration
+import com.findly.android.pushmessages.SharingStatusChannel
 
 /**
  * `Configuration.Provider` switches WorkManager to on-demand initialization (androidx.work 2.6+)
@@ -32,6 +33,8 @@ class FindlyApplication : Application(), Configuration.Provider {
     override fun onCreate() {
         super.onCreate()
         container = AppContainer(this)
+        // specs/011 §4.4: the STALE_NUDGE channel must exist before the first nudge arrives.
+        SharingStatusChannel.ensureCreated(this)
         // MUST come after the assignment above, never from inside AppContainer's constructor:
         // start() touches WorkManager, whose on-demand initialization calls straight back into
         // `workManagerConfiguration` below and reads `container`. See AppContainer.start()'s doc —
