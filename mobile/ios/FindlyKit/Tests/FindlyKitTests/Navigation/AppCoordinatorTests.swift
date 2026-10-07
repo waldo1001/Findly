@@ -365,15 +365,17 @@ struct AppCoordinatorTests {
         #expect(coordinator.canGoBack == false)
     }
 
-    @Test func deepLink_arrivingBeforeLaunchResolves_isNotLostBehindLaunching() {
-        // A cold start via a join link can deliver `onOpenURL` before `.task` runs.
+    @Test func deepLink_arrivingBeforeLaunchResolves_isStoredNotNavigated_andReplaysAfterResolution() {
+        // specs/010 §1.3 - stored (never navigated, never lost), replayed above the resolved root.
+        // Full matrix: `AppCoordinatorPendingLinkTests`.
         let coordinator = AppCoordinator(joinLinkHost: "join.example.test")
 
         coordinator.handleDeepLink(URL(string: "https://join.example.test/g#7f3k-9qrz")!)
+        #expect(coordinator.route == .launching)
 
+        coordinator.resolveLaunch(destination: .familyMap)
         #expect(coordinator.route == .groupJoin(prefillCode: "7F3K9QRZ"))
-        // Backing out of the deep-linked screen must never reveal the splash.
         coordinator.pop()
-        #expect(coordinator.route != .launching)
+        #expect(coordinator.route == .liveMap)
     }
 }
