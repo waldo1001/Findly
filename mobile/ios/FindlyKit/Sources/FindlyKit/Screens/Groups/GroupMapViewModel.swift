@@ -16,6 +16,9 @@ public final class GroupMapViewModel: ObservableObject {
         case loaded([GroupMemberLocation])
         case error(String)
         case expired
+        /// specs/010 §2.1 / §3.6 — a confirmed `404 PROFILE_NOT_FOUND` on a (re)load. Group screens
+        /// need a PROFILE, not a family, so `FAMILY_NOT_FOUND` is deliberately NOT routed here.
+        case routeToOnboarding(OnboardingVariant)
     }
 
     @Published public private(set) var state: State = .loading
@@ -43,36 +46,107 @@ public final class GroupMapViewModel: ObservableObject {
     public let groupId: String
     private var cameraPolicyState = MapCameraPolicyState.initial
     private var cameraSequence = 0
+    private let refreshInterval: Duration
+    private let refreshSleep: (Duration) async -> Void
 
-    public init(apiClient: FindlyAPIClient, groupId: String) {
+    /// specs/010 §3.2/§3.6 (rows A55/I59) — mirrors `LiveMapViewModel.refreshDriver` exactly: owns
+    /// WHEN the group map refreshes and runs each refresh through `performRefresh`.
+    public private(set) lazy var refreshDriver = MapRefreshDriver(
+        interval: refreshInterval,
+        sleep: refreshSleep,
+        adopted: { [weak self] in self?.showRefreshing() },
+        perform: { [weak self] trigger in await self?.performRefresh(trigger) }
+    )
+
+    public init(
+        apiClient: FindlyAPIClient,
+        groupId: String,
+        refreshInterval: Duration = MapRefreshDriver.defaultInterval,
+        refreshSleep: @escaping (Duration) async -> Void = MapRefreshDriver.liveSleep
+    ) {
         self.apiClient = apiClient
         self.groupId = groupId
+        self.refreshInterval = refreshInterval
+        self.refreshSleep = refreshSleep
     }
 
+    /// An EXPLICIT load (Refresh / Retry) — mirrors `LiveMapViewModel.load()`: goes through
+    /// `refreshDriver` so the §3.6 one-request-in-flight rule covers it, shows `.loading` while it
+    /// runs and reports its own failure; if an automatic fetch is already running it ADOPTS it (no
+    /// second request, `showRefreshing()` now, the failure reported as its own).
     public func load() async {
-        state = .loading
+        await refreshDriver.refresh()
+    }
+
+    /// One fetch of the group roster for `trigger` — mirrors `LiveMapViewModel.performRefresh`
+    /// (specs/010 §3.2/§3.6).
+    ///
+    /// A CONFIRMED STATE CHANGE is not a failed refresh, whatever triggered the fetch (§3.6; 001
+    /// §12.10): each surfaces exactly as on a first load and ENDS polling, because every later poll
+    /// would get the same answer —
+    /// - `410 GROUP_EXPIRED` → `.expired` (005 §2.3: the screen swaps to "This group has ended");
+    /// - `404 GROUP_NOT_FOUND` (a removed member, a deleted or swept group) → the first-load error
+    ///   outcome, `.error` (its Retry still works — a tap is not polling);
+    /// - `404 PROFILE_NOT_FOUND` → route to Onboarding (010 §2.1). Group screens need a profile, not
+    ///   a family, so `FAMILY_NOT_FOUND` is deliberately NOT here: it is an ordinary failure.
+    private func performRefresh(_ trigger: MapRefreshPolicy.Trigger) async {
+        let hasDataOnScreen: Bool
+        if case .loaded = state { hasDataOnScreen = true } else { hasDataOnScreen = false }
+        if trigger == .explicit { state = .loading }
         do {
             let envelope = try await apiClient.getGroupLatestLocations(groupId: groupId)
-            let members = envelope.data.members
-            state = .loaded(members)
-
-            if let selectedUserId, !members.contains(where: { $0.userId == selectedUserId }) {
-                self.selectedUserId = nil
-            }
-
-            let points = Self.locatedPoints(in: members)
-            let hasPoints = !points.isEmpty
-            if MapCameraPolicy.shouldRunOnLoadOrRefresh(state: cameraPolicyState, hasPoints: hasPoints) {
-                emitCameraCommand(MapCameraPolicy.target(points: points))
-            }
-            cameraPolicyState = MapCameraPolicy.nextState(state: cameraPolicyState, hasPoints: hasPoints)
+            apply(envelope.data.members)
         } catch {
-            if (error as? APIError)?.serverCode == .groupExpired {
+            switch (error as? APIError)?.serverCode {
+            case .groupExpired:
                 state = .expired
-            } else {
+                refreshDriver.end()
+                return
+            case .groupNotFound:
                 state = .error(userFacingMessage(for: error))
+                refreshDriver.end()
+                return
+            case .profileNotFound:
+                state = .routeToOnboarding(.profileLess)
+                refreshDriver.end()
+                return
+            default:
+                break
+            }
+            // The trigger as it is NOW, not as the fetch started: an explicit Refresh that adopted
+            // this fetch while it ran upgraded it, and its failure must then surface (§3.6).
+            let effectiveTrigger = refreshDriver.inFlightTrigger ?? trigger
+            switch MapRefreshPolicy.failureOutcome(for: effectiveTrigger, hasDataOnScreen: hasDataOnScreen) {
+            case .keepLastData: break
+            case .showError: state = .error(userFacingMessage(for: error))
             }
         }
+    }
+
+    /// §3.6 adoption — mirrors `LiveMapViewModel.showRefreshing()`.
+    private func showRefreshing() {
+        switch state {
+        case .loaded, .error: state = .loading
+        case .loading, .expired, .routeToOnboarding: break
+        }
+    }
+
+    private func apply(_ members: [GroupMemberLocation]) {
+        // An unchanged 30 s poll must not republish (and so re-render) the roster sheet.
+        if state != .loaded(members) {
+            state = .loaded(members)
+        }
+
+        if let selectedUserId, !members.contains(where: { $0.userId == selectedUserId }) {
+            self.selectedUserId = nil
+        }
+
+        let points = Self.locatedPoints(in: members)
+        let hasPoints = !points.isEmpty
+        if MapCameraPolicy.shouldRunOnLoadOrRefresh(state: cameraPolicyState, hasPoints: hasPoints) {
+            emitCameraCommand(MapCameraPolicy.target(points: points))
+        }
+        cameraPolicyState = MapCameraPolicy.nextState(state: cameraPolicyState, hasPoints: hasPoints)
     }
 
     /// specs/010 §3.5, position-only mirror of `LiveMapViewModel.selectMember` — there is exactly

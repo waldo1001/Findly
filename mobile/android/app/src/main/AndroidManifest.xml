@@ -17,14 +17,13 @@
          implementation is A2; declared now for the same reason as above. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
-
-    <!-- A43 (specs/009-device-runtime.md §5.4/§6.2): GeofenceConfigSyncWorker's expedited-
-         WorkManager fallback for GEOFENCE_CONFIG_CHANGED runs as a "dataSync" foreground service
-         type on API 34+ (a GET /geofences fetch plus local re-registration bookkeeping, not a GPS
-         capture - never FOREGROUND_SERVICE_TYPE_LOCATION). Required alongside the matching
-         foregroundServiceType declared below, the same way FOREGROUND_SERVICE_LOCATION above
-         pairs with LocateRequestWorker's. -->
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- A50 (specs/003-android-client.md §11.6): FOREGROUND_SERVICE_LOCATION is the ONLY
+         foreground-service type permission. A43 added FOREGROUND_SERVICE_DATA_SYNC for
+         GeofenceConfigSyncWorker's expedited fallback, and from then on Play refused to commit
+         every release for want of a console declaration it cannot offer yet (handoff H13/H15).
+         That path runs as a foreground service only below API 31, where no type permission
+         exists; the type permissions are enforced only from API 34. ForegroundServiceTypeDeclarationTest
+         guards this. -->
 
     <!-- A40 (specs/009-device-runtime.md §3.2 "Restart and recovery"): lets
          BootCompletedReceiver restart the foreground presence service after a reboot / app
@@ -182,24 +181,24 @@
              fallback does not run in one of our own services — WorkManager runs expedited work
              inside its own androidx.work.impl.foreground.SystemForegroundService, and
              LocateRequestWorker.getForegroundInfo() (specs/009 §5.1 option 2) returns a
-             location-typed ForegroundInfo for it. Android 14+ hard-enforces that a typed
-             foreground service declare its type in the manifest entry that actually runs it, so
-             without this override the library's own service entry has no type at all and the
-             entire fallback throws — caught by lintVitalRelease, not by any local gate
-             (`SpecifyForegroundServiceType`). tools:node="merge" overrides the library's manifest
-             entry for this app the same way the androidx.startup provider below already does.
+             location-typed ForegroundInfo for it. The library's own service entry declares no
+             type, and from API 29 the platform rejects a startForeground() type that is not a
+             subset of the manifest's: without this override, LocateRequestWorker's location type
+             throws IllegalArgumentException on Android 10-11 (WorkManager's API 29 start path does
+             not catch it, so the process crashes) — caught by lintVitalRelease, not by any local
+             gate (`SpecifyForegroundServiceType`). From API 31 expedited work never runs here.
+             tools:node="merge" overrides the library's manifest entry for this app the same way
+             the androidx.startup provider below already does.
 
-             A43 (specs/009 §5.4/§6.2) adds "dataSync" to the same declaration: this single
-             SystemForegroundService instance is shared by every expedited worker in the app, and
-             GeofenceConfigSyncWorker.getForegroundInfo() now also runs through it with a
-             FOREGROUND_SERVICE_TYPE_DATA_SYNC ForegroundInfo (never "location" - that push type
-             does a GET /geofences fetch plus re-registration bookkeeping, not a GPS capture).
-             Android supports multiple declared types on one service via this pipe-separated list;
-             the type actually passed to startForeground() per call still comes from whichever
-             worker's own ForegroundInfo is running. -->
+             This single SystemForegroundService instance is shared by every expedited worker in
+             the app. GeofenceConfigSyncWorker (A43) also runs through it, with a TYPELESS
+             ForegroundInfo (A50, specs/003 §11.6): WorkManager only promotes expedited work to a
+             foreground service below API 31, where a type of 0 is accepted, and the dispatcher ORs
+             the types of every running worker, so a concurrent locate still starts as "location".
+             A43's "dataSync" entry here was removed together with its permission above. -->
         <service
             android:name="androidx.work.impl.foreground.SystemForegroundService"
-            android:foregroundServiceType="location|dataSync"
+            android:foregroundServiceType="location"
             tools:node="merge" />
 
         <!-- A11 (specs/009-device-runtime.md §6.3): GeofencingClient's transition callback

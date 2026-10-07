@@ -144,7 +144,12 @@ public final class LocationRuntimeContainer {
         permissionDisclosureStore: PermissionDisclosureStateStoring = InMemoryPermissionDisclosureStore(),
         familyContextCache: FamilyContextCache? = nil,
         isPermissionGranted: @escaping () -> Bool = { false },
-        batteryLevelProvider: @escaping () -> Int = { 100 },
+        // I57 (specs/004 §7 "Battery level") — feeds `GeofenceTransitionHandler`'s `batteryPct`. The
+        // shipping app passes the SAME closure it gives `SystemLocationProvider` (one shared
+        // `BatteryLevelMonitor`); this may be invoked off the main actor, so it must be thread-safe.
+        // The default is only the "no battery source wired" placeholder (`100`) for tests/non-device
+        // hosts — relying on it is the I57 defect.
+        batteryLevelProvider: @escaping () -> Int = { BatteryPercent.unknown },
         onReRegisterDevice: @escaping () async -> Void = {},
         onSignedOut: @escaping () async -> Void = {}
     ) {

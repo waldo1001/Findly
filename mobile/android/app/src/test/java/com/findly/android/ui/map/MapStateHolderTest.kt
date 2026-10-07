@@ -8,6 +8,9 @@ import com.findly.android.network.dto.LatestDeviceDto
 import com.findly.android.network.dto.LatestLocationsResponseDto
 import com.findly.android.network.dto.LatestMemberDto
 import com.findly.android.ui.onboarding.OnboardingVariant
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -18,6 +21,7 @@ import org.junit.Test
 
 /** [MapStateHolder] is pure Kotlin (specs/003-android-client.md §14) — tested with a
  * `backgroundScope` + [FakeLocationsApi], no Robolectric/emulator (001-api-contract.md §5.2). */
+@OptIn(ExperimentalCoroutinesApi::class)
 class MapStateHolderTest {
 
     @Test
@@ -362,6 +366,438 @@ class MapStateHolderTest {
         val after = (holder.state.value as MapUiState.Content).cameraCommand
         assertNotEquals(before?.seq, after?.seq)
         assertTrue(after?.target is MapCameraTarget.Bounds)
+    }
+
+    // specs/010-app-shell-and-screen-ux.md §3.6 (A55) — data freshness. The trigger policy itself
+    // (timer, visibility, in-flight gate) is MapRefreshControllerTest's; these pin how the holder
+    // wires it and the failure/camera/selection rules that ride on it.
+
+    private fun roster(vararg members: LatestMemberDto) = ApiResult.Success(
+        LatestLocationsResponseDto(members = members.toList()),
+        features = defaultFeatures(),
+    )
+
+    @Test
+    fun `while visible the roster is re-fetched every 30 s and the new positions replace the old`() = runTest {
+        val api = FakeLocationsApi().apply {
+            getLatestLocationsResult = roster(memberWithOneDevice("u1", "Eric", "d1", 51.0, 3.0, "2026-10-05T07:00:00Z"))
+        }
+        val holder = MapStateHolder(api, backgroundScope)
+        runCurrent()
+        holder.onVisible()
+        runCurrent()
+        assertEquals("first appearance: one fetch only", 1, api.getLatestLocationsCallCount)
+
+        api.getLatestLocationsResult = roster(memberWithOneDevice("u1", "Eric", "d1", 52.0, 4.0, "2026-10-05T07:14:00Z"))
+        advanceTimeBy(30_000)
+        runCurrent()
+
+        assertEquals(2, api.getLatestLocationsCallCount)
+        val device = (holder.state.value as MapUiState.Content).members.single().devices.single()
+        assertEquals(52.0, device.lat)
+        assertEquals("2026-10-05T07:14:00Z", device.recordedAt)
+    }
+
+    @Test
+    fun `nothing is fetched in the background - not before the map is visible, not after it is hidden`() = runTest {
+        val api = FakeLocationsApi()
+        val holder = MapStateHolder(api, backgroundScope)
+        runCurrent()
+        advanceTimeBy(5 * 60_000)
+        runCurrent()
+        assertEquals("never visible: only the initial load", 1, api.getLatestLocationsCallCount)
+
+        holder.onVisible()
+        holder.onHidden()
+        advanceTimeBy(5 * 60_000)
+        runCurrent()
+
+        assertEquals("hidden: no timer", 1, api.getLatestLocationsCallCount)
+    }
+
+    @Test
+    fun `a return to the foreground re-fetches the roster`() = runTest {
+        val api = FakeLocationsApi()
+        val holder = MapStateHolder(api, backgroundScope)
+        runCurrent()
+        holder.onVisible()
+        runCurrent()
+        holder.onHidden()
+        assertEquals(1, api.getLatestLocationsCallCount)
+
+        holder.onVisible()
+        runCurrent()
+
+        assertEquals(2, api.getLatestLocationsCallCount)
+    }
+
+    @Test
+    fun `a failed periodic refresh keeps the last data on screen with no error`() = runTest {
+        val api = FakeLocationsApi().apply {
+            getLatestLocationsResult = roster(memberWithOneDevice("u1", "Eric", "d1", 51.0, 3.0, "2026-10-05T07:00:00Z"))
+        }
+        val holder = MapStateHolder(api, backgroundScope)
+        runCurrent()
+        holder.onVisible()
+        runCurrent()
+        val before = holder.state.value as MapUiState.Content
+
+        api.getLatestLocationsResult = ApiResult.Failure(ApiError.NetworkFailure(RuntimeException("offline")))
+        advanceTimeBy(30_000)
+        runCurrent()
+
+        assertEquals(2, api.getLatestLocationsCallCount)
+        assertEquals("the failure surfaces nothing - same Content, same roster", before, holder.state.value)
+    }
+
+    @Test
+    fun `a failed foreground refresh also keeps the last data with no error`() = runTest {
+        val api = FakeLocationsApi().apply {
+            getLatestLocationsResult = roster(memberWithOneDevice("u1", "Eric", "d1", 51.0, 3.0, "2026-10-05T07:00:00Z"))
+        }
+        val holder = MapStateHolder(api, backgroundScope)
+        runCurrent()
+        holder.onVisible()
+        runCurrent()
+        holder.onHidden()
+        val before = holder.state.value
+
+        api.getLatestLocationsResult = ApiResult.Failure(ApiError.InternalError("boom", "r_1"))
+        holder.onVisible()
+        runCurrent()
+
+        assertEquals(2, api.getLatestLocationsCallCount)
+        assertEquals(before, holder.state.value)
+    }
+
+    @Test
+    fun `a failed first load shows the error state, and a later successful periodic refresh recovers from it`() = runTest {
+        val api = FakeLocationsApi().apply {
+            getLatestLocationsResult = ApiResult.Failure(ApiError.NetworkFailure(RuntimeException("offline")))
+        }
+        val holder = MapStateHolder(api, backgroundScope)
+        runCurrent()
+        assertTrue("only a FIRST load failure shows the error state", holder.state.value is MapUiState.Error)
+        holder.onVisible()
+        runCurrent()
+
+        advanceTimeBy(30_000)
+        runCurrent()
+        assertTrue("still failing: the error state stays, nothing else to show", holder.state.value is MapUiState.Error)
+
+        api.getLatestLocationsResult = roster(memberWithOneDevice("u1", "Eric", "d1", 51.0, 3.0, "2026-10-05T07:00:00Z"))
+        advanceTimeBy(30_000)
+        runCurrent()
+
+        assertTrue("the periodic retry recovered the screen", holder.state.value is MapUiState.Content)
+    }
+
+    @Test
+    fun `an explicit Refresh whose request fails still reports its own failure, even over existing data`() = runTest {
+        val api = FakeLocationsApi().apply {
+            getLatestLocationsResult = roster(memberWithOneDevice("u1", "Eric", "d1", 51.0, 3.0, "2026-10-05T07:00:00Z"))
+        }
+        val holder = MapStateHolder(api, backgroundScope)
+        runCurrent()
+        assertTrue(holder.state.value is MapUiState.Content)
+
+        api.getLatestLocationsResult = ApiResult.Failure(ApiError.InternalError("boom", "r_1"))
+        holder.refresh()
+
+        assertTrue(holder.state.value is MapUiState.Error)
+    }
+
+    @Test
+    fun `an explicit Refresh that arrives while a periodic fetch is in flight takes it over and reports its failure`() = runTest {
+        val api = FakeLocationsApi().apply {
+            getLatestLocationsResult = roster(memberWithOneDevice("u1", "Eric", "d1", 51.0, 3.0, "2026-10-05T07:00:00Z"))
+        }
+        val holder = MapStateHolder(api, backgroundScope)
+        runCurrent()
+        holder.onVisible()
+        runCurrent()
+
+        val gate = CompletableDeferred<Unit>()
+        api.getLatestLocationsGate = gate
+        advanceTimeBy(30_000)
+        runCurrent()
+        assertEquals("the timer fetch is held in flight", 2, api.getLatestLocationsCallCount)
+
+        holder.refresh() // the user taps Refresh: not queued, not a third request...
+        assertEquals(2, api.getLatestLocationsCallCount)
+        api.getLatestLocationsResult = ApiResult.Failure(ApiError.InternalError("boom", "r_1"))
+        gate.complete(Unit)
+        runCurrent()
+
+        // ...but it owns the outcome: its failure is reported rather than swallowed as a silent tick.
+        assertTrue(holder.state.value is MapUiState.Error)
+    }
+
+    @Test
+    fun `a trigger arriving while a fetch is in flight is dropped - one request at a time`() = runTest {
+        val api = FakeLocationsApi().apply { getLatestLocationsGate = CompletableDeferred() }
+        val holder = MapStateHolder(api, backgroundScope)
+        runCurrent()
+        holder.onVisible()
+        runCurrent()
+        assertEquals("the initial load is held in flight", 1, api.getLatestLocationsCallCount)
+
+        advanceTimeBy(30_000)
+        runCurrent()
+        holder.onHidden()
+        holder.onVisible()
+        runCurrent()
+
+        assertEquals("tick and foreground return both dropped", 1, api.getLatestLocationsCallCount)
+    }
+
+    @Test
+    fun `periodic refreshes never move the camera and never drop the selection`() = runTest {
+        val api = FakeLocationsApi().apply {
+            getLatestLocationsResult = roster(
+                memberWithOneDevice("u1", "Eric", "d1", 51.0, 3.0, "2026-10-05T07:00:00Z"),
+                memberWithOneDevice("u2", "Noor", "d2", 52.0, 4.0, "2026-10-05T07:00:00Z"),
+            )
+        }
+        val holder = MapStateHolder(api, backgroundScope)
+        runCurrent()
+        holder.onVisible()
+        holder.selectMember("u2")
+        val before = holder.state.value as MapUiState.Content
+        assertEquals("u2", before.selectedUserId)
+
+        // Every member moves a long way - exactly the data that used to yank the camera.
+        api.getLatestLocationsResult = roster(
+            memberWithOneDevice("u1", "Eric", "d1", 60.0, 20.0, "2026-10-05T07:30:00Z"),
+            memberWithOneDevice("u2", "Noor", "d2", 61.0, 21.0, "2026-10-05T07:30:00Z"),
+        )
+        advanceTimeBy(90_000) // three ticks
+        runCurrent()
+
+        assertEquals(4, api.getLatestLocationsCallCount)
+        val after = holder.state.value as MapUiState.Content
+        assertEquals("no refresh mints a camera command (010 §3.6/§3.4)", before.cameraCommand, after.cameraCommand)
+        assertEquals("u2", after.selectedUserId)
+        assertEquals(60.0, after.members.first { it.userId == "u1" }.devices.single().lat)
+    }
+
+    @Test
+    fun `a member selected while a fetch is in flight survives it, and so does the camera command the selection minted`() = runTest {
+        val api = FakeLocationsApi().apply {
+            getLatestLocationsResult = roster(
+                memberWithOneDevice("u1", "Eric", "d1", 51.0, 3.0, "2026-10-05T07:00:00Z"),
+                memberWithOneDevice("u2", "Noor", "d2", 52.0, 4.0, "2026-10-05T07:00:00Z"),
+            )
+        }
+        val holder = MapStateHolder(api, backgroundScope)
+        runCurrent()
+        holder.onVisible()
+        runCurrent()
+
+        val gate = CompletableDeferred<Unit>()
+        api.getLatestLocationsGate = gate
+        advanceTimeBy(30_000)
+        runCurrent()
+        assertEquals("the periodic fetch is held in flight", 2, api.getLatestLocationsCallCount)
+
+        holder.selectMember("u2") // the user taps a row while the request is out
+        val selected = holder.state.value as MapUiState.Content
+        assertEquals("u2", selected.selectedUserId)
+        assertEquals(MapCameraTarget.Center(52.0, 4.0, MapCamera.SINGLE_POINT_ZOOM), selected.cameraCommand?.target)
+
+        gate.complete(Unit)
+        runCurrent()
+
+        val after = holder.state.value as MapUiState.Content
+        assertEquals("the refresh must not erase the selection made meanwhile", "u2", after.selectedUserId)
+        assertEquals(
+            "nor swap the selection's camera command for an older one (the renderer would replay it)",
+            selected.cameraCommand,
+            after.cameraCommand,
+        )
+    }
+
+    @Test
+    fun `a confirmed PROFILE_NOT_FOUND on a periodic refresh still routes to Onboarding`() = runTest {
+        val api = FakeLocationsApi().apply {
+            getLatestLocationsResult = roster(memberWithOneDevice("u1", "Eric", "d1", 51.0, 3.0, "2026-10-05T07:00:00Z"))
+        }
+        val holder = MapStateHolder(api, backgroundScope)
+        runCurrent()
+        holder.onVisible()
+        runCurrent()
+
+        api.getLatestLocationsResult = ApiResult.Failure(ApiError.ProfileNotFound("gone", "r_9"))
+        advanceTimeBy(30_000)
+        runCurrent()
+
+        // 010 §2.1: a confirmed state change (the family vanished under an open map), not a
+        // failed refresh - the dead-end routing rule applies to every load, whichever trigger.
+        assertEquals(MapUiState.RouteToOnboarding(OnboardingVariant.ProfileLess), holder.state.value)
+    }
+
+    @Test
+    fun `a confirmed state change on a periodic refresh ends polling - no tick and no foreground return fetches again`() = runTest {
+        listOf(
+            ApiResult.Failure(ApiError.ProfileNotFound("gone", "r_9")) to OnboardingVariant.ProfileLess,
+            ApiResult.Failure(ApiError.FamilyNotFound("gone", "r_9")) to OnboardingVariant.FamilyLess,
+        ).forEach { (failure, variant) ->
+            val api = FakeLocationsApi().apply {
+                getLatestLocationsResult = roster(memberWithOneDevice("u1", "Eric", "d1", 51.0, 3.0, "2026-10-05T07:00:00Z"))
+            }
+            val holder = MapStateHolder(api, backgroundScope)
+            runCurrent()
+            holder.onVisible()
+            runCurrent()
+
+            api.getLatestLocationsResult = failure
+            advanceTimeBy(30_000)
+            runCurrent()
+            assertEquals(MapUiState.RouteToOnboarding(variant), holder.state.value)
+            val callsWhenRouted = api.getLatestLocationsCallCount
+
+            advanceTimeBy(10 * 60_000)
+            runCurrent()
+            holder.onHidden()
+            holder.onVisible()
+            runCurrent()
+
+            assertEquals("$failure: polling ended with the routing", callsWhenRouted, api.getLatestLocationsCallCount)
+        }
+    }
+
+    @Test
+    fun `a transient failure does not end polling - the next tick still fetches`() = runTest {
+        val api = FakeLocationsApi().apply {
+            getLatestLocationsResult = roster(memberWithOneDevice("u1", "Eric", "d1", 51.0, 3.0, "2026-10-05T07:00:00Z"))
+        }
+        val holder = MapStateHolder(api, backgroundScope)
+        runCurrent()
+        holder.onVisible()
+        runCurrent()
+
+        api.getLatestLocationsResult = ApiResult.Failure(ApiError.InternalError("boom", "r_1"))
+        advanceTimeBy(30_000)
+        runCurrent()
+        advanceTimeBy(30_000)
+        runCurrent()
+
+        assertEquals(3, api.getLatestLocationsCallCount)
+    }
+
+    // A55 review F1: an explicit Refresh failure replaces Content with Error, which tears the
+    // GoogleMap out of composition; the next success opens a FRESH map surface at the default
+    // camera unless the holder re-runs the camera policy for it like a first load.
+
+    @Test
+    fun `a success after an explicit failure re-runs the camera policy for the fresh map surface, with no selection`() = runTest {
+        val two = roster(
+            memberWithOneDevice("u1", "Eric", "d1", 51.0, 3.0, "2026-10-05T07:00:00Z"),
+            memberWithOneDevice("u2", "Noor", "d2", 52.0, 4.0, "2026-10-05T07:00:00Z"),
+        )
+        val api = FakeLocationsApi().apply { getLatestLocationsResult = two }
+        val holder = MapStateHolder(api, backgroundScope)
+        runCurrent()
+        holder.selectMember("u2")
+        val beforeSeq = (holder.state.value as MapUiState.Content).cameraCommand!!.seq
+
+        api.getLatestLocationsResult = ApiResult.Failure(ApiError.InternalError("boom", "r_1"))
+        holder.refresh()
+        assertTrue("the Error card replaced the map", holder.state.value is MapUiState.Error)
+
+        api.getLatestLocationsResult = two
+        holder.refresh()
+
+        val after = holder.state.value as MapUiState.Content
+        assertEquals(
+            "the fresh map surface is fitted to everyone, not left at the default camera",
+            MapCamera.target(listOf(51.0 to 3.0, 52.0 to 4.0)),
+            after.cameraCommand?.target,
+        )
+        assertTrue("a NEW command, so the renderer's LaunchedEffect fires", after.cameraCommand!!.seq > beforeSeq)
+        assertNull("the selection died with the torn-down sheet", after.selectedUserId)
+    }
+
+    @Test
+    fun `a success after a failed first load mints the first-load camera command`() = runTest {
+        val api = FakeLocationsApi().apply {
+            getLatestLocationsResult = ApiResult.Failure(ApiError.NetworkFailure(RuntimeException("offline")))
+        }
+        val holder = MapStateHolder(api, backgroundScope)
+        runCurrent()
+        holder.onVisible()
+        runCurrent()
+
+        api.getLatestLocationsResult = roster(memberWithOneDevice("u1", "Eric", "d1", 51.0, 3.0, "2026-10-05T07:00:00Z"))
+        advanceTimeBy(30_000)
+        runCurrent()
+
+        val state = holder.state.value as MapUiState.Content
+        assertEquals(MapCameraTarget.Center(51.0, 3.0, MapCamera.SINGLE_POINT_ZOOM), state.cameraCommand?.target)
+    }
+
+    @Test
+    fun `a success after a silently-failed periodic refresh mints nothing - the map surface was never torn down`() = runTest {
+        val api = FakeLocationsApi().apply {
+            getLatestLocationsResult = roster(
+                memberWithOneDevice("u1", "Eric", "d1", 51.0, 3.0, "2026-10-05T07:00:00Z"),
+                memberWithOneDevice("u2", "Noor", "d2", 52.0, 4.0, "2026-10-05T07:00:00Z"),
+            )
+        }
+        val holder = MapStateHolder(api, backgroundScope)
+        runCurrent()
+        holder.onVisible()
+        holder.selectMember("u2")
+        val before = holder.state.value as MapUiState.Content
+
+        api.getLatestLocationsResult = ApiResult.Failure(ApiError.InternalError("boom", "r_1"))
+        advanceTimeBy(30_000)
+        runCurrent()
+        api.getLatestLocationsResult = roster(
+            memberWithOneDevice("u1", "Eric", "d1", 60.0, 20.0, "2026-10-05T07:30:00Z"),
+            memberWithOneDevice("u2", "Noor", "d2", 61.0, 21.0, "2026-10-05T07:30:00Z"),
+        )
+        advanceTimeBy(30_000)
+        runCurrent()
+
+        val after = holder.state.value as MapUiState.Content
+        assertEquals(before.cameraCommand, after.cameraCommand)
+        assertEquals("u2", after.selectedUserId)
+    }
+
+    @Test
+    fun `an exception that escapes the API client on a periodic refresh is a silent failed refresh, never a crash`() = runTest {
+        val api = FakeLocationsApi().apply {
+            getLatestLocationsResult = roster(memberWithOneDevice("u1", "Eric", "d1", 51.0, 3.0, "2026-10-05T07:00:00Z"))
+        }
+        val holder = MapStateHolder(api, backgroundScope)
+        runCurrent()
+        holder.onVisible()
+        runCurrent()
+        val before = holder.state.value
+
+        // What a captive portal's 200-with-HTML does to the real client: a non-IOException.
+        api.getLatestLocationsThrowable = IllegalStateException("malformed body")
+        advanceTimeBy(30_000)
+        runCurrent() // an uncaught exception on backgroundScope would fail the test right here
+
+        assertEquals(2, api.getLatestLocationsCallCount)
+        assertEquals("treated as a failed refresh: last data kept, nothing surfaced", before, holder.state.value)
+
+        api.getLatestLocationsThrowable = null
+        advanceTimeBy(30_000)
+        runCurrent()
+        assertEquals("the in-flight gate reopened - the next tick fetches", 3, api.getLatestLocationsCallCount)
+    }
+
+    @Test
+    fun `an exception on the first load shows the error state instead of crashing`() = runTest {
+        val api = FakeLocationsApi().apply { getLatestLocationsThrowable = IllegalStateException("malformed body") }
+
+        val holder = MapStateHolder(api, backgroundScope)
+        runCurrent()
+
+        assertTrue(holder.state.value is MapUiState.Error)
     }
 
     private fun memberWithOneDevice(

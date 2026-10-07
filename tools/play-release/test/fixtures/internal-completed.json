@@ -1,0 +1,11 @@
+{
+  "track": "internal",
+  "releases": [
+    {
+      "name": "1.2.0 (234)",
+      "versionCodes": ["234"],
+      "status": "completed",
+      "releaseNotes": [{ "language": "en-GB", "text": "Internal build" }]
+    }
+  ]
+}

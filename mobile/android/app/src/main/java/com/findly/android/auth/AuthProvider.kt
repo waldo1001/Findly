@@ -21,6 +21,12 @@ interface AuthProvider {
      * `network/FindlyApiClient.kt`'s retry-once-on-`AUTH_TOKEN_EXPIRED` path (001-api-contract.md
      * §2.1/§6.4) — it is NOT the push-token refresh mechanism (see `push/PushTokenProvider.kt`
      * and specs/003 §7 for why the two are distinct).
+     *
+     * **Failure is reported only as [IdTokenException]** (specs/003 §6.5, A52) — never a Firebase
+     * type, never any other exception (coroutine cancellation excepted): [IdTokenException.UserInvalid]
+     * when the signed-in user itself is gone (deleted/disabled), [IdTokenException.Transient] for
+     * everything else. Callers in the network layer go through [idTokenOrThrow], which applies the
+     * local sign-out for `UserInvalid`; nothing should call this directly for a request.
      */
     suspend fun currentIdToken(forceRefresh: Boolean = false): String?
 

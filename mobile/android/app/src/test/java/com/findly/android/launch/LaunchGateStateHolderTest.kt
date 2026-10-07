@@ -328,6 +328,54 @@ class LaunchGateStateHolderTest {
         assertEquals(2, familyApi.getMyFamilyCallCount)
     }
 
+    /**
+     * A53 (specs/010 §1.1, §10): the nav host now resets to the Map root when sign-in succeeds from
+     * a signed-out start, which only works if the gate — created once, at cold start, while the
+     * caller was still signed out — re-resolves for the newly signed-in user instead of keeping
+     * its stale `SignedOut`. It does, because it collects `authProvider.authState` for its whole
+     * life; this pins that so the root reset can never land on a gate stuck at `SignedOut`.
+     */
+    @Test
+    fun `a gate created signed-out re-probes and registers when the caller then signs in`() = runTest {
+        val authProvider = FakeAuthProvider(initialState = AuthState.SignedOut)
+        val fakeApi = FakeDevicesApi()
+        val familyApi = FakeFamilyApi().apply {
+            getMyFamilyResult = ApiResult.Success(familyMe(uid = "uid-2"), features = null)
+        }
+        val holder = LaunchGateStateHolder(authProvider, registrar(fakeApi), FakePushTokenProvider(), familyApi, FakeLocalStateWiper(), backgroundScope)
+        runCurrent()
+        assertEquals(LaunchUiState.SignedOut, holder.state.value)
+        assertEquals(0, familyApi.getMyFamilyCallCount)
+
+        authProvider.setAuthState(AuthState.SignedIn("uid-2"))
+        runCurrent()
+
+        val state = holder.state.value
+        assertTrue("expected Ready, was $state", state is LaunchUiState.Ready)
+        assertEquals("uid-2", (state as LaunchUiState.Ready).uid)
+        assertEquals(1, familyApi.getMyFamilyCallCount)
+        assertEquals(1, fakeApi.registerDeviceCalls.size)
+    }
+
+    @Test
+    fun `a brand-new user signing in from a signed-out start resolves to Onboarding profile-less`() = runTest {
+        // The fresh-install path of A53: no profile yet, so the map root the nav host resets to must
+        // bounce on to Onboarding (010 §1.1 row 3) — never register a profile-less caller's device.
+        val authProvider = FakeAuthProvider(initialState = AuthState.SignedOut)
+        val fakeApi = FakeDevicesApi()
+        val familyApi = FakeFamilyApi().apply {
+            getMyFamilyResult = ApiResult.Failure(ApiError.ProfileNotFound("no profile", "r_1"))
+        }
+        val holder = LaunchGateStateHolder(authProvider, registrar(fakeApi), FakePushTokenProvider(), familyApi, FakeLocalStateWiper(), backgroundScope)
+        runCurrent()
+
+        authProvider.setAuthState(AuthState.SignedIn("uid-new"))
+        runCurrent()
+
+        assertEquals(LaunchUiState.Onboarding("uid-new", OnboardingVariant.ProfileLess), holder.state.value)
+        assertEquals(0, fakeApi.registerDeviceCalls.size)
+    }
+
     @Test
     fun `retryRegistration is a no-op when the caller was never signed in`() = runTest {
         val authProvider = FakeAuthProvider(initialState = AuthState.SignedOut)
