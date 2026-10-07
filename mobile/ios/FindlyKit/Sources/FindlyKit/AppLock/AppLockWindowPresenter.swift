@@ -81,9 +81,10 @@ public final class AppLockWindowPresenter {
     private func hideOtherWindowsFromAccessibility(except overlay: UIWindow) {
         for scene in UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }) {
             for other in scene.windows where other !== overlay {
-                let view: UIView = other.rootViewController?.view ?? other
-                hiddenViews.append((WeakView(view: view), view.accessibilityElementsHidden))
-                view.accessibilityElementsHidden = true
+                // The WINDOW itself, not its root view: UIKit-presented sheets, covers and dialogs
+                // live in presentation containers that are siblings of the root view in the window.
+                hiddenViews.append((WeakView(view: other), other.accessibilityElementsHidden))
+                other.accessibilityElementsHidden = true
             }
         }
     }
