@@ -35,6 +35,9 @@ vi.mock("../../../src/domain/device/registerDevice", () => ({
 }));
 vi.mock("../../../src/domain/device/listMyDevices", () => ({ listMyDevices: vi.fn() }));
 vi.mock("../../../src/domain/device/patchDeviceSettings", () => ({ patchDeviceSettings: vi.fn() }));
+vi.mock("../../../src/domain/device/deleteDevice", () => ({ deleteDevice: vi.fn() }));
+vi.mock("../../../src/adapters/tables/lastKnownTableRepo", () => ({ TableLastKnownRepo: class {} }));
+vi.mock("../../../src/adapters/tables/idempotencyMarkersTableRepo", () => ({ TableIdempotencyRepo: class {} }));
 
 vi.mock("../../../src/adapters/auth/firebaseJoseVerifier", () => ({ createTokenVerifier: () => ({}) }));
 vi.mock("../../../src/adapters/tables/usersTableRepo", () => ({ TableUserRepo: class {} }));

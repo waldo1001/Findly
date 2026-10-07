@@ -28,9 +28,14 @@ import com.findly.android.ui.designsystem.components.FindlyNavDrawerItems
 import com.findly.android.ui.designsystem.components.LocalNavBackAction
 import com.findly.android.ui.designsystem.components.rememberFindlyNavDrawerState
 import androidx.navigation.navArgument
-import androidx.navigation.navDeepLink
 import com.findly.android.AppContainer
+import com.findly.android.auth.AuthState
 import com.findly.android.launch.LaunchGateViewModel
+import com.findly.android.pendinglink.CaptureDecision
+import com.findly.android.pendinglink.IncomingLinkEvent
+import com.findly.android.pendinglink.LinkAppState
+import com.findly.android.pendinglink.PendingLinkKind
+import com.findly.android.pendinglink.PendingLinkPolicy
 import com.findly.android.launch.LaunchUiState
 import com.findly.android.network.PlanLimits
 import com.findly.android.location.battery.BatteryOptimizationOemPolicy
@@ -55,7 +60,6 @@ import com.findly.android.ui.groups.GroupDetailRoute
 import com.findly.android.ui.groups.GroupDetailViewModel
 import com.findly.android.ui.groups.GroupDetailViewModelFactory
 import com.findly.android.ui.groups.GroupJoinCodeSanitizer
-import com.findly.android.ui.groups.GroupJoinHttpsLinkParser
 import com.findly.android.ui.groups.GroupJoinRoute
 import com.findly.android.ui.groups.GroupJoinViewModel
 import com.findly.android.ui.groups.GroupJoinViewModelFactory
@@ -76,7 +80,6 @@ import com.findly.android.ui.invites.CreateInviteRoute
 import com.findly.android.ui.invites.CreateInviteViewModel
 import com.findly.android.ui.invites.CreateInviteViewModelFactory
 import com.findly.android.ui.invites.FamilyInviteCodeSanitizer
-import com.findly.android.ui.invites.FamilyInviteHttpsLinkParser
 import com.findly.android.ui.locate.LocateRoute
 import com.findly.android.ui.locate.LocateViewModel
 import com.findly.android.ui.locate.LocateViewModelFactory
@@ -137,46 +140,27 @@ import kotlinx.coroutines.launch
  * [Destinations]'s own doc describes for `Locate`, since [PlanLimits] and a `Boolean` aren't
  * URL-safe path segments either. [Destinations.GroupDetail]/[Destinations.GroupMap] instead use a
  * real `{groupId}` path argument (safe, no encoding risk — see [Destinations.GroupDetail]'s doc).
- * [Destinations.GroupJoin] additionally declares a [navDeepLink] for `findly://group-join?code=…`
- * — the app's first and only external deep link — whose `code` query argument is run through
- * [GroupJoinCodeSanitizer] **before** it ever reaches [GroupJoinRoute], since it is untrusted
- * external input (any app, or a malicious link, can launch this intent with an arbitrary string).
- *
- * **A6 addition** (specs/007-public-join-links.md, specs/003-android-client.md §12.3): the public
- * `https://{JOIN_LINK_HOST}/g#CODE` join link is matched *before* this composable even runs — by
- * [com.findly.android.MainActivity], which parses the launching `Intent`'s `data` `Uri` via
- * [GroupJoinHttpsLinkParser] (deliberately **not** through a second [navDeepLink] entry here, since
- * Navigation Compose's `uriPattern` placeholder matching covers path/query segments, not URL
- * fragments — and the join code lives in the fragment, 007 §1) and passes the one
- * [httpsJoinLinkResult] in. The `LaunchedEffect(Unit)` below fires that navigation exactly once per
- * *fresh composition* of [FindlyNavHost] — which is **not** the same as "once ever": rotation,
- * dark/light-mode toggle, multi-window resize, font-scale/locale change, and process-death restore
- * all recreate `MainActivity` (and so this composable) with a fresh `onCreate` while the launching
- * `Intent` stays the same. [com.findly.android.MainActivity] closes that gap on its side by
- * only ever passing a non-[GroupJoinHttpsLinkParser.Result.NoMatch] [httpsJoinLinkResult] on a
- * genuinely new launch (`savedInstanceState == null`) — see its doc for the full reasoning — so
- * this effect firing "once per fresh composition" only ever matters on that first, genuine launch.
- * This is deliberately not a re-check of the live `Activity.intent` from inside this graph itself,
- * which would re-fire on every later in-app visit to [Destinations.GroupJoin] using the same
- * (by-then-stale) intent data.
+ * **Join/invite links (A62, specs/010 section 1.3).** No screen here declares a `navDeepLink`:
+ * `MainActivity` parses every 007 link form (https `/g#`, `/f#`, `findly://group-join`,
+ * `findly://family-join`) with `JoinLinkParser` — untrusted input, whitelist-sanitized — and passes
+ * one `incomingLinkEvent`. `PendingLinkPolicy` decides navigate-now vs store, and the pending slot
+ * is replayed after launch resolution. `MainActivity` only delivers a link on a genuinely new
+ * launch (`savedInstanceState == null`) or `onNewIntent`, so rotation never re-fires it.
  */
 @Composable
 fun FindlyNavHost(
     container: AppContainer,
     launchGateViewModel: LaunchGateViewModel,
     navController: NavHostController = rememberNavController(),
-    httpsJoinLinkResult: GroupJoinHttpsLinkParser.Result = GroupJoinHttpsLinkParser.Result.NoMatch,
-    /** A36 (specs/007-public-join-links.md §1/§4 as amended, specs/010 §5.2): the public
-     * `https://{JOIN_LINK_HOST}/f#CODE` family-invite link, matched the same way and for the same
-     * reason as [httpsJoinLinkResult] above (Navigation Compose's `uriPattern` placeholder
-     * matching covers path/query segments, not URL fragments) — see that parameter's doc and
-     * [com.findly.android.MainActivity]'s for the full freshness-guard reasoning, which applies
-     * identically here. */
-    httpsFamilyInviteLinkResult: FamilyInviteHttpsLinkParser.Result = FamilyInviteHttpsLinkParser.Result.NoMatch,
+    /** A62 (specs/010 section 1.3): the join/invite link the Activity received (any of the four
+     * 007 forms, already parsed by [JoinLinkParser]) — replaces the two https-only results this
+     * graph used to take (A6/A36). Whether it navigates now or goes into the pending slot is the
+     * pure [com.findly.android.pendinglink.PendingLinkPolicy] decision. */
+    incomingLinkEvent: IncomingLinkEvent? = null,
     /** A10 (specs/009-device-runtime.md §3.2): true when this composition was launched by tapping
      * the foreground-service's persistent notification — [com.findly.android.MainActivity] already
-     * gates this to a fresh launch (same idiom as [httpsJoinLinkResult]'s own freshness guard, its
-     * doc above), so the one-time navigation below never re-fires on rotation/recreation. A35
+     * gates this to a fresh launch (same `savedInstanceState == null` freshness idiom as the link
+     * delivery above), so the one-time navigation below never re-fires on rotation/recreation. A35
      * (specs/010 §4.1) repoints this from the retired `Destinations.Settings` to
      * [Destinations.Devices] — the notification's tap action opens "the app's device-settings
      * screen" (009 §3.2), which is exactly the new Devices screen, not Family/Privacy. */
@@ -241,34 +225,6 @@ fun FindlyNavHost(
         }
     }
 
-    // A6 (specs/007 §4, specs/003 §12.3): one-time navigation to GroupJoin when this composition
-    // was launched from a matching https join link — "wrong host or path is ignored, never
-    // mis-routed" is already enforced by GroupJoinHttpsLinkParser returning NoMatch, so there's
-    // nothing to do here in that case (this also covers an Activity *recreation*, since
-    // MainActivity only ever passes a non-NoMatch result on a genuinely fresh launch — see its
-    // doc). A matching link with no usable fragment still navigates, with an empty (not error)
-    // prefill, per 007 §4.
-    LaunchedEffect(Unit) {
-        val matched = httpsJoinLinkResult as? GroupJoinHttpsLinkParser.Result.Matched ?: return@LaunchedEffect
-        val route = matched.sanitizedCode?.let { "group-join?code=$it" } ?: Destinations.GroupJoin.route
-        navController.navigate(route) {
-            popUpTo(Destinations.Map.route)
-            launchSingleTop = true
-        }
-    }
-
-    // A36 (specs/007 §4 as amended, specs/010 §5.2): one-time navigation to the accept-invite
-    // screen when this composition was launched from a matching https family-invite link -- the
-    // exact mirror of the group https-link effect above.
-    LaunchedEffect(Unit) {
-        val matched = httpsFamilyInviteLinkResult as? FamilyInviteHttpsLinkParser.Result.Matched ?: return@LaunchedEffect
-        val route = matched.sanitizedCode?.let { "invite-accept?code=$it" } ?: Destinations.InviteAccept.route
-        navController.navigate(route) {
-            popUpTo(Destinations.Map.route)
-            launchSingleTop = true
-        }
-    }
-
     // A10 (specs/009 §3.2): one-time navigation to Settings when this composition was launched by
     // tapping the foreground-service notification — same "fire once per fresh composition" idiom
     // as the https-join-link effect above.
@@ -294,6 +250,52 @@ fun FindlyNavHost(
         { navController.popBackStack() }
     } else {
         null
+    }
+
+    // A62 (specs/010 section 1.3): pending join/invite link. Capture first, then replay, so a link
+    // stored on the first composition is considered by the replay effect right after.
+    val launchState by launchGateViewModel.state.collectAsState()
+    val currentRoute = currentBackStackEntry?.destination?.route
+    // `locked` is always false until the app lock (A63) supplies it.
+    val linkAppState = LinkAppState(
+        signedIn = authState is AuthState.SignedIn,
+        launchResolved = PendingLinkPolicy.isLaunchResolved(launchState, currentRoute),
+        locked = false,
+    )
+    val pendingLinkCoordinator = container.pendingLinkCoordinator
+
+    LaunchedEffect(incomingLinkEvent) {
+        val link = incomingLinkEvent?.link ?: return@LaunchedEffect
+        val decision = pendingLinkCoordinator.onIncoming(link, linkAppState, System.currentTimeMillis())
+        if (decision is CaptureDecision.NavigateNow) {
+            // A stale needsDisplayName=true from an earlier Onboarding flow must not leak into an
+            // immediate group-join link.
+            if (decision.link.kind == PendingLinkKind.GroupJoin) pendingJoinContext = null
+            // As before A62: pushed above the map root; a link without a code opens the join screen
+            // with an empty field (007 section 4).
+            navController.navigate(joinLinkRoute(decision.link.kind, decision.link.code)) {
+                popUpTo(Destinations.Map.route)
+                launchSingleTop = true
+            }
+        }
+    }
+
+    val pendingLink by pendingLinkCoordinator.store.current.collectAsState()
+    LaunchedEffect(pendingLink, linkAppState, currentRoute) {
+        // Clears the slot first, then pushes above the resolved root (Map or Onboarding) with the
+        // code prefilled and NOT submitted. Works from Onboarding: accept-invite / join-group are
+        // 001 section 1.5.3 bootstrap calls that need no profile.
+        pendingLinkCoordinator.replayIfReady(linkAppState, System.currentTimeMillis()) { replay ->
+            if (replay.kind == PendingLinkKind.GroupJoin) {
+                val profileLess = (launchState as? LaunchUiState.Onboarding)?.variant == OnboardingVariant.ProfileLess
+                pendingJoinContext = if (profileLess) {
+                    GroupsListUiState.CreateJoinContext(limits = null, needsDisplayName = true, prefillDisplayName = "")
+                } else {
+                    null
+                }
+            }
+            navController.navigate(joinLinkRoute(replay.kind, replay.code)) { launchSingleTop = true }
+        }
     }
 
     CompositionLocalProvider(LocalNavBackAction provides backAction) {
@@ -457,9 +459,12 @@ fun FindlyNavHost(
             // screen visit, even after sign-in completes. DevicesStateHolder now calls the
             // supplier fresh on every load().
             val devicesViewModel: DevicesViewModel = viewModel(
-                factory = DevicesViewModelFactory(container.findlyApiClient, isParent) {
-                    container.localDeviceIdOrNull()
-                },
+                factory = DevicesViewModelFactory(
+                    container.findlyApiClient,
+                    isParent,
+                    localDeviceId = { container.localDeviceIdOrNull() },
+                    localUserId = { container.localUserIdOrNull() },
+                ),
             )
             // A41 (specs/010 §4.2, specs/009 §3.2): Android-runtime-local settings (which OS
             // dialog/settings page to open, whether this OEM needs the dontkillmyapp.com link) -
@@ -528,8 +533,8 @@ fun FindlyNavHost(
 
         // A36 (specs/010 §5.2): reached from Onboarding's "I have an invite code", from
         // GroupsListRoute's "Manage family invites" (family-less state), or from a matching
-        // https://{JOIN_LINK_HOST}/f#CODE / findly://family-join?code=… link (the latter via the
-        // navDeepLink below; the former via httpsFamilyInviteLinkResult's LaunchedEffect above).
+        // https://{JOIN_LINK_HOST}/f#CODE / findly://family-join?code=… link (via the
+        // incomingLinkEvent / pending-link effects above).
         composable(
             route = Destinations.InviteAccept.ROUTE_WITH_ARG,
             arguments = listOf(
@@ -539,7 +544,6 @@ fun FindlyNavHost(
                     defaultValue = null
                 },
             ),
-            deepLinks = listOf(navDeepLink { uriPattern = Destinations.InviteAccept.DEEP_LINK_URI_PATTERN }),
         ) { backStackEntry ->
             val rawCode = backStackEntry.arguments?.getString(Destinations.InviteAccept.ARG_CODE)
             // The deep link's `code` is untrusted external input -- sanitize before it ever
@@ -633,7 +637,6 @@ fun FindlyNavHost(
                     defaultValue = null
                 },
             ),
-            deepLinks = listOf(navDeepLink { uriPattern = Destinations.GroupJoin.DEEP_LINK_URI_PATTERN }),
         ) { backStackEntry ->
             val rawCode = backStackEntry.arguments?.getString(Destinations.GroupJoin.ARG_CODE)
             // The deep link's `code` is untrusted external input — sanitize before it ever
@@ -705,4 +708,12 @@ fun FindlyNavHost(
         }
     }
     }
+}
+
+/** Route of the screen a join/invite link opens, code (already sanitized) as the optional arg. */
+private fun joinLinkRoute(kind: PendingLinkKind, code: String?): String = when (kind) {
+    PendingLinkKind.GroupJoin ->
+        code?.let { "group-join?code=$it" } ?: Destinations.GroupJoin.route
+    PendingLinkKind.FamilyInvite ->
+        code?.let { "invite-accept?code=$it" } ?: Destinations.InviteAccept.route
 }

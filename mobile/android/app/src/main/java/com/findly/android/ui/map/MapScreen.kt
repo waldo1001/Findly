@@ -346,11 +346,13 @@ private fun RosterList(
         verticalArrangement = Arrangement.spacedBy(FindlyTheme.spacing.xs),
     ) {
         members.forEach { member ->
-            if (member.devices.isEmpty()) {
+            if (member.shownDevices.isEmpty()) {
                 item(key = member.userId) {
                     FindlyListRow(
                         title = member.displayName,
-                        subtitle = "No devices registered",
+                        // 011 §2: all-dormant reads "No recent location"; no devices at all keeps
+                        // "No devices registered". Selectable either way (010 §3.3/§3.5).
+                        subtitle = RosterRowText.memberWithoutShownDevices(member.hasOnlyDormantDevices),
                         selected = member.userId == selectedUserId,
                         // specs/010 §3.5: tapping a roster row selects (and, behind that
                         // selection, surfaces "Locate now") — replaces the old direct
@@ -359,7 +361,7 @@ private fun RosterList(
                     )
                 }
             } else {
-                items(member.devices, key = { it.deviceId }) { device ->
+                items(member.shownDevices, key = { it.deviceId }) { device ->
                     FindlyListRow(
                         title = "${member.displayName} · ${device.deviceName}",
                         // specs/010 §3.1: humanized relative time, recomputed on the 30 s

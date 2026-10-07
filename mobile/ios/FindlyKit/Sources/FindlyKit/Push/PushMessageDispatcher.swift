@@ -55,6 +55,9 @@ public final class PushMessageDispatcher {
             geofenceEventHandler.handle(data)
         case .geofenceConfigChanged:
             await geofenceConfigChangedHandler.handle(data)
+        case .staleNudge:
+            // 009 §5.6: nothing to capture - the OS renders it; a tap only opens the app.
+            break
         case .unrecognized:
             break
         }

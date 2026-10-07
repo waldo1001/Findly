@@ -480,4 +480,135 @@ describe("domain/device/patchDeviceSettings", () => {
 
     expect(result.device.trackingEnabled).toBe(true);
   });
+
+  // specs/001 §4.3, 011 §4.4/§5 — staleNudgeEnabled is owner-only in every role.
+  it("a member owner may set staleNudgeEnabled on their own device", async () => {
+    const deps = buildDeps();
+    await seedFamily(deps);
+    seedDevice(deps, { ownerUserId: "u2" });
+
+    const result = await patchDeviceSettings({ uid: "u2", familyId: FAMILY_ID, role: "member", deviceId: DEVICE_ID, body: { staleNudgeEnabled: false } }, deps);
+
+    expect(result.device.staleNudgeEnabled).toBe(false);
+    expect((await deps.deviceRepo.getDevice("u2", DEVICE_ID))?.staleNudgeEnabled).toBe(false);
+  });
+
+  it("a parent owner may set staleNudgeEnabled on their own device, and back to true", async () => {
+    const deps = buildDeps();
+    await seedFamily(deps);
+    seedDevice(deps, { ownerUserId: "u1", staleNudgeEnabled: false });
+
+    const result = await patchDeviceSettings({ uid: "u1", familyId: FAMILY_ID, role: "parent", deviceId: DEVICE_ID, body: { staleNudgeEnabled: true } }, deps);
+
+    expect(result.device.staleNudgeEnabled).toBe(true);
+  });
+
+  it("a family-less owner may set staleNudgeEnabled on their own device", async () => {
+    const deps = buildDeps();
+    seedDevice(deps, { ownerUserId: "u9" });
+
+    const result = await patchDeviceSettings({ uid: "u9", familyId: null, role: null, deviceId: DEVICE_ID, body: { staleNudgeEnabled: false } }, deps);
+
+    expect(result.device.staleNudgeEnabled).toBe(false);
+  });
+
+  it("a PARENT setting staleNudgeEnabled on another member's device gets AUTH_FORBIDDEN and nothing is written", async () => {
+    const deps = buildDeps();
+    await seedFamily(deps);
+    seedDevice(deps, { ownerUserId: "u2" });
+
+    await expectAppError(patchDeviceSettings({ uid: "u1", familyId: FAMILY_ID, role: "parent", deviceId: DEVICE_ID, body: { staleNudgeEnabled: false } }, deps), "AUTH_FORBIDDEN");
+    expect((await deps.deviceRepo.getDevice("u2", DEVICE_ID))?.staleNudgeEnabled).toBeUndefined();
+  });
+
+  it("a parent mixing staleNudgeEnabled with other fields on another member's device is rejected as a whole", async () => {
+    const deps = buildDeps();
+    await seedFamily(deps);
+    seedDevice(deps, { ownerUserId: "u2" });
+
+    await expectAppError(patchDeviceSettings({ uid: "u1", familyId: FAMILY_ID, role: "parent", deviceId: DEVICE_ID, body: { trackingEnabled: false, staleNudgeEnabled: false } }, deps), "AUTH_FORBIDDEN");
+    expect((await deps.deviceRepo.getDevice("u2", DEVICE_ID))?.trackingEnabled).toBe(true);
+  });
+
+  it("a parent can still change other fields on another member's device without touching staleNudgeEnabled", async () => {
+    const deps = buildDeps();
+    await seedFamily(deps);
+    seedDevice(deps, { ownerUserId: "u2", staleNudgeEnabled: false });
+
+    const result = await patchDeviceSettings({ uid: "u1", familyId: FAMILY_ID, role: "parent", deviceId: DEVICE_ID, body: { deviceName: "Renamed" } }, deps);
+
+    expect(result.device.staleNudgeEnabled).toBe(false);
+  });
+
+  it("a non-boolean staleNudgeEnabled is VALIDATION_FAILED", async () => {
+    const deps = buildDeps();
+    seedDevice(deps, { ownerUserId: "u1" });
+
+    await expectAppError(patchDeviceSettings({ uid: "u1", familyId: FAMILY_ID, role: "parent", deviceId: DEVICE_ID, body: { staleNudgeEnabled: "no" } }, deps), "VALIDATION_FAILED", { fields: ["staleNudgeEnabled"] });
+  });
+
+  it("staleNudgeEnabled alone is a valid patch, sends NO SETTINGS_CHANGED push and leaves other settings alone", async () => {
+    const deps = buildDeps();
+    seedDevice(deps, { ownerUserId: "u1", pushToken: "device-token", syncIntervalMinutes: 15, trackingEnabled: true });
+
+    await patchDeviceSettings({ uid: "u1", familyId: FAMILY_ID, role: "parent", deviceId: DEVICE_ID, body: { staleNudgeEnabled: false } }, deps);
+
+    expect(deps.pushSender.sent).toHaveLength(0);
+    const stored = await deps.deviceRepo.getDevice("u1", DEVICE_ID);
+    expect(stored).toMatchObject({ syncIntervalMinutes: 15, trackingEnabled: true, deviceName: "Pixel" });
+  });
+
+  it("an other-field patch preserves the stored staleNudgeEnabled and lastNudgedAt", async () => {
+    const deps = buildDeps();
+    seedDevice(deps, { ownerUserId: "u1", staleNudgeEnabled: false, lastNudgedAt: "2026-07-18T10:00:00Z" });
+
+    await patchDeviceSettings({ uid: "u1", familyId: FAMILY_ID, role: "parent", deviceId: DEVICE_ID, body: { trackingEnabled: false } }, deps);
+
+    const stored = await deps.deviceRepo.getDevice("u1", DEVICE_ID);
+    expect(stored).toMatchObject({ staleNudgeEnabled: false, lastNudgedAt: "2026-07-18T10:00:00Z" });
+  });
+
+  it("a patch of a legacy row (no staleNudgeEnabled property) reports true", async () => {
+    const deps = buildDeps();
+    seedDevice(deps, { ownerUserId: "u1" });
+
+    const result = await patchDeviceSettings({ uid: "u1", familyId: FAMILY_ID, role: "parent", deviceId: DEVICE_ID, body: { deviceName: "x" } }, deps);
+
+    expect(result.device.staleNudgeEnabled).toBe(true);
+  });
+
+  // PATCH-vs-DELETE race (001 §4.4): a PATCH that read the device before a concurrent
+  // removal must not resurrect it by writing the row back.
+  it("a device removed between the PATCH's read and its write is DEVICE_NOT_FOUND and is NOT resurrected", async () => {
+    const deps = buildDeps();
+    seedDevice(deps, { ownerUserId: "u1" });
+    const realGet = deps.deviceRepo.getDevice.bind(deps.deviceRepo);
+    deps.deviceRepo.getDevice = async (owner, id) => {
+      const found = await realGet(owner, id);
+      await deps.deviceRepo.deleteDevice(owner, id); // concurrent DELETE lands right after the read
+      return found;
+    };
+
+    await expectAppError(
+      patchDeviceSettings(
+        { uid: "u1", familyId: FAMILY_ID, role: "parent", deviceId: DEVICE_ID, body: { deviceName: "x" } },
+        deps,
+      ),
+      "DEVICE_NOT_FOUND",
+    );
+    expect(await realGet("u1", DEVICE_ID)).toBeNull();
+  });
+
+  it("an owner-only PATCH (pushToken) message for a forbidden field mentions staleNudgeEnabled", async () => {
+    const deps = buildDeps();
+    await seedFamily(deps);
+    seedDevice(deps, { ownerUserId: "u2" });
+
+    await expect(
+      patchDeviceSettings(
+        { uid: "u2", familyId: FAMILY_ID, role: "member", deviceId: DEVICE_ID, body: { deviceName: "x" } },
+        deps,
+      ),
+    ).rejects.toMatchObject({ code: "AUTH_FORBIDDEN", message: expect.stringContaining("staleNudgeEnabled") });
+  });
 });

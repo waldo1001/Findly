@@ -15,6 +15,7 @@ import type {
   LastKnownRepo,
 } from "../../ports/repositories";
 import { getFeatures, type Features } from "../plan";
+import { isDormant } from "../device/dormancy";
 import { listDevicesForMembers, listLastKnownsForMembers } from "../family/deviceFanout";
 
 export interface LatestLocationsDeps {
@@ -43,6 +44,8 @@ export interface MemberDeviceLocation {
   trackingEnabled: boolean;
   syncIntervalMinutes: number;
   isStale: boolean | null;
+  /** 001 §5.2 / 011 §2 — always a boolean, also on never-reported devices. */
+  isDormant: boolean;
 }
 
 export interface MemberLocations {
@@ -71,6 +74,7 @@ function toDeviceLocation(device: DeviceRecord, lastKnown: LastKnownRecord | und
       trackingEnabled: device.trackingEnabled,
       syncIntervalMinutes: device.syncIntervalMinutes,
       isStale: null,
+      isDormant: isDormant(device, now),
     };
   }
 
@@ -91,6 +95,7 @@ function toDeviceLocation(device: DeviceRecord, lastKnown: LastKnownRecord | und
     trackingEnabled: device.trackingEnabled,
     syncIntervalMinutes: device.syncIntervalMinutes,
     isStale,
+    isDormant: isDormant(device, now),
   };
 }
 

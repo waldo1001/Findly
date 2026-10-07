@@ -122,7 +122,7 @@ export async function replaceGeofences(
       });
       if (sendOutcome === "invalidToken") {
         // Write back into the DEVICE OWNER's own partition (002 §2.4).
-        await deps.deviceRepo.putDevice(device.ownerUserId, { ...device, pushInvalid: true });
+        await deps.deviceRepo.replaceExistingDevice(device.ownerUserId, { ...device, pushInvalid: true });
       }
     } catch {
       // Fan-out is silent/best-effort (§10 PUSH_DELIVERY_FAILED note) — never fails the request.

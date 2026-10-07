@@ -787,4 +787,20 @@ describe("domain/geofence/reportGeofenceEvents", () => {
       expect(stored?.lastSeenAt).toBe(new Date(NOW).toISOString());
     });
   });
+
+  it("an invalidToken for a target device removed concurrently does NOT resurrect it", async () => {
+    const deps = buildDeps();
+    await seedFamily(deps);
+    seedReporterDevice(deps);
+    seedOtherDevice(deps);
+    deps.geofenceConfigRepo.seedConfig(FAMILY_ID, { version: 1, geofences: [HOME_GEOFENCE] }, '"cfg-etag"');
+    deps.pushSender.send = async () => {
+      await deps.deviceRepo.deleteDevice(OTHER_UID, OTHER_DEVICE_ID); // concurrent DELETE
+      return "invalidToken";
+    };
+
+    await reportGeofenceEvents(baseInput(), deps);
+
+    expect(await deps.deviceRepo.getDevice(OTHER_UID, OTHER_DEVICE_ID)).toBeNull();
+  });
 });

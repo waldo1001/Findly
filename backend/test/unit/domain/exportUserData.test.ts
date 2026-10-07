@@ -237,6 +237,7 @@ describe("domain/export/exportUserData (specs/001 §13.1, specs/008 §3)", () =>
         pushInvalid: false,
         syncIntervalMinutes: 15,
         trackingEnabled: true,
+        staleNudgeEnabled: true,
       },
     ]);
     // Push tokens (write-only, 001 §4.1) never leak into the export (008 §2).

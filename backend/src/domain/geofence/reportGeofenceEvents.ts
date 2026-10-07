@@ -239,7 +239,7 @@ export async function reportGeofenceEvents(
           });
           if (outcome === "invalidToken") {
             // Write back into the DEVICE OWNER's own partition (002 §2.4).
-            await deps.deviceRepo.putDevice(target.ownerUserId, { ...target, pushInvalid: true });
+            await deps.deviceRepo.replaceExistingDevice(target.ownerUserId, { ...target, pushInvalid: true });
           }
         } catch {
           // Fan-out is silent/best-effort (§10 PUSH_DELIVERY_FAILED note) — never fails the request.

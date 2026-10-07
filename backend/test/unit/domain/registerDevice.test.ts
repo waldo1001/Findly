@@ -647,4 +647,44 @@ describe("domain/device/registerDevice", () => {
 
     expect(result.created).toBe(false);
   });
+
+  // specs/001 §4.1, 011 §4 — staleNudgeEnabled.
+  it("first registration stores staleNudgeEnabled true and returns it in the §4.1 response object", async () => {
+    const deps = buildDeps();
+
+    const result = await registerDevice({ uid: "u1", familyId: FAMILY_ID, body: { deviceId: DEVICE_ID, platform: "android", model: "Pixel 8", appVersion: "1.1.0" } }, deps);
+
+    expect(result.device.staleNudgeEnabled).toBe(true);
+    expect((await deps.deviceRepo.getDevice("u1", DEVICE_ID))?.staleNudgeEnabled).toBe(true);
+  });
+
+  it("re-registration preserves staleNudgeEnabled false (an upsert never resets the owner's opt-out)", async () => {
+    const deps = buildDeps();
+    seedDevice(deps, { deviceId: DEVICE_ID, staleNudgeEnabled: false });
+
+    const result = await registerDevice({ uid: "u1", familyId: FAMILY_ID, body: { deviceId: DEVICE_ID, platform: "android", model: "Pixel 8", appVersion: "1.1.0" } }, deps);
+
+    expect(result.created).toBe(false);
+    expect(result.device.staleNudgeEnabled).toBe(false);
+    expect((await deps.deviceRepo.getDevice("u1", DEVICE_ID))?.staleNudgeEnabled).toBe(false);
+  });
+
+  it("a legacy row without the property reads as staleNudgeEnabled true on re-registration", async () => {
+    const deps = buildDeps();
+    seedDevice(deps, { deviceId: DEVICE_ID });
+
+    const result = await registerDevice({ uid: "u1", familyId: FAMILY_ID, body: { deviceId: DEVICE_ID, platform: "android", model: "Pixel 8", appVersion: "1.1.0" } }, deps);
+
+    expect(result.device.staleNudgeEnabled).toBe(true);
+  });
+
+  it("re-registration preserves lastNudgedAt (written only by the nudger) and never exposes it", async () => {
+    const deps = buildDeps();
+    seedDevice(deps, { deviceId: DEVICE_ID, lastNudgedAt: "2026-07-18T10:00:00Z" });
+
+    const result = await registerDevice({ uid: "u1", familyId: FAMILY_ID, body: { deviceId: DEVICE_ID, platform: "android", model: "Pixel 8", appVersion: "1.1.0" } }, deps);
+
+    expect((await deps.deviceRepo.getDevice("u1", DEVICE_ID))?.lastNudgedAt).toBe("2026-07-18T10:00:00Z");
+    expect(result.device).not.toHaveProperty("lastNudgedAt");
+  });
 });

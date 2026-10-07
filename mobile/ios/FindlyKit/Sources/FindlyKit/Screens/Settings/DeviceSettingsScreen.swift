@@ -84,6 +84,9 @@ private struct DeviceCardView: View {
     @ObservedObject var viewModel: DeviceSettingsViewModel
     let device: DeviceListItem
     @State private var renameDraft: String
+    @State private var showRemoveConfirmation = false
+
+    private static let isoFormatter = ISO8601DateFormatter()
 
     init(viewModel: DeviceSettingsViewModel, device: DeviceListItem) {
         self.viewModel = viewModel
@@ -99,11 +102,22 @@ private struct DeviceCardView: View {
                         .font(theme.typography.titleMedium.font)
                         .foregroundColor(theme.colors.onSurface)
                     Spacer()
-                    StatusChip(device.trackingEnabled ? "Active" : "Paused", kind: device.trackingEnabled ? .online : .paused)
+                    StatusChip(
+                        DeviceLifecyclePlan.statusLabel(isDormant: device.isDormant, trackingEnabled: device.trackingEnabled),
+                        kind: device.isDormant ? .stale : (device.trackingEnabled ? .online : .paused)
+                    )
                 }
                 Text("Owner: \(device.ownerDisplayName)")
                     .font(theme.typography.bodyMedium.font)
                     .foregroundColor(theme.colors.onSurface.opacity(0.7))
+                // specs/011 §1.1 — muted "Last seen" line; omitted when `lastSeenAt` is absent.
+                if let lastSeen = DeviceLifecyclePlan.lastSeenText(
+                    lastSeenAt: device.lastSeenAt, nowIso: Self.isoFormatter.string(from: Date())
+                ) {
+                    Text(lastSeen)
+                        .font(theme.typography.bodyMedium.font)
+                        .foregroundColor(theme.colors.onSurface.opacity(0.7))
+                }
                 if viewModel.isParent {
                     FindlyToggleRow(
                         title: "Tracking enabled",
@@ -115,6 +129,22 @@ private struct DeviceCardView: View {
                     intervalDropdown
                     renameRow
                 }
+                // specs/011 §4.4 / 010 §4.2 bullet 5 — the owner's own reminder preference, outside
+                // the parent gate; only on devices the caller owns.
+                if viewModel.showsNudgeToggle(device) {
+                    FindlyToggleRow(
+                        title: "Remind me when sharing stops",
+                        isOn: Binding(
+                            get: { device.staleNudgeEnabled },
+                            set: { newValue in Task { await viewModel.setStaleNudgeEnabled(deviceId: device.deviceId, newValue) } }
+                        )
+                    )
+                }
+                // specs/011 §1.1 — Remove is outside the parent gate (owners may remove their own
+                // devices) and never offered on this device's own card.
+                if viewModel.canRemove(device) {
+                    FindlyButton("Remove device", style: .destructive) { showRemoveConfirmation = true }
+                }
                 // specs/010-app-shell-and-screen-ux.md §4.2 (I36): "Errors from this card's
                 // mutations render on this card, not pooled at the top of the list" — the retired
                 // shared `lastActionError` banner used to sit above the whole list in
@@ -124,6 +154,17 @@ private struct DeviceCardView: View {
                     cardErrorText(cardError)
                 }
             }
+        }
+        .confirmationDialog(
+            DeviceLifecyclePlan.confirmationTitle(deviceName: device.deviceName),
+            isPresented: $showRemoveConfirmation, titleVisibility: .visible
+        ) {
+            Button("Remove", role: .destructive) {
+                Task { await viewModel.remove(deviceId: device.deviceId) }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(DeviceLifecyclePlan.confirmationBody)
         }
     }
 

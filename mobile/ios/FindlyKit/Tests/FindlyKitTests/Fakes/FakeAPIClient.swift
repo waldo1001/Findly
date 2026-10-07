@@ -80,6 +80,13 @@ final class FakeAPIClient: FindlyAPIClient {
         return try await updateDeviceHandler(deviceId, request)
     }
 
+    private(set) var deleteDeviceCalls: [String] = []
+    var deleteDeviceHandler: (String) async throws -> Void = { _ in fatalError("not configured") }
+    func deleteDevice(deviceId: String) async throws {
+        deleteDeviceCalls.append(deviceId)
+        try await deleteDeviceHandler(deviceId)
+    }
+
     // MARK: - §5 Locations
 
     private(set) var getLatestLocationsCallCount = 0

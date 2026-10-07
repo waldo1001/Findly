@@ -34,8 +34,8 @@ object MapCameraPolicy {
         CameraPolicyState(hasRunInitial = true, hadAnyPoint = state.hadAnyPoint || hasPoints)
 
     /** specs/010 §3.5 / §10 "Freshest-device resolution": newest `recordedAt` among located
-     * devices wins; devices without a fix are never chosen. */
+     * devices wins; devices without a fix are never chosen, nor are dormant ones (011 §2). */
     fun freshestLocatedDevice(devices: List<RosterDeviceUi>): RosterDeviceUi? =
-        devices.filter { it.hasLocation && it.recordedAt != null }
+        devices.filter { it.hasLocation && it.recordedAt != null && !it.isDormant }
             .maxByOrNull { Instant.parse(it.recordedAt) }
 }
