@@ -199,7 +199,8 @@ public final class LiveMapViewModel: ObservableObject {
     private func annotations(for members: [MemberLocations]) -> [MapAnnotationItem] {
         members.flatMap { member in
             member.devices.compactMap { device -> MapAnnotationItem? in
-                guard let lat = device.lat, let lon = device.lon else { return nil }
+                // 011 §2 / 010 §3.3: dormant devices get no marker.
+                guard !device.isDormant, let lat = device.lat, let lon = device.lon else { return nil }
                 return MapAnnotationItem(
                     id: device.deviceId, lat: lat, lon: lon,
                     initials: Self.initials(for: member.displayName), isStale: device.isStale ?? true,
@@ -212,7 +213,8 @@ public final class LiveMapViewModel: ObservableObject {
     private static func locatedPoints(in members: [MemberLocations]) -> [MapGeoPoint] {
         members.flatMap { member in
             member.devices.compactMap { device -> MapGeoPoint? in
-                guard let lat = device.lat, let lon = device.lon else { return nil }
+                // 011 §2 / 010 §3.4: dormant devices take no part in the camera fit.
+                guard !device.isDormant, let lat = device.lat, let lon = device.lon else { return nil }
                 return MapGeoPoint(lat: lat, lon: lon)
             }
         }

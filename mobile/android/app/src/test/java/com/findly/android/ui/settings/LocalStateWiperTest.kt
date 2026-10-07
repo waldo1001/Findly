@@ -5,6 +5,10 @@ import com.findly.android.fakes.InMemoryGeofenceConfigStateStore
 import com.findly.android.location.InMemoryPermissionDisclosureStore
 import com.findly.android.location.PermissionDisclosureKind
 import com.findly.android.location.settings.CachedGeofenceConfig
+import com.findly.android.pendinglink.InMemoryPendingLinkPersistence
+import com.findly.android.pendinglink.PendingLink
+import com.findly.android.pendinglink.PendingLinkKind
+import com.findly.android.pendinglink.PendingLinkStore
 import com.findly.android.queue.FixBatch
 import com.findly.android.queue.FixQueueStore
 import com.findly.android.queue.FixSource
@@ -33,6 +37,7 @@ class LocalStateWiperTest {
         geofenceEventQueueStore: InMemoryGeofenceEventQueueStore = InMemoryGeofenceEventQueueStore(),
         geofenceConfigStateStore: InMemoryGeofenceConfigStateStore = InMemoryGeofenceConfigStateStore(),
         permissionDisclosureStore: InMemoryPermissionDisclosureStore = InMemoryPermissionDisclosureStore(),
+        pendingLinkStore: PendingLinkStore = PendingLinkStore(InMemoryPendingLinkPersistence()),
     ) = DefaultLocalStateWiper(
         fixQueueStore,
         deviceIdStore,
@@ -40,6 +45,7 @@ class LocalStateWiperTest {
         geofenceEventQueueStore,
         geofenceConfigStateStore,
         permissionDisclosureStore,
+        pendingLinkStore,
     )
 
     @Test
@@ -152,6 +158,7 @@ class LocalStateWiperTest {
             geofenceEventQueueStore,
             geofenceConfigStateStore,
             permissionDisclosureStore,
+            PendingLinkStore(InMemoryPendingLinkPersistence()),
         ).wipeAll("uid-1")
 
         assertTrue("the throwing step was actually attempted", throwingFixQueueStore.clearAllCallCount > 0)
@@ -194,10 +201,26 @@ class LocalStateWiperTest {
             InMemoryGeofenceEventQueueStore(),
             throwingConfigStore,
             InMemoryPermissionDisclosureStore(),
+            PendingLinkStore(InMemoryPendingLinkPersistence()),
         ).wipeAll("uid-1")
 
         assertEquals("the fix queue - which runs BEFORE the throwing step - still gets cleared", 0, fixQueueStore.pendingCount())
     }
+
+    // A62 (specs/010 section 1.3 "Clearing"): a link captured for one person never replays for the
+    // next person to sign in on that phone.
+    @Test
+    fun `wipeAll clears the pending join or invite link (memory and storage)`() = runTest {
+        val persistence = InMemoryPendingLinkPersistence()
+        val pendingLinkStore = PendingLinkStore(persistence)
+        pendingLinkStore.save(PendingLink(PendingLinkKind.FamilyInvite, "7F3K9QRZ", receivedAt = 1L))
+
+        wiper(pendingLinkStore = pendingLinkStore).wipeAll("uid-1")
+
+        assertNull(pendingLinkStore.current.value)
+        assertNull(persistence.read())
+    }
+
 }
 
 /** Throws from [clearAll] every time (simulating a Room `deleteAll()` disk I/O error) while

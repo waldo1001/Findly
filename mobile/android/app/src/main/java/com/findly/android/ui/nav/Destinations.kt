@@ -60,7 +60,6 @@ sealed class Destinations(val route: String) {
     data object InviteAccept : Destinations("invite-accept") {
         const val ARG_CODE = "code"
         const val ROUTE_WITH_ARG = "invite-accept?code={code}"
-        const val DEEP_LINK_URI_PATTERN = "findly://family-join?code={code}"
     }
 
     data object SignIn : Destinations("sign-in")
@@ -125,6 +124,5 @@ sealed class Destinations(val route: String) {
     data object GroupJoin : Destinations("group-join") {
         const val ARG_CODE = "code"
         const val ROUTE_WITH_ARG = "group-join?code={code}"
-        const val DEEP_LINK_URI_PATTERN = "findly://group-join?code={code}"
     }
 }

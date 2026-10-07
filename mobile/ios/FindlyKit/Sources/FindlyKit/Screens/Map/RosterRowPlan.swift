@@ -21,8 +21,11 @@ import Foundation
 /// their own copy of the logic that produces it.
 public struct RosterRowPlan: Equatable {
     public struct Row: Equatable, Identifiable {
-        /// `nil` for the synthetic "no devices registered" row shown when a member has no devices.
+        /// `nil` for the synthetic row shown when a member has nothing to chip (see `emptyState`).
         public let device: DeviceLocation?
+        /// Which synthetic row this is when `device == nil`: no devices registered at all, or
+        /// devices that are all dormant (011 §2 — `No recent location`).
+        public let emptyState: EmptyState?
         /// The first row in a member's block shows the member's own display name as its title;
         /// subsequent device rows show that device's own name instead (`LiveMapScreen.memberRow`'s
         /// pre-I48 `index == 0` check).
@@ -31,6 +34,25 @@ public struct RosterRowPlan: Equatable {
         /// `\.element.deviceId`, or a fixed sentinel for the synthetic "no devices" row (there is
         /// at most one of those per member, so a constant is unambiguous).
         public var id: String { device?.deviceId ?? "no-devices" }
+
+        public init(device: DeviceLocation?, isFirst: Bool, emptyState: EmptyState? = nil) {
+            self.device = device
+            self.isFirst = isFirst
+            self.emptyState = emptyState
+        }
+    }
+
+    /// The two member-level "nothing to show" states (010 §3.3, 011 §2).
+    public enum EmptyState: Equatable {
+        case noDevices
+        case noRecentLocation
+
+        public var text: String {
+            switch self {
+            case .noDevices: return "No devices registered"
+            case .noRecentLocation: return "No recent location"
+            }
+        }
     }
 
     public let rows: [Row]
@@ -44,9 +66,15 @@ public struct RosterRowPlan: Equatable {
 
     public static func compute(devices: [DeviceLocation]) -> RosterRowPlan {
         guard !devices.isEmpty else {
-            return RosterRowPlan(rows: [Row(device: nil, isFirst: true)])
+            return RosterRowPlan(rows: [Row(device: nil, isFirst: true, emptyState: .noDevices)])
         }
-        let rows = devices.enumerated().map { index, device in Row(device: device, isFirst: index == 0) }
+        // 011 §2 / 010 §3.3: dormant devices get no roster chip; a member whose devices are ALL
+        // dormant still appears, with the `No recent location` row.
+        let live = devices.filter { !$0.isDormant }
+        guard !live.isEmpty else {
+            return RosterRowPlan(rows: [Row(device: nil, isFirst: true, emptyState: .noRecentLocation)])
+        }
+        let rows = live.enumerated().map { index, device in Row(device: device, isFirst: index == 0) }
         return RosterRowPlan(rows: rows)
     }
 }

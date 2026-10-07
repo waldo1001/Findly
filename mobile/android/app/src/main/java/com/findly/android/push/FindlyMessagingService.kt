@@ -79,6 +79,9 @@ class FindlyMessagingService : FirebaseMessagingService() {
 
             PushMessageLane.ExpeditedGeofenceConfigSync -> container.geofenceConfigSyncWorkEnqueuer.enqueue()
 
+            // 011 §4.4: STALE_NUDGE in the foreground is suppressed - nothing to do.
+            PushMessageLane.Drop -> Unit
+
             PushMessageLane.Dispatcher -> runBlocking(Dispatchers.IO) {
                 container.pushMessageDispatcher.dispatch(message.data)
             }

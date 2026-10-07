@@ -4,17 +4,21 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
@@ -33,6 +37,7 @@ import com.findly.android.ui.designsystem.components.FindlySwitchRow
 import com.findly.android.ui.designsystem.components.FindlyTextField
 import com.findly.android.ui.designsystem.components.FindlyTopBar
 import com.findly.android.ui.onboarding.OnboardingVariant
+import java.time.Instant
 
 /**
  * The Devices screen (specs/010-app-shell-and-screen-ux.md §4) — Android's first real Devices UI,
@@ -66,6 +71,10 @@ fun DevicesRoute(
         onSelectSyncInterval = viewModel::setSyncInterval,
         onRenameDraftChange = viewModel::updateRenameDraft,
         onSaveRename = viewModel::rename,
+        onRequestRemove = viewModel::requestRemove,
+        onCancelRemove = viewModel::cancelRemove,
+        onConfirmRemove = viewModel::confirmRemove,
+        onToggleStaleNudge = viewModel::setStaleNudge,
         onOpenBatterySettings = onOpenBatterySettings,
         vendorLinkUrl = vendorLinkUrl,
         onOpenVendorLink = onOpenVendorLink,
@@ -83,6 +92,10 @@ fun DevicesScreen(
     onSelectSyncInterval: (deviceId: String, minutes: Int) -> Unit = { _, _ -> },
     onRenameDraftChange: (deviceId: String, draft: String) -> Unit = { _, _ -> },
     onSaveRename: (deviceId: String, name: String) -> Unit = { _, _ -> },
+    onRequestRemove: (deviceId: String) -> Unit = {},
+    onCancelRemove: (deviceId: String) -> Unit = {},
+    onConfirmRemove: (deviceId: String) -> Unit = {},
+    onToggleStaleNudge: (deviceId: String, enabled: Boolean) -> Unit = { _, _ -> },
     onOpenBatterySettings: () -> Unit = {},
     vendorLinkUrl: String? = null,
     onOpenVendorLink: (String) -> Unit = {},
@@ -109,6 +122,8 @@ fun DevicesScreen(
                         modifier = Modifier.padding(FindlyTheme.spacing.md),
                     )
                 } else {
+                    // 010 §3.1's relative-time formatter, evaluated whenever the list changes.
+                    val nowIso = remember(state) { Instant.now().toString() }
                     LazyColumn(
                         modifier = Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(FindlyTheme.spacing.md),
@@ -123,6 +138,11 @@ fun DevicesScreen(
                                 onSelectSyncInterval = { minutes -> onSelectSyncInterval(device.deviceId, minutes) },
                                 onRenameDraftChange = { draft -> onRenameDraftChange(device.deviceId, draft) },
                                 onSaveRename = { onSaveRename(device.deviceId, device.renameDraft.trim()) },
+                                nowIso = nowIso,
+                                onRequestRemove = { onRequestRemove(device.deviceId) },
+                                onCancelRemove = { onCancelRemove(device.deviceId) },
+                                onConfirmRemove = { onConfirmRemove(device.deviceId) },
+                                onToggleStaleNudge = { enabled -> onToggleStaleNudge(device.deviceId, enabled) },
                                 onOpenBatterySettings = onOpenBatterySettings,
                                 vendorLinkUrl = vendorLinkUrl,
                                 onOpenVendorLink = onOpenVendorLink,
@@ -150,6 +170,11 @@ private fun DeviceCard(
     onSelectSyncInterval: (Int) -> Unit,
     onRenameDraftChange: (String) -> Unit,
     onSaveRename: () -> Unit,
+    nowIso: String,
+    onRequestRemove: () -> Unit,
+    onCancelRemove: () -> Unit,
+    onConfirmRemove: () -> Unit,
+    onToggleStaleNudge: (Boolean) -> Unit,
     onOpenBatterySettings: () -> Unit = {},
     vendorLinkUrl: String? = null,
     onOpenVendorLink: (String) -> Unit = {},
@@ -161,9 +186,10 @@ private fun DeviceCard(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(text = device.deviceName, color = FindlyTheme.colors.onSurface, style = FindlyTheme.typography.titleMedium)
+            // 011 §1.1/§2: a dormant device shows Inactive in place of Active/Paused.
             FindlyStatusChip(
-                label = if (device.trackingEnabled) "Active" else "Paused",
-                tone = if (device.trackingEnabled) FindlyStatusTone.Success else FindlyStatusTone.Neutral,
+                label = DeviceLifecyclePolicy.statusLabel(device.trackingEnabled, device.isDormant),
+                tone = if (device.trackingEnabled && !device.isDormant) FindlyStatusTone.Success else FindlyStatusTone.Neutral,
             )
         }
 
@@ -171,8 +197,20 @@ private fun DeviceCard(
             text = "Owner: ${device.ownerDisplayName}",
             color = FindlyTheme.colors.subtleText,
             style = FindlyTheme.typography.bodyMedium,
-            modifier = Modifier.padding(top = FindlyTheme.spacing.xs, bottom = FindlyTheme.spacing.sm),
+            modifier = Modifier.padding(top = FindlyTheme.spacing.xs),
         )
+
+        // 010 §4.2 bullet 5 / 011 §1.1: muted last-activity line, omitted without lastSeenAt.
+        val lastSeen = DeviceLifecyclePolicy.lastSeenLine(device.lastSeenAt, nowIso)
+        if (lastSeen != null) {
+            Text(
+                text = lastSeen,
+                color = FindlyTheme.colors.subtleText,
+                style = FindlyTheme.typography.bodyMedium,
+                modifier = Modifier.padding(top = FindlyTheme.spacing.xs),
+            )
+        }
+        Spacer(modifier = Modifier.padding(bottom = FindlyTheme.spacing.sm))
 
         if (isParent) {
             FindlySwitchRow(
@@ -246,6 +284,38 @@ private fun DeviceCard(
                         .clickable { onOpenVendorLink(vendorLinkUrl) },
                 )
             }
+        }
+
+        // 011 §4.4: the owner's own reminder preference - owned devices only, any role, outside
+        // the parent gate; commits immediately.
+        if (DeviceLifecyclePolicy.showsNudgeToggle(device.isOwnedByCaller)) {
+            FindlySwitchRow(
+                title = "Remind me when sharing stops",
+                checked = device.staleNudgeEnabled,
+                onCheckedChange = onToggleStaleNudge,
+                enabled = !device.isMutating,
+            )
+        }
+
+        // 011 §1.1: parent or owner, never this device; outside bullet 3's parent gate.
+        if (device.canRemove) {
+            FindlyButton(
+                text = "Remove device",
+                onClick = onRequestRemove,
+                style = FindlyButtonStyle.Destructive,
+                enabled = !device.isMutating,
+                modifier = Modifier.padding(top = FindlyTheme.spacing.sm),
+            )
+        }
+
+        if (device.isConfirmingRemoval) {
+            AlertDialog(
+                onDismissRequest = onCancelRemove,
+                title = { Text(DeviceLifecyclePolicy.removeDialogTitle(device.deviceName)) },
+                text = { Text(DeviceLifecyclePolicy.REMOVE_DIALOG_BODY) },
+                confirmButton = { TextButton(onClick = onConfirmRemove) { Text("Remove", color = FindlyTheme.colors.danger) } },
+                dismissButton = { TextButton(onClick = onCancelRemove) { Text("Cancel") } },
+            )
         }
 
         if (device.error != null) {

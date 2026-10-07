@@ -97,6 +97,10 @@ interface FindlyApiService {
         @Body request: UpdateDeviceRequestDto,
     ): Response<Envelope<DeviceDto>>
 
+    /** Bare 204 (001 §4.4) — see §3.6's `removeMember` doc for why this returns `ResponseBody`. */
+    @DELETE("v1/devices/{deviceId}")
+    suspend fun deleteDevice(@Path("deviceId") deviceId: String): Response<ResponseBody>
+
     // ---- §5 Location reporting & reading ----
 
     @POST("v1/locations")

@@ -16,6 +16,9 @@ sealed class PushMessageType {
     data object GeofenceEvent : PushMessageType()
     data object SettingsChanged : PushMessageType()
     data object GeofenceConfigChanged : PushMessageType()
+
+    /** 001 §8.8 / 009 §5.6 — a visible, OS-displayed push; the client only drops it in the foreground. */
+    data object StaleNudge : PushMessageType()
     data class Unrecognized(val rawType: String) : PushMessageType()
 
     companion object {
@@ -29,6 +32,7 @@ sealed class PushMessageType {
             "GEOFENCE_EVENT" -> GeofenceEvent
             "SETTINGS_CHANGED" -> SettingsChanged
             "GEOFENCE_CONFIG_CHANGED" -> GeofenceConfigChanged
+            "STALE_NUDGE" -> StaleNudge
             else -> Unrecognized(data["type"].orEmpty())
         }
     }

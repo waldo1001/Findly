@@ -16,6 +16,11 @@ sealed class PushMessageLane {
      * first, so a synchronous, immediately-returning enqueue call is the whole handoff. */
     data object ExpeditedGeofenceConfigSync : PushMessageLane()
 
+    /** STALE_NUDGE (specs/011 §4.4, 009 §5.6) — received by `onMessageReceived` only while the app is
+     * foregrounded (a backgrounded app's `notification`-block message is displayed by the OS and
+     * never reaches it). The app being open means it is not stale: drop it, show nothing. */
+    data object Drop : PushMessageLane()
+
     /** Everything else — `SETTINGS_CHANGED`, `GEOFENCE_EVENT`, an unknown or reserved-future type,
      * and a missing type — routes through [com.findly.android.pushmessages.PushMessageDispatcher].
      * Each of these is cheap in-memory work (a schedule rebuild, posting a local notification, or
@@ -36,6 +41,7 @@ object PushMessageLanePolicy {
     fun decide(type: PushMessageType): PushMessageLane = when (type) {
         is PushMessageType.LocateRequest -> PushMessageLane.LocateHandoff
         is PushMessageType.GeofenceConfigChanged -> PushMessageLane.ExpeditedGeofenceConfigSync
+        is PushMessageType.StaleNudge -> PushMessageLane.Drop
         is PushMessageType.SettingsChanged,
         is PushMessageType.GeofenceEvent,
         is PushMessageType.Unrecognized,

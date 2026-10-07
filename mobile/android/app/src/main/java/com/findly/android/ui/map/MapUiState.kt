@@ -15,6 +15,9 @@ data class RosterDeviceUi(
     val trackingEnabled: Boolean,
     val syncIntervalMinutes: Int,
     val isStale: Boolean?,
+    /** 001 §5.2 / 011 §2: server-computed. Dormant devices are presentation-hidden everywhere on
+     * the map (010 §3.3) — see [RosterMemberUi.shownDevices]. */
+    val isDormant: Boolean = false,
 ) {
     val hasLocation: Boolean get() = lat != null && lon != null
 }
@@ -25,7 +28,22 @@ data class RosterMemberUi(
     val userId: String,
     val displayName: String,
     val devices: List<RosterDeviceUi>,
-)
+) {
+    /** The devices the map actually shows: markers, roster chips, camera fit, freshest-device
+     * choice all work off this (010 §3.3, 011 §2) — dormant ones are excluded. */
+    val shownDevices: List<RosterDeviceUi> get() = devices.filterNot { it.isDormant }
+
+    /** True when the member has devices but every one is dormant — the roster row then reads
+     * `No recent location` (011 §2) and stays selectable. A member with no devices at all is a
+     * different state ("No devices registered"). */
+    val hasOnlyDormantDevices: Boolean get() = devices.isNotEmpty() && devices.all { it.isDormant }
+}
+
+/** Roster row wording for a member with nothing to show (specs/010 §3.3, 011 §2). */
+object RosterRowText {
+    fun memberWithoutShownDevices(hasOnlyDormantDevices: Boolean): String =
+        if (hasOnlyDormantDevices) "No recent location" else "No devices registered"
+}
 
 /** State surfaced by [MapStateHolder] (specs/003-android-client.md §12's reserved `Map`
  * destination, filled in by A2). */
