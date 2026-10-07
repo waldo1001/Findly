@@ -197,7 +197,17 @@ struct FindlyApp: App {
             apiClient: apiClient, deviceIdProvider: deviceIdProvider, deviceInfoProvider: deviceInfoProvider,
             authProvider: authProvider, appVersionTracker: appVersionTracker
         )
-        let locationProvider = SystemLocationProvider()
+        // specs/004-ios-client.md §7 "Battery level" (I57) — ONE battery reader for EVERY capture
+        // path. Until I57 every iPhone reported `batteryPct: 100` on every fix because both consumers
+        // below were built with their `{ 100 }` default closures, which never read `UIDevice` at all.
+        // Reading the real level also needs `UIDevice.isBatteryMonitoringEnabled = true` (without it
+        // `batteryLevel` is always -1.0); the monitor's init turns it on, and it is built before
+        // anything that can capture a fix. The same closure goes to `SystemLocationProvider` (main-actor callers) AND to
+        // `LocationRuntimeContainer` → `GeofenceTransitionHandler` (an async, non-main-actor caller);
+        // `BatteryLevelMonitor.percent` is safe from either — see its doc for why it is a cache.
+        let batteryMonitor = BatteryLevelMonitor()
+        let batteryLevelProvider: () -> Int = { batteryMonitor.percent }
+        let locationProvider = SystemLocationProvider(batteryLevelProvider: batteryLevelProvider)
         // specs/009-device-runtime.md §6.2 (I11) — the real, CLLocationManager-region-monitoring-
         // backed registrar. Built here (like `locationProvider` above), BEFORE
         // `LocationRuntimeContainer` exists, because `LocationRuntimeContainer.init` needs it as an
@@ -234,6 +244,7 @@ struct FindlyApp: App {
             // like `permissionDisclosureStore` immediately above (the identical I26/I31 shape).
             familyContextCache: familyContextCache,
             isPermissionGranted: { [weak locationProvider] in locationProvider?.isAuthorized ?? false },
+            batteryLevelProvider: batteryLevelProvider,
             // specs/009 §9: 404 DEVICE_NOT_FOUND -> stop the schedule, clear local device state,
             // re-run registration. `onSignedIn` below (I12) now also explicitly registers on first
             // launch after sign-in and on every app update, per specs/004 §5's trigger list — this

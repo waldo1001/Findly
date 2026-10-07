@@ -1,0 +1,15 @@
+{
+  "track": "production",
+  "releases": [
+    {
+      "name": "1.4.0 (240)",
+      "versionCodes": ["240"],
+      "status": "draft"
+    },
+    {
+      "name": "1.1.0 (230)",
+      "versionCodes": ["230"],
+      "status": "completed"
+    }
+  ]
+}

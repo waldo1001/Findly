@@ -40,6 +40,11 @@ public struct LiveMapScreen: View {
     @State private var now = Date()
     private static let ticker = Timer.publish(every: 30, on: .main, in: .common).autoconnect()
     private static let isoFormatter = ISO8601DateFormatter()
+    /// specs/010 §3.6 (I59) — the ONLY lifecycle signal this screen needs beyond appear/disappear:
+    /// the ticker above merely recomputes relative-time labels, so on its own it left a reopened app
+    /// showing the last load's positions. Forwarded, untranslated beyond
+    /// `MapRefreshPolicy.ScenePhase.init(_:)`, to `viewModel.refreshDriver`, which decides everything.
+    @Environment(\.scenePhase) private var scenePhase
 
     private let onSelectHistory: () -> Void
     private let onSelectGeofences: () -> Void
@@ -103,9 +108,29 @@ public struct LiveMapScreen: View {
                 )
             }
         }
+        // specs/010 §3.6 (rows A55/I59) — the data-freshness wiring, deliberately thin: the screen
+        // only forwards three lifecycle signals to `viewModel.refreshDriver`, which owns every
+        // decision (first appearance / return to the map / foreground return / the 30 s timer that
+        // exists only while this view is on screen AND the scene is `.active` / one fetch in flight)
+        // and is unit-tested in `MapRefreshPolicyTests`/`MapRefreshDriverTests`.
+        //
+        // `.task` (not `.onAppear`): it is cancelled when the view goes away, so the first load
+        // cannot outlive the screen. `RootView` re-creates this screen on every navigation back to
+        // the map, so each return is a fresh first appearance with a fresh view model.
         .task {
             syncSheetHeight()
-            await viewModel.load()
+            await viewModel.refreshDriver.appeared(phase: MapRefreshPolicy.ScenePhase(scenePhase))
+        }
+        // Cancels the 30 s timer the moment the map leaves the screen.
+        .onDisappear { viewModel.refreshDriver.disappeared() }
+        // §3.6 #2: a return to `.active` while the map is on screen re-fetches; leaving `.active`
+        // (inactive/background) cancels the timer, so nothing polls in the background. The sheet
+        // height is re-read first because a foreground refresh may be the load that mints the
+        // camera command (§3.4: first load that yields a point), and §3.4's occlusion model fits
+        // against the detent current at that moment.
+        .onChange(of: scenePhase) { newPhase in
+            syncSheetHeight()
+            Task { await viewModel.refreshDriver.scenePhaseChanged(MapRefreshPolicy.ScenePhase(newPhase)) }
         }
         .onChange(of: routingVariant) { variant in
             if let variant { onProfileDeadEnd(variant) }
