@@ -28,15 +28,16 @@ export type NudgeCandidate = Pick<
   "trackingEnabled" | "syncIntervalMinutes" | "pushToken" | "pushInvalid" | "registeredAt" | "staleNudgeEnabled" | "lastNudgedAt"
 > & { lastSeenAt?: string };
 
-const brusselsHour = new Intl.DateTimeFormat("en-GB", {
-  timeZone: QUIET_HOURS_ZONE,
-  hour: "2-digit",
-  hourCycle: "h23",
-});
-
-/** Hour of day (0–23) at `instant` in Europe/Brussels, DST-correct via the platform tz database. */
+/** Hour of day (0–23) at `instant` in Europe/Brussels, DST-correct via the platform tz database.
+ * The formatter is built per call (a handful per run) so its options are exercised — and
+ * mutation-tested — by every isNudgeDue call rather than frozen at module load. */
 function localHour(instant: Date): number {
-  return Number(brusselsHour.format(instant));
+  const formatter = new Intl.DateTimeFormat("en-GB", {
+    timeZone: QUIET_HOURS_ZONE,
+    hour: "2-digit",
+    hourCycle: "h23",
+  });
+  return Number(formatter.format(instant));
 }
 
 /** 011 §4.1 — all seven conditions; `now` is the send time. */
@@ -54,12 +55,9 @@ export function isNudgeDue(device: NudgeCandidate, now: Date): boolean {
   // 5. not given up: quiet at most 7 days
   if (quietMs > NUDGE_GIVE_UP_DAYS * DAY_MS) return false;
   // 6. rate limit: at most one per 24 h
-  if (
-    device.lastNudgedAt !== undefined &&
-    now.getTime() - new Date(device.lastNudgedAt).getTime() < NUDGE_RATE_LIMIT_HOURS * HOUR_MS
-  ) {
-    return false;
-  }
+  const sinceNudgeMs =
+    device.lastNudgedAt === undefined ? Infinity : now.getTime() - new Date(device.lastNudgedAt).getTime();
+  if (sinceNudgeMs < NUDGE_RATE_LIMIT_HOURS * HOUR_MS) return false;
   // 7. quiet hours: [08:00, 21:00) Europe/Brussels
   const hour = localHour(now);
   return hour >= WINDOW_START_HOUR && hour < WINDOW_END_HOUR;
