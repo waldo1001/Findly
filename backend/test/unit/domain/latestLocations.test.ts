@@ -97,6 +97,7 @@ describe("domain/location/latestLocations", () => {
         trackingEnabled: true,
         syncIntervalMinutes: 15,
         isStale: null,
+        isDormant: false,
       },
     ]);
   });
@@ -138,6 +139,7 @@ describe("domain/location/latestLocations", () => {
         trackingEnabled: true,
         syncIntervalMinutes: 15,
         isStale: false,
+        isDormant: false,
       },
     ]);
   });
@@ -307,5 +309,58 @@ describe("domain/location/latestLocations", () => {
     };
 
     await expectAppError(latestLocations({ familyId: FAMILY_ID }, deps), "INTERNAL_ERROR");
+  });
+
+  // specs/001 §5.2, 011 §2 — isDormant is server-computed and always a boolean.
+  it("isDormant: exactly 30 days since lastSeenAt is false, one millisecond more is true", async () => {
+    const deps = await buildDeps();
+    await deps.familyRepo.addMember(FAMILY_ID, { userId: "u1", role: "parent", displayName: "Eric", joinedAt: "2026-07-01T00:00:00Z" });
+    const nowMs = new Date(NOW).getTime();
+    const day = 24 * 60 * 60 * 1000;
+    deps.deviceRepo.seed("u1", device({ deviceId: "edge", ownerUserId: "u1", lastSeenAt: new Date(nowMs - 30 * day).toISOString() }));
+    deps.deviceRepo.seed("u1", device({ deviceId: "over", ownerUserId: "u1", lastSeenAt: new Date(nowMs - 30 * day - 1).toISOString() }));
+
+    const result = await latestLocations({ familyId: FAMILY_ID }, deps);
+
+    const devices = result.members.find((m) => m.userId === "u1")?.devices ?? [];
+    expect(devices.find((d) => d.deviceId === "edge")?.isDormant).toBe(false);
+    expect(devices.find((d) => d.deviceId === "over")?.isDormant).toBe(true);
+  });
+
+  it("isDormant is present (true) on a never-reported dormant device whose fix fields are null", async () => {
+    const deps = await buildDeps();
+    await deps.familyRepo.addMember(FAMILY_ID, { userId: "u1", role: "parent", displayName: "Eric", joinedAt: "2026-07-01T00:00:00Z" });
+    deps.deviceRepo.seed("u1", device({ deviceId: "ghost", ownerUserId: "u1", lastSeenAt: "2026-05-01T00:00:00Z" }));
+
+    const result = await latestLocations({ familyId: FAMILY_ID }, deps);
+
+    expect(result.members[0]?.devices[0]).toMatchObject({ deviceId: "ghost", lat: null, isStale: null, isDormant: true });
+  });
+
+  it("isDormant is true on a device WITH a last-known fix when the device has been silent > 30 days", async () => {
+    const deps = await buildDeps();
+    await deps.familyRepo.addMember(FAMILY_ID, { userId: "u1", role: "parent", displayName: "Eric", joinedAt: "2026-07-01T00:00:00Z" });
+    deps.deviceRepo.seed("u1", device({ deviceId: "old", ownerUserId: "u1", lastSeenAt: "2026-05-01T00:00:00Z" }));
+    deps.lastKnownRepo.seed("u1", {
+      deviceId: "old", lat: 1, lon: 2, accuracyM: 5, batteryPct: 50,
+      recordedAt: "2026-05-01T00:00:00Z", receivedAt: "2026-05-01T00:00:01Z", source: "periodic",
+    });
+
+    const result = await latestLocations({ familyId: FAMILY_ID }, deps);
+
+    expect(result.members[0]?.devices[0]).toMatchObject({ isStale: true, isDormant: true });
+  });
+
+  it("isDormant falls back to registeredAt when the stored row carries no lastSeenAt", async () => {
+    const deps = await buildDeps();
+    await deps.familyRepo.addMember(FAMILY_ID, { userId: "u1", role: "parent", displayName: "Eric", joinedAt: "2026-07-01T00:00:00Z" });
+    deps.deviceRepo.seed(
+      "u1",
+      device({ deviceId: "d1", ownerUserId: "u1", registeredAt: "2026-04-01T00:00:00Z", lastSeenAt: undefined as unknown as string }),
+    );
+
+    const result = await latestLocations({ familyId: FAMILY_ID }, deps);
+
+    expect(result.members[0]?.devices[0]?.isDormant).toBe(true);
   });
 });

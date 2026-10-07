@@ -459,7 +459,12 @@ public struct LiveMapScreen: View {
                             statusChip(for: device)
                         }
                     } else {
-                        FindlyListRow(title: member.displayName, subtitle: "No devices registered", avatarText: Self.initials(for: member.displayName))
+                        // 010 §3.3 / 011 §2: "No devices registered", or "No recent location" when
+                        // every device is dormant.
+                        FindlyListRow(
+                            title: member.displayName, subtitle: (row.emptyState ?? .noDevices).text,
+                            avatarText: Self.initials(for: member.displayName)
+                        )
                     }
                     if index < plan.rows.count - 1 {
                         FindlyCardDivider()
@@ -478,7 +483,7 @@ public struct LiveMapScreen: View {
     }
 
     private func summaryLine(for members: [MemberLocations]) -> String {
-        let located = members.filter { member in member.devices.contains { $0.lat != nil && $0.lon != nil } }.count
+        let located = members.filter { member in member.devices.contains { !$0.isDormant && $0.lat != nil && $0.lon != nil } }.count
         return "\(located) of \(members.count) sharing their location"
     }
 

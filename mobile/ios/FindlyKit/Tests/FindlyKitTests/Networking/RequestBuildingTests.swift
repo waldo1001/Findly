@@ -118,6 +118,35 @@ struct RequestBuildingTests {
         try await client.removeMember(userId: "u2")
     }
 
+    // MARK: §4.3/§4.4 device lifecycle (011 §1, §4.4)
+
+    @Test func deleteDevice_buildsRequestAndHandlesNoContent() async throws {
+        let client = makeClient()
+        MockURLProtocol.requestHandler = { request in
+            #expect(request.httpMethod == "DELETE")
+            #expect(request.url?.path == "/api/v1/devices/d9")
+            #expect(request.value(forHTTPHeaderField: "Authorization")?.hasPrefix("Bearer ") == true)
+            return (jsonResponse(url: request.url!, status: 204), Data())
+        }
+        try await client.deleteDevice(deviceId: "d9")
+    }
+
+    @Test func updateDevice_staleNudgeEnabled_isTheOnlyKeySent() async throws {
+        let client = makeClient()
+        MockURLProtocol.requestHandler = { request in
+            #expect(request.httpMethod == "PATCH")
+            #expect(request.url?.path == "/api/v1/devices/d1")
+            let body = try self.bodyJSON(request)
+            #expect(body["staleNudgeEnabled"] as? Bool == false)
+            #expect(body.count == 1)
+            return (jsonResponse(url: request.url!, status: 200), envelopeJSON(data: """
+            {"deviceId":"d1","ownerUserId":"u1","platform":"ios","deviceName":"P","model":"iPhone","appVersion":"1.0.0","syncIntervalMinutes":15,"trackingEnabled":true,"pushInvalid":false,"staleNudgeEnabled":false}
+            """))
+        }
+        let envelope = try await client.updateDevice(deviceId: "d1", UpdateDeviceRequest(staleNudgeEnabled: false))
+        #expect(envelope.data.staleNudgeEnabled == false)
+    }
+
     // MARK: §4 Devices
 
     @Test func registerDevice_buildsRequest_omittingAbsentTokens() async throws {

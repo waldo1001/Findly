@@ -1,5 +1,6 @@
 package com.findly.android.ui.devices
 
+import com.findly.android.network.ApiError
 import com.findly.android.network.ApiResult
 import com.findly.android.network.dto.FamilyDeviceDto
 import com.findly.android.network.dto.UpdateDeviceRequestDto
@@ -49,6 +50,10 @@ class DevicesStateHolder(
      * cache `null` for this whole `ViewModel`'s lifetime, never marking a card even after sign-in
      * completes and a later [load] re-runs. */
     private val localDeviceId: () -> String? = { null },
+    /** The signed-in caller's uid (matches `ownerUserId`), resolved fresh per [load] like
+     * [localDeviceId] — decides ownership for the nudge toggle and the Remove action
+     * (specs/011 §1.1, §4.4). */
+    private val localUserId: () -> String? = { null },
 ) {
     private val _state = MutableStateFlow<DevicesUiState>(DevicesUiState.Loading)
     val state: StateFlow<DevicesUiState> = _state.asStateFlow()
@@ -74,8 +79,15 @@ class DevicesStateHolder(
             is ApiResult.Success -> {
                 // Resolved fresh on every load() (finding 9) - see localDeviceId's own doc.
                 val currentLocalDeviceId = localDeviceId()
+                val currentLocalUserId = localUserId()
                 _state.value = DevicesUiState.Content(
-                    devices = result.data.devices.map { it.toCardUi(isThisDevice = it.deviceId == currentLocalDeviceId) },
+                    devices = result.data.devices.map {
+                        it.toCardUi(
+                            isThisDevice = it.deviceId == currentLocalDeviceId,
+                            isOwner = currentLocalUserId != null && it.ownerUserId == currentLocalUserId,
+                            isParent = isParent,
+                        )
+                    },
                     limits = result.features?.limits,
                 )
             }
@@ -103,6 +115,60 @@ class DevicesStateHolder(
      * first real caller. */
     suspend fun rename(deviceId: String, name: String) =
         mutate(deviceId, UpdateDeviceRequestDto(deviceName = name), syncsRenameDraft = true)
+
+    /** 011 §1.1: opens the Remove confirmation — ignored unless the action is available. */
+    fun requestRemove(deviceId: String) {
+        val card = cardOrNull(deviceId) ?: return
+        if (!card.canRemove) return
+        withCard(deviceId) { it.copy(isConfirmingRemoval = true, error = null) }
+    }
+
+    fun cancelRemove(deviceId: String) {
+        withCard(deviceId) { it.copy(isConfirmingRemoval = false) }
+    }
+
+    /** 011 §1.1: `204` and `DEVICE_NOT_FOUND` both mean the device is gone (the latter also
+     * refreshes the list); `AUTH_FORBIDDEN` renders on the card. */
+    suspend fun confirmRemove(deviceId: String) {
+        val card = cardOrNull(deviceId) ?: return
+        if (!card.canRemove || !card.isConfirmingRemoval) return
+
+        withCard(deviceId) { it.copy(isConfirmingRemoval = false, isMutating = true, error = null) }
+        when (val result = devicesApi.deleteDevice(deviceId)) {
+            is ApiResult.Success -> dropCard(deviceId)
+            is ApiResult.Failure -> when (result.error) {
+                is ApiError.DeviceNotFound -> {
+                    dropCard(deviceId)
+                    load()
+                }
+                is ApiError.AuthForbidden ->
+                    withCard(deviceId) { it.copy(isMutating = false, error = DeviceLifecyclePolicy.REMOVE_FORBIDDEN_MESSAGE) }
+                else -> withCard(deviceId) { it.copy(isMutating = false, error = result.error.userMessage()) }
+            }
+        }
+    }
+
+    /** 011 §4.4: owner-only (any role) `Remind me when sharing stops` — commits immediately. */
+    suspend fun setStaleNudge(deviceId: String, enabled: Boolean) {
+        val card = cardOrNull(deviceId) ?: return
+        if (!DeviceLifecyclePolicy.showsNudgeToggle(card.isOwnedByCaller)) return
+
+        withCard(deviceId) { it.copy(isMutating = true, error = null) }
+        when (val result = devicesApi.updateDevice(deviceId, UpdateDeviceRequestDto(staleNudgeEnabled = enabled))) {
+            is ApiResult.Success -> withCard(deviceId) {
+                it.copy(staleNudgeEnabled = result.data.staleNudgeEnabled, isMutating = false, error = null)
+            }
+            is ApiResult.Failure -> withCard(deviceId) { it.copy(isMutating = false, error = result.error.userMessage()) }
+        }
+    }
+
+    private fun cardOrNull(deviceId: String): DeviceCardUi? =
+        (_state.value as? DevicesUiState.Content)?.devices?.firstOrNull { it.deviceId == deviceId }
+
+    private fun dropCard(deviceId: String) {
+        val current = _state.value as? DevicesUiState.Content ?: return
+        _state.value = current.copy(devices = current.devices.filterNot { it.deviceId == deviceId })
+    }
 
     private fun withCard(deviceId: String, transform: (DeviceCardUi) -> DeviceCardUi) {
         val current = _state.value as? DevicesUiState.Content ?: return
@@ -141,7 +207,7 @@ class DevicesStateHolder(
     }
 }
 
-private fun FamilyDeviceDto.toCardUi(isThisDevice: Boolean): DeviceCardUi = DeviceCardUi(
+private fun FamilyDeviceDto.toCardUi(isThisDevice: Boolean, isOwner: Boolean, isParent: Boolean): DeviceCardUi = DeviceCardUi(
     deviceId = deviceId,
     deviceName = deviceName,
     model = model,
@@ -153,4 +219,8 @@ private fun FamilyDeviceDto.toCardUi(isThisDevice: Boolean): DeviceCardUi = Devi
     lastSeenAt = lastSeenAt,
     renameDraft = deviceName,
     isThisDevice = isThisDevice,
+    isDormant = isDormant,
+    staleNudgeEnabled = staleNudgeEnabled,
+    isOwnedByCaller = isOwner,
+    canRemove = DeviceLifecyclePolicy.canRemove(isParent = isParent, isOwner = isOwner, isThisDevice = isThisDevice),
 )

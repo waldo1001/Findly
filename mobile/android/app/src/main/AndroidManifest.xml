@@ -77,7 +77,8 @@
                  app's first and only external deep link, findly://group-join?code=XXXXXXXX. A
                  custom scheme (not an android:autoVerify https App Link), so no digital-asset-
                  links verification is needed; the `code` query param is untrusted input and is
-                 sanitized in FindlyNavHost/GroupJoinCodeSanitizer before any network call. -->
+                 parsed by JoinLinkParser (A62; GroupJoinCodeSanitizer whitelist) in MainActivity before any
+                 navigation or network call. -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
@@ -95,7 +96,7 @@
                  URL FRAGMENT (007 §1) — irrelevant to this intent-filter's own host/path matching
                  (and, unlike the findly:// filter's `code` query param, never delivered to a
                  server/CDN/proxy at all) — so it is read directly off the delivered Uri and
-                 sanitized in MainActivity/FindlyNavHost via GroupJoinHttpsLinkParser, the same
+                 sanitized in MainActivity via JoinLinkParser (A62; GroupJoinHttpsLinkParser), the same
                  whitelist gate as the filter above. A wrong host or path is ignored, never
                  mis-routed (007 §4); the findly:// filter above remains supported unchanged (007
                  §1: backward compatibility). -->
@@ -113,8 +114,9 @@
                  android-client.md §12.3/§12.2 mirror, specs/010 §5.2): the family-invite twin of
                  the two group filters above, `findly://family-join?code=XXXXXXXX` — a custom
                  scheme (not android:autoVerify), so no digital-asset-links verification is
-                 needed; the `code` query param is untrusted input, sanitized in
-                 FindlyNavHost/FamilyInviteCodeSanitizer before any network call, exactly like
+                 needed; the `code` query param is untrusted input, parsed by
+                 JoinLinkParser (A62; FamilyInviteCodeSanitizer whitelist) before any navigation or
+                 network call, exactly like
                  group-join's `code` param above. -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
@@ -131,7 +133,7 @@
                  007 §3). Unlike the findly:// filter above, the invite code lives in the URL
                  FRAGMENT (007 §1), never delivered to a server/CDN/proxy at all, so it is
                  read directly off the delivered Uri and sanitized in
-                 MainActivity/FindlyNavHost via FamilyInviteHttpsLinkParser, the same whitelist
+                 MainActivity via JoinLinkParser (A62; FamilyInviteHttpsLinkParser), the same whitelist
                  gate as the https /g filter above. A wrong host or path is ignored, never
                  mis-routed (007 §4); /f never routes to the group-join screen, nor /g to this
                  one. -->

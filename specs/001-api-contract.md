@@ -266,7 +266,7 @@ Open family: all members see all devices and their settings (only parents can ch
                   "isDormant": false } ] }
 ```
 
-`isDormant` (added 2026-10-07, 011 §2 — corrected the same day: first added to §5.2 only, which left the Devices screen, the one place dormant devices are *listed*, with no way to know) is the identical server-computed boolean as §5.2's, always present. `lastSeenAt` MAY be absent on a legacy row that predates its refresh rule; clients then omit the "Last seen" line (011 §1.1).
+`isDormant` (added 2026-10-07, 011 §2 — corrected the same day: first added to §5.2 only, which left the Devices screen, the one place dormant devices are *listed*, with no way to know) is the identical server-computed boolean as §5.2's, always present. On a legacy row that predates the `lastSeenAt` refresh rule the server reports `registeredAt` in its place — registration is itself a device-originated call that refreshes it (above), so this is a true lower bound, never an invention. Clients still omit the "Last seen" line if the field is ever absent (011 §1.1).
 
 `lastSeenAt` = server receive time of the device's most recent **device-originated** call — `POST /devices` (§4.1), `POST /locations` (§5.1), `POST /geofence-events` (§7.3) and `POST /locate-requests/{id}/fulfill` (§6.3) MUST all refresh it (write-skipped to once per minute, 002 §2.4). *(Amended 2026-09-06: the shipped backend refreshed it only on registration, so §6.1's "most-recently-seen" target choice could pick a member's old phone over the one actually reporting.)*
 

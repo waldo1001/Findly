@@ -39,6 +39,11 @@ export class InMemoryLastKnownRepo implements LastKnownRepo {
     return roster ? [...roster.values()].map((r) => ({ ...r })) : [];
   }
 
+  /** Single-row delete (001 §4.4, 002 §2.4 removal step 2). Idempotent. */
+  async delete(ownerUserId: string, deviceId: string): Promise<void> {
+    this.records.get(ownerUserId)?.delete(deviceId);
+  }
+
   /** Account deletion (002 §4.2 step 2, B18). Idempotent. */
   async deleteByOwner(ownerUserId: string): Promise<void> {
     this.records.delete(ownerUserId);

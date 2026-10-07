@@ -233,7 +233,7 @@ export async function createLocateRequest(
         status = "pushFailed";
         // Write back into the DEVICE OWNER's own partition (002 §2.4) — the target, not
         // necessarily the requester.
-        await deps.deviceRepo.putDevice(device.ownerUserId, { ...device, pushInvalid: true });
+        await deps.deviceRepo.replaceExistingDevice(device.ownerUserId, { ...device, pushInvalid: true });
       } else if (outcome === "error") {
         // specs/001 §6.1/§6.2 (amended 2026-09-06) — a non-throwing "error" outcome (every
         // non-ok, non-token-rejection FCM response, including an FCM 5xx — see

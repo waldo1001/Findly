@@ -6,6 +6,8 @@ import { AppError } from "../../http/errors";
 import type { DeviceRepo, EntitlementsRepo, FamilyRepo, UserRepo } from "../../ports/repositories";
 import { getFeatures, type Features } from "../plan";
 import { listDevicesForMembers } from "../family/deviceFanout";
+import type { Clock } from "../../ports/support";
+import { isDormant } from "./dormancy";
 import { toDeviceView, type DeviceView } from "./deviceView";
 
 export interface ListMyDevicesDeps {
@@ -13,6 +15,7 @@ export interface ListMyDevicesDeps {
   familyRepo: FamilyRepo;
   userRepo: UserRepo;
   entitlementsRepo: EntitlementsRepo;
+  clock: Clock;
 }
 
 export interface ListMyDevicesInput {
@@ -21,7 +24,7 @@ export interface ListMyDevicesInput {
   familyId: string | null;
 }
 
-export type DeviceListEntry = DeviceView & { ownerDisplayName: string; lastSeenAt: string };
+export type DeviceListEntry = DeviceView & { ownerDisplayName: string; lastSeenAt: string; isDormant: boolean };
 
 export interface ListMyDevicesResult {
   devices: DeviceListEntry[];
@@ -29,6 +32,7 @@ export interface ListMyDevicesResult {
 }
 
 export async function listMyDevices(input: ListMyDevicesInput, deps: ListMyDevicesDeps): Promise<ListMyDevicesResult> {
+  const now = deps.clock.now();
   if (input.familyId) {
     const familyId = input.familyId;
     const entitlements = await deps.entitlementsRepo.get(familyId);
@@ -48,6 +52,7 @@ export async function listMyDevices(input: ListMyDevicesInput, deps: ListMyDevic
         ...toDeviceView(device),
         ownerDisplayName: displayNameByUserId.get(device.ownerUserId) ?? device.ownerUserId,
         lastSeenAt: device.lastSeenAt,
+        isDormant: isDormant(device, now),
       })),
       features,
     };
@@ -64,6 +69,7 @@ export async function listMyDevices(input: ListMyDevicesInput, deps: ListMyDevic
       ...toDeviceView(device),
       ownerDisplayName,
       lastSeenAt: device.lastSeenAt,
+      isDormant: isDormant(device, now),
     })),
     features,
   };

@@ -61,6 +61,8 @@ data class LatestDeviceDto(
     val trackingEnabled: Boolean,
     val syncIntervalMinutes: Int,
     val isStale: Boolean? = null,
+    /** 001 §5.2 (011 §2): server-computed; absent → `false` (003 §6 defensive default). */
+    val isDormant: Boolean = false,
 )
 
 @Serializable

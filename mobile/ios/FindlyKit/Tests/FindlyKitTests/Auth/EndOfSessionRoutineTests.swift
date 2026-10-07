@@ -35,6 +35,7 @@ struct EndOfSessionRoutineTests {
             deviceIdProvider: InMemoryDeviceIdProvider(),
             appVersionTracker: InMemoryAppVersionRegistrationTracker(),
             exportArtifactStore: exportArtifactStore,
+            pendingLinks: PendingLinkSlot(store: InMemoryPendingLinkStore()),
             wipeLocalState: {}
         )
 
@@ -55,6 +56,7 @@ struct EndOfSessionRoutineTests {
             deviceIdProvider: deviceIdProvider,
             appVersionTracker: appVersionTracker,
             exportArtifactStore: InMemoryExportArtifactStore(),
+            pendingLinks: PendingLinkSlot(store: InMemoryPendingLinkStore()),
             wipeLocalState: {}
         )
 
@@ -73,6 +75,7 @@ struct EndOfSessionRoutineTests {
             deviceIdProvider: InMemoryDeviceIdProvider(),
             appVersionTracker: InMemoryAppVersionRegistrationTracker(),
             exportArtifactStore: InMemoryExportArtifactStore(),
+            pendingLinks: PendingLinkSlot(store: InMemoryPendingLinkStore()),
             wipeLocalState: { await recorder.wipe() }
         )
 
@@ -109,6 +112,7 @@ struct EndOfSessionRoutineTests {
             deviceIdProvider: deviceIdProvider,
             appVersionTracker: InMemoryAppVersionRegistrationTracker(),
             exportArtifactStore: exportArtifactStore,
+            pendingLinks: PendingLinkSlot(store: InMemoryPendingLinkStore()),
             wipeLocalState: { await recorder.wipe() },
             options: .init(clearsStoredSession: false)
         )
@@ -135,6 +139,7 @@ struct EndOfSessionRoutineTests {
             deviceIdProvider: deviceIdProvider,
             appVersionTracker: appVersionTracker,
             exportArtifactStore: InMemoryExportArtifactStore(),
+            pendingLinks: PendingLinkSlot(store: InMemoryPendingLinkStore()),
             wipeLocalState: { await recorder.wipe() }
         )
 
@@ -151,9 +156,34 @@ struct EndOfSessionRoutineTests {
             deviceIdProvider: InMemoryDeviceIdProvider(),
             appVersionTracker: InMemoryAppVersionRegistrationTracker(),
             exportArtifactStore: InMemoryExportArtifactStore(),
+            pendingLinks: PendingLinkSlot(store: InMemoryPendingLinkStore()),
             wipeLocalState: { await recorder.wipe() }
         )
 
         #expect(recorder.callCount == 1, "a weakly-captured authProvider that happened to already deallocate must not skip the local wipe")
+    }
+
+    // MARK: - specs/010 §1.3 (I63) — a link captured for one person never replays for the next
+
+    @Test func run_clearsThePendingLink_inMemoryAndStored() async {
+        let store = InMemoryPendingLinkStore()
+        let slot = PendingLinkSlot(store: store)
+        slot.put(PendingLink(kind: .familyInvite, code: "7F3K9QRZ", receivedAt: Date()))
+        let auth = FakeAuthProviding()
+        auth.currentUserId = "u1"
+
+        await EndOfSessionRoutine.run(
+            currentUserId: auth.currentUserId,
+            authProvider: auth,
+            deviceIdProvider: InMemoryDeviceIdProvider(),
+            appVersionTracker: InMemoryAppVersionRegistrationTracker(),
+            exportArtifactStore: InMemoryExportArtifactStore(),
+            pendingLinks: slot,
+            wipeLocalState: {}
+        )
+
+        #expect(store.load() == nil)
+        let ready = LinkActState(isSignedIn: true, isLaunchResolved: true, isLocked: false)
+        #expect(slot.take(ready) == nil)
     }
 }

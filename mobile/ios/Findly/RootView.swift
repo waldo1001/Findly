@@ -230,6 +230,7 @@ struct RootView: View {
             deviceIdProvider: deviceIdProvider,
             appVersionTracker: appVersionTracker,
             exportArtifactStore: exportArtifactStore,
+            pendingLinks: coordinator.pendingLinks,
             wipeLocalState: { await locationRuntimeContainer.wipeLocalState() },
             options: .init(clearsStoredSession: false)
         )
@@ -365,7 +366,11 @@ struct RootView: View {
                 )
             case .deviceSettings(let isParent):
                 DeviceSettingsScreen(
-                    viewModel: DeviceSettingsViewModel(apiClient: apiClient, isParent: isParent),
+                    viewModel: DeviceSettingsViewModel(
+                        apiClient: apiClient, isParent: isParent, currentUserId: authProvider.currentUserId,
+                        // 011 §1.1: this phone's own card never offers Remove.
+                        thisDeviceId: authProvider.currentUserId.map { deviceIdProvider.deviceId(forUserId: $0) }
+                    ),
                     onProfileDeadEnd: { variant in coordinator.showOnboarding(variant) }
                 )
             case .familyMembers:
@@ -526,6 +531,7 @@ struct RootView: View {
                         deviceIdProvider: deviceIdProvider,
                         exportArtifactStore: exportArtifactStore,
                         appVersionTracker: appVersionTracker,
+                        pendingLinks: coordinator.pendingLinks,
                         // Post-review (security review, High finding): the ONE consolidated
                         // LocationRuntimeContainer.wipeLocalState() — covers the fix queue,
                         // geofence-event queue, cached geofence config/ETag, cached device

@@ -218,7 +218,14 @@ extension AppDelegate: UNUserNotificationCenterDelegate {
         willPresent notification: UNNotification,
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
-        completionHandler([.banner, .sound])
+        // specs/011 §4.4 / 009 §5.6: a `STALE_NUDGE` is suppressed in the foreground (the app being
+        // open means it is not stale); the decision itself lives in FindlyKit. Everything else keeps
+        // the §5.1 banner + sound.
+        let data = PushPayloadParsing.stringData(from: notification.request.content.userInfo)
+        switch ForegroundPresentationPolicy.decision(for: data) {
+        case .suppress: completionHandler([])
+        case .bannerAndSound: completionHandler([.banner, .sound])
+        }
     }
 }
 

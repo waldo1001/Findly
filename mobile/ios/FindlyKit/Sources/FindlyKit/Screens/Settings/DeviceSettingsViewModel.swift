@@ -37,10 +37,80 @@ public final class DeviceSettingsViewModel: ObservableObject {
 
     public let isParent: Bool
     private let apiClient: FindlyAPIClient
+    /// 011 §1.1/§4.4 — who is looking (owner checks) and which device this app runs on (never
+    /// offered Remove). Both optional: unknown means no owner-only affordance is shown.
+    private let currentUserId: String?
+    private let thisDeviceId: String?
 
-    public init(apiClient: FindlyAPIClient, isParent: Bool) {
+    public init(apiClient: FindlyAPIClient, isParent: Bool, currentUserId: String? = nil, thisDeviceId: String? = nil) {
         self.apiClient = apiClient
         self.isParent = isParent
+        self.currentUserId = currentUserId
+        self.thisDeviceId = thisDeviceId
+    }
+
+    /// 011 §1.1 — the remove-action visibility matrix for one card.
+    public func canRemove(_ device: DeviceListItem) -> Bool {
+        DeviceLifecyclePlan.showsRemove(
+            isParent: isParent, callerUserId: currentUserId, ownerUserId: device.ownerUserId,
+            deviceId: device.deviceId, thisDeviceId: thisDeviceId
+        )
+    }
+
+    /// 011 §4.4 — the nudge toggle is the owner's own preference: owned devices only, any role.
+    public func showsNudgeToggle(_ device: DeviceListItem) -> Bool {
+        DeviceLifecyclePlan.showsNudgeToggle(callerUserId: currentUserId, ownerUserId: device.ownerUserId)
+    }
+
+    /// 011 §1 / 001 §4.4. `204` and `DEVICE_NOT_FOUND` (already gone) both remove the card;
+    /// `AUTH_FORBIDDEN` and anything else render on the card (010 §4.2 bullet 6, §9).
+    public func remove(deviceId: String) async {
+        guard case .loaded(var devices) = state,
+              let device = devices.first(where: { $0.deviceId == deviceId }), canRemove(device) else { return }
+        do {
+            try await apiClient.deleteDevice(deviceId: deviceId)
+            devices.removeAll { $0.deviceId == deviceId }
+            state = .loaded(devices)
+            cardErrors[deviceId] = nil
+        } catch let error as APIError {
+            if case .server(let body, _) = error, body.code == .deviceNotFound {
+                devices.removeAll { $0.deviceId == deviceId }
+                state = .loaded(devices)
+                cardErrors[deviceId] = nil
+                await refreshList()
+            } else if case .server(let body, _) = error, body.code == .authForbidden {
+                cardErrors[deviceId] = DeviceLifecyclePlan.authForbiddenMessage
+            } else {
+                cardErrors[deviceId] = userFacingMessage(for: error)
+            }
+        } catch {
+            cardErrors[deviceId] = userFacingMessage(for: error)
+        }
+    }
+
+    /// 011 §4.4 — commits immediately via `PATCH /devices/{id}`, ONLY the one field, and only on a
+    /// device the caller owns (the server answers `403` for anyone else, including a parent).
+    public func setStaleNudgeEnabled(deviceId: String, _ enabled: Bool) async {
+        guard case .loaded(var devices) = state,
+              let index = devices.firstIndex(where: { $0.deviceId == deviceId }),
+              showsNudgeToggle(devices[index]) else { return }
+        do {
+            let envelope = try await apiClient.updateDevice(deviceId: deviceId, UpdateDeviceRequest(staleNudgeEnabled: enabled))
+            minSyncIntervalMinutes = envelope.features.limits.minSyncIntervalMinutes
+            devices[index] = Self.merge(devices[index], with: envelope.data)
+            state = .loaded(devices)
+            cardErrors[deviceId] = nil
+        } catch {
+            cardErrors[deviceId] = userFacingMessage(for: error)
+        }
+    }
+
+    /// A silent re-fetch (no `.loading` flash) after a `DEVICE_NOT_FOUND` — the list has changed
+    /// under us. A failure here keeps the locally-pruned list.
+    private func refreshList() async {
+        guard let envelope = try? await apiClient.listDevices() else { return }
+        minSyncIntervalMinutes = envelope.features.limits.minSyncIntervalMinutes
+        state = .loaded(envelope.data.devices)
     }
 
     /// specs/010-app-shell-and-screen-ux.md §4.2 (I36) — one device's mutation error, rendered on
@@ -101,7 +171,8 @@ public final class DeviceSettingsViewModel: ObservableObject {
             deviceId: response.deviceId, ownerUserId: response.ownerUserId, platform: response.platform,
             deviceName: response.deviceName, model: response.model, appVersion: response.appVersion,
             syncIntervalMinutes: response.syncIntervalMinutes, trackingEnabled: response.trackingEnabled,
-            pushInvalid: response.pushInvalid, ownerDisplayName: item.ownerDisplayName, lastSeenAt: item.lastSeenAt
+            pushInvalid: response.pushInvalid, ownerDisplayName: item.ownerDisplayName, lastSeenAt: item.lastSeenAt,
+            isDormant: item.isDormant, staleNudgeEnabled: response.staleNudgeEnabled
         )
     }
 }

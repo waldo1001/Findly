@@ -168,6 +168,9 @@ class FindlyApiClient(
     override suspend fun updateDevice(deviceId: String, request: UpdateDeviceRequestDto): ApiResult<DeviceDto> =
         unwrap { service.updateDevice(deviceId, request.requireAtLeastOneField()) }
 
+    override suspend fun deleteDevice(deviceId: String): ApiResult<Unit> =
+        unwrapBare204 { service.deleteDevice(deviceId) }
+
     // ------------------------------------------------------------------
     // LocationsApi (001 §5)
     // ------------------------------------------------------------------

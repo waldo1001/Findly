@@ -128,8 +128,9 @@ public enum MapCameraPolicy {
             return formatter.date(from: recordedAt) ?? plainFormatter.date(from: recordedAt)
         }
 
+        // 011 §2 / 010 §3.5: a dormant device takes no part in the freshest-device choice.
         return devices
-            .filter { $0.lat != nil && $0.lon != nil }
+            .filter { $0.lat != nil && $0.lon != nil && !$0.isDormant }
             .compactMap { device -> (DeviceLocation, Date)? in
                 guard let date = parsedRecordedAt(device) else { return nil }
                 return (device, date)

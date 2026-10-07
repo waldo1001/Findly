@@ -3,6 +3,7 @@ package com.findly.android.ui.settings
 import com.findly.android.device.DeviceIdStore
 import com.findly.android.location.PermissionDisclosureStore
 import com.findly.android.location.settings.GeofenceConfigStateStore
+import com.findly.android.pendinglink.PendingLinkStore
 import com.findly.android.queue.FixQueueStore
 import com.findly.android.queue.GeofenceEventQueueStore
 
@@ -61,6 +62,7 @@ class DefaultLocalStateWiper(
     private val geofenceEventQueueStore: GeofenceEventQueueStore,
     private val geofenceConfigStateStore: GeofenceConfigStateStore,
     private val permissionDisclosureStore: PermissionDisclosureStore,
+    private val pendingLinkStore: PendingLinkStore,
 ) : LocalStateWiper {
     override suspend fun wipeAll(uid: String) {
         runCatching { fixQueueStore.clearAll() }
@@ -69,5 +71,7 @@ class DefaultLocalStateWiper(
         runCatching { geofenceEventQueueStore.clearAll() }
         runCatching { geofenceConfigStateStore.clear() }
         runCatching { permissionDisclosureStore.clear() }
+        // A62 (specs/010 1.3 "Clearing"): a link captured for one person never replays for the next.
+        runCatching { pendingLinkStore.clear() }
     }
 }

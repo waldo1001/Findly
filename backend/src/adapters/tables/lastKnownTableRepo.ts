@@ -107,6 +107,16 @@ export class TableLastKnownRepo implements LastKnownRepo {
     });
   }
 
+  /** Single-row delete (001 §4.4, 002 §2.4 step 2). Idempotent, including a never-created
+   * table (TableNotFound is a 404 like EntityNotFound). */
+  async delete(ownerUserId: string, deviceId: string): Promise<void> {
+    try {
+      await this.client.deleteEntity(ownerUserId, `${DEVICE_PREFIX}${deviceId}`);
+    } catch (err) {
+      if (!isNotFound(err)) throw err;
+    }
+  }
+
   /** Wipes the owner's whole partition — account deletion (001 §13.2, 002 §4.2 step 2, B18).
    * Idempotent. */
   async deleteByOwner(ownerUserId: string): Promise<void> {

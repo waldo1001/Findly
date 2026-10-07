@@ -30,9 +30,38 @@ public final class AppCoordinator: ObservableObject {
     /// flash a sign-in screen at every launch for a restored session and require reading
     /// `currentUserId` this early. See `AppRoute.launching` for what that early read does to
     /// Firebase's own initialization.
-    public init(route: AppRoute = .launching, joinLinkHost: String = AppConfig.defaultJoinLinkHost) {
+    /// specs/010 §1.3 (I63) — the one pending-link slot. Defaults to an in-memory store (tests);
+    /// the app target passes a `UserDefaultsPendingLinkStore`-backed slot.
+    public let pendingLinks: PendingLinkSlot
+
+    /// specs/010 §1.4 (I64 seam) — while `true`, links are stored rather than navigated.
+    public var isLocked = false
+
+    public init(
+        route: AppRoute = .launching,
+        joinLinkHost: String = AppConfig.defaultJoinLinkHost,
+        pendingLinks: PendingLinkSlot? = nil
+    ) {
         self.stack = [route]
         self.joinLinkHost = joinLinkHost
+        self.pendingLinks = pendingLinks ?? PendingLinkSlot(store: InMemoryPendingLinkStore())
+    }
+
+    /// specs/010 §1.3 — `.launching` = auth restore / launch resolution unfinished; `.signIn` =
+    /// signed out. Anything else is a resolved, signed-in root (or a screen above one).
+    private var linkActState: LinkActState {
+        LinkActState(isSignedIn: route != .signIn, isLaunchResolved: route != .launching, isLocked: isLocked)
+    }
+
+    /// specs/010 §1.3 "Replay" — consumes the pending link exactly once (slot cleared first) and
+    /// pushes its destination above the current root, prefilled and not submitted. Called after
+    /// launch resolution and sign-in; I64 calls it after unlock.
+    public func replayPendingLinkIfPossible() {
+        guard let link = pendingLinks.take(linkActState) else { return }
+        switch link.kind {
+        case .familyInvite: push(.acceptInvite(prefillCode: link.code))
+        case .groupJoin: push(.groupJoin(prefillCode: link.code))
+        }
     }
 
     /// specs/004 §2.6, specs/010 §1.1 — called once by `RootView` on first appear, when
@@ -47,6 +76,7 @@ public final class AppCoordinator: ObservableObject {
     public func resolveLaunch(destination: LaunchDestination) {
         guard stack == [.launching] else { return }
         stack = [Self.route(for: destination)]
+        replayPendingLinkIfPossible()
     }
 
     /// specs/010 §1.1 — an interactive sign-in resolves through the exact SAME launch-resolution
@@ -57,6 +87,7 @@ public final class AppCoordinator: ObservableObject {
     /// `.launching`, so `resolveLaunch`'s idempotency guard doesn't apply here.
     public func showPostSignIn(_ destination: LaunchDestination) {
         stack = [Self.route(for: destination)]
+        replayPendingLinkIfPossible()
     }
 
     private static func route(for destination: LaunchDestination) -> AppRoute {
@@ -227,9 +258,33 @@ public final class AppCoordinator: ObservableObject {
     /// the destination screen returns the user wherever they were rather than dropping them at a
     /// root. An unrecognized link still changes nothing at all — it must not grow the stack either.
     public func handleDeepLink(_ url: URL) {
+        guard let parsed = parseLink(url) else { return }
+        // specs/010 §1.3 — a link with a usable code that the app cannot act on yet is stored as
+        // the pending link, never navigated and never logged. A recognized https link with no
+        // usable fragment is "handled exactly as today": join screen without prefill when the app
+        // can act, ignored otherwise (there is nothing to keep).
+        let decision = PendingLinkPolicy.captureDecision(linkActState)
+        switch (decision, parsed.code) {
+        case (.navigateNow, _):
+            switch parsed.kind {
+            case .groupJoin: push(.groupJoin(prefillCode: parsed.code ?? ""))
+            case .familyInvite: push(.acceptInvite(prefillCode: parsed.code ?? ""))
+            }
+        case (.store, let code?):
+            pendingLinks.put(PendingLink(kind: parsed.kind, code: code, receivedAt: pendingLinks.now()))
+        case (.store, nil):
+            break
+        }
+    }
+
+    private struct ParsedLink {
+        let kind: PendingLinkKind
+        let code: String?
+    }
+
+    private func parseLink(_ url: URL) -> ParsedLink? {
         if let code = GroupCodeParsing.normalize(url.absoluteString) {
-            push(.groupJoin(prefillCode: code))
-            return
+            return ParsedLink(kind: .groupJoin, code: code)
         }
         // The family-invite deep link only, NOT `InviteCodeParsing.normalize(_:)`'s full breadth
         // — that broader function also accepts the legacy `findly://invite/<code>` PATH form
@@ -238,15 +293,14 @@ public final class AppCoordinator: ObservableObject {
         // (`handleDeepLink_inviteDeepLink_isIgnoredNotMisroutedToGroupJoin`'s existing contract).
         if let rawCode = CodeLinkParsing.extractQueryCode(from: url, expectedHost: "family-join"),
            let code = CodeLinkParsing.normalizeCode(rawCode) {
-            push(.acceptInvite(prefillCode: code))
-            return
+            return ParsedLink(kind: .familyInvite, code: code)
         }
         if case .recognized(let code) = GroupCodeParsing.matchHttpsJoinLink(url, joinLinkHost: joinLinkHost) {
-            push(.groupJoin(prefillCode: code ?? ""))
-            return
+            return ParsedLink(kind: .groupJoin, code: code)
         }
         if case .recognized(let code) = InviteCodeParsing.matchHttpsInviteLink(url, joinLinkHost: joinLinkHost) {
-            push(.acceptInvite(prefillCode: code ?? ""))
+            return ParsedLink(kind: .familyInvite, code: code)
         }
+        return nil
     }
 }

@@ -1,7 +1,7 @@
 // specs/001 §4.3 — update device settings. Pure domain logic: no Azure/Google imports.
 //
 // Role matrix (§4.3): a parent may set any field of any family device; a non-parent owner
-// (member role, in a family) may set only pushToken on their OWN device — any other field
+// (member role, in a family) may set only pushToken and staleNudgeEnabled on their OWN device — any other field
 // is AUTH_FORBIDDEN, and so is targeting a device they don't own; a family-less owner may
 // set any field of their own device (no family => no parent => the user is their own admin,
 // §1.5 step 4). Devices are keyed by ownerUserId, not familyId (002 §2.4, B8 re-key): the
@@ -60,6 +60,12 @@ export async function patchDeviceSettings(
 
   const patch = parseOrThrow(patchDeviceSettingsRequestSchema, input.body);
 
+  // staleNudgeEnabled is the owner's own notification preference (001 §4.3, 011 §4.4): owner
+  // only, in EVERY role — a parent on another member's device is forbidden, whole request.
+  if (patch.staleNudgeEnabled !== undefined && device.ownerUserId !== input.uid) {
+    throw new AppError("AUTH_FORBIDDEN", "staleNudgeEnabled can only be changed by the device owner");
+  }
+
   if (input.familyId) {
     const isParent = input.role === "parent";
     if (!isParent) {
@@ -70,7 +76,7 @@ export async function patchDeviceSettings(
       const restrictedFieldRequested =
         patch.syncIntervalMinutes !== undefined || patch.trackingEnabled !== undefined || patch.deviceName !== undefined;
       if (restrictedFieldRequested) {
-        throw new AppError("AUTH_FORBIDDEN", "a non-parent owner may only update pushToken");
+        throw new AppError("AUTH_FORBIDDEN", "a non-parent owner may only update pushToken and staleNudgeEnabled");
       }
     }
   }
@@ -112,10 +118,16 @@ export async function patchDeviceSettings(
     trackingEnabled: patch.trackingEnabled ?? device.trackingEnabled,
     deviceName: patch.deviceName ?? device.deviceName,
     pushToken: patch.pushToken ?? device.pushToken,
+    staleNudgeEnabled: patch.staleNudgeEnabled ?? device.staleNudgeEnabled,
   };
   // Write back into the DEVICE OWNER's own partition (002 §2.4) — not necessarily the
   // caller's, since a parent may be editing another member's device.
-  await deps.deviceRepo.putDevice(updated.ownerUserId, updated);
+  // Update-only: a concurrent DELETE /devices/{id} (001 §4.4) after our read must not be
+  // undone by this write resurrecting the row.
+  const written = await deps.deviceRepo.replaceExistingDevice(updated.ownerUserId, updated);
+  if (!written) {
+    throw new AppError("DEVICE_NOT_FOUND", "device was removed mid-request");
+  }
 
   if (settingsChanged && updated.pushToken && !updated.pushInvalid) {
     try {
@@ -129,7 +141,7 @@ export async function patchDeviceSettings(
         },
       });
       if (outcome === "invalidToken") {
-        await deps.deviceRepo.putDevice(updated.ownerUserId, { ...updated, pushInvalid: true });
+        await deps.deviceRepo.replaceExistingDevice(updated.ownerUserId, { ...updated, pushInvalid: true });
       }
     } catch {
       // Best-effort accelerator (§4.3) — never fails the request (§10 PUSH_DELIVERY_FAILED note).

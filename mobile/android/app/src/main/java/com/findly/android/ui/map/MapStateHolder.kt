@@ -167,7 +167,7 @@ class MapStateHolder(
 }
 
 private fun List<RosterMemberUi>.locatedPoints(): List<Pair<Double, Double>> =
-    flatMap { member -> member.devices.filter { it.hasLocation }.map { it.lat!! to it.lon!! } }
+    flatMap { member -> member.shownDevices.filter { it.hasLocation }.map { it.lat!! to it.lon!! } }
 
 private fun LatestMemberDto.toUi(): RosterMemberUi = RosterMemberUi(
     userId = userId,
@@ -185,4 +185,5 @@ private fun LatestDeviceDto.toUi(): RosterDeviceUi = RosterDeviceUi(
     trackingEnabled = trackingEnabled,
     syncIntervalMinutes = syncIntervalMinutes,
     isStale = isStale,
+    isDormant = isDormant,
 )

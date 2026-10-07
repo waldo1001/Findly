@@ -16,6 +16,8 @@ public protocol FindlyAPIClient {
     func registerDevice(_ request: RegisterDeviceRequest) async throws -> Envelope<DeviceResponse>
     func listDevices() async throws -> Envelope<ListDevicesResponse>
     func updateDevice(deviceId: String, _ request: UpdateDeviceRequest) async throws -> Envelope<DeviceResponse>
+    /// 001 §4.4 / 011 §1 — bare 204.
+    func deleteDevice(deviceId: String) async throws
 
     // §5 — Location reporting & reading
     func reportLocations(deviceId: String, batchId: String, fixes: [LocationFix]) async throws -> Envelope<ReportLocationsResponse>
