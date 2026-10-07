@@ -47,6 +47,11 @@ export class InMemoryDeviceRepo implements DeviceRepo {
     return this.devices.get(ownerUserId)?.size ?? 0;
   }
 
+  /** Single-row delete (001 §4.4, 002 §2.4 removal step 1). Idempotent. */
+  async deleteDevice(ownerUserId: string, deviceId: string): Promise<void> {
+    this.devices.get(ownerUserId)?.delete(deviceId);
+  }
+
   async deleteDevicesByOwner(ownerUserId: string): Promise<void> {
     this.devices.delete(ownerUserId);
   }

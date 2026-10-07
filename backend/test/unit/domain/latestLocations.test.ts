@@ -97,6 +97,7 @@ describe("domain/location/latestLocations", () => {
         trackingEnabled: true,
         syncIntervalMinutes: 15,
         isStale: null,
+        isDormant: false,
       },
     ]);
   });
@@ -138,6 +139,7 @@ describe("domain/location/latestLocations", () => {
         trackingEnabled: true,
         syncIntervalMinutes: 15,
         isStale: false,
+        isDormant: false,
       },
     ]);
   });
