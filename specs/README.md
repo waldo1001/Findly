@@ -19,8 +19,9 @@ This project is **spec-driven**: no implementation code is written before (a) a 
 | [`008-privacy-endpoints.md`](008-privacy-endpoints.md) | Privacy: per-member data export, account deletion (last-parent cascade), family deletion, self-service web deletion page |
 | [`009-device-runtime.md`](009-device-runtime.md) | Device runtime: capture policy & accuracy tiers, durable fix queue, **background presence (≤ 30 min) vs battery-saver (60+) scheduling**, foreground trigger, pause, push handling (visible locate, Android locate foreground service), geofence registration lifecycle, permissions (amended 2026-09-06, 000 §D19) |
 | [`010-app-shell-and-screen-ux.md`](010-app-shell-and-screen-ux.md) | App shell & screen UX: map-first root + navigation drawer, map camera policy + roster bottom sheet, profile-dead-end → onboarding routing, Devices screen, invite create/accept UX |
+| [`011-device-lifecycle-and-staleness.md`](011-device-lifecycle-and-staleness.md) | Device lifecycle & staleness: device removal, server-computed dormancy, iOS force-quit explainer, server stale-nudge push (000 §D20) |
 
-Future specs claim the next number (e.g. `011-web-viz.md`, `0xx-subscriptions.md`).
+Future specs claim the next number (e.g. `012-web-viz.md`, `0xx-subscriptions.md`).
 
 ## Required sections in every spec
 
