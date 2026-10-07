@@ -1,5 +1,6 @@
 package com.findly.android.ui.settings
 
+import com.findly.android.applock.AppLockStore
 import com.findly.android.device.DeviceIdStore
 import com.findly.android.location.PermissionDisclosureStore
 import com.findly.android.location.settings.GeofenceConfigStateStore
@@ -63,6 +64,7 @@ class DefaultLocalStateWiper(
     private val geofenceConfigStateStore: GeofenceConfigStateStore,
     private val permissionDisclosureStore: PermissionDisclosureStore,
     private val pendingLinkStore: PendingLinkStore,
+    private val appLockStore: AppLockStore,
 ) : LocalStateWiper {
     override suspend fun wipeAll(uid: String) {
         runCatching { fixQueueStore.clearAll() }
@@ -73,5 +75,7 @@ class DefaultLocalStateWiper(
         runCatching { permissionDisclosureStore.clear() }
         // A62 (specs/010 1.3 "Clearing"): a link captured for one person never replays for the next.
         runCatching { pendingLinkStore.clear() }
+        // A63 (specs/010 1.4): the app-lock setting and background timestamp end with the session.
+        runCatching { appLockStore.clear() }
     }
 }

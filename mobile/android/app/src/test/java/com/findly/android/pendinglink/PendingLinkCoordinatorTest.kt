@@ -104,4 +104,17 @@ class PendingLinkCoordinatorTest {
 
         assertEquals(listOf(PendingLink(PendingLinkKind.FamilyInvite, "7F3K9QRZ", 0L)), navigated)
     }
+
+    @Test
+    fun `a link arriving while locked is stored, waits through the lock, and replays once after unlock (010 1_4)`() {
+        val locked = LinkAppState(signedIn = true, launchResolved = true, locked = true)
+
+        assertEquals(CaptureDecision.Store(family), coordinator.onIncoming(family, locked, now = 0L))
+        assertEquals(false, coordinator.replayIfReady(locked, now = 10L) { error("must not replay while locked") })
+
+        val replayed = mutableListOf<PendingLink>()
+        assertEquals(true, coordinator.replayIfReady(canAct, now = 20L) { replayed += it })
+        assertEquals(1, replayed.size)
+        assertNull(store.current.value)
+    }
 }
