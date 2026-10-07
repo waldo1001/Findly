@@ -73,7 +73,7 @@ class GoogleMapRenderer : MapRenderer {
         sheetDetent: FindlyBottomSheetDetent,
     ) {
         val markers = members.flatMap { member ->
-            member.devices.filter { it.hasLocation }.map { device ->
+            member.shownDevices.filter { it.hasLocation }.map { device ->
                 MapMarker(
                     id = device.deviceId,
                     userId = member.userId,
