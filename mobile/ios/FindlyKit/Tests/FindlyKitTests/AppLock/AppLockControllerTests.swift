@@ -105,13 +105,31 @@ struct AppLockControllerTests {
         #expect(!h.controller.isLocked, "a repeated start (re-run .task) must not re-lock")
     }
 
-    /// The device has no screen lock any more (so no way to authenticate, and nothing a gate could
-    /// protect): locking would be an unrecoverable lockout, so the lock stays down.
-    @Test func coldStart_whenDeviceCannotAuthenticate_doesNotLock() {
+    /// The device positively reports that no passcode is set (`LAError.passcodeNotSet`): locking
+    /// would be an unrecoverable lockout, so the lock stays down (010 §1.4, credential removed).
+    @Test func coldStart_whenPasscodeNotSet_doesNotLock() {
         let h = make()
-        h.auth.currentCapability = .init(canAuthenticate: false, biometry: .none)
+        h.auth.currentCapability = .init(canAuthenticate: false, biometry: .none, passcodeNotSet: true)
         h.controller.start(scenePhase: .active)
         #expect(!h.controller.isLocked)
+    }
+
+    /// Any OTHER failure to evaluate (biometry lockout, a background relaunch before first unlock)
+    /// is transient and must not skip the lock.
+    @Test func coldStart_whenEvaluationFailsForAnotherReason_stillLocks() {
+        let h = make()
+        h.auth.currentCapability = .init(canAuthenticate: false, biometry: .none, passcodeNotSet: false)
+        h.controller.start(scenePhase: .active)
+        #expect(h.controller.isLocked)
+    }
+
+    @Test func foreground_whenEvaluationFailsForAnotherReason_stillRelocks() async {
+        let h = await makeUnlocked()
+        h.auth.currentCapability = .init(canAuthenticate: false, biometry: .none, passcodeNotSet: false)
+        h.controller.scenePhaseChanged(.background)
+        h.clock.now += 600
+        h.controller.scenePhaseChanged(.active)
+        #expect(h.controller.isLocked)
     }
 
     // MARK: - Foreground / background

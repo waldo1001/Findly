@@ -197,6 +197,30 @@ struct EndOfSessionRoutineTests {
     // MARK: - specs/010 §1.4 (I64) — "The setting and the background timestamp are cleared by the
     // end-of-session local wipe"
 
+    /// The lock comes down only AFTER the local wipe, so no unlocked window shows the old UI.
+    @Test func run_dropsTheLock_afterTheLocalWipe_notBefore() async {
+        let appLock = AppLockController(authenticator: FakeAppLockAuthenticator(), store: {
+            let s = InMemoryAppLockSettingsStore(); s.isEnabled = true; return s
+        }(), isSignedIn: { true })
+        appLock.start(scenePhase: .active)
+        var lockedDuringWipe: Bool?
+        let auth = FakeAuthProviding()
+        auth.currentUserId = "u1"
+
+        await EndOfSessionRoutine.run(
+            currentUserId: auth.currentUserId, authProvider: auth,
+            deviceIdProvider: InMemoryDeviceIdProvider(),
+            appVersionTracker: InMemoryAppVersionRegistrationTracker(),
+            exportArtifactStore: InMemoryExportArtifactStore(),
+            pendingLinks: PendingLinkSlot(store: InMemoryPendingLinkStore()),
+            appLock: appLock,
+            wipeLocalState: { lockedDuringWipe = appLock.isLocked }
+        )
+
+        #expect(lockedDuringWipe == true)
+        #expect(!appLock.isLocked)
+    }
+
     @Test func run_clearsTheAppLockSettingAndBackgroundTimestamp_andDropsALockedState() async {
         let store = InMemoryAppLockSettingsStore()
         store.isEnabled = true

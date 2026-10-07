@@ -77,3 +77,29 @@ struct AppLockToggleStateTests {
         #expect(state.caption == nil)
     }
 }
+
+/// The VoiceOver / first-responder rules of the overlay window (`AppLockWindowPresenter`).
+struct AppLockOverlayVisibilityTests {
+    @Test func hidden_whenNeitherLockedNorCovered() {
+        let v = AppLockOverlayVisibility(isLocked: false, isCoverVisible: false)
+        #expect(!v.isVisible)
+        #expect(!v.hidesOtherWindowsFromAccessibility)
+        #expect(!v.resignsFirstResponder)
+    }
+
+    @Test func locked_hidesOtherWindows_resignsResponder_andMovesFocus() {
+        let v = AppLockOverlayVisibility(isLocked: true, isCoverVisible: false)
+        #expect(v.isVisible)
+        #expect(v.hidesOtherWindowsFromAccessibility)
+        #expect(v.resignsFirstResponder)
+        #expect(v.movesAccessibilityFocusToOverlay)
+    }
+
+    @Test func coverOnly_hidesOtherWindows_butDoesNotStealFocus() {
+        let v = AppLockOverlayVisibility(isLocked: false, isCoverVisible: true)
+        #expect(v.isVisible)
+        #expect(v.hidesOtherWindowsFromAccessibility)
+        #expect(!v.resignsFirstResponder)
+        #expect(!v.movesAccessibilityFocusToOverlay)
+    }
+}

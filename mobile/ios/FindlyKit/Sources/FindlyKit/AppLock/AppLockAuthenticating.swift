@@ -39,15 +39,20 @@ public final class SystemAppLockAuthenticator: AppLockAuthenticating {
         let context = LAContext()
         var error: NSError?
         let can = context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &error)
-        // `biometryType` is only valid after `canEvaluatePolicy` has run.
+        let passcodeNotSet = !can && (error as? LAError)?.code == .passcodeNotSet
+        // Biometry wording (010 §1.4: "passcode when no biometry is enrolled") comes from a
+        // biometrics-only evaluation; `biometryType` is only valid after `canEvaluatePolicy` ran.
+        let bioContext = LAContext()
         var biometry = AppLockBiometry.none
-        switch context.biometryType {
-        case .faceID: biometry = .faceID
-        case .touchID: biometry = .touchID
-        default:
-            if #available(iOS 17.0, macOS 14.0, *), context.biometryType == .opticID { biometry = .opticID }
+        if bioContext.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: nil) {
+            switch bioContext.biometryType {
+            case .faceID: biometry = .faceID
+            case .touchID: biometry = .touchID
+            default:
+                if #available(iOS 17.0, macOS 14.0, *), bioContext.biometryType == .opticID { biometry = .opticID }
+            }
         }
-        return AppLockCapability(canAuthenticate: can, biometry: biometry)
+        return AppLockCapability(canAuthenticate: can, biometry: biometry, passcodeNotSet: passcodeNotSet)
     }
 
     public func authenticate(reason: String) async -> AppLockAuthResult {

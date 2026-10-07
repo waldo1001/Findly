@@ -83,10 +83,11 @@ public final class AppLockController: ObservableObject {
         if phase == .background, isEnabled, isSignedIn() {
             store.backgroundedAt = now()
         }
-        updateCover()
+        // Re-lock BEFORE the cover comes down, so there is never a frame with neither.
         if phase == .active, hasStarted {
             evaluate(isColdStart: false)
         }
+        updateCover()
     }
 
     private func evaluate(isColdStart: Bool) {
@@ -96,9 +97,10 @@ public final class AppLockController: ObservableObject {
             enabled: isEnabled, signedIn: isSignedIn(), isColdStart: isColdStart,
             backgroundedAt: backgroundedAt, now: now()
         )
-        // A device with no credential cannot authenticate, so locking would be an unrecoverable
-        // lockout — and there is no screen lock for a gate to add to. Stay unlocked.
-        guard should, authenticator.capability().canAuthenticate else { return }
+        // Only a device that positively reports "no passcode set" stays unlocked (010 §1.4: locking
+        // would be an unrecoverable lockout and there is no screen lock for a gate to add to). Any
+        // other failure to evaluate is transient and must NOT skip the lock.
+        guard should, !authenticator.capability().passcodeNotSet else { return }
         lock()
     }
 

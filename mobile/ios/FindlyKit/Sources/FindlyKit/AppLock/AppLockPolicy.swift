@@ -36,11 +36,40 @@ public enum AppLockBiometry: Equatable, Sendable {
 public struct AppLockCapability: Equatable, Sendable {
     public var canAuthenticate: Bool
     public var biometry: AppLockBiometry
+    /// `true` only when the device positively reports that NO credential is set
+    /// (`LAError.passcodeNotSet`). This — and nothing else — is the 010 §1.4 "credential removed
+    /// later" case where the lock stays down. Any other `canEvaluatePolicy` failure (biometry
+    /// lockout, a background relaunch before first unlock, …) is transient: the lock still goes up
+    /// and the Unlock button prompts, the OS handling the rest.
+    public var passcodeNotSet: Bool
 
-    public init(canAuthenticate: Bool, biometry: AppLockBiometry) {
+    public init(canAuthenticate: Bool, biometry: AppLockBiometry, passcodeNotSet: Bool = false) {
         self.canAuthenticate = canAuthenticate
         self.biometry = biometry
+        self.passcodeNotSet = passcodeNotSet
     }
+}
+
+/// The overlay window's visibility decisions, as a pure value so the VoiceOver / first-responder
+/// rules are testable without UIKit (the window itself is `AppLockWindowPresenter`, verified by
+/// `xcodebuild`).
+public struct AppLockOverlayVisibility: Equatable, Sendable {
+    public let isLocked: Bool
+    public let isCoverVisible: Bool
+
+    public init(isLocked: Bool, isCoverVisible: Bool) {
+        self.isLocked = isLocked
+        self.isCoverVisible = isCoverVisible
+    }
+
+    public var isVisible: Bool { isLocked || isCoverVisible }
+    /// Every OTHER window must be hidden from VoiceOver while the lock or the cover is up — a modal
+    /// trait inside the overlay's own hosting view does not reach the main window beneath it.
+    public var hidesOtherWindowsFromAccessibility: Bool { isVisible }
+    /// A keyboard must not be able to drive a field underneath the lock screen.
+    public var resignsFirstResponder: Bool { isLocked }
+    /// VoiceOver focus moves to the lock screen only for a real lock, not for the transient cover.
+    public var movesAccessibilityFocusToOverlay: Bool { isLocked }
 }
 
 /// 010 §1.4 "Setting" / "Enabling" — what the Privacy & data toggle shows.
