@@ -1,6 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- See backup_rules.xml — revisit at H1. -->
+<!-- See backup_rules.xml (A62: the pending join/invite link is excluded from both paths) — revisit at H1. -->
 <data-extraction-rules>
     <cloud-backup>
+        <exclude domain="sharedpref" path="findly_pending_link.xml"/>
     </cloud-backup>
+    <device-transfer>
+        <exclude domain="sharedpref" path="findly_pending_link.xml"/>
+    </device-transfer>
 </data-extraction-rules>
