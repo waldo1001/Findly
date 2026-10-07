@@ -97,6 +97,11 @@ struct RootView: View {
     /// dismissed the banner would see it again on their next tap.
     @StateObject private var permissionFlow: PermissionFlowViewModel
 
+    // specs/011-device-lifecycle-and-staleness.md §3 (I62) — the one-time force-quit explainer.
+    // `forceQuitExplainerDue` mirrors the persisted due state; the alert itself is hosted by
+    // `LiveMapScreen`'s sheet content and additionally gated on the permission cover being down.
+    @State private var forceQuitExplainerDue = false
+
     init(
         coordinator: AppCoordinator,
         config: AppConfig,
@@ -298,8 +303,25 @@ struct RootView: View {
                         // "Locate now" routes into the EXISTING Locate screen (001 §6, unchanged).
                         coordinator.showLocate(target: .user(userId), targetDisplayName: displayName)
                     },
-                    onProfileDeadEnd: { variant in coordinator.showOnboarding(variant) }
+                    onProfileDeadEnd: { variant in coordinator.showOnboarding(variant) },
+                    // specs/011 §3: never while the permission disclosure cover is up (deferred,
+                    // not dropped: the binding turns true again once the cover is gone).
+                    forceQuitExplainerPresented: Binding(
+                        get: { forceQuitExplainerDue && permissionFlow.disclosure == nil },
+                        set: { if !$0 { forceQuitExplainerDue = false } }
+                    ),
+                    // Only the "Got it" tap records the one-time slot as used.
+                    onForceQuitExplainerAcknowledged: {
+                        locationRuntimeContainer.acknowledgeForceQuitExplainer()
+                        forceQuitExplainerDue = false
+                    }
                 )
+                // specs/011 §3 (I62) — "after launch resolution has landed on the Family Map".
+                // Idempotent: the presenter clears the flag in every branch and stays "due" until
+                // acknowledged, so a presentation that never reached the screen retries here.
+                .onAppear {
+                    forceQuitExplainerDue = locationRuntimeContainer.shouldShowForceQuitExplainer()
+                }
 
             // MARK: - specs/010-app-shell-and-screen-ux.md §2.2 (I34) — replaces the retired Home
             // hub's `.profileless`/`.familyless` branches. A root: no back, no drawer.

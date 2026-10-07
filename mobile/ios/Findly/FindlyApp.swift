@@ -241,6 +241,8 @@ struct FindlyApp: App {
             // task fixes) — see `LocationRuntimeContainer.wipeLocalState()`'s doc for why sharing
             // one instance is what makes the account-deletion wipe's clear() a live call.
             permissionDisclosureStore: UserDefaultsPermissionDisclosureStore(),
+            // specs/011 §3 (I62) — cleared by `wipeLocalState()` with the other end-of-session keys.
+            forceQuitExplainerStore: UserDefaultsForceQuitExplainerStore(),
             // specs/010-app-shell-and-screen-ux.md §1.2 (I34 review fix) — the SAME instance
             // handed to `RootView`/`LiveMapScreen` below, so `wipeLocalState()` is this cache's
             // real, live-called `clear()` caller on every sign-out/account-deletion path, exactly
