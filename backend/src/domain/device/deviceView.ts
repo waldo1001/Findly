@@ -3,7 +3,13 @@
 
 import type { DeviceRecord } from "../../ports/repositories";
 
-export type DeviceView = Omit<DeviceRecord, "registeredAt" | "lastSeenAt" | "locationPushToken" | "pushToken">;
+export type DeviceView = Omit<
+  DeviceRecord,
+  "registeredAt" | "lastSeenAt" | "locationPushToken" | "pushToken" | "staleNudgeEnabled" | "lastNudgedAt"
+> & {
+  /** 001 §4.1 — always a boolean; a row without the property reads as true (002 §2.4). */
+  staleNudgeEnabled: boolean;
+};
 
 export function toDeviceView(device: DeviceRecord): DeviceView {
   return {
@@ -16,5 +22,6 @@ export function toDeviceView(device: DeviceRecord): DeviceView {
     pushInvalid: device.pushInvalid,
     syncIntervalMinutes: device.syncIntervalMinutes,
     trackingEnabled: device.trackingEnabled,
+    staleNudgeEnabled: device.staleNudgeEnabled !== false,
   };
 }

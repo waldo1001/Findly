@@ -386,6 +386,15 @@ describe("domain/location/reportLocations", () => {
     await expectAppError(reportLocations(baseInput(), deps), "DEVICE_NOT_FOUND");
   });
 
+  it("a removed device (DELETE /devices/{id}, 001 §4.4) gets DEVICE_NOT_FOUND on its next report and writes nothing", async () => {
+    const deps = buildDeps();
+    seedDevice(deps);
+    await deps.deviceRepo.deleteDevice(USER_ID, DEVICE_ID);
+
+    await expectAppError(reportLocations(baseInput(), deps), "DEVICE_NOT_FOUND");
+    expect(await deps.lastKnownRepo.get(USER_ID, DEVICE_ID)).toBeNull();
+  });
+
   it("throws DEVICE_NOT_FOUND when the device is registered to a different user (own-partition lookup finds nothing, 002 §2.4)", async () => {
     const deps = buildDeps();
     seedDevice(deps, { ownerUserId: "someone-else" });

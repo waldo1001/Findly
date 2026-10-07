@@ -28,6 +28,14 @@ export class InMemoryDeviceRepo implements DeviceRepo {
     this.partition(ownerUserId).set(device.deviceId, { ...device });
   }
 
+  /** Update-only full write (DeviceRepo.replaceExistingDevice): false when the row is gone. */
+  async replaceExistingDevice(ownerUserId: string, device: DeviceRecord): Promise<boolean> {
+    const roster = this.partition(ownerUserId);
+    if (!roster.has(device.deviceId)) return false;
+    roster.set(device.deviceId, { ...device });
+    return true;
+  }
+
   /** Mirrors TableDeviceRepo.touchLastSeen's field-level Merge semantics: merges
    * `lastSeenAt` into whatever is CURRENTLY stored, never into a caller-held snapshot — so
    * a concurrent settings change committed after a caller's own read is preserved. */
@@ -45,6 +53,11 @@ export class InMemoryDeviceRepo implements DeviceRepo {
 
   async countDevices(ownerUserId: string): Promise<number> {
     return this.devices.get(ownerUserId)?.size ?? 0;
+  }
+
+  /** Single-row delete (001 §4.4, 002 §2.4 removal step 1). Idempotent. */
+  async deleteDevice(ownerUserId: string, deviceId: string): Promise<void> {
+    this.devices.get(ownerUserId)?.delete(deviceId);
   }
 
   async deleteDevicesByOwner(ownerUserId: string): Promise<void> {
