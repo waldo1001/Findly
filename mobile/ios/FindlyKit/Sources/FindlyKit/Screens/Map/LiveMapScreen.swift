@@ -62,6 +62,13 @@ public struct LiveMapScreen: View {
     /// supply it.
     private let onProfileDeadEnd: (OnboardingVariant) -> Void
 
+    /// specs/011 §3 (I62) — the one-time force-quit explainer. Presented from INSIDE the roster
+    /// sheet's content: the Family Map always has that sheet up, and SwiftUI drops an alert
+    /// attached to a view beneath a presented sheet. The caller owns the due/permission-cover
+    /// gating; this screen only hosts the alert and reports the "Got it" tap.
+    private let forceQuitExplainerPresented: Binding<Bool>
+    private let onForceQuitExplainerAcknowledged: () -> Void
+
     public init(
         viewModel: @autoclosure @escaping () -> LiveMapViewModel,
         renderer: any MapRendering,
@@ -74,7 +81,9 @@ public struct LiveMapScreen: View {
         onSelectGroups: @escaping () -> Void = {},
         onSelectPrivacySettings: @escaping () -> Void = {},
         onLocateNow: @escaping (String, String) -> Void = { _, _ in },
-        onProfileDeadEnd: @escaping (OnboardingVariant) -> Void = { _ in }
+        onProfileDeadEnd: @escaping (OnboardingVariant) -> Void = { _ in },
+        forceQuitExplainerPresented: Binding<Bool> = .constant(false),
+        onForceQuitExplainerAcknowledged: @escaping () -> Void = {}
     ) {
         _viewModel = StateObject(wrappedValue: viewModel())
         self.renderer = renderer
@@ -88,6 +97,8 @@ public struct LiveMapScreen: View {
         self.onSelectPrivacySettings = onSelectPrivacySettings
         self.onLocateNow = onLocateNow
         self.onProfileDeadEnd = onProfileDeadEnd
+        self.forceQuitExplainerPresented = forceQuitExplainerPresented
+        self.onForceQuitExplainerAcknowledged = onForceQuitExplainerAcknowledged
     }
 
     public var body: some View {
@@ -219,6 +230,11 @@ public struct LiveMapScreen: View {
             standardHeightCap: viewModel.mapViewportSizePt.height
         ) { detent in
             rosterSheetContent(detent: detent)
+                .alert(ForceQuitExplainer.title, isPresented: forceQuitExplainerPresented) {
+                    Button(ForceQuitExplainer.actionTitle, role: .cancel) { onForceQuitExplainerAcknowledged() }
+                } message: {
+                    Text(ForceQuitExplainer.body)
+                }
         }
     }
 

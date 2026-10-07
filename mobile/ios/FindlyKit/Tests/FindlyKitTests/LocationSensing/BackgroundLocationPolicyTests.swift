@@ -15,6 +15,19 @@ struct BackgroundLocationPolicyTests {
         #expect(BackgroundLocationPolicy.allowsBackgroundLocationUpdates(for: .denied) == false)
     }
 
+    /// specs/009 §3.4 / §7 "Ongoing visibility" (H12, I62) — iOS shows the blue background-location
+    /// indicator wherever background updates are allowed (parity with Android's persistent
+    /// foreground-service notification).
+    @Test func showsBackgroundLocationIndicator_trueWhereverBackgroundUpdatesAreAllowed() {
+        for authorization in [LocationAuthorization.always, .whenInUse, .notDetermined, .denied] {
+            #expect(
+                BackgroundLocationPolicy.showsBackgroundLocationIndicator(for: authorization)
+                    == BackgroundLocationPolicy.allowsBackgroundLocationUpdates(for: authorization)
+            )
+        }
+        #expect(BackgroundLocationPolicy.showsBackgroundLocationIndicator(for: .always) == true)
+    }
+
     @Test func shouldMonitorSignificantChangesAndVisits_trueOnlyForAlways() {
         #expect(BackgroundLocationPolicy.shouldMonitorSignificantChangesAndVisits(for: .always) == true)
         #expect(BackgroundLocationPolicy.shouldMonitorSignificantChangesAndVisits(for: .whenInUse) == false)

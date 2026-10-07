@@ -33,7 +33,8 @@ struct DeleteAccountViewModelTests {
         DeleteAccountViewModel(
             apiClient: api, authProvider: auth, deviceIdProvider: deviceIdProvider,
             exportArtifactStore: exportArtifactStore, appVersionTracker: appVersionTracker,
-            pendingLinks: pendingLinks ?? PendingLinkSlot(store: InMemoryPendingLinkStore()), wipeLocalState: wipeLocalState
+            pendingLinks: pendingLinks ?? PendingLinkSlot(store: InMemoryPendingLinkStore()),
+            appLock: AppLockController(authenticator: FakeAppLockAuthenticator()), wipeLocalState: wipeLocalState
         )
     }
 
