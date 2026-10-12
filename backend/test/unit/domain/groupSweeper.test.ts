@@ -167,6 +167,28 @@ describe("domain/group/groupSweeper sweepGroups", () => {
     }
   });
 
+  it("SECURITY: skips (row survives) when a concurrent PATCH sets a date between the sweeper's null read and its stale-row delete", async () => {
+    const deps = buildDeps();
+    const meta = baseMeta({ endsAt: null, expiryPolicy: "delete" });
+    await seedGroup(deps, meta);
+    const bucket = daysFromNow(0);
+    await seedExpiryRow(deps, bucket, meta.groupId);
+
+    const realGetGroupMeta = deps.groupRepo.getGroupMeta.bind(deps.groupRepo);
+    deps.groupRepo.getGroupMeta = async (groupId: string) => {
+      const snapshot = await realGetGroupMeta(groupId);
+      // Owner PATCHes endsAt to later today and writes a row into the SAME bucket.
+      await deps.groupRepo.updateGroupMeta(groupId, { endsAt: bucket + "T23:00:00Z" });
+      return snapshot;
+    };
+
+    const result = await sweepGroups(deps);
+
+    expect(result.skipped).toEqual(["grp_a"]);
+    expect(result.staleRowsRemoved).toEqual([]);
+    expect(deps.groupExpiryRepo.get(bucket, "grp_a")).toBeDefined();
+  });
+
   it("re-buckets a stale row when the owner extended endsAt into the future (self-healing)", async () => {
     const deps = buildDeps();
     const newEndsAt = daysFromNow(10) + "T00:00:00Z";

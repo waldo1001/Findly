@@ -112,6 +112,35 @@ describe("integration/Groups.meta endsAt null round-trip (specs/002 §2.10, 005 
     expect(afterRotate).toMatchObject({ endsAt: null, name: "Only a rename", code: "NEWCODE9" });
   });
 
+  it("CONCURRENCY: a code rotation racing the guarded Replace is not lost — the retry re-reads (real 412)", async () => {
+    const repo = new TableGroupRepo();
+    const meta = newMeta();
+    await repo.createGroupMeta(meta);
+
+    // After clearEndsAt's first read, land a REAL concurrent write (genuine ETag rotation) and
+    // hand back the now-stale snapshot, forcing the Replace to hit a 412 and retry.
+    const rawClient = (repo as unknown as { client: ReturnType<typeof createTableClient> }).client;
+    const realGetEntity = rawClient.getEntity.bind(rawClient);
+    let injected = false;
+    rawClient.getEntity = (async (partitionKey: string, rowKey: string) => {
+      const result = await realGetEntity(partitionKey, rowKey);
+      if (!injected) {
+        injected = true;
+        await createTableClient("Groups").updateEntity(
+          { partitionKey: meta.groupId, rowKey: META_ROW_KEY, code: "RACED001" },
+          "Merge",
+        );
+      }
+      return result;
+    }) as typeof rawClient.getEntity;
+
+    await repo.updateGroupMeta(meta.groupId, { endsAt: null });
+
+    const raw = await rawMeta(meta.groupId);
+    expect(raw.endsAt).toBeUndefined();
+    expect(raw.code).toBe("RACED001");
+  });
+
   it("updateGroupMeta({ endsAt: null }) on an already-null group is idempotent", async () => {
     const repo = new TableGroupRepo();
     const meta = newMeta({ endsAt: null });

@@ -158,6 +158,12 @@ async function processRow(
     // 002 §4.1 step 2 (amended 2026-10-12) — the owner removed the end date (005 §2.5), so this
     // row is stale: a group without an end date never expires and has no expiry row. Delete the
     // row and nothing else — members, code and positions of such a group are live data.
+    // TOCTOU guard (same B12 idiom as the destructive branches): a concurrent owner PATCH that
+    // sets a date and writes a row into this same bucket must not have its row deleted here.
+    if (!(await verifyStillCurrent(groupId, meta, deps))) {
+      result.skipped.push(groupId);
+      return;
+    }
     await deps.groupExpiryRepo.deleteExpiryRow(bucketDate, groupId);
     result.staleRowsRemoved.push(groupId);
     return;
