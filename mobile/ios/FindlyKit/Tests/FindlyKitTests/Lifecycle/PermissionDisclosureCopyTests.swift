@@ -1,14 +1,21 @@
 import Testing
 @testable import FindlyKit
 
-/// specs/009 §7 "Ongoing visibility" (I62) — the iOS background disclosure SHOULD mention the indicator.
+/// specs/009 §7 "Ongoing visibility" (amended 2026-10-12, 000 §D21 (a), I65) — the disclosure MUST NOT promise an indicator.
 struct PermissionDisclosureCopyTests {
-    @Test func backgroundPoints_mentionTheBlueLocationIndicator() {
-        #expect(PermissionDisclosureCopy.backgroundIndicatorSentence == "While Findly shares your location, iOS shows a blue location indicator.")
-        #expect(PermissionDisclosureCopy.points(for: .background).contains(PermissionDisclosureCopy.backgroundIndicatorSentence))
+    @Test func noDisclosureStringMentionsAnIndicator() {
+        for kind in [PermissionDisclosureKind.foreground, .background] {
+            for point in PermissionDisclosureCopy.points(for: kind) {
+                #expect(!point.lowercased().contains("indicator"))
+            }
+        }
     }
 
-    @Test func foregroundPoints_doNotMentionTheIndicator() {
-        #expect(!PermissionDisclosureCopy.points(for: .foreground).contains(PermissionDisclosureCopy.backgroundIndicatorSentence))
+    /// specs/009 §7 "Presence needs background permission" (I67) — the required sentence, verbatim, as the last point.
+    @Test func backgroundDisclosureStatesWhatAlwaysEnables() {
+        let sentence = "Without 'Always', your family only sees you while Findly is open, and 'Locate now' cannot reach this phone."
+        let points = PermissionDisclosureCopy.points(for: .background)
+        #expect(points.contains(sentence))
+        #expect(points.last == sentence)
     }
 }

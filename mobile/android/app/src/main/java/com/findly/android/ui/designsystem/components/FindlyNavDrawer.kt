@@ -1,5 +1,6 @@
 package com.findly.android.ui.designsystem.components
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -16,6 +17,7 @@ import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -27,6 +29,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.findly.android.ui.designsystem.FindlyTheme
+import kotlinx.coroutines.launch
 
 /**
  * The 010-app-shell-and-screen-ux.md §1.2 navigation drawer's destinations, in the spec's
@@ -89,9 +92,21 @@ fun FindlyNavDrawer(
     modifier: Modifier = Modifier,
     content: @Composable () -> Unit,
 ) {
+    val scope = rememberCoroutineScope()
+    // The no-`drawerState` ModalDrawerSheet overload (used below) does not install Material3's own
+    // back handling (verified in material3 1.4.0 bytecode: only the drawerState overload calls
+    // DrawerPredictiveBackHandler), so system back closes the open drawer here instead (A65).
+    // Same expression as the gesture gate: also covers the drawer while it animates open.
+    val open = drawerState.isOpen || drawerState.targetValue == DrawerValue.Open
+    BackHandler(enabled = open) { scope.launch { drawerState.close() } }
     ModalNavigationDrawer(
         drawerState = drawerState,
         modifier = modifier,
+        // 010 §1.2 (amended 2026-10-12): a closed drawer takes no drag, so the map pans freely; the
+        // open (or opening) drawer stays swipe- and scrim-dismissable.
+        gesturesEnabled = FindlyNavDrawerGestures.enabled(
+            isOpen = open,
+        ),
         drawerContent = {
             ModalDrawerSheet(drawerContainerColor = FindlyTheme.colors.surface) {
                 Column(
