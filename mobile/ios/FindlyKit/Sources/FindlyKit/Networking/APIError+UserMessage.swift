@@ -60,11 +60,30 @@ extension APIError {
             case .locationBatchTooLarge:
                 return "Too many locations at once."
             case .limitExceeded:
-                // specs/008-privacy-endpoints.md §3, specs/004-ios-client.md §3.6 — the export
-                // quota gets its own friendly, retry-tomorrow message; every other LIMIT_EXCEEDED
-                // (`details.limit` unset or some other plan limit) keeps the generic message.
-                if case .string("exportsPerDay")? = body.details?["limit"] {
-                    return "You've reached today's export limit. Try again tomorrow."
+                // specs/005 §2.5 item 7 (group limits, verbatim), 008 §3 (exports), and Android's
+                // per-limit copy for the rest (ApiErrorUserMessage.kt). The generic message is only
+                // for an absent or unrecognised `details.limit` — never for a group limit.
+                if case .string(let limit)? = body.details?["limit"] {
+                    switch limit {
+                    case "maxOwnedGroups":
+                        return "You already have the maximum number of active groups you created. End or delete one first."
+                    case "maxJoinedGroups":
+                        return "You're already in the maximum number of active groups you joined. Leave one first."
+                    case "maxGroupDurationDays":
+                        return "That end date is further out than your plan allows."
+                    case "exportsPerDay":
+                        return "You've reached today's export limit. Try again tomorrow."
+                    case "maxDevices":
+                        return "You've reached your device limit for this plan."
+                    case "maxGeofences":
+                        return "You've reached your geofence limit for this plan."
+                    case "locateRequestsPerDay":
+                        return "You've reached today's locate-request limit."
+                    case "minSyncIntervalMinutes":
+                        return "That sync interval isn't available on your plan."
+                    default:
+                        break
+                    }
                 }
                 return "You've reached a plan limit."
             case .rateLimited:
