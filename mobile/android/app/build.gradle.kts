@@ -297,7 +297,7 @@ dependencies {
     ksp("androidx.room:room-compiler:2.8.4")
 
     // A10 (specs/009 §1): FusedLocationProviderClient-backed real fix capture (location/).
-    implementation("com.google.android.gms:play-services-location:21.3.0")
+    implementation("com.google.android.gms:play-services-location:21.4.0")
 
     // Real Firebase Auth (specs/003 §7, H1) — FirebaseAuthProvider's only consumer.
     implementation(platform("com.google.firebase:firebase-bom:34.17.0"))
