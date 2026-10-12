@@ -91,8 +91,8 @@ export async function patchGroup(input: PatchGroupInput, deps: PatchGroupDeps): 
       }
     }
     // ended (grace) -> active reactivation is a create-equivalent for the owner cap (001 §12.4):
-    // the caller's OTHER active owned groups must be < maxOwnedGroups. An already-active group
-    // never re-checks (it is already part of the count the cap was enforced against).
+    // the caller's OTHER active owned groups must be < maxOwnedGroups (this group is `ended`,
+    // so it is not part of the active count). An already-active group never re-checks.
     if (currentState === "ended") {
       const otherActiveOwned = await countActiveGroupsWithRole(
         input.uid,
@@ -100,7 +100,6 @@ export async function patchGroup(input: PatchGroupInput, deps: PatchGroupDeps): 
         now,
         features.limits.groupGraceDays,
         deps,
-        input.groupId,
       );
       if (otherActiveOwned >= features.limits.maxOwnedGroups) {
         throw new AppError("LIMIT_EXCEEDED", "maxOwnedGroups cap reached", { limit: "maxOwnedGroups" });

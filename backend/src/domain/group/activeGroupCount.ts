@@ -12,13 +12,11 @@ export async function countActiveGroupsWithRole(
   now: Date,
   groupGraceDays: number,
   deps: { userRepo: UserRepo; groupRepo: GroupRepo },
-  excludeGroupId?: string,
 ): Promise<number> {
   const memberships = await deps.userRepo.listGroupMemberships(uid);
   let count = 0;
   for (const membership of memberships) {
     if (membership.role !== role) continue;
-    if (membership.groupId === excludeGroupId) continue;
     const meta = await deps.groupRepo.getGroupMeta(membership.groupId);
     if (!meta) continue; // orphaned reverse-index row (self-healing skip)
     if (deriveGroupState(now, meta.endsAt, meta.expiryPolicy, groupGraceDays) === "active") count += 1;
