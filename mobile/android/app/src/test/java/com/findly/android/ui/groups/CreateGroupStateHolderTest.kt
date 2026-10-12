@@ -202,4 +202,17 @@ class CreateGroupStateHolderTest {
         assertEquals("Name must be 1-50 characters", h.state.value.validationError)
         assertTrue(api.createGroupCalls.isEmpty())
     }
+
+    @Test
+    fun `defaultEndsAtMillis is now plus 24h (005 2_5 item 1)`() {
+        val h = holder(FakeGroupsApi())
+        assertEquals(fixedNowMillis + 24L * 60 * 60 * 1000, h.defaultEndsAtMillis)
+    }
+
+    @Test
+    fun `defaultEndsAtMillis never exceeds a plan cap`() {
+        val h = holder(FakeGroupsApi(), limits = groupsFeatures(maxGroupDurationDays = 0).limits)
+        // A cap of 0 days is below the 1h floor; the default is still bounded by it.
+        assertEquals(fixedNowMillis, h.defaultEndsAtMillis)
+    }
 }

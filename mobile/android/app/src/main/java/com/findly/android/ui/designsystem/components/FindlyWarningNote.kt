@@ -1,4 +1,4 @@
-package com.findly.android.ui.groups
+package com.findly.android.ui.designsystem.components
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -23,15 +23,18 @@ import androidx.compose.ui.unit.dp
 import com.findly.android.ui.designsystem.FindlyTheme
 
 /**
- * The 005 §2.5 item-2 warning, in the design system's warning style (`FindlyTheme.colors.warning`
- * stripe + the `▲` glyph, so status is never colour alone — same rule as `FindlyStatusChip`).
- * Rendered on the create screen directly under the "No end date" choice (above Create). The text
- * is [GroupPolicyCopy.NO_END_DATE_WARNING], with the lead sentence in bold per the spec's
- * formatting. A sentence-length message does not fit `FindlyStatusChip`'s 24 dp pill, hence this
- * small card-shaped sibling built from the same tokens.
+ * A sentence-length warning surface (specs/003-android-client.md §4.3, D21): an optional bold
+ * [lead] followed by [body], with a `warning`-token accent stripe and a `▲` glyph so the warning
+ * is never colour alone (same rule as [FindlyStatusChip], which is a fixed-height pill and cannot
+ * carry a sentence). Plain strings only, `FindlyTheme.*` tokens only — no screen-specific
+ * dependency. First use: the 005 §2.5 item-2 no-end-date warning.
  */
 @Composable
-fun GroupNoEndDateWarning(modifier: Modifier = Modifier) {
+fun FindlyWarningNote(
+    body: String,
+    modifier: Modifier = Modifier,
+    lead: String? = null,
+) {
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -52,9 +55,11 @@ fun GroupNoEndDateWarning(modifier: Modifier = Modifier) {
             Text(text = "▲", color = FindlyTheme.colors.warning, style = FindlyTheme.typography.bodyMedium)
             Text(
                 text = buildAnnotatedString {
-                    withStyle(SpanStyle(fontWeight = FontWeight.Bold)) { append(GroupPolicyCopy.NO_END_DATE_WARNING_LEAD) }
-                    append(" ")
-                    append(GroupPolicyCopy.NO_END_DATE_WARNING_BODY)
+                    if (lead != null) {
+                        withStyle(SpanStyle(fontWeight = FontWeight.Bold)) { append(lead) }
+                        append(" ")
+                    }
+                    append(body)
                 },
                 color = FindlyTheme.colors.onSurface,
                 style = FindlyTheme.typography.bodyMedium,

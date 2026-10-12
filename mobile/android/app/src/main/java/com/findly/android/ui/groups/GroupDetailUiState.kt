@@ -35,6 +35,9 @@ sealed class GroupDetailUiState {
         /** `null` for a non-owner member during `grace` (`state == "ended"`) — roster hidden per
          * 005 §2.3; the owner and `archived` groups always get the full roster (001 §12.3). */
         val members: List<GroupMemberUi>?,
+        /** The caller's `limits.maxGroupDurationDays` (001 §9) from the response envelope; `null` = no
+         * cap (or no features in the envelope). Bounds "Set an end date" (005 §2.5 item 6). */
+        val maxGroupDurationDays: Int? = null,
         val isMutating: Boolean = false,
         val mutationError: String? = null,
         val rotatedCode: String? = null,

@@ -29,6 +29,7 @@ import com.findly.android.ui.designsystem.components.FindlyCard
 import com.findly.android.ui.designsystem.components.FindlyStatusChip
 import com.findly.android.ui.designsystem.components.FindlyStatusTone
 import com.findly.android.ui.designsystem.components.FindlySwitchRow
+import com.findly.android.ui.designsystem.components.FindlyWarningNote
 import com.findly.android.ui.designsystem.components.FindlyTextField
 import com.findly.android.ui.designsystem.components.FindlyTopBar
 import java.time.Instant
@@ -58,6 +59,7 @@ fun CreateGroupRoute(
         state = state,
         needsDisplayName = viewModel.needsDisplayName,
         prefillDisplayName = prefillDisplayName,
+        defaultEndsAtMillis = viewModel.defaultEndsAtMillis,
         onNoEndDateChange = viewModel::setNoEndDate,
         onCreate = viewModel::createGroup,
         onCreated = onCreated,
@@ -72,6 +74,8 @@ fun CreateGroupScreen(
     modifier: Modifier = Modifier,
     needsDisplayName: Boolean = false,
     prefillDisplayName: String = "",
+    /** Initial end date: now + 24 h (005 §2.5 item 1), from [CreateGroupStateHolder.defaultEndsAtMillis]. */
+    defaultEndsAtMillis: Long? = null,
     onNoEndDateChange: (Boolean) -> Unit = {},
     onCreate: (name: String, endsAtMillis: Long?, expiryPolicy: String, displayName: String?) -> Unit =
         { _, _, _, _ -> },
@@ -83,9 +87,11 @@ fun CreateGroupScreen(
     // editable, same "enter it once" intent as GroupJoinScreen's prefillCode.
     var displayName by remember { mutableStateOf(prefillDisplayName) }
     var expiryPolicy by remember { mutableStateOf("delete") }
-    var dateMillis by remember { mutableStateOf<Long?>(null) }
-    var hour by remember { mutableStateOf("22") }
-    var minute by remember { mutableStateOf("00") }
+    // The picker date is a UTC-midnight millis; hour/minute are the UTC time-of-day fields.
+    val defaultAt = remember(defaultEndsAtMillis) { defaultEndsAtMillis?.let { Instant.ofEpochMilli(it).atZone(ZoneOffset.UTC) } }
+    var dateMillis by remember { mutableStateOf(defaultAt?.toLocalDate()?.atStartOfDay(ZoneOffset.UTC)?.toInstant()?.toEpochMilli()) }
+    var hour by remember { mutableStateOf(defaultAt?.hour?.toString() ?: "22") }
+    var minute by remember { mutableStateOf(defaultAt?.minute?.toString()?.padStart(2, '0') ?: "00") }
     var showDatePicker by remember { mutableStateOf(false) }
 
     LaunchedEffect(state.created) {
@@ -141,7 +147,12 @@ fun CreateGroupScreen(
                 onCheckedChange = onNoEndDateChange,
                 enabled = !state.isCreating,
             )
-            if (state.noEndDate) GroupNoEndDateWarning()
+            if (state.noEndDate) {
+                FindlyWarningNote(
+                    lead = GroupPolicyCopy.NO_END_DATE_WARNING_LEAD,
+                    body = GroupPolicyCopy.NO_END_DATE_WARNING_BODY,
+                )
+            }
 
             FindlyCard {
                 Column(verticalArrangement = Arrangement.spacedBy(FindlyTheme.spacing.xs)) {
@@ -195,9 +206,10 @@ fun CreateGroupScreen(
 }
 
 /** Combines a `DatePickerState.selectedDateMillis` (midnight UTC of the picked date, per Material3's
- * documented contract) with an hour/minute, both interpreted in UTC — mirrors
- * [com.findly.android.ui.history.HistoryScreen]'s `Long.toIsoDate()` UTC convention. Untested
- * (private, Compose-UI-adjacent glue), same precedent as that function. */
+ * documented contract) with an hour/minute, both interpreted in UTC (out-of-range values are
+ * clamped) — mirrors [com.findly.android.ui.history.HistoryScreen]'s `Long.toIsoDate()` UTC
+ * convention. Pure; shared with [GroupDetailScreen]'s "Set an end date" picker and unit-tested in
+ * `GroupEndsAtValidationTest`. */
 internal fun combineDateAndTime(dateMillis: Long, hour: Int, minute: Int): Long =
     Instant.ofEpochMilli(dateMillis)
         .atZone(ZoneOffset.UTC)

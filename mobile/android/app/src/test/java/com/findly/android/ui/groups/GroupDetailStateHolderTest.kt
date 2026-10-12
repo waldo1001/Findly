@@ -255,6 +255,20 @@ class GroupDetailStateHolderTest {
     }
 
     @Test
+    fun `removeEndDate by a non-owner gets the standard not-owner error and makes no call`() = runTest {
+        val api = FakeGroupsApi().apply {
+            getGroupResult = ApiResult.Success(sampleGroupDetailDto(role = "member"), features = groupsFeatures())
+        }
+        val holder = GroupDetailStateHolder(groupId, api, backgroundScope)
+        runCurrent()
+
+        holder.removeEndDate()
+
+        assertEquals("Only the group owner can do that.", (holder.state.value as GroupDetailUiState.Content).mutationError)
+        assertTrue(api.updateGroupCalls.isEmpty())
+    }
+
+    @Test
     fun `removeEndDate is a no-op for a non-owner, an already-undated group and an archived group`() = runTest {
         suspend fun callsFor(role: String, endsAt: String?, state: String): Int {
             val api = FakeGroupsApi().apply {
@@ -309,5 +323,76 @@ class GroupDetailStateHolderTest {
 
         assertEquals(UpdateGroupRequestDto.setEndsAt("2026-09-01T10:00:00Z"), api.updateGroupCalls.single().second)
         assertEquals("2026-09-01T10:00:00Z", (holder.state.value as GroupDetailUiState.Content).endsAt)
+    }
+
+    // ------------------------------------------------------------------
+    // A66 review: setEndDate is bounded like the create screen (005 §2.5 item 6)
+    // ------------------------------------------------------------------
+
+    private val nowMillis = 1_784_707_200_000L // 2026-07-21T10:00:00Z
+    private val hour = 60L * 60 * 1000
+    private val day = 24 * hour
+
+    private suspend fun kotlinx.coroutines.test.TestScope.ownerHolder(
+        maxDays: Int?,
+        api: FakeGroupsApi = FakeGroupsApi(),
+    ): Pair<GroupDetailStateHolder, FakeGroupsApi> {
+        api.getGroupResult = ApiResult.Success(sampleGroupDetailDto(role = "owner"), features = groupsFeatures(maxGroupDurationDays = maxDays))
+        val holder = GroupDetailStateHolder(groupId, api, backgroundScope, clock = { nowMillis })
+        runCurrent()
+        return holder to api
+    }
+
+    @Test
+    fun `Content carries maxGroupDurationDays from the envelope limits`() = runTest {
+        val (holder, _) = ownerHolder(maxDays = 30)
+        assertEquals(30, (holder.state.value as GroupDetailUiState.Content).maxGroupDurationDays)
+        val (holder2, _) = ownerHolder(maxDays = null)
+        assertNull((holder2.state.value as GroupDetailUiState.Content).maxGroupDurationDays)
+    }
+
+    @Test
+    fun `setEndDate below the 1h floor sets mutationError and makes no call`() = runTest {
+        val (holder, api) = ownerHolder(maxDays = 30)
+
+        holder.setEndDate(nowMillis + 30 * 60_000)
+
+        assertEquals(
+            "End time must be at least 1 hour from now",
+            (holder.state.value as GroupDetailUiState.Content).mutationError,
+        )
+        assertTrue(api.updateGroupCalls.isEmpty())
+    }
+
+    @Test
+    fun `setEndDate above the plan cap sets mutationError and makes no call`() = runTest {
+        val (holder, api) = ownerHolder(maxDays = 30)
+
+        holder.setEndDate(nowMillis + 31 * day)
+
+        assertEquals(
+            "That end date is further out than your plan allows",
+            (holder.state.value as GroupDetailUiState.Content).mutationError,
+        )
+        assertTrue(api.updateGroupCalls.isEmpty())
+    }
+
+    @Test
+    fun `setEndDate with a null cap accepts one year out and PATCHes the ISO instant`() = runTest {
+        val (holder, api) = ownerHolder(maxDays = null)
+
+        holder.setEndDate(nowMillis + 365 * day)
+
+        val sent = api.updateGroupCalls.single().second
+        assertEquals(UpdateGroupRequestDto.setEndsAt(java.time.Instant.ofEpochMilli(nowMillis + 365 * day).toString()), sent)
+    }
+
+    @Test
+    fun `updateEndsAt has no floor - End group now sends now plus 60s`() = runTest {
+        val (holder, api) = ownerHolder(maxDays = 30)
+
+        holder.updateEndsAt(java.time.Instant.ofEpochMilli(nowMillis + 60_000).toString())
+
+        assertEquals(1, api.updateGroupCalls.size)
     }
 }

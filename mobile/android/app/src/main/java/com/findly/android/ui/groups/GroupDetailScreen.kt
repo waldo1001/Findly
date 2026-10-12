@@ -114,6 +114,7 @@ fun GroupDetailRoute(
         joinLinkHost = joinLinkHost,
         onRename = viewModel::rename,
         onExtend = viewModel::updateEndsAt,
+        onSetEndDate = viewModel::setEndDate,
         onRemoveEndDate = viewModel::removeEndDate,
         onRotateCode = viewModel::rotateCode,
         onKickMember = viewModel::kickMember,
@@ -134,6 +135,7 @@ fun GroupDetailScreen(
     onRename: (String) -> Unit = {},
     onExtend: (String) -> Unit = {},
     onRemoveEndDate: () -> Unit = {},
+    onSetEndDate: (endsAtMillis: Long) -> Unit = {},
     onRotateCode: () -> Unit = {},
     onKickMember: (String) -> Unit = {},
     onDeleteGroup: () -> Unit = {},
@@ -351,12 +353,10 @@ fun GroupDetailScreen(
                     text = "OK",
                     onClick = {
                         pickerState.selectedDateMillis?.let { picked ->
-                            val endsAt = Instant.ofEpochMilli(
+                            // Bounded by GroupDetailStateHolder.setEndDate (1 h floor, plan cap):
+                            // a failure surfaces as mutationError, never as a silent "end now".
+                            onSetEndDate(
                                 combineDateAndTime(picked, endHour.toIntOrNull() ?: 0, endMinute.toIntOrNull() ?: 0),
-                            )
-                            pendingAction = PendingGroupAction.Extend(
-                                endsAtIso = endsAt.toString(),
-                                label = "set this group's end to $endsAt (UTC)",
                             )
                         }
                         showEndDatePicker = false

@@ -48,6 +48,11 @@ class CreateGroupStateHolder(
     val maxEndsAtMillis: Long?
         get() = limits?.maxGroupDurationDays?.let { clock() + it * DAY_MILLIS }
 
+    /** The create picker's initial end date: now + 24 h (005 §2.5 item 1), bounded by the plan cap
+     * when there is one. */
+    val defaultEndsAtMillis: Long
+        get() = (clock() + DAY_MILLIS).let { default -> maxEndsAtMillis?.let { default.coerceAtMost(it) } ?: default }
+
     /** Switches the 005 §2.5 "No end date" choice on/off. */
     fun setNoEndDate(noEndDate: Boolean) {
         _state.value = _state.value.copy(noEndDate = noEndDate)
@@ -57,16 +62,12 @@ class CreateGroupStateHolder(
      * valid. With [CreateGroupUiState.noEndDate] on, [endsAtMillis] is ignored (the picker is
      * disabled) and no date rule applies. */
     fun validate(name: String, endsAtMillis: Long?, expiryPolicy: String, displayName: String?): String? {
-        val max = maxEndsAtMillis
-        val noEndDate = _state.value.noEndDate
-        return when {
-            name.isBlank() || name.length > 50 -> "Name must be 1-50 characters"
-            noEndDate -> validatePolicyAndName(expiryPolicy, displayName)
-            endsAtMillis == null -> "Pick an end date and time"
-            endsAtMillis < minEndsAtMillis -> "End time must be at least 1 hour from now"
-            max != null && endsAtMillis > max -> "That end date is further out than your plan allows"
-            else -> validatePolicyAndName(expiryPolicy, displayName)
+        if (name.isBlank() || name.length > 50) return "Name must be 1-50 characters"
+        if (!_state.value.noEndDate) {
+            if (endsAtMillis == null) return "Pick an end date and time"
+            validateEndsAt(endsAtMillis, clock(), limits?.maxGroupDurationDays)?.let { return it }
         }
+        return validatePolicyAndName(expiryPolicy, displayName)
     }
 
     private fun validatePolicyAndName(expiryPolicy: String, displayName: String?): String? = when {
