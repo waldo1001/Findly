@@ -34,9 +34,13 @@ public final class GroupDetailViewModel: ObservableObject {
     private let apiClient: FindlyAPIClient
     public let groupId: String
 
-    public init(apiClient: FindlyAPIClient, groupId: String) {
+    /// Injected clock (default: the system clock) so `endNow()`'s instant is deterministic in tests.
+    private let now: () -> Date
+
+    public init(apiClient: FindlyAPIClient, groupId: String, now: @escaping () -> Date = Date.init) {
         self.apiClient = apiClient
         self.groupId = groupId
+        self.now = now
     }
 
     public var isOwner: Bool {
@@ -72,10 +76,12 @@ public final class GroupDetailViewModel: ObservableObject {
         }
     }
 
-    /// Owner-only convenience — `endsAt <= now + 5 min` means "end the group now" (001 §12.4).
+    /// Owner-only convenience — `now < endsAt <= now + 5 min` means "end the group now" (001 §12.4).
+    /// Sends now + 60 s (as Android does): `endsAt` must be strictly in the future on arrival, so
+    /// plain `now` would already be in the past and be refused with 400.
     public func endNow() async {
         await mutateSummary { client in
-            try await client.updateGroup(groupId: self.groupId, name: nil, endsAt: .set(Self.iso8601Formatter.string(from: Date())))
+            try await client.updateGroup(groupId: self.groupId, name: nil, endsAt: .set(Self.iso8601Formatter.string(from: self.now().addingTimeInterval(60))))
         }
     }
 

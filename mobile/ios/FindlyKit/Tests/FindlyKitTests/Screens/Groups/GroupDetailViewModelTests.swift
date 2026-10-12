@@ -170,6 +170,29 @@ struct GroupDetailViewModelTests {
         #expect(viewModel.lastActionError == "You already have the maximum number of active groups you created. End or delete one first.")
     }
 
+    /// 001 §12.4: `endsAt` must be > now when it arrives, and `> now && <= now + 5 min` means "end
+    /// now". Sending `now` exactly is already in the past on arrival (400), so the client sends
+    /// now + 60 s (same as Android).
+    @Test func endNow_sendsNowPlus60Seconds() async {
+        let api = FakeAPIClient()
+        api.getGroupHandler = { _ in TestFeatures.envelope(self.makeDetail()) }
+        api.updateGroupHandler = { _, _, _ in
+            TestFeatures.envelope(GroupSummary(
+                groupId: "grp_1", name: "Festival crew", endsAt: "2026-08-02T12:01:00Z", expiryPolicy: "delete",
+                state: "active", role: "owner", memberCount: 2, code: "7F3K9QRZ", createdAt: nil
+            ))
+        }
+        let fixedNow = ISO8601DateFormatter().date(from: "2026-08-02T12:00:00Z")!
+        let viewModel = GroupDetailViewModel(apiClient: api, groupId: "grp_1", now: { fixedNow })
+        await viewModel.load()
+
+        await viewModel.endNow()
+
+        #expect(api.updateGroupCalls.count == 1)
+        #expect(api.updateGroupCalls[0].name == nil)
+        #expect(api.updateGroupCalls[0].endsAt == .set("2026-08-02T12:01:00Z"))
+    }
+
     @Test func rotateCode_updatesCodeButPreservesRoster() async {
         let api = FakeAPIClient()
         api.getGroupHandler = { _ in TestFeatures.envelope(self.makeDetail()) }
