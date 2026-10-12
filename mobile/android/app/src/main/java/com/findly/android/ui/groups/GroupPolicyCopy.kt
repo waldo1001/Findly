@@ -8,6 +8,20 @@ package com.findly.android.ui.groups
  */
 object GroupPolicyCopy {
 
+    /** 005 §2.5 item 2 — the bold lead of the no-end-date warning. */
+    const val NO_END_DATE_WARNING_LEAD = "This group has no end date."
+
+    /** 005 §2.5 item 2 — the rest of the no-end-date warning. */
+    const val NO_END_DATE_WARNING_BODY =
+        "Everyone in it keeps seeing each other's live location until you end or delete the group, or they leave it."
+
+    /** 005 §2.5 item 2, verbatim — shown under the "No end date" choice and in the "Remove end
+     * date" confirmation dialog. */
+    const val NO_END_DATE_WARNING = "$NO_END_DATE_WARNING_LEAD $NO_END_DATE_WARNING_BODY"
+
+    /** 005 §2.5 item 3 — one-line note under the policy promise. */
+    const val NO_END_DATE_POLICY_NOTE = "Applies only if you set an end date later."
+
     /** The three `expiryPolicy` values, in the order 005 §2.1's table presents them — the order a
      * picker should offer them in. */
     val ALL_POLICIES: List<String> = listOf("delete", "grace", "archive")

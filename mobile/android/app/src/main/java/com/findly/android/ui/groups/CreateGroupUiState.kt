@@ -7,4 +7,7 @@ data class CreateGroupUiState(
     val validationError: String? = null,
     val submitError: String? = null,
     val created: GroupSummaryUi? = null,
+    /** 005 §2.5: the explicit "No end date" choice. Never preselected — a dated group (now + 24 h
+     * default) stays the default. */
+    val noEndDate: Boolean = false,
 )

@@ -24,6 +24,8 @@ class CreateGroupViewModel(
     fun validate(name: String, endsAtMillis: Long?, expiryPolicy: String, displayName: String?): String? =
         stateHolder.validate(name, endsAtMillis, expiryPolicy, displayName)
 
+    fun setNoEndDate(noEndDate: Boolean) = stateHolder.setNoEndDate(noEndDate)
+
     fun createGroup(name: String, endsAtMillis: Long?, expiryPolicy: String, displayName: String?) {
         viewModelScope.launch { stateHolder.createGroup(name, endsAtMillis, expiryPolicy, displayName) }
     }

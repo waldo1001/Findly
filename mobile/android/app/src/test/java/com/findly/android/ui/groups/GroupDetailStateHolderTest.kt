@@ -7,6 +7,7 @@ import com.findly.android.fakes.sampleGroupDto
 import com.findly.android.network.ApiError
 import com.findly.android.network.ApiResult
 import com.findly.android.network.dto.GroupMemberDto
+import com.findly.android.network.dto.UpdateGroupRequestDto
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -175,5 +176,138 @@ class GroupDetailStateHolderTest {
         val state = holder.state.value as GroupDetailUiState.Content
         assertEquals("This group has ended.", state.mutationError)
         assertEquals(false, state.isMutating)
+    }
+
+    // ------------------------------------------------------------------
+    // 005 §2.5 — groups without an end date (A66)
+    // ------------------------------------------------------------------
+
+    @Test
+    fun `a group with endsAt null loads as Content without crashing`() = runTest {
+        val api = FakeGroupsApi().apply {
+            getGroupResult = ApiResult.Success(sampleGroupDetailDto(endsAt = null), features = groupsFeatures())
+        }
+        val holder = GroupDetailStateHolder(groupId, api, backgroundScope)
+        runCurrent()
+
+        val state = holder.state.value as GroupDetailUiState.Content
+        assertNull(state.endsAt)
+        assertEquals(false, state.canRemoveEndDate)
+    }
+
+    @Test
+    fun `canRemoveEndDate is true only for an owner on a dated active or ended group`() = runTest {
+        suspend fun contentFor(role: String, endsAt: String?, state: String): GroupDetailUiState.Content {
+            val api = FakeGroupsApi().apply {
+                getGroupResult = ApiResult.Success(
+                    sampleGroupDetailDto(role = role, endsAt = endsAt, state = state),
+                    features = groupsFeatures(),
+                )
+            }
+            val holder = GroupDetailStateHolder(groupId, api, backgroundScope)
+            runCurrent()
+            return holder.state.value as GroupDetailUiState.Content
+        }
+
+        assertTrue(contentFor("owner", "2026-08-02T22:00:00Z", "active").canRemoveEndDate)
+        assertTrue(contentFor("owner", "2026-07-20T22:00:00Z", "ended").canRemoveEndDate)
+        assertEquals(false, contentFor("owner", "2026-07-20T22:00:00Z", "archived").canRemoveEndDate)
+        assertEquals(false, contentFor("member", "2026-08-02T22:00:00Z", "active").canRemoveEndDate)
+        assertEquals(false, contentFor("owner", null, "active").canRemoveEndDate)
+    }
+
+    @Test
+    fun `owner removeEndDate PATCHes endsAt null and the state shows no end date`() = runTest {
+        val api = FakeGroupsApi().apply {
+            getGroupResult = ApiResult.Success(sampleGroupDetailDto(role = "owner"), features = groupsFeatures())
+            updateGroupResult = ApiResult.Success(sampleGroupDto(endsAt = null), features = groupsFeatures())
+        }
+        val holder = GroupDetailStateHolder(groupId, api, backgroundScope)
+        runCurrent()
+
+        holder.removeEndDate()
+
+        val call = api.updateGroupCalls.single()
+        assertEquals(groupId, call.first)
+        assertEquals(UpdateGroupRequestDto.removeEndDate(), call.second)
+        val state = holder.state.value as GroupDetailUiState.Content
+        assertNull(state.endsAt)
+        assertEquals(false, state.isMutating)
+    }
+
+    @Test
+    fun `removeEndDate reactivates an ended group`() = runTest {
+        val api = FakeGroupsApi().apply {
+            getGroupResult = ApiResult.Success(
+                sampleGroupDetailDto(role = "owner", endsAt = "2026-07-20T22:00:00Z", state = "ended"),
+                features = groupsFeatures(),
+            )
+            updateGroupResult = ApiResult.Success(sampleGroupDto(endsAt = null, state = "active"), features = groupsFeatures())
+        }
+        val holder = GroupDetailStateHolder(groupId, api, backgroundScope)
+        runCurrent()
+
+        holder.removeEndDate()
+
+        val state = holder.state.value as GroupDetailUiState.Content
+        assertEquals("active", state.state)
+        assertNull(state.endsAt)
+    }
+
+    @Test
+    fun `removeEndDate is a no-op for a non-owner, an already-undated group and an archived group`() = runTest {
+        suspend fun callsFor(role: String, endsAt: String?, state: String): Int {
+            val api = FakeGroupsApi().apply {
+                getGroupResult = ApiResult.Success(
+                    sampleGroupDetailDto(role = role, endsAt = endsAt, state = state),
+                    features = groupsFeatures(),
+                )
+            }
+            val holder = GroupDetailStateHolder(groupId, api, backgroundScope)
+            runCurrent()
+            holder.removeEndDate()
+            return api.updateGroupCalls.size
+        }
+
+        assertEquals(0, callsFor("member", "2026-08-02T22:00:00Z", "active"))
+        assertEquals(0, callsFor("owner", null, "active"))
+        assertEquals(0, callsFor("owner", "2026-07-20T22:00:00Z", "archived"))
+    }
+
+    @Test
+    fun `removeEndDate refused by the maxOwnedGroups cap names the limit`() = runTest {
+        val api = FakeGroupsApi().apply {
+            getGroupResult = ApiResult.Success(
+                sampleGroupDetailDto(role = "owner", endsAt = "2026-07-20T22:00:00Z", state = "ended"),
+                features = groupsFeatures(),
+            )
+            updateGroupResult = ApiResult.Failure(ApiError.LimitExceeded("maxOwnedGroups", "raw", "r_1"))
+        }
+        val holder = GroupDetailStateHolder(groupId, api, backgroundScope)
+        runCurrent()
+
+        holder.removeEndDate()
+
+        val state = holder.state.value as GroupDetailUiState.Content
+        assertEquals(
+            "You already have the maximum number of active groups you created. End or delete one first.",
+            state.mutationError,
+        )
+        assertEquals("2026-07-20T22:00:00Z", state.endsAt)
+    }
+
+    @Test
+    fun `updateEndsAt works from a no-end group (Set an end date)`() = runTest {
+        val api = FakeGroupsApi().apply {
+            getGroupResult = ApiResult.Success(sampleGroupDetailDto(role = "owner", endsAt = null), features = groupsFeatures())
+            updateGroupResult = ApiResult.Success(sampleGroupDto(endsAt = "2026-09-01T10:00:00Z"), features = groupsFeatures())
+        }
+        val holder = GroupDetailStateHolder(groupId, api, backgroundScope)
+        runCurrent()
+
+        holder.updateEndsAt("2026-09-01T10:00:00Z")
+
+        assertEquals(UpdateGroupRequestDto.setEndsAt("2026-09-01T10:00:00Z"), api.updateGroupCalls.single().second)
+        assertEquals("2026-09-01T10:00:00Z", (holder.state.value as GroupDetailUiState.Content).endsAt)
     }
 }

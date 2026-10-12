@@ -17,7 +17,7 @@ import org.junit.Test
 class CreateGroupStateHolderTest {
 
     private val fixedNowMillis = 1_784_707_200_000L // 2026-07-21T10:00:00Z (test fixture epoch)
-    private val limits = groupsFeatures().limits // maxActiveGroups=5, maxGroupDurationDays=30, ...
+    private val limits = groupsFeatures().limits // maxOwnedGroups=5, maxGroupDurationDays=30, ...
 
     private fun holder(api: FakeGroupsApi, limits: PlanLimits? = this.limits, needsDisplayName: Boolean = false) =
         CreateGroupStateHolder(api, limits, needsDisplayName, clock = { fixedNowMillis })
@@ -109,20 +109,97 @@ class CreateGroupStateHolderTest {
         val call = api.createGroupCalls.single()
         assertEquals("Festival crew", call.name)
         assertEquals("delete", call.expiryPolicy)
-        assertTrue("endsAt must be ISO-8601 UTC (Z-suffixed): ${call.endsAt}", call.endsAt.endsWith("Z"))
+        assertTrue("endsAt must be ISO-8601 UTC (Z-suffixed): ${call.endsAt}", call.endsAt!!.endsWith("Z"))
     }
 
     @Test
     fun `a server failure surfaces the user-facing message, never raw server text`() = runTest {
         val api = FakeGroupsApi().apply {
-            createGroupResult = ApiResult.Failure(ApiError.LimitExceeded("maxActiveGroups", "raw debug text", "r_1"))
+            createGroupResult = ApiResult.Failure(ApiError.LimitExceeded("maxOwnedGroups", "raw debug text", "r_1"))
         }
         val h = holder(api)
 
         h.createGroup(name = "Festival crew", endsAtMillis = fixedNowMillis + 2 * 60 * 60 * 1000, expiryPolicy = "delete", displayName = null)
 
-        assertEquals("You've reached your active-group limit for this plan.", h.state.value.submitError)
+        assertEquals(
+            "You already have the maximum number of active groups you created. End or delete one first.",
+            h.state.value.submitError,
+        )
         assertEquals(false, h.state.value.isCreating)
         assertNull(h.state.value.created)
+    }
+
+    // ------------------------------------------------------------------
+    // 005 §2.5 — groups without an end date (A66)
+    // ------------------------------------------------------------------
+
+    @Test
+    fun `noEndDate defaults to false and a missing end date is still rejected`() = runTest {
+        val api = FakeGroupsApi()
+        val h = holder(api)
+
+        assertEquals(false, h.state.value.noEndDate)
+        h.createGroup(name = "Festival crew", endsAtMillis = null, expiryPolicy = "delete", displayName = null)
+
+        assertEquals("Pick an end date and time", h.state.value.validationError)
+        assertTrue(api.createGroupCalls.isEmpty())
+    }
+
+    @Test
+    fun `with noEndDate on, a null endsAtMillis is valid and submit sends endsAt null`() = runTest {
+        val api = FakeGroupsApi()
+        val h = holder(api)
+
+        h.setNoEndDate(true)
+        h.createGroup(name = "Standing crew", endsAtMillis = null, expiryPolicy = "grace", displayName = null)
+
+        assertNull(h.state.value.validationError)
+        val call = api.createGroupCalls.single()
+        assertNull(call.endsAt)
+        assertEquals("grace", call.expiryPolicy)
+    }
+
+    @Test
+    fun `with noEndDate on, a picked date is ignored and endsAt null is sent`() = runTest {
+        val api = FakeGroupsApi()
+        val h = holder(api)
+
+        h.setNoEndDate(true)
+        h.createGroup(name = "Standing crew", endsAtMillis = fixedNowMillis + 2 * 60 * 60 * 1000, expiryPolicy = "delete", displayName = null)
+
+        assertNull(api.createGroupCalls.single().endsAt)
+    }
+
+    @Test
+    fun `noEndDate can be switched off again`() {
+        val h = holder(FakeGroupsApi())
+        h.setNoEndDate(true)
+        h.setNoEndDate(false)
+        assertEquals(false, h.state.value.noEndDate)
+    }
+
+    @Test
+    fun `null maxGroupDurationDays means no upper bound - a far-future end date validates`() = runTest {
+        val api = FakeGroupsApi()
+        val h = holder(api, limits = groupsFeatures(maxGroupDurationDays = null).limits)
+        val oneYear = fixedNowMillis + 365L * 24 * 60 * 60 * 1000
+
+        assertNull(h.maxEndsAtMillis)
+        h.createGroup(name = "Festival crew", endsAtMillis = oneYear, expiryPolicy = "delete", displayName = null)
+
+        assertNull(h.state.value.validationError)
+        assertEquals(1, api.createGroupCalls.size)
+    }
+
+    @Test
+    fun `noEndDate still enforces the other validation rules`() = runTest {
+        val api = FakeGroupsApi()
+        val h = holder(api)
+
+        h.setNoEndDate(true)
+        h.createGroup(name = " ", endsAtMillis = null, expiryPolicy = "delete", displayName = null)
+
+        assertEquals("Name must be 1-50 characters", h.state.value.validationError)
+        assertTrue(api.createGroupCalls.isEmpty())
     }
 }

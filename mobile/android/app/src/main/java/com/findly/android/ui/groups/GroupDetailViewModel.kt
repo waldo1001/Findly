@@ -21,6 +21,10 @@ class GroupDetailViewModel(groupId: String, groupsApi: GroupsApi) : ViewModel() 
         viewModelScope.launch { stateHolder.rename(name) }
     }
 
+    fun removeEndDate() {
+        viewModelScope.launch { stateHolder.removeEndDate() }
+    }
+
     fun updateEndsAt(endsAtIso: String) {
         viewModelScope.launch { stateHolder.updateEndsAt(endsAtIso) }
     }

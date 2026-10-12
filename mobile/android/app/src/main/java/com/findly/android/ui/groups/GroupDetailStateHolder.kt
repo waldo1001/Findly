@@ -49,13 +49,22 @@ class GroupDetailStateHolder(
     }
 
     /** §12.4 — owner-only; name only. */
-    suspend fun rename(name: String) = mutateGroup { groupsApi.updateGroup(groupId, UpdateGroupRequestDto(name = name)) }
+    suspend fun rename(name: String) = mutateGroup { groupsApi.updateGroup(groupId, UpdateGroupRequestDto.rename(name)) }
 
     /** §12.4 — owner-only; `endsAt` only. Extending a `grace`-state group reactivates it (005
      * §2.2); as a convenience, `endsAt ≤ now + 5 min` ends the group now (both server-side rules,
      * nothing special needed here). */
     suspend fun updateEndsAt(endsAtIso: String) =
-        mutateGroup { groupsApi.updateGroup(groupId, UpdateGroupRequestDto(endsAt = endsAtIso)) }
+        mutateGroup { groupsApi.updateGroup(groupId, UpdateGroupRequestDto.setEndsAt(endsAtIso)) }
+
+    /** §12.4 `{"endsAt": null}` — owner-only "Remove end date" on a dated `active`/`ended` group
+     * (005 §2.5 item 5). On an `ended` group it also reactivates (subject to the server's
+     * `maxOwnedGroups` check). A no-op when [GroupDetailUiState.Content.canRemoveEndDate] is false. */
+    suspend fun removeEndDate() {
+        val current = _state.value as? GroupDetailUiState.Content ?: return
+        if (current.isOwner && !current.canRemoveEndDate) return
+        mutateGroup { groupsApi.updateGroup(groupId, UpdateGroupRequestDto.removeEndDate()) }
+    }
 
     private suspend fun mutateGroup(call: suspend () -> ApiResult<GroupDto>) {
         val current = _state.value as? GroupDetailUiState.Content ?: return

@@ -24,7 +24,8 @@ sealed class GroupDetailUiState {
     data class Content(
         val groupId: String,
         val name: String,
-        val endsAt: String,
+        /** `null` = no end date (005 §2.5). */
+        val endsAt: String?,
         val expiryPolicy: String,
         val state: String,
         val role: String,
@@ -42,5 +43,9 @@ sealed class GroupDetailUiState {
         val left: Boolean = false,
     ) : GroupDetailUiState() {
         val isOwner: Boolean get() = role == "owner"
+
+        /** "Remove end date" (005 §2.5 item 5): owner, dated, and `active` or `ended` (grace) —
+         * `archived` is not patchable (001 §12.4). */
+        val canRemoveEndDate: Boolean get() = isOwner && endsAt != null && (state == "active" || state == "ended")
     }
 }
