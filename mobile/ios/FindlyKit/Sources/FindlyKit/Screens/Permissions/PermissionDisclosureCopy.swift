@@ -16,6 +16,7 @@ public enum PermissionDisclosureCopy {
                 "To keep the map up to date, Findly needs to collect your location even when the app is closed or not in use.",
                 "This is what lets your family see where you are without you opening the app, and what makes arrival and departure alerts work for places like home or school.",
                 "Background updates follow the interval you choose in Settings, and stop entirely when you pause sharing.",
+                "Without 'Always', your family only sees you while Findly is open, and 'Locate now' cannot reach this phone.",
             ]
         }
     }
