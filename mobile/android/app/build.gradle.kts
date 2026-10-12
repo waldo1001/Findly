@@ -288,7 +288,7 @@ dependencies {
     implementation("androidx.navigation:navigation-compose:2.8.5")
 
     // Periodic/foreground-service scheduling (specs/009-device-runtime.md §3).
-    implementation("androidx.work:work-runtime-ktx:2.10.0")
+    implementation("androidx.work:work-runtime-ktx:2.12.0")
 
     // A10 (specs/009 §2): durable fix-queue storage, replacing the A1 in-memory placeholder
     // (specs/003 §10.4) behind the unchanged FixQueueStore interface (queue/room/).
