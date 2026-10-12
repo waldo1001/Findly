@@ -60,4 +60,13 @@ describe("domain/group/groupState deriveGroupState", () => {
     expect(deriveGroupState(justBefore, ENDS_AT.toISOString(), "grace", shortGrace)).toBe("ended");
     expect(deriveGroupState(graceUntil, ENDS_AT.toISOString(), "grace", shortGrace)).toBe("expired");
   });
+
+  // specs/005 §2.2/§2.5 — endsAt null = no end date: always active, whatever the policy,
+  // however far `now` is in the future.
+  it("endsAt null is active for every policy (no end date, 005 §2.5)", () => {
+    const farFuture = new Date("2099-01-01T00:00:00Z");
+    expect(deriveGroupState(farFuture, null, "delete", GRACE_DAYS)).toBe("active");
+    expect(deriveGroupState(farFuture, null, "grace", GRACE_DAYS)).toBe("active");
+    expect(deriveGroupState(farFuture, null, "archive", GRACE_DAYS)).toBe("active");
+  });
 });

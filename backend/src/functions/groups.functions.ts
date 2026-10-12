@@ -164,7 +164,7 @@ app.http("patchGroup", {
       const body: unknown = await request.json().catch(() => ({}));
       const result = await patchGroup(
         { uid: auth.uid, familyId: auth.familyId, groupId, body },
-        { groupRepo, groupExpiryRepo, entitlementsRepo, clock },
+        { groupRepo, groupExpiryRepo, userRepo, entitlementsRepo, clock },
       );
       const { features, ...data } = result;
       return { status: 200, jsonBody: ok(data, features) };

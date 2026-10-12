@@ -47,6 +47,9 @@ export interface SweepGroupsResult {
   /** GroupExpiry rows whose Groups.meta was already gone (002 §4.1 step 1) — the stray row
    * itself was cleaned; no group data existed to delete. */
   orphansCleaned: string[];
+  /** Rows deleted because the group's `endsAt` is now `null` (owner removed the end date,
+   * 005 §2.5; 002 §4.1 step 2 amended 2026-10-12) — only the stale row was removed. */
+  staleRowsRemoved: string[];
   /** Rows moved to a later bucket because the owner extended endsAt after the row was written
    * (002 §4.1 step 2) — a stale row, self-healing. */
   rebucketed: string[];
@@ -151,6 +154,15 @@ async function processRow(
     return;
   }
 
+  if (meta.endsAt === null) {
+    // 002 §4.1 step 2 (amended 2026-10-12) — the owner removed the end date (005 §2.5), so this
+    // row is stale: a group without an end date never expires and has no expiry row. Delete the
+    // row and nothing else — members, code and positions of such a group are live data.
+    await deps.groupExpiryRepo.deleteExpiryRow(bucketDate, groupId);
+    result.staleRowsRemoved.push(groupId);
+    return;
+  }
+
   // Only grace-policy groups need groupGraceDays; skip the extra owner-plan read otherwise
   // (cost-consciousness — 000's few-euros/month target).
   const graceDays = meta.expiryPolicy === "grace" ? await resolveGroupGraceDays(meta, deps) : 0;
@@ -217,6 +229,7 @@ export async function sweepGroups(deps: SweepGroupsDeps): Promise<SweepGroupsRes
     scannedBuckets: bucketDates.length,
     rowsScanned: 0,
     orphansCleaned: [],
+    staleRowsRemoved: [],
     rebucketed: [],
     graceTransitioned: [],
     archived: [],

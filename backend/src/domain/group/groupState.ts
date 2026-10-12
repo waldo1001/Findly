@@ -8,6 +8,7 @@ export type GroupState = "active" | "ended" | "archived" | "expired";
 
 /**
  * state(now, endsAt, policy):
+ *   endsAt = null                                 -> "active"   (no end date, 005 §2.5)
  *   now < endsAt                                 -> "active"
  *   policy = delete,  now >= endsAt               -> expired
  *   policy = grace,   endsAt <= now < graceUntil  -> "ended"    (owner may reactivate)
@@ -29,10 +30,14 @@ export function graceUntilMs(endsAt: string, groupGraceDays: number): number {
 
 export function deriveGroupState(
   now: Date,
-  endsAt: string,
+  endsAt: string | null,
   policy: GroupExpiryPolicy,
   groupGraceDays: number,
 ): GroupState {
+  if (endsAt === null) {
+    return "active"; // no end date (005 §2.5) — never ended/archived/expired by itself
+  }
+
   const endsAtMs = new Date(endsAt).getTime();
   const nowMs = now.getTime();
 

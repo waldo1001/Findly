@@ -663,6 +663,36 @@ describe("domain/user/deleteAccount", () => {
     expect(await deps.userRepo.listGroupMemberships(CALLER)).toEqual([]);
   });
 
+  it("hard-deletes an owned group WITHOUT an end date (endsAt null, no GroupExpiry row to remove — 005 §2.5)", async () => {
+    const deps = buildDeps();
+    await deps.userRepo.createProfile(CALLER, { familyId: null, role: null, displayName: "Eric" });
+    await deps.groupRepo.createGroupMeta({
+      groupId: "grp_noend0000000000000",
+      name: "Standing group",
+      ownerUserId: CALLER,
+      createdAt: "2026-07-19T08:00:00Z",
+      endsAt: null,
+      expiryPolicy: "delete",
+      code: "NOENDC01",
+    });
+    await deps.groupRepo.addMember("grp_noend0000000000000", {
+      userId: CALLER,
+      role: "owner",
+      displayName: "Eric",
+      joinedAt: "2026-07-19T08:00:00Z",
+    });
+    await deps.userRepo.addGroupMembership(CALLER, {
+      groupId: "grp_noend0000000000000",
+      role: "owner",
+      joinedAt: "2026-07-19T08:00:00Z",
+    });
+
+    await deleteAccount({ uid: CALLER, familyId: null, role: null }, deps);
+
+    expect(await deps.groupRepo.getGroupMeta("grp_noend0000000000000")).toBeNull();
+    expect(await deps.userRepo.getProfile(CALLER)).toBeNull();
+  });
+
   // --- crash-retry idempotency at each step boundary (specs/008 §9 requires this) ---
 
   it("converges to full erasure on a re-call after a simulated crash mid-step-1 (devices already gone, nothing else touched)", async () => {

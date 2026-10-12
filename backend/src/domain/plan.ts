@@ -9,12 +9,16 @@ export interface PlanLimits {
   historyDays: number;
   minSyncIntervalMinutes: number;
   locateRequestsPerDay: number;
-  /** Caller-scoped (001 §9): the caller's own non-expired memberships, owned + joined (005 §4). */
-  maxActiveGroups: number;
+  /** Caller-scoped (001 §9, §12.1/§12.4): the caller's own `active` groups with role `owner`
+   * (005 §4; amended 2026-10-12, 000 §D21 — replaces the retired combined `maxActiveGroups`). */
+  maxOwnedGroups: number;
+  /** Caller-scoped (001 §9, §12.6): the caller's own `active` groups with role `member` (005 §4). */
+  maxJoinedGroups: number;
   /** Owner-scoped (001 §9, §12.6): resolved from the group OWNER's plan at join time. */
   maxGroupMembers: number;
-  /** Caller-scoped (001 §9, §12.1/§12.4): enforced against the caller's own features. */
-  maxGroupDurationDays: number;
+  /** Caller-scoped (001 §9, §12.1/§12.4): enforced against the caller's own features.
+   * `null` = no upper bound on a dated `endsAt` (005 §4); never applies to `endsAt: null`. */
+  maxGroupDurationDays: number | null;
   /** Derived graceUntil for `grace`-policy groups (005 §2.2, §4). */
   groupGraceDays: number;
   /** Caller-scoped (001 §9, §13.1): GET /export quota, counted against the caller even
@@ -45,9 +49,10 @@ const FREE_PLAN: PlanBenefits = {
     historyDays: 90,
     minSyncIntervalMinutes: 5,
     locateRequestsPerDay: 100,
-    maxActiveGroups: 5,
+    maxOwnedGroups: 5,
+    maxJoinedGroups: 5,
     maxGroupMembers: 200,
-    maxGroupDurationDays: 30,
+    maxGroupDurationDays: null,
     groupGraceDays: 7,
     exportsPerDay: 3,
   },

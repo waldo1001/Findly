@@ -382,7 +382,10 @@ export interface GroupMeta {
   name: string;
   ownerUserId: string;
   createdAt: string;
-  endsAt: string;
+  /** `null` = no end date (005 §2.5, 002 §2.10): the group is always `active` and has no
+   * `GroupExpiry` row. Table Storage drops nulls, so adapters omit the property on write and
+   * read an absent one back as `null`. */
+  endsAt: string | null;
   expiryPolicy: GroupExpiryPolicy;
   /** Current join code, denormalized for display (002 §2.10) — NOT the source of truth for
    * validity; that's GroupCodeRepo/GroupCodes (002 §2.11). */

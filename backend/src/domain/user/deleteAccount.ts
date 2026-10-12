@@ -123,7 +123,10 @@ export async function deleteAccount(input: DeleteAccountInput, deps: DeleteAccou
         continue;
       }
       await hardDeleteGroupFootprint(meta, deps);
-      await deps.groupExpiryRepo.deleteExpiryRow(bucketDateOf(meta.endsAt), membership.groupId);
+      if (meta.endsAt !== null) {
+        // No GroupExpiry row exists for a group without an end date (002 §2.13, 005 §2.5).
+        await deps.groupExpiryRepo.deleteExpiryRow(bucketDateOf(meta.endsAt), membership.groupId);
+      }
     } else {
       await deps.groupRepo.removeMember(membership.groupId, uid);
       await deps.userRepo.removeGroupMembership(uid, membership.groupId);

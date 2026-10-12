@@ -15,7 +15,7 @@ import type {
 } from "../../ports/repositories";
 import { normalizeInviteCode } from "../family/inviteCode";
 import { getFeatures, type Features } from "../plan";
-import { deriveGroupState } from "./groupState";
+import { countActiveGroupsWithRole } from "./activeGroupCount";
 import { toGroupListItem, type GroupListItem } from "./groupView";
 
 export interface CreateGroupDeps {
@@ -75,29 +75,33 @@ export async function createGroup(input: CreateGroupInput, deps: CreateGroupDeps
 
   const now = deps.clock.now();
   const nowMs = now.getTime();
-  const endsAtMs = new Date(body.endsAt).getTime();
 
-  if (endsAtMs < nowMs + MIN_LEAD_TIME_MS) {
-    throw new AppError("VALIDATION_FAILED", "endsAt must be at least 1h from now", { fields: ["endsAt"] });
-  }
-  const maxEndsAtMs = nowMs + features.limits.maxGroupDurationDays * 24 * 60 * 60 * 1000;
-  if (endsAtMs > maxEndsAtMs) {
-    throw new AppError("LIMIT_EXCEEDED", "endsAt exceeds the maximum group duration", {
-      limit: "maxGroupDurationDays",
-    });
+  // `endsAt: null` = no end date (005 §2.5): neither the +1h floor nor the duration horizon
+  // applies. The horizon applies to a dated endsAt only when the plan has one (001 §9).
+  if (body.endsAt !== null) {
+    const endsAtMs = new Date(body.endsAt).getTime();
+    if (endsAtMs < nowMs + MIN_LEAD_TIME_MS) {
+      throw new AppError("VALIDATION_FAILED", "endsAt must be at least 1h from now", { fields: ["endsAt"] });
+    }
+    const maxDurationDays = features.limits.maxGroupDurationDays;
+    if (maxDurationDays !== null && endsAtMs > nowMs + maxDurationDays * 24 * 60 * 60 * 1000) {
+      throw new AppError("LIMIT_EXCEEDED", "endsAt exceeds the maximum group duration", {
+        limit: "maxGroupDurationDays",
+      });
+    }
   }
 
-  // maxActiveGroups (005 §4): the caller's non-expired memberships, owned + joined.
-  const memberships = await deps.userRepo.listGroupMemberships(input.uid);
-  let activeCount = 0;
-  for (const membership of memberships) {
-    const existingMeta = await deps.groupRepo.getGroupMeta(membership.groupId);
-    if (!existingMeta) continue; // orphaned reverse-index row (self-healing skip)
-    const state = deriveGroupState(now, existingMeta.endsAt, existingMeta.expiryPolicy, features.limits.groupGraceDays);
-    if (state !== "expired") activeCount += 1;
-  }
-  if (activeCount >= features.limits.maxActiveGroups) {
-    throw new AppError("LIMIT_EXCEEDED", "maxActiveGroups cap reached", { limit: "maxActiveGroups" });
+  // maxOwnedGroups (005 §4, 001 §12.1): the caller's ACTIVE groups with role owner only —
+  // ended/archived/expired never count, and joined groups are counted by joinGroup instead.
+  const activeOwned = await countActiveGroupsWithRole(
+    input.uid,
+    "owner",
+    now,
+    features.limits.groupGraceDays,
+    deps,
+  );
+  if (activeOwned >= features.limits.maxOwnedGroups) {
+    throw new AppError("LIMIT_EXCEEDED", "maxOwnedGroups cap reached", { limit: "maxOwnedGroups" });
   }
 
   const groupId = `grp_${deps.idGenerator.next(GROUP_ID_LENGTH)}`;
@@ -120,7 +124,10 @@ export async function createGroup(input: CreateGroupInput, deps: CreateGroupDeps
   if (!profile) {
     await deps.userRepo.createProfile(input.uid, { familyId: null, role: null, displayName });
   }
-  await deps.groupExpiryRepo.putExpiryRow(bucketDateOf(body.endsAt), groupId, "expire");
+  if (body.endsAt !== null) {
+    // No GroupExpiry row for a group without an end date (002 §2.13, 005 §2.5).
+    await deps.groupExpiryRepo.putExpiryRow(bucketDateOf(body.endsAt), groupId, "expire");
+  }
 
   return {
     ...toGroupListItem(meta, "owner", 1, "active"),

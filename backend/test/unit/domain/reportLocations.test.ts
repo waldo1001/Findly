@@ -993,6 +993,16 @@ describe("domain/location/reportLocations", () => {
       expect(await deps.groupLastKnownRepo.get("grp_b", USER_ID)).not.toBeNull();
     });
 
+    it("fans out to a group without an end date (endsAt null is always active, 005 §2.5)", async () => {
+      const deps = buildDeps();
+      seedDevice(deps);
+      await seedActiveGroupMembership(deps, "grp_noend", { endsAt: null, expiryPolicy: "archive" });
+
+      await reportLocations(baseInput(), deps);
+
+      expect(await deps.groupLastKnownRepo.get("grp_noend", USER_ID)).not.toBeNull();
+    });
+
     it("does NOT fan out to a grace-state (ended) group", async () => {
       const deps = buildDeps();
       seedDevice(deps);

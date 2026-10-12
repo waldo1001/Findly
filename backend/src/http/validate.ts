@@ -191,7 +191,9 @@ export type GroupIdParam = z.infer<typeof groupIdParamSchema>;
 // bootstrapping a profile" needs the profile lookup, also domain-level (001 §12.1/§1.5.3).
 export const createGroupRequestSchema = z.object({
   name: z.string().min(1).max(50),
-  endsAt: z.string().datetime(),
+  // The KEY is required (z.nullable() alone rejects `undefined`): `null` = no end date
+  // (005 §2.5), and an omission must never silently create a group that runs forever (001 §12.1).
+  endsAt: z.string().datetime().nullable(),
   expiryPolicy: z.enum(["delete", "grace", "archive"]),
   displayName: normalizedTextSchema(30).optional(),
 });
@@ -222,7 +224,8 @@ export type JoinGroupRequest = z.infer<typeof joinGroupRequestSchema>;
 export const patchGroupRequestSchema = z
   .object({
     name: z.string().min(1).max(50).optional(),
-    endsAt: z.string().datetime().optional(),
+    // A key present with `null` removes the end date (005 §2.5); an absent key leaves it unchanged.
+    endsAt: z.string().datetime().nullable().optional(),
   })
   .refine((data) => data.name !== undefined || data.endsAt !== undefined, {
     message: "at least one field (name or endsAt) is required",

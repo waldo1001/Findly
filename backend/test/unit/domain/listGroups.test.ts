@@ -87,6 +87,40 @@ describe("domain/group/listGroups", () => {
     ]);
   });
 
+  it("lists a group without an end date as active with endsAt null and its code (005 §2.5)", async () => {
+    const deps = buildDeps();
+    await seedGroup(
+      deps,
+      "u1",
+      {
+        groupId: "grp_a",
+        name: "Standing group",
+        ownerUserId: "u1",
+        createdAt: "2020-01-01T00:00:00Z",
+        endsAt: null,
+        expiryPolicy: "delete",
+        code: "ABCD1234",
+      },
+      "owner",
+      2,
+    );
+
+    const result = await listGroups({ uid: "u1", familyId: null }, deps);
+
+    expect(result.groups).toEqual([
+      {
+        groupId: "grp_a",
+        name: "Standing group",
+        endsAt: null,
+        expiryPolicy: "delete",
+        state: "active",
+        role: "owner",
+        memberCount: 2,
+        code: "ABCD1234",
+      },
+    ]);
+  });
+
   it("filters out a delete-policy group past endsAt (expired)", async () => {
     const deps = buildDeps();
     await seedGroup(

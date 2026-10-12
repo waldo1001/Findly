@@ -9,6 +9,7 @@ import type { Clock } from "../../ports/support";
 import type { EntitlementsRepo, GroupCodeRepo, GroupRepo, UserRepo } from "../../ports/repositories";
 import { normalizeInviteCode } from "../family/inviteCode";
 import { getFeatures, type Features } from "../plan";
+import { countActiveGroupsWithRole } from "./activeGroupCount";
 import { deriveGroupState } from "./groupState";
 import { toGroupListItem, type GroupListItem } from "./groupView";
 
@@ -99,6 +100,20 @@ export async function joinGroup(input: JoinGroupInput, deps: JoinGroupDeps): Pro
   const existingMembership = await deps.groupRepo.getMember(meta.groupId, input.uid);
   if (existingMembership) {
     throw new AppError("GROUP_ALREADY_MEMBER", "caller is already a member of this group");
+  }
+
+  // maxJoinedGroups (005 §4, 001 §12.6): the CALLER's plan, counted over the caller's ACTIVE
+  // groups with role member (owned never count here). Order: code -> expired -> already-member
+  // -> maxJoinedGroups -> GROUP_FULL. Best-effort under concurrency, like the §4.1 device cap.
+  const activeJoined = await countActiveGroupsWithRole(
+    input.uid,
+    "member",
+    now,
+    callerFeatures.limits.groupGraceDays,
+    deps,
+  );
+  if (activeJoined >= callerFeatures.limits.maxJoinedGroups) {
+    throw new AppError("LIMIT_EXCEEDED", "maxJoinedGroups cap reached", { limit: "maxJoinedGroups" });
   }
 
   const ownerProfile = await deps.userRepo.getProfile(meta.ownerUserId);

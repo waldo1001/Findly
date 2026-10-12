@@ -55,5 +55,8 @@ export async function deleteGroup(input: DeleteGroupInput, deps: DeleteGroupDeps
   // reverse-index rows -> GroupLastKnown partition -> code -> members -> meta, then the
   // expiry row LAST (own concern here since only this caller knows which bucket to target).
   await hardDeleteGroupFootprint(meta, deps);
-  await deps.groupExpiryRepo.deleteExpiryRow(bucketDateOf(meta.endsAt), input.groupId);
+  if (meta.endsAt !== null) {
+    // A group without an end date has no GroupExpiry row at all (002 §2.13, 005 §2.5).
+    await deps.groupExpiryRepo.deleteExpiryRow(bucketDateOf(meta.endsAt), input.groupId);
+  }
 }

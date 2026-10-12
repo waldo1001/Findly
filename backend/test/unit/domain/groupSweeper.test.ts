@@ -136,6 +136,37 @@ describe("domain/group/groupSweeper sweepGroups", () => {
     expect(await deps.groupExpiryRepo.listByDate(daysFromNow(-1))).toEqual([]);
   });
 
+  it("deletes a stale expiry row whose meta has endsAt null and touches NOTHING else (005 §2.5, 002 §4.1 step 2)", async () => {
+    const deps = buildDeps();
+    // Every policy: a null endsAt never expires, whatever the policy, however old the row.
+    for (const [i, policy] of (["delete", "grace", "archive"] as const).entries()) {
+      const groupId = `grp_noend${i}`;
+      const meta = baseMeta({ groupId, endsAt: null, expiryPolicy: policy, code: `NOEND00${i}` });
+      await seedGroup(deps, meta, { members: [`m${i}`], withLocations: true });
+      await seedExpiryRow(deps, daysFromNow(-3), groupId);
+    }
+
+    const result = await sweepGroups(deps);
+
+    expect(result.rowsScanned).toBe(3);
+    expect(result.staleRowsRemoved.sort()).toEqual(["grp_noend0", "grp_noend1", "grp_noend2"]);
+    expect(result.hardDeleted).toEqual([]);
+    expect(result.archived).toEqual([]);
+    expect(result.graceTransitioned).toEqual([]);
+    expect(result.rebucketed).toEqual([]);
+    expect(result.skipped).toEqual([]);
+    expect(result.errors).toEqual([]);
+    expect(deps.groupExpiryRepo.size()).toBe(0);
+    for (let i = 0; i < 3; i += 1) {
+      const groupId = `grp_noend${i}`;
+      expect(await deps.groupRepo.getGroupMeta(groupId)).not.toBeNull();
+      expect(await deps.groupRepo.listMembers(groupId)).toHaveLength(2);
+      expect(await deps.groupCodeRepo.getCode(`NOEND00${i}`)).not.toBeNull();
+      expect(await deps.groupLastKnownRepo.listByGroup(groupId)).toHaveLength(1);
+      expect(await deps.userRepo.listGroupMemberships(`m${i}`)).toHaveLength(1);
+    }
+  });
+
   it("re-buckets a stale row when the owner extended endsAt into the future (self-healing)", async () => {
     const deps = buildDeps();
     const newEndsAt = daysFromNow(10) + "T00:00:00Z";
@@ -175,7 +206,7 @@ describe("domain/group/groupSweeper sweepGroups", () => {
     const deps = buildDeps();
     const meta = baseMeta({ endsAt: daysFromNow(0) + "T09:00:00Z", expiryPolicy: "delete" });
     await seedGroup(deps, meta, { members: ["u9"], withLocations: true });
-    const bucket = meta.endsAt.slice(0, 10);
+    const bucket = meta.endsAt!.slice(0, 10);
     await seedExpiryRow(deps, bucket, meta.groupId);
 
     const result = await sweepGroups(deps);
@@ -195,7 +226,7 @@ describe("domain/group/groupSweeper sweepGroups", () => {
     const deps = buildDeps();
     const meta = baseMeta({ endsAt: daysFromNow(0) + "T09:00:00Z", expiryPolicy: "archive" });
     await seedGroup(deps, meta, { members: ["u9"], withLocations: true });
-    const bucket = meta.endsAt.slice(0, 10);
+    const bucket = meta.endsAt!.slice(0, 10);
     await seedExpiryRow(deps, bucket, meta.groupId);
 
     const result = await sweepGroups(deps);
@@ -315,7 +346,7 @@ describe("domain/group/groupSweeper sweepGroups", () => {
     deps.userRepo.seed("u1", { familyId: "fam_missing", role: "parent", displayName: "Eric" });
     const meta = baseMeta({ endsAt: daysFromNow(0) + "T09:00:00Z", expiryPolicy: "delete", ownerUserId: "u1" });
     await seedGroup(deps, meta);
-    const bucket = meta.endsAt.slice(0, 10);
+    const bucket = meta.endsAt!.slice(0, 10);
     await seedExpiryRow(deps, bucket, meta.groupId);
 
     const result = await sweepGroups(deps);
@@ -328,7 +359,7 @@ describe("domain/group/groupSweeper sweepGroups", () => {
     const deps = buildDeps();
     const meta = baseMeta({ endsAt: daysFromNow(0) + "T09:00:00Z", expiryPolicy: "delete" });
     await seedGroup(deps, meta);
-    const bucket = meta.endsAt.slice(0, 10);
+    const bucket = meta.endsAt!.slice(0, 10);
     await seedExpiryRow(deps, bucket, meta.groupId);
 
     const first = await sweepGroups(deps);
@@ -344,7 +375,7 @@ describe("domain/group/groupSweeper sweepGroups", () => {
     const deps = buildDeps();
     const meta = baseMeta({ endsAt: daysFromNow(-1) + "T00:00:00Z", expiryPolicy: "delete" });
     await seedGroup(deps, meta);
-    const bucket = meta.endsAt.slice(0, 10);
+    const bucket = meta.endsAt!.slice(0, 10);
     await seedExpiryRow(deps, bucket, meta.groupId);
     // Simulate a crash that deleted meta but left the expiry row behind.
     deps.groupRepo.deleteMetaOnlyForTest(meta.groupId);
@@ -361,8 +392,8 @@ describe("domain/group/groupSweeper sweepGroups", () => {
     const boomMeta = baseMeta({ groupId: "grp_boom", endsAt: daysFromNow(0) + "T09:00:00Z", expiryPolicy: "delete" });
     const okMeta = baseMeta({ groupId: "grp_ok", endsAt: daysFromNow(0) + "T09:00:00Z", expiryPolicy: "delete" });
     await seedGroup(deps, okMeta);
-    await seedExpiryRow(deps, okMeta.endsAt.slice(0, 10), okMeta.groupId);
-    await seedExpiryRow(deps, boomMeta.endsAt.slice(0, 10), boomMeta.groupId);
+    await seedExpiryRow(deps, okMeta.endsAt!.slice(0, 10), okMeta.groupId);
+    await seedExpiryRow(deps, boomMeta.endsAt!.slice(0, 10), boomMeta.groupId);
     // grp_boom has an expiry row but NO seeded group meta/members/code — getGroupMeta returns
     // null for it normally (which would just be the orphan path, not a throw), so instead
     // force a genuine failure via a broken groupRepo wrapping the real one.
@@ -376,7 +407,7 @@ describe("domain/group/groupSweeper sweepGroups", () => {
 
     expect(result.hardDeleted).toEqual(["grp_ok"]);
     expect(result.errors).toEqual([
-      { groupId: "grp_boom", bucketDate: boomMeta.endsAt.slice(0, 10), message: "simulated storage failure" },
+      { groupId: "grp_boom", bucketDate: boomMeta.endsAt!.slice(0, 10), message: "simulated storage failure" },
     ]);
   });
 
@@ -393,7 +424,7 @@ describe("domain/group/groupSweeper sweepGroups", () => {
     const deps = buildDeps();
     const meta = baseMeta({ endsAt: daysFromNow(0) + "T09:00:00Z", expiryPolicy: "delete" });
     await seedGroup(deps, meta, { members: ["u9"], withLocations: true });
-    const bucket = meta.endsAt.slice(0, 10);
+    const bucket = meta.endsAt!.slice(0, 10);
     await seedExpiryRow(deps, bucket, meta.groupId);
 
     const realGetGroupMeta = deps.groupRepo.getGroupMeta.bind(deps.groupRepo);
@@ -427,7 +458,7 @@ describe("domain/group/groupSweeper sweepGroups", () => {
     const deps = buildDeps();
     const meta = baseMeta({ endsAt: daysFromNow(0) + "T09:00:00Z", expiryPolicy: "archive" });
     await seedGroup(deps, meta, { withLocations: true });
-    const bucket = meta.endsAt.slice(0, 10);
+    const bucket = meta.endsAt!.slice(0, 10);
     await seedExpiryRow(deps, bucket, meta.groupId);
 
     const realGetGroupMeta = deps.groupRepo.getGroupMeta.bind(deps.groupRepo);
@@ -453,7 +484,7 @@ describe("domain/group/groupSweeper sweepGroups", () => {
     const deps = buildDeps();
     const meta = baseMeta({ endsAt: daysFromNow(0) + "T09:00:00Z", expiryPolicy: "grace" });
     await seedGroup(deps, meta, { withLocations: true });
-    const bucket = meta.endsAt.slice(0, 10);
+    const bucket = meta.endsAt!.slice(0, 10);
     await seedExpiryRow(deps, bucket, meta.groupId);
 
     const realGetGroupMeta = deps.groupRepo.getGroupMeta.bind(deps.groupRepo);
@@ -481,7 +512,7 @@ describe("domain/group/groupSweeper sweepGroups", () => {
     const deps = buildDeps();
     const meta = baseMeta({ endsAt: daysFromNow(0) + "T09:00:00Z", expiryPolicy: "delete" });
     await seedGroup(deps, meta);
-    const bucket = meta.endsAt.slice(0, 10);
+    const bucket = meta.endsAt!.slice(0, 10);
     await seedExpiryRow(deps, bucket, meta.groupId);
 
     const realGetGroupMeta = deps.groupRepo.getGroupMeta.bind(deps.groupRepo);
