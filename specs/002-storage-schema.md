@@ -42,7 +42,7 @@ The `invite:` rows are the **invite reverse index** (same idiom as `Users`' `gro
 
 Every authenticated request does exactly one point read here (001 §1.5). `role` is denormalized from `Families`; both rows are written in the same logical operation on role change (no distributed transaction — `Families` is the source of truth, `Users` a cache; on mismatch the request re-reads `Families`).
 
-The `group:` rows are the **"my groups" reverse index** (one partition scan next to the auth point read): `GET /groups` (001 §12.2) scans them and point-reads each `Groups.meta` (≤ `maxActiveGroups`, so ≤ 5 on free). Group `name`/`endsAt` are deliberately **not** denormalized here — rename/extend would need a fan-out update to every member's row with no self-healing on partial failure; a handful of meta point reads keeps `Groups.meta` the single source of truth. The location-ingest fan-out (001 §5.1) reads the same rows.
+The `group:` rows are the **"my groups" reverse index** (one partition scan next to the auth point read): `GET /groups` (001 §12.2) scans them and point-reads each `Groups.meta`. *(Amended 2026-10-12, 000 §D21.)* The scan is no longer bounded by a group cap: only `active` groups count toward `maxOwnedGroups`/`maxJoinedGroups`, so `archived` mementos and `ended` grace groups add rows on top of at most 5 + 5 active ones. Accepted at family scale: each extra row costs one meta point read per `GET /groups` and per ingest batch. The owned/joined split is counted from the row's own `role`, with state taken from the meta read that already happens. Group `name`/`endsAt` are deliberately **not** denormalized here — rename/extend would need a fan-out update to every member's row with no self-healing on partial failure; a handful of meta point reads keeps `Groups.meta` the single source of truth. The location-ingest fan-out (001 §5.1) reads the same rows.
 
 ### 2.3 `Invites`
 
@@ -110,7 +110,7 @@ Metrics: `locationBatches`, `fixes`, `locateRequests`, `geofenceEvents`, `apiCal
 
 | PK | RK | Properties |
 |---|---|---|
-| `{groupId}` | `meta` | `name`, `ownerUserId`, `createdAt`, `endsAt`, `expiryPolicy` (`delete`\|`grace`\|`archive`), `code` (current join code, denormalized for display) |
+| `{groupId}` | `meta` | `name`, `ownerUserId`, `createdAt`, `endsAt` (**nullable** — `null` = no end date, 005 §2.5; amended 2026-10-12), `expiryPolicy` (`delete`\|`grace`\|`archive`), `code` (current join code, denormalized for display) |
 | `{groupId}` | `member:{userId}` | `role` (`owner`\|`member`), `displayName` (per-group, 005 §1), `joinedAt` |
 
 Mirrors `Families` (§2.1): point read (`meta`); partition scan on `member:` = roster + `memberCount`. Group **state is never stored** — it is derived from `now`/`endsAt`/`expiryPolicy` (005 §2.2), so there are no transition writes. Membership insert is a conditional insert (join race-safe); the `maxGroupMembers` capacity check is best-effort under concurrency (001 §12.6).
@@ -137,7 +137,7 @@ One row per member per group — the member's single best position across their 
 |---|---|---|
 | `{yyyy-MM-dd}` (UTC date of the group's **next lifecycle action**) | `{groupId}` | `action` (`expire`\|`hardDelete`) |
 
-Lets the sweeper (§4) find due groups with a handful of tiny date-partition scans — never a full table scan. Written at create (bucket = date of `endsAt`, `action: "expire"`); moved on `PATCH endsAt` (insert new bucket row, delete old — the sweeper re-verifies against `Groups.meta`, so a partial move is harmless); a `grace` group's row is re-bucketed to `date(graceUntil)` with `action: "hardDelete"` when its end date is processed.
+Lets the sweeper (§4) find due groups with a handful of tiny date-partition scans — never a full table scan. Written at create (bucket = date of `endsAt`, `action: "expire"`) — **no row at all for a group with `endsAt: null`** (amended 2026-10-12, 005 §2.5); moved on `PATCH endsAt` (insert new bucket row, delete old — the sweeper re-verifies against `Groups.meta`, so a partial move is harmless); `PATCH` to `null` deletes the row, `PATCH` from `null` to an instant inserts one; a `grace` group's row is re-bucketed to `date(graceUntil)` with `action: "hardDelete"` when its end date is processed.
 
 ## 3. Blob Storage
 
@@ -196,7 +196,7 @@ Table Storage has no per-row TTL, and the group privacy promise (005 §2.4) requ
 Per run: scan `GroupExpiry` (§2.13) partitions for dates `[today − 45 … today]` (46 tiny/empty scans — the window generously covers `groupGraceDays` plus any outage backlog; that bound is the documented catch-up horizon). For each row:
 
 1. Point-read `Groups.meta`. Meta gone (owner deleted inline) → delete the orphaned expiry row, done.
-2. `now < endsAt` (owner extended; this row is stale) → re-bucket to `date(endsAt)`, done — this re-check is what makes a partially-failed PATCH-time row move self-healing.
+2. `endsAt` is `null` (owner removed the end date; this row is stale — amended 2026-10-12) → delete the expiry row, done. `now < endsAt` (owner extended; this row is stale) → re-bucket to `date(endsAt)`, done — this re-check is what makes a partially-failed PATCH-time row move self-healing.
 3. `policy = delete`, `now ≥ endsAt` → **hard delete**: the `GroupLastKnown` partition, the `GroupCodes` row, every member's `Users` `group:` row (roster read first), the `Groups` member rows + meta, and the expiry row **last** — a crash mid-way re-runs cleanly (every delete swallows 404).
 4. `policy = grace`: `now < graceUntil` → delete the `GroupLastKnown` partition + `GroupCodes` row (locations and joinability die at `endsAt` even in grace; a reactivated group starts location-fresh and mints a new code), re-bucket the expiry row to `date(graceUntil)` with `action: "hardDelete"`. `now ≥ graceUntil` → full hard delete as (3).
 5. `policy = archive` → delete the `GroupLastKnown` partition + `GroupCodes` row; keep meta, member rows, and reverse-index rows (the memento); delete the expiry row (never revisited — teardown happens via owner delete / member leave, 001 §12.5/12.8).

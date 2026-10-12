@@ -334,7 +334,7 @@ Rules:
 - **Paused device:** `403 TRACKING_PAUSED`, with current settings in `error.details.deviceSettings`. While paused the device MUST stop collecting fixes, stop its periodic worker, and unregister its platform geofences (transitions detected while paused are dropped); fixes recorded **before** the pause MAY still be uploaded after resume. **Resume is pull-based:** while paused the device MUST re-check its settings via `GET /devices` on every app foreground and at least every 6 hours; the `SETTINGS_CHANGED` push (§8.3) is a best-effort accelerator, never the resume mechanism.
 - **Fix sources:** on a geofence transition the device SHOULD also record one fix with `source: "geofence"` (so the map has a position matching the event); `source: "manual"` is a user-initiated refresh of the device's own position from the app UI.
 - **Piggybacked sync:** every response carries current `deviceSettings` and the geofence config `geofenceEtag`; if the ETag differs from the device's cached one, the device SHOULD `GET /geofences` (§7.1). This bounds config staleness to one sync interval with zero extra polling. For a **family-less caller**, `geofenceEtag` is `"0"` (geofences are family-scoped; there is no config to sync).
-- **Group fan-out (side effect):** after last-known is updated, the batch's newest fix is also upserted (same only-newer rule, position-only fields — 002 §2.12) into each of the reporter's **`active`** groups (state per 005 §2.2) — at most `features.limits.maxActiveGroups` extra writes. Paused devices never reach this point (`TRACKING_PAUSED` above).
+- **Group fan-out (side effect):** after last-known is updated, the batch's newest fix is also upserted (same only-newer rule, position-only fields — 002 §2.12) into each of the reporter's **`active`** groups (state per 005 §2.2) — at most `maxOwnedGroups + maxJoinedGroups` extra writes (only `active` groups count toward either cap, §9). Paused devices never reach this point (`TRACKING_PAUSED` above).
 - **History gate:** the per-fix history append happens **only when the caller has a family**. A family-less user's fixes update last-known and group positions only — group participation never creates durable location history (005 §3).
 
 ### 5.2 Live map — `GET /locations/latest`
@@ -631,8 +631,8 @@ Shape (present in every success envelope):
 { "subscriptionStatus": "free",
   "limits": { "maxDevices": 10, "maxGeofences": 20, "historyDays": 90,
               "minSyncIntervalMinutes": 5, "locateRequestsPerDay": 100,
-              "maxActiveGroups": 5, "maxGroupMembers": 200,
-              "maxGroupDurationDays": 30, "groupGraceDays": 7,
+              "maxOwnedGroups": 5, "maxJoinedGroups": 5, "maxGroupMembers": 200,
+              "maxGroupDurationDays": null, "groupGraceDays": 7,
               "exportsPerDay": 3 },
   "flags": { "pushToLocate": true, "geofencing": true, "historyReplay": true, "groups": true } }
 ```
@@ -640,9 +640,10 @@ Shape (present in every success envelope):
 - Derived **server-side only** from `PLAN_MATRIX[subscriptionStatus]` (a constant in `backend/src/domain/plan.ts`). Clients never send entitlement data.
 - `"active"` currently mirrors `"free"` — it is a reserved placeholder; changing plan benefits later = editing the matrix, nothing else.
 - The `features` envelope always reflects the **caller**: their family's entitlement when they have one, else an implicit `"free"` (family-less users have no `Entitlements` row — 002 §2.6).
-- **Group capacity is governed by the owner's plan:** `maxGroupMembers` is resolved from the group **owner's** entitlement at join time (§12.6) — the future "owner upgrades → bigger group" story without snapshotting limits into storage. The caller-scoped group limits (`maxActiveGroups`, `maxGroupDurationDays`) enforce against the caller's own `features`.
+- **Group capacity is governed by the owner's plan:** `maxGroupMembers` is resolved from the group **owner's** entitlement at join time (§12.6) — the future "owner upgrades → bigger group" story without snapshotting limits into storage. The caller-scoped group limits (`maxOwnedGroups`, `maxJoinedGroups`, `maxGroupDurationDays`) enforce against the caller's own `features`.
+- **Group limits (amended 2026-10-12, 000 §D21):** `maxOwnedGroups` caps the caller's **active** groups with `role: owner`, and `maxJoinedGroups` caps the caller's **active** groups with `role: member`. Only `state: "active"` counts (005 §2.2): `ended` (grace) and `archived` groups never count. `maxActiveGroups` (one combined cap) is **retired** and no longer serialized. `maxGroupDurationDays` is **nullable**: `null` means no upper bound on a dated `endsAt`; a number keeps the old horizon check. Groups without an end date (`endsAt: null`, §12.1) are allowed on every plan whatever this value is.
 - **Every** limit enforcement point (device cap §4.1, geofence cap §7.2, history window §5.3/§7.4, locate quota §6.1, interval floor §1.4/§4.3, group caps §12.1/§12.4/§12.6, export quota §13.1) reads this object — never a literal.
-- Plan-cap violations (`maxDevices`, `maxGeofences`, `locateRequestsPerDay`, `minSyncIntervalMinutes`, `maxActiveGroups`, `maxGroupDurationDays`, `exportsPerDay`) use HTTP **402** `LIMIT_EXCEEDED` with `details.limit: "<limits key>"` — the single future upsell hook. Two deliberate exceptions: the history window is `400 VALIDATION_FAILED`, `details.reason: "beyondRetention"` (§5.3/§7.4), because it bounds a query, not a plan action; and group capacity is `409 GROUP_FULL` (§12.6), because the joiner hitting it isn't the upsell target — the owner's plan governs capacity.
+- Plan-cap violations (`maxDevices`, `maxGeofences`, `locateRequestsPerDay`, `minSyncIntervalMinutes`, `maxOwnedGroups`, `maxJoinedGroups`, `maxGroupDurationDays`, `exportsPerDay`) use HTTP **402** `LIMIT_EXCEEDED` with `details.limit: "<limits key>"` — the single future upsell hook. Two deliberate exceptions: the history window is `400 VALIDATION_FAILED`, `details.reason: "beyondRetention"` (§5.3/§7.4), because it bounds a query, not a plan action; and group capacity is `409 GROUP_FULL` (§12.6), because the joiner hitting it isn't the upsell target — the owner's plan governs capacity.
 - **Usage increment rules** (stored per family/day — per user/day for family-less callers, 002 §2.9): `apiCalls` +1 per authenticated request (any endpoint, once auth succeeds); `locationBatches` +1 per accepted non-duplicate batch; `fixes` + accepted-fix count; `locateRequests` +1 per `201`-created request only (coalesced `200`s and rejections excluded — this metric feeds the §6.1 quota); `geofenceEvents` + accepted-event count; `exports` +1 per successful §13.1 download (feeds the `exportsPerDay` quota; counted against the **caller**, also when exporting another member).
 
 ---
@@ -674,7 +675,7 @@ Shape (present in every success envelope):
 | 400 | `GROUP_CODE_INVALID` | Unknown or rotated group join code (§12.6) | — |
 | 400 | `VALIDATION_FAILED` | Any request-schema violation | `{ "fields": ["fixes[3].recordedAt"], "reason?": "lastParent" \| "beyondRetention" \| "deviceIdInUse" \| "ownerCannotLeave" \| … }` |
 | 400 | `LOCATION_BATCH_TOO_LARGE` | > 100 fixes (§5.1) | `{ "max": 100 }` |
-| 402 | `LIMIT_EXCEEDED` | Plan limit hit | `{ "limit": "maxDevices" \| "maxGeofences" \| "locateRequestsPerDay" \| "minSyncIntervalMinutes" \| "maxActiveGroups" \| "maxGroupDurationDays" \| "exportsPerDay" }` |
+| 402 | `LIMIT_EXCEEDED` | Plan limit hit | `{ "limit": "maxDevices" \| "maxGeofences" \| "locateRequestsPerDay" \| "minSyncIntervalMinutes" \| "maxOwnedGroups" \| "maxJoinedGroups" \| "maxGroupDurationDays" \| "exportsPerDay" }` |
 | 429 | `RATE_LIMITED` | Per-user throttle (reserved; not enforced in v1) | `{ "retryAfterSeconds": 30 }` |
 | 500 | `INTERNAL_ERROR` | Unhandled failure; never leaks internals | — |
 | 503 | `PUSH_DELIVERY_FAILED` | Reserved. The locate flow reports push failure via `status: "pushFailed"` (§6.2), never via this error; geofence fan-out failures are silent best-effort. Kept for future endpoints where a synchronous push IS the operation. | — |
@@ -696,7 +697,7 @@ Envelope format: §1.3. `message` is for logs/debugging only; clients map `code`
 - Geofences: ETag 304/409 flows; `"0"` sentinel create; validation caps; `notifyOnEnter`/`notifyOnExit` fan-out filtering (history always stored); unknown-`geofenceId` event acceptance without fan-out; event idempotency.
 - Features: limits read from `PLAN_MATRIX` only (mutation testing should kill hardcoded-literal mutants).
 - Profiles: the four §1.5.3 bootstrap endpoints create a profile; `PROFILE_NOT_FOUND` everywhere else without one; family-less caller on family-scoped endpoints → `FAMILY_NOT_FOUND`; family-less §4.2 own-devices response and §4.3 full-field own-device PATCH.
-- Groups (§12; full matrix in 005 §7): lifecycle × policy enforcement; owned+joined `maxActiveGroups` count; owner-plan `GROUP_FULL`; join/rotate/kick/leave code paths; `GROUP_NOT_FOUND` masking for non-members; §5.1 fan-out (active groups only, position-only fields, only-newer) and the family-less history gate; sweeper per-policy deletion + idempotent re-run.
+- Groups (§12; full matrix in 005 §7): lifecycle × policy enforcement; `maxOwnedGroups` (create, reactivation) and `maxJoinedGroups` (join) counted over `active` groups only; `endsAt: null` create/PATCH/list paths; owner-plan `GROUP_FULL`; join/rotate/kick/leave code paths; `GROUP_NOT_FOUND` masking for non-members; §5.1 fan-out (active groups only, position-only fields, only-newer) and the family-less history gate; sweeper per-policy deletion + idempotent re-run.
 - Privacy (§13; full matrix in 008 §9): export coverage/authorization/quota; account-delete erasure completeness, ordering (devices first, profile last), crash-retry idempotency, no-profile no-op, last-parent/sole-member cascade; family-delete coverage, member survival, invite revocation + §3.4 fail-closed.
 
 ---
@@ -707,14 +708,18 @@ Product model, lifecycle, and privacy guarantees are normative in [005](005-temp
 
 ### 12.1 Create group — `POST /groups`
 
-Any authenticated user. Bootstraps a profile if the caller has none (§1.5.3) — `displayName` is REQUIRED then, optional otherwise (defaults to the profile's). The caller becomes `owner`. The caller's non-expired memberships (owned + joined) MUST be `< features.limits.maxActiveGroups` (→ `402 LIMIT_EXCEEDED`, `details.limit: "maxActiveGroups"`).
+Any authenticated user. Bootstraps a profile if the caller has none (§1.5.3) — `displayName` is REQUIRED then, optional otherwise (defaults to the profile's). The caller becomes `owner`. The number of the caller's groups with `role: owner` and derived state `active` (005 §2.2) MUST be `< features.limits.maxOwnedGroups` (→ `402 LIMIT_EXCEEDED`, `details.limit: "maxOwnedGroups"`). `ended` and `archived` groups do not count *(amended 2026-10-12, 000 §D21; was `maxActiveGroups`, owned + joined, non-expired)*.
 
 ```json
 // request
 { "name": "Festival crew", "endsAt": "2026-08-02T22:00:00Z",
   "expiryPolicy": "delete", "displayName": "Eric" }
 // name 1–50 chars; expiryPolicy ∈ {delete, grace, archive} (005 §2.1);
-// endsAt ≥ now + 1h (else 400 VALIDATION_FAILED) and ≤ now + limits.maxGroupDurationDays
+// endsAt is REQUIRED as a key: an ISO 8601 instant, or null = no end date (005 §2.5).
+//   A missing key → 400 VALIDATION_FAILED, details.fields: ["endsAt"] (an omission must
+//   never silently create a group that runs forever).
+// non-null endsAt ≥ now + 1h (else 400 VALIDATION_FAILED) and, only when
+//   limits.maxGroupDurationDays is non-null, ≤ now + that many days
 //   (else 402 LIMIT_EXCEEDED, details.limit: "maxGroupDurationDays"); displayName 1–30 chars
 
 // 201 → data
@@ -737,6 +742,8 @@ Caller needs a profile. Expired groups are filtered out; `ended`/`archived` ones
 
 `code` is present for **every** member (any member may recruit — 005 §1); it is `null` once the group is past `endsAt` (the code row is deleted, 005 §2.3).
 
+`endsAt` is **nullable** in every group item shape (§12.1–§12.6 responses): `null` = no end date, the group stays `active` until the owner sets an end or deletes it (005 §2.5). *(Amended 2026-10-12, 000 §D21. Clients released before this amendment decode `endsAt` as non-null and fail on such a group: see the rollout gate in 005 §2.5.)*
+
 ### 12.3 Get group — `GET /groups/{groupId}` (group member)
 
 The §12.2 item plus the roster. During `grace` (`state: "ended"`), non-owner members receive the item with `"members": null` (roster hidden, 005 §2.3); the owner and `archived` groups get the full roster.
@@ -756,9 +763,11 @@ The §12.2 item plus the roster. During `grace` (`state: "ended"`), non-owner me
 ```json
 // request — at least one field
 { "name": "Festival crew 2026", "endsAt": "2026-08-03T22:00:00Z" }
+// or remove the end date (005 §2.5):
+{ "endsAt": null }
 ```
 
-- `endsAt` MUST be `> now` and `≤ now + limits.maxGroupDurationDays` (→ `402`, `details.limit: "maxGroupDurationDays"`); as a convenience, `endsAt ≤ now + 5 min` means "end the group now". Extending a `grace`-state (`ended`) group **reactivates** it (005 §2.2). Not allowed on `archived` (→ `410 GROUP_EXPIRED`).
+- A non-null `endsAt` MUST be `> now` and, when `limits.maxGroupDurationDays` is non-null, `≤ now + limits.maxGroupDurationDays` (→ `402`, `details.limit: "maxGroupDurationDays"`). `endsAt: null` removes the end date (amended 2026-10-12, 005 §2.5). A key that is present with `null` is different from an absent key: absent leaves `endsAt` unchanged. As a convenience, `endsAt ≤ now + 5 min` means "end the group now". Extending a `grace`-state (`ended`) group, either to a future instant or to `null`, **reactivates** it (005 §2.2). Reactivation is a create-equivalent for the owner cap: the caller's *other* `active` owned groups MUST be `< maxOwnedGroups` (→ `402 LIMIT_EXCEEDED`, `details.limit: "maxOwnedGroups"`). An `endsAt` change on an already-`active` group never re-checks the cap. Not allowed on `archived` (→ `410 GROUP_EXPIRED`).
 - `200` → data: the updated §12.2 item shape.
 
 ### 12.5 Delete group — `DELETE /groups/{groupId}` (owner)
@@ -778,7 +787,7 @@ Any authenticated user. Bootstraps a profile if absent (§1.5.3 — `displayName
   "state": "active", "role": "member", "memberCount": 8, "code": "7F3K9QRZ" }
 ```
 
-Errors: unknown/rotated code → `400 GROUP_CODE_INVALID`; group past `endsAt` → `410 GROUP_EXPIRED`; already a member → `409 GROUP_ALREADY_MEMBER`; roster at the **owner's** plan `maxGroupMembers` (§9) → `409 GROUP_FULL`, `details: { "max": 200 }`. The membership insert is conditional; the capacity check is best-effort under concurrency (same accepted class as the §4.1 device cap).
+Errors: unknown/rotated code → `400 GROUP_CODE_INVALID`; group past `endsAt` → `410 GROUP_EXPIRED`; already a member → `409 GROUP_ALREADY_MEMBER`; roster at the **owner's** plan `maxGroupMembers` (§9) → `409 GROUP_FULL`, `details: { "max": 200 }`; the caller already has `maxJoinedGroups` groups with `role: member` and state `active` (**the caller's** plan, §9) → `402 LIMIT_EXCEEDED`, `details.limit: "maxJoinedGroups"` *(amended 2026-10-12, 000 §D21; join was uncapped before)*. Check order: code → expired → already-member → `maxJoinedGroups` → `GROUP_FULL`. The membership insert is conditional; the capacity check is best-effort under concurrency (same accepted class as the §4.1 device cap).
 
 ### 12.7 Rotate join code — `POST /groups/{groupId}/code/rotate` (owner)
 
@@ -844,6 +853,8 @@ Query: `userId` (optional — another **current member of the caller's family**,
   "providerData": { "firebaseAuthentication":
       "Your phone number and sign-in metadata are held by Firebase Authentication, not by Findly; they are deleted when your account is deleted." } }
 ```
+
+`groups[].endsAt` is nullable here exactly as in §12 (`null` = no end date, 005 §2.5; amended 2026-10-12).
 
 Success increments usage metric `exports` (§9).
 
