@@ -285,7 +285,7 @@ dependencies {
     implementation("androidx.compose.ui:ui-graphics")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
-    implementation("androidx.navigation:navigation-compose:2.8.5")
+    implementation("androidx.navigation:navigation-compose:2.10.2")
 
     // Periodic/foreground-service scheduling (specs/009-device-runtime.md §3).
     implementation("androidx.work:work-runtime-ktx:2.10.0")
