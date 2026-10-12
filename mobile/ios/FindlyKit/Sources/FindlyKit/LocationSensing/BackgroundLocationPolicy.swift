@@ -22,11 +22,12 @@ public enum BackgroundLocationPolicy {
         authorization == .always
     }
 
-    /// specs/009 §3.4 / §7 "Ongoing visibility" (H12, I62; 000 §D20): the blue background-location
-    /// indicator is shown on every manager that may run in the background — the iOS counterpart of
-    /// Android's persistent foreground-service notification. Same predicate as background updates.
+    /// specs/009 §3.4 / §7 "Ongoing visibility" (amended 2026-10-12, 000 §D21 (a), I65 — reverses
+    /// H12/I62 of D20): the background-location indicator (blue status-bar / Dynamic Island pill)
+    /// is off for every authorization, including Always. Deliberately NOT tied to
+    /// `allowsBackgroundLocationUpdates` — that one stays true for Always or background captures time out.
     public static func showsBackgroundLocationIndicator(for authorization: LocationAuthorization) -> Bool {
-        allowsBackgroundLocationUpdates(for: authorization)
+        false
     }
 
     /// specs/009 §3.4 "Significant-location-change monitoring": "MUST be started only with Always

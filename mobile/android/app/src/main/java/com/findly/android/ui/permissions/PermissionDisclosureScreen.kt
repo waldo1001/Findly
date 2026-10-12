@@ -64,7 +64,7 @@ fun PermissionDisclosureScreen(
             )
 
             Column(verticalArrangement = Arrangement.spacedBy(FindlyTheme.spacing.sm)) {
-                pointsFor(kind).forEach { point ->
+                PermissionDisclosureCopy.points(kind).forEach { point ->
                     Row(horizontalArrangement = Arrangement.spacedBy(FindlyTheme.spacing.sm)) {
                         // A plain bullet, not an icon set: these are three sentences of disclosure,
                         // and decorating them would undercut the tone.
@@ -113,23 +113,6 @@ private fun titleFor(kind: PermissionDisclosureKind) = when (kind) {
 private fun headlineFor(kind: PermissionDisclosureKind) = when (kind) {
     PermissionDisclosureKind.FOREGROUND -> "Findly shares your location with your family"
     PermissionDisclosureKind.BACKGROUND -> "Keep sharing when Findly isn't open"
-}
-
-/**
- * The three things a disclosure has to answer: what is collected, what it is used for, and who can
- * see it. Written plainly — a family member reads this, not a lawyer.
- */
-private fun pointsFor(kind: PermissionDisclosureKind) = when (kind) {
-    PermissionDisclosureKind.FOREGROUND -> listOf(
-        "Findly collects this device's location so it can appear on your family's map.",
-        "Only people in the families and groups you have joined can see it. It is never sold or shared with anyone else.",
-        "You can pause sharing at any time in Settings, and delete your history and account from inside the app.",
-    )
-    PermissionDisclosureKind.BACKGROUND -> listOf(
-        "To keep the map up to date, Findly needs to collect your location even when the app is closed or not in use.",
-        "This is what lets your family see where you are without you opening the app, and what makes arrival and departure alerts work for places like home or school.",
-        "Background updates follow the interval you choose in Settings, and stop entirely when you pause sharing.",
-    )
 }
 
 private fun closingFor(kind: PermissionDisclosureKind) = when (kind) {

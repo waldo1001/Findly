@@ -446,7 +446,7 @@ public final class SystemLocationProvider: NSObject, LocationProviding, SystemLo
         // `applyBackgroundLocationUpdatesPolicy` below — safe here because `PresencePolicy` only
         // ever calls this method when authorization is already `.always`.
         manager.allowsBackgroundLocationUpdates = true
-        // specs/009 §3.4 / §7 "Ongoing visibility" (H12, I62): presence only runs under `.always`.
+        // specs/009 §3.4 / §7 "Ongoing visibility" (amended 2026-10-12, 000 §D21 (a), I65): indicator is off; presence only runs under `.always`.
         manager.showsBackgroundLocationIndicator = BackgroundLocationPolicy.showsBackgroundLocationIndicator(for: .always)
         manager.startUpdatingLocation()
 
@@ -599,7 +599,7 @@ extension SystemLocationProvider: CLLocationManagerDelegate {
     /// `.always`.
     private func applyBackgroundLocationUpdatesPolicy() {
         manager.allowsBackgroundLocationUpdates = BackgroundLocationPolicy.allowsBackgroundLocationUpdates(for: authorization)
-        // specs/009 §3.4 / §7 "Ongoing visibility" (H12, I62) — was `false` before 2026-10-07.
+        // specs/009 §7 (amended 2026-10-12, 000 §D21): always false.
         manager.showsBackgroundLocationIndicator = BackgroundLocationPolicy.showsBackgroundLocationIndicator(for: authorization)
     }
 
