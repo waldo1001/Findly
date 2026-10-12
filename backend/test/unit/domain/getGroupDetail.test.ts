@@ -97,6 +97,16 @@ describe("domain/group/getGroupDetail", () => {
     ]);
   });
 
+  it("returns a group without an end date as active with endsAt null and the roster (005 §2.5)", async () => {
+    const deps = buildDeps();
+    await seed(deps, { ...ACTIVE_META, endsAt: null });
+
+    const result = await getGroupDetail({ uid: "u9", familyId: null, groupId: "grp_a" }, deps);
+
+    expect(result).toMatchObject({ endsAt: null, state: "active", code: "ABCD1234" });
+    expect(result.members).not.toBeNull();
+  });
+
   it("returns the full roster for an active group (non-owner member)", async () => {
     const deps = buildDeps();
     await seed(deps, ACTIVE_META);

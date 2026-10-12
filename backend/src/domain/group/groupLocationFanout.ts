@@ -31,8 +31,9 @@ export interface GroupLocationFanoutFix {
 
 /**
  * Fans the batch's newest fix out to every one of `uid`'s currently-active groups (at most
- * `features.limits.maxActiveGroups` extra writes, per 001 §5.1 — that cap is enforced
- * best-effort at group create/join time, not re-checked here).
+ * `features.limits.maxOwnedGroups + maxJoinedGroups` extra writes, per 001 §5.1 — those caps
+ * are enforced best-effort at group create/join time, not re-checked here). A group without
+ * an end date (`endsAt: null`) is always `active`, so it always receives the fan-out (005 §2.5).
  */
 export async function fanOutLocationToActiveGroups(
   uid: string,

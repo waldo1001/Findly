@@ -7,7 +7,8 @@ import type { GroupState } from "./groupState";
 export interface GroupListItem {
   groupId: string;
   name: string;
-  endsAt: string;
+  /** null = no end date (005 §2.5, 001 §12.2). */
+  endsAt: string | null;
   expiryPolicy: GroupExpiryPolicy;
   state: Exclude<GroupState, "expired">;
   role: GroupRole;

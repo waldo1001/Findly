@@ -599,6 +599,40 @@ describe("domain/export/exportUserData (specs/001 §13.1, specs/008 §3)", () =>
     ]);
   });
 
+  it("groups: a group without an end date exports endsAt null and state active (001 §13.1, 005 §2.5)", async () => {
+    const deps = buildDeps();
+    await seedFamily(deps);
+    await deps.groupRepo.createGroupMeta({
+      groupId: "grp_1234567890123456789",
+      name: "Standing group",
+      ownerUserId: PARENT_ID,
+      createdAt: "2020-01-01T00:00:00Z",
+      endsAt: null,
+      expiryPolicy: "delete",
+      code: "ABCD1234",
+    });
+    await deps.groupRepo.addMember("grp_1234567890123456789", {
+      userId: MEMBER_ID,
+      role: "member",
+      displayName: "Noor F.",
+      joinedAt: "2020-01-02T10:00:00Z",
+    });
+    await deps.userRepo.addGroupMembership(MEMBER_ID, {
+      groupId: "grp_1234567890123456789",
+      role: "member",
+      joinedAt: "2020-01-02T10:00:00Z",
+    });
+
+    const doc = await exportUserData(
+      { uid: MEMBER_ID, familyId: FAMILY_ID, role: "member", query: {} },
+      deps,
+    );
+
+    expect(doc.groups).toEqual([
+      expect.objectContaining({ groupId: "grp_1234567890123456789", state: "active", endsAt: null }),
+    ]);
+  });
+
   it("groups: skips an orphaned reverse-index row (group meta already gone — self-healing, same as listGroups.ts)", async () => {
     const deps = buildDeps();
     await seedFamily(deps);

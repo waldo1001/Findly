@@ -7,14 +7,17 @@
 import { AppError } from "../../http/errors";
 import { parseOrThrow, patchGroupRequestSchema } from "../../http/validate";
 import type { Clock } from "../../ports/support";
-import type { EntitlementsRepo, GroupExpiryRepo, GroupMeta, GroupRepo } from "../../ports/repositories";
+import type { EntitlementsRepo, GroupExpiryRepo, GroupMeta, GroupRepo, UserRepo } from "../../ports/repositories";
 import { getFeatures, type Features } from "../plan";
+import { countActiveGroupsWithRole } from "./activeGroupCount";
 import { deriveGroupState } from "./groupState";
 import { toGroupListItem, type GroupListItem } from "./groupView";
 
 export interface PatchGroupDeps {
   groupRepo: GroupRepo;
   groupExpiryRepo: GroupExpiryRepo;
+  /** Reverse index for the reactivation owner-cap count (001 §12.4). */
+  userRepo: UserRepo;
   entitlementsRepo: EntitlementsRepo;
   clock: Clock;
 }
@@ -73,16 +76,34 @@ export async function patchGroup(input: PatchGroupInput, deps: PatchGroupDeps): 
     patch.name = body.name;
   }
   if (body.endsAt !== undefined) {
-    const nowMs = now.getTime();
-    const endsAtMs = new Date(body.endsAt).getTime();
-    if (endsAtMs <= nowMs) {
-      throw new AppError("VALIDATION_FAILED", "endsAt must be in the future", { fields: ["endsAt"] });
+    // `null` removes the end date (005 §2.5): the future/horizon checks only concern an instant.
+    if (body.endsAt !== null) {
+      const nowMs = now.getTime();
+      const endsAtMs = new Date(body.endsAt).getTime();
+      if (endsAtMs <= nowMs) {
+        throw new AppError("VALIDATION_FAILED", "endsAt must be in the future", { fields: ["endsAt"] });
+      }
+      const maxDurationDays = features.limits.maxGroupDurationDays;
+      if (maxDurationDays !== null && endsAtMs > nowMs + maxDurationDays * 24 * 60 * 60 * 1000) {
+        throw new AppError("LIMIT_EXCEEDED", "endsAt exceeds the maximum group duration", {
+          limit: "maxGroupDurationDays",
+        });
+      }
     }
-    const maxEndsAtMs = nowMs + features.limits.maxGroupDurationDays * 24 * 60 * 60 * 1000;
-    if (endsAtMs > maxEndsAtMs) {
-      throw new AppError("LIMIT_EXCEEDED", "endsAt exceeds the maximum group duration", {
-        limit: "maxGroupDurationDays",
-      });
+    // ended (grace) -> active reactivation is a create-equivalent for the owner cap (001 §12.4):
+    // the caller's OTHER active owned groups must be < maxOwnedGroups (this group is `ended`,
+    // so it is not part of the active count). An already-active group never re-checks.
+    if (currentState === "ended") {
+      const otherActiveOwned = await countActiveGroupsWithRole(
+        input.uid,
+        "owner",
+        now,
+        features.limits.groupGraceDays,
+        deps,
+      );
+      if (otherActiveOwned >= features.limits.maxOwnedGroups) {
+        throw new AppError("LIMIT_EXCEEDED", "maxOwnedGroups cap reached", { limit: "maxOwnedGroups" });
+      }
     }
     patch.endsAt = body.endsAt;
   }
@@ -92,9 +113,17 @@ export async function patchGroup(input: PatchGroupInput, deps: PatchGroupDeps): 
   if (patch.endsAt !== undefined) {
     // Move the GroupExpiry index row (002 §2.13): insert the new bucket, delete the old one.
     // Self-healing by design — the old bucket may already be elsewhere (a prior partial move
-    // or a sweeper pass), so a missing-row delete is a harmless no-op (port contract).
-    await deps.groupExpiryRepo.putExpiryRow(bucketDateOf(patch.endsAt), input.groupId, "expire");
-    await deps.groupExpiryRepo.deleteExpiryRow(bucketDateOf(meta.endsAt), input.groupId);
+    // or a sweeper pass), so a missing-row delete is a harmless no-op (port contract). A null
+    // endsAt has no row at all: `null` deletes the old row, and null -> instant inserts one.
+    const newBucket = patch.endsAt === null ? null : bucketDateOf(patch.endsAt);
+    const oldBucket = meta.endsAt === null ? null : bucketDateOf(meta.endsAt);
+    if (newBucket !== null) {
+      await deps.groupExpiryRepo.putExpiryRow(newBucket, input.groupId, "expire");
+    }
+    // Never delete the row just written when the new end date stays in the same date bucket.
+    if (oldBucket !== null && oldBucket !== newBucket) {
+      await deps.groupExpiryRepo.deleteExpiryRow(oldBucket, input.groupId);
+    }
   }
 
   const memberCount = (await deps.groupRepo.listMembers(input.groupId)).length;

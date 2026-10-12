@@ -75,7 +75,8 @@ export interface ExportGroupMembership {
   displayName: string;
   joinedAt: string;
   state: Exclude<GroupState, "expired">;
-  endsAt: string;
+  /** null = no end date (001 §13.1 note, 005 §2.5). */
+  endsAt: string | null;
 }
 
 export interface ExportGroupPosition {

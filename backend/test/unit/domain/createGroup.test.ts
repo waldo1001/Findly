@@ -10,6 +10,8 @@ import { SeqIdGenerator } from "../../fakes/seqIdGenerator";
 import { SeqInviteCodeGenerator } from "../../fakes/seqInviteCodeGenerator";
 import { FixedClock } from "../../fakes/fixedClock";
 import { expectAppError } from "../../support/expectAppError";
+import { useLimitOverride } from "../../support/planOverride";
+import type { GroupMeta } from "../../../src/ports/repositories";
 
 const NOW = new Date("2026-07-21T10:00:00Z");
 const VALID_ENDS_AT = "2026-08-02T22:00:00Z"; // well within [now+1h, now+30d]
@@ -302,65 +304,169 @@ describe("domain/group/createGroup", () => {
       expect(result.endsAt).toBe(exactly1h);
     });
 
-    it('throws LIMIT_EXCEEDED with details.limit: "maxGroupDurationDays" when endsAt exceeds the horizon', async () => {
+    it("accepts any future dated endsAt when maxGroupDurationDays is null (shipped free plan, 001 §9)", async () => {
       const deps = buildDeps();
-      const tooFar = new Date(NOW.getTime() + 31 * 24 * 60 * 60 * 1000).toISOString();
+      const tenYears = new Date(NOW.getTime() + 3650 * 24 * 60 * 60 * 1000).toISOString();
 
-      await expectAppError(
-        createGroup({ uid: "u1", body: { ...VALID_BODY, endsAt: tooFar } }, deps),
-        "LIMIT_EXCEEDED",
-        { limit: "maxGroupDurationDays" },
-      );
+      const result = await createGroup({ uid: "u1", body: { ...VALID_BODY, endsAt: tenYears } }, deps);
+
+      expect(result.endsAt).toBe(tenYears);
     });
 
-    it("accepts endsAt exactly at now + maxGroupDurationDays (boundary)", async () => {
-      const deps = buildDeps();
-      const exactlyAtHorizon = new Date(NOW.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString();
+    describe("with a numeric maxGroupDurationDays (30)", () => {
+      useLimitOverride({ maxGroupDurationDays: 30 });
 
-      const result = await createGroup({ uid: "u1", body: { ...VALID_BODY, endsAt: exactlyAtHorizon } }, deps);
+      it('throws LIMIT_EXCEEDED with details.limit: "maxGroupDurationDays" when endsAt exceeds the horizon', async () => {
+        const deps = buildDeps();
+        const tooFar = new Date(NOW.getTime() + 31 * 24 * 60 * 60 * 1000).toISOString();
 
-      expect(result.endsAt).toBe(exactlyAtHorizon);
+        await expectAppError(
+          createGroup({ uid: "u1", body: { ...VALID_BODY, endsAt: tooFar } }, deps),
+          "LIMIT_EXCEEDED",
+          { limit: "maxGroupDurationDays" },
+        );
+      });
+
+      it("accepts endsAt exactly at now + maxGroupDurationDays (boundary)", async () => {
+        const deps = buildDeps();
+        const exactlyAtHorizon = new Date(NOW.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString();
+
+        const result = await createGroup({ uid: "u1", body: { ...VALID_BODY, endsAt: exactlyAtHorizon } }, deps);
+
+        expect(result.endsAt).toBe(exactlyAtHorizon);
+      });
+
+      it("never applies the horizon to endsAt: null (005 §2.5)", async () => {
+        const deps = buildDeps();
+
+        const result = await createGroup({ uid: "u1", body: { ...VALID_BODY, endsAt: null } }, deps);
+
+        expect(result.endsAt).toBeNull();
+      });
     });
   });
 
-  describe("maxActiveGroups capacity (005 §4, 001 §12.1)", () => {
-    it("throws LIMIT_EXCEEDED once the caller's non-expired memberships reach the cap", async () => {
+  describe("groups without an end date (005 §2.5, 001 §12.1)", () => {
+    it("creates an active group with endsAt null and writes NO GroupExpiry row", async () => {
       const deps = buildDeps();
-      // Free plan cap is 5 — seed 5 existing non-expired (owned) groups for u1.
-      for (let i = 0; i < 5; i += 1) {
-        const groupId = `grp_existing${i}`;
-        await deps.groupRepo.createGroupMeta({
-          groupId,
-          name: `Existing ${i}`,
-          ownerUserId: "u1",
-          createdAt: NOW.toISOString(),
-          endsAt: VALID_ENDS_AT,
-          expiryPolicy: "delete",
-          code: `CODE${i}`,
-        });
-        await deps.userRepo.addGroupMembership("u1", { groupId, role: "owner", joinedAt: NOW.toISOString() });
-      }
+
+      const result = await createGroup({ uid: "u1", body: { ...VALID_BODY, endsAt: null } }, deps);
+
+      expect(result.endsAt).toBeNull();
+      expect(result.state).toBe("active");
+      expect(result.code).toBe("00000001");
+      expect(deps.groupExpiryRepo.size()).toBe(0);
+      const meta = await deps.groupRepo.getGroupMeta(result.groupId);
+      expect(meta?.endsAt).toBeNull();
+    });
+
+    it('rejects a body with the endsAt KEY MISSING: VALIDATION_FAILED, details.fields ["endsAt"]', async () => {
+      const deps = buildDeps();
+      const { endsAt: _omitted, ...withoutEndsAt } = VALID_BODY;
+
+      await expectAppError(createGroup({ uid: "u1", body: withoutEndsAt }, deps), "VALIDATION_FAILED", {
+        fields: ["endsAt"],
+      });
+      expect(deps.groupExpiryRepo.size()).toBe(0);
+    });
+
+    it("rejects an explicit undefined endsAt the same way (key effectively missing)", async () => {
+      const deps = buildDeps();
+
+      await expectAppError(
+        createGroup({ uid: "u1", body: { ...VALID_BODY, endsAt: undefined } }, deps),
+        "VALIDATION_FAILED",
+        { fields: ["endsAt"] },
+      );
+    });
+
+    it("rejects a non-datetime, non-null endsAt", async () => {
+      const deps = buildDeps();
+
+      await expectAppError(
+        createGroup({ uid: "u1", body: { ...VALID_BODY, endsAt: "tomorrow" } }, deps),
+        "VALIDATION_FAILED",
+        { fields: ["endsAt"] },
+      );
+    });
+  });
+
+  describe("maxOwnedGroups capacity over ACTIVE owned groups only (005 §4, 001 §12.1)", () => {
+    async function seedGroup(
+      deps: ReturnType<typeof buildDeps>,
+      id: string,
+      role: "owner" | "member",
+      overrides: Partial<GroupMeta> = {},
+    ) {
+      await deps.groupRepo.createGroupMeta({
+        groupId: id,
+        name: `Seeded ${id}`,
+        ownerUserId: role === "owner" ? "u1" : "someone-else",
+        createdAt: "2026-07-01T00:00:00Z",
+        endsAt: VALID_ENDS_AT,
+        expiryPolicy: "delete",
+        code: `C${id}`.slice(0, 8),
+        ...overrides,
+      });
+      await deps.userRepo.addGroupMembership("u1", { groupId: id, role, joinedAt: "2026-07-01T00:00:00Z" });
+    }
+
+    it('throws LIMIT_EXCEEDED {limit:"maxOwnedGroups"} when 5 active owned groups exist', async () => {
+      const deps = buildDeps();
+      for (let i = 0; i < 5; i += 1) await seedGroup(deps, `grp_own${i}`, "owner");
 
       await expectAppError(createGroup({ uid: "u1", body: VALID_BODY }, deps), "LIMIT_EXCEEDED", {
-        limit: "maxActiveGroups",
+        limit: "maxOwnedGroups",
       });
     });
 
-    it("excludes expired memberships from the maxActiveGroups count", async () => {
+    it("allows a create with 4 active owned groups plus 5 joined (joined never count against owned)", async () => {
       const deps = buildDeps();
-      // 5 EXPIRED groups (endsAt in the past, delete policy) must not block a 6th create.
+      for (let i = 0; i < 4; i += 1) await seedGroup(deps, `grp_own${i}`, "owner");
+      for (let i = 0; i < 5; i += 1) await seedGroup(deps, `grp_mem${i}`, "member");
+
+      const result = await createGroup({ uid: "u1", body: VALID_BODY }, deps);
+
+      expect(result.state).toBe("active");
+    });
+
+    it("counts a no-end-date owned group as active", async () => {
+      const deps = buildDeps();
+      for (let i = 0; i < 5; i += 1) await seedGroup(deps, `grp_own${i}`, "owner", { endsAt: null });
+
+      await expectAppError(createGroup({ uid: "u1", body: VALID_BODY }, deps), "LIMIT_EXCEEDED", {
+        limit: "maxOwnedGroups",
+      });
+    });
+
+    it("does not count an archived or ended owned group: 5 owned of which 1 archived and 1 ended -> allowed", async () => {
+      const deps = buildDeps();
+      for (let i = 0; i < 3; i += 1) await seedGroup(deps, `grp_own${i}`, "owner");
+      await seedGroup(deps, "grp_arch", "owner", { endsAt: "2026-07-01T00:00:00Z", expiryPolicy: "archive" });
+      await seedGroup(deps, "grp_ended", "owner", { endsAt: "2026-07-20T00:00:00Z", expiryPolicy: "grace" });
+
+      const result = await createGroup({ uid: "u1", body: VALID_BODY }, deps);
+
+      expect(result.state).toBe("active");
+    });
+
+    it("still refuses with 5 active owned even when ended/archived ones also exist", async () => {
+      const deps = buildDeps();
+      for (let i = 0; i < 5; i += 1) await seedGroup(deps, `grp_own${i}`, "owner");
+      await seedGroup(deps, "grp_arch", "owner", { endsAt: "2026-07-01T00:00:00Z", expiryPolicy: "archive" });
+
+      await expectAppError(createGroup({ uid: "u1", body: VALID_BODY }, deps), "LIMIT_EXCEEDED", {
+        limit: "maxOwnedGroups",
+      });
+    });
+
+    it("excludes expired memberships from the count", async () => {
+      const deps = buildDeps();
       for (let i = 0; i < 5; i += 1) {
-        const groupId = `grp_expired${i}`;
-        await deps.groupRepo.createGroupMeta({
-          groupId,
-          name: `Expired ${i}`,
-          ownerUserId: "u1",
+        await seedGroup(deps, `grp_expired${i}`, "owner", {
           createdAt: "2026-01-01T00:00:00Z",
-          endsAt: "2026-01-02T00:00:00Z", // long past NOW
-          expiryPolicy: "delete",
-          code: `OLD${i}`,
+          endsAt: "2026-01-02T00:00:00Z", // long past NOW, delete policy
         });
-        await deps.userRepo.addGroupMembership("u1", { groupId, role: "owner", joinedAt: "2026-01-01T00:00:00Z" });
       }
 
       const result = await createGroup({ uid: "u1", body: VALID_BODY }, deps);

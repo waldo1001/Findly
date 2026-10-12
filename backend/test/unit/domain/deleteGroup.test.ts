@@ -47,7 +47,9 @@ async function seed(deps: ReturnType<typeof buildDeps>, meta: GroupMeta) {
     joinedAt: meta.createdAt,
   });
   await deps.groupCodeRepo.createCode(meta.code, { groupId: meta.groupId, createdAt: meta.createdAt });
-  await deps.groupExpiryRepo.putExpiryRow(meta.endsAt.slice(0, 10), meta.groupId, "expire");
+  if (meta.endsAt !== null) {
+    await deps.groupExpiryRepo.putExpiryRow(meta.endsAt.slice(0, 10), meta.groupId, "expire");
+  }
   await deps.userRepo.addGroupMembership(meta.ownerUserId, { groupId: meta.groupId, role: "owner", joinedAt: meta.createdAt });
   await deps.userRepo.addGroupMembership("u9", { groupId: meta.groupId, role: "member", joinedAt: meta.createdAt });
 }
@@ -88,6 +90,18 @@ describe("domain/group/deleteGroup", () => {
       deleteGroup({ uid: "u1", familyId: null, groupId: "grp_a" }, deps),
       "GROUP_NOT_FOUND",
     );
+  });
+
+  it("hard-deletes a group without an end date (endsAt null, no expiry row exists — 005 §2.5)", async () => {
+    const deps = buildDeps();
+    await seed(deps, { ...ACTIVE_META, endsAt: null });
+
+    await deleteGroup({ uid: "u1", familyId: null, groupId: "grp_a" }, deps);
+
+    expect(await deps.groupRepo.getGroupMeta("grp_a")).toBeNull();
+    expect(await deps.groupRepo.listMembers("grp_a")).toEqual([]);
+    expect(await deps.groupCodeRepo.getCode("ABCD1234")).toBeNull();
+    expect(await deps.userRepo.listGroupMemberships("u9")).toEqual([]);
   });
 
   it("hard-deletes meta, all member rows, the code row, both members' reverse-index rows, the expiry row, and the GroupLastKnown partition", async () => {

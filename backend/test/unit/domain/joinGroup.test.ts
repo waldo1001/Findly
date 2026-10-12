@@ -191,6 +191,139 @@ describe("domain/group/joinGroup", () => {
     );
   });
 
+  it("joins a group without an end date (endsAt null echoed, state active — 005 §2.5)", async () => {
+    const deps = buildDeps();
+    await seedGroup(deps, { ...ACTIVE_META, endsAt: null });
+
+    const result = await joinGroup({ uid: "u2", body: { code: "ABCD1234", displayName: "Noor" } }, deps);
+
+    expect(result).toMatchObject({ endsAt: null, state: "active", role: "member", memberCount: 2 });
+  });
+
+  describe("maxJoinedGroups over the caller's ACTIVE joined groups (005 §4, 001 §12.6)", () => {
+    async function seedMembership(
+      deps: ReturnType<typeof buildDeps>,
+      uid: string,
+      id: string,
+      role: "owner" | "member",
+      overrides: Partial<GroupMeta> = {},
+    ) {
+      await deps.groupRepo.createGroupMeta({
+        ...ACTIVE_META,
+        groupId: id,
+        ownerUserId: role === "owner" ? uid : "someone-else",
+        code: `C${id}`.slice(0, 8),
+        ...overrides,
+      });
+      await deps.userRepo.addGroupMembership(uid, { groupId: id, role, joinedAt: "2026-07-01T00:00:00Z" });
+    }
+
+    it("allows a join at 4 active joined groups", async () => {
+      const deps = buildDeps();
+      await seedGroup(deps, ACTIVE_META);
+      for (let i = 0; i < 4; i += 1) await seedMembership(deps, "u2", `grp_j${i}`, "member");
+
+      const result = await joinGroup({ uid: "u2", body: { code: "ABCD1234", displayName: "Noor" } }, deps);
+
+      expect(result.role).toBe("member");
+    });
+
+    it('throws LIMIT_EXCEEDED {limit:"maxJoinedGroups"} at 5 active joined groups', async () => {
+      const deps = buildDeps();
+      await seedGroup(deps, ACTIVE_META);
+      for (let i = 0; i < 5; i += 1) await seedMembership(deps, "u2", `grp_j${i}`, "member");
+
+      await expectAppError(
+        joinGroup({ uid: "u2", body: { code: "ABCD1234", displayName: "Noor" } }, deps),
+        "LIMIT_EXCEEDED",
+        { limit: "maxJoinedGroups" },
+      );
+      expect(await deps.groupRepo.getMember("grp_a", "u2")).toBeNull();
+    });
+
+    it("counts a no-end-date joined group as active", async () => {
+      const deps = buildDeps();
+      await seedGroup(deps, ACTIVE_META);
+      for (let i = 0; i < 5; i += 1) await seedMembership(deps, "u2", `grp_j${i}`, "member", { endsAt: null });
+
+      await expectAppError(
+        joinGroup({ uid: "u2", body: { code: "ABCD1234", displayName: "Noor" } }, deps),
+        "LIMIT_EXCEEDED",
+        { limit: "maxJoinedGroups" },
+      );
+    });
+
+    it("does not count archived or ended joined groups", async () => {
+      const deps = buildDeps();
+      await seedGroup(deps, ACTIVE_META);
+      for (let i = 0; i < 3; i += 1) await seedMembership(deps, "u2", `grp_j${i}`, "member");
+      await seedMembership(deps, "u2", "grp_arch", "member", { endsAt: "2026-07-01T00:00:00Z", expiryPolicy: "archive" });
+      await seedMembership(deps, "u2", "grp_ended", "member", { endsAt: "2026-07-20T00:00:00Z", expiryPolicy: "grace" });
+
+      const result = await joinGroup({ uid: "u2", body: { code: "ABCD1234", displayName: "Noor" } }, deps);
+
+      expect(result.role).toBe("member");
+    });
+
+    it("never counts owned groups against maxJoinedGroups (5 active owned + join -> allowed)", async () => {
+      const deps = buildDeps();
+      await seedGroup(deps, ACTIVE_META);
+      for (let i = 0; i < 5; i += 1) await seedMembership(deps, "u2", `grp_o${i}`, "owner");
+
+      const result = await joinGroup({ uid: "u2", body: { code: "ABCD1234", displayName: "Noor" } }, deps);
+
+      expect(result.role).toBe("member");
+    });
+
+    it("check order: an expired code beats maxJoinedGroups (GROUP_EXPIRED, not LIMIT_EXCEEDED)", async () => {
+      const deps = buildDeps();
+      await seedGroup(deps, { ...ACTIVE_META, endsAt: "2026-01-01T00:00:00Z", expiryPolicy: "archive" });
+      for (let i = 0; i < 5; i += 1) await seedMembership(deps, "u2", `grp_j${i}`, "member");
+
+      await expectAppError(
+        joinGroup({ uid: "u2", body: { code: "ABCD1234", displayName: "Noor" } }, deps),
+        "GROUP_EXPIRED",
+      );
+    });
+
+    it("check order: already-member beats maxJoinedGroups (GROUP_ALREADY_MEMBER)", async () => {
+      const deps = buildDeps();
+      await seedGroup(deps, ACTIVE_META);
+      await deps.groupRepo.addMember("grp_a", {
+        userId: "u2",
+        role: "member",
+        displayName: "Noor",
+        joinedAt: ACTIVE_META.createdAt,
+      });
+      for (let i = 0; i < 5; i += 1) await seedMembership(deps, "u2", `grp_j${i}`, "member");
+
+      await expectAppError(
+        joinGroup({ uid: "u2", body: { code: "ABCD1234", displayName: "Noor" } }, deps),
+        "GROUP_ALREADY_MEMBER",
+      );
+    });
+
+    it("check order: maxJoinedGroups beats GROUP_FULL", async () => {
+      const deps = buildDeps();
+      await seedGroup(deps, ACTIVE_META);
+      for (let i = 0; i < 199; i += 1) {
+        await deps.groupRepo.addMember("grp_a", {
+          userId: `existing${i}`,
+          role: "member",
+          displayName: `Existing ${i}`,
+          joinedAt: ACTIVE_META.createdAt,
+        });
+      }
+      for (let i = 0; i < 5; i += 1) await seedMembership(deps, "u2", `grp_j${i}`, "member");
+
+      await expectAppError(
+        joinGroup({ uid: "u2", body: { code: "ABCD1234", displayName: "Noor" } }, deps),
+        "LIMIT_EXCEEDED",
+        { limit: "maxJoinedGroups" },
+      );
+    });
+  });
+
   describe("owner-plan GROUP_FULL capacity (001 §9/§12.6)", () => {
     it("throws GROUP_FULL with details.max once the roster hits the owner's plan maxGroupMembers cap", async () => {
       const deps = buildDeps();
