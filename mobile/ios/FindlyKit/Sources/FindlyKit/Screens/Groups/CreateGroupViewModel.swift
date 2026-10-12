@@ -1,9 +1,10 @@
 import Foundation
 
-/// specs/004-ios-client.md §3.4 (001 §12.1; 005 §2.1) — creates a group. `endsAt`/`expiryPolicy`
-/// bounds (≥ now+1h, ≤ `limits.maxGroupDurationDays`) are the server's job (001 §12.1) — not
-/// duplicated here beyond what the picker UI needs for a sane default, matching this client's
-/// established "server is the source of truth" convention (specs/004 §3.4).
+/// specs/004-ios-client.md §3.4 (001 §12.1; 005 §2.1, §2.5) — creates a group. `endsAt`/`expiryPolicy`
+/// bounds (≥ now+1h, ≤ `limits.maxGroupDurationDays` when non-null) are enforced by the picker's
+/// range (`GroupEndsAtBounds`) and, authoritatively, by the server (001 §12.1) — matching this
+/// client's "server is the source of truth" convention (specs/004 §3.4). `endsAt == nil` is a group
+/// without an end date and goes out as `"endsAt":null`.
 @MainActor
 public final class CreateGroupViewModel: ObservableObject {
     public enum State: Equatable {
@@ -29,7 +30,7 @@ public final class CreateGroupViewModel: ObservableObject {
     /// routes directly, bypassing `RootView`'s bootstrap-tracking state entirely. Only probed when
     /// `displayName` is actually blank — a non-blank value is valid either way, so the extra
     /// `GET /families/me` round trip is skipped in the common (name provided) case.
-    public func createGroup(name: String, endsAt: Date, expiryPolicy: GroupExpiryPolicy, displayName: String) async {
+    public func createGroup(name: String, endsAt: Date?, expiryPolicy: GroupExpiryPolicy, displayName: String) async {
         let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedName.isEmpty else {
             state = .error("Enter a name for the group.")
@@ -44,7 +45,7 @@ public final class CreateGroupViewModel: ObservableObject {
         do {
             let envelope = try await apiClient.createGroup(
                 name: trimmedName,
-                endsAt: Self.iso8601Formatter.string(from: endsAt),
+                endsAt: endsAt.map { Self.iso8601Formatter.string(from: $0) },
                 expiryPolicy: expiryPolicy.rawValue,
                 displayName: trimmedDisplayName.isEmpty ? nil : trimmedDisplayName
             )

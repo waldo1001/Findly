@@ -42,10 +42,10 @@ public protocol FindlyAPIClient {
     ) async throws -> Envelope<GeofenceEventHistoryResponse>
 
     // §12 — Groups (temporary, specs/005-temporary-groups.md)
-    func createGroup(name: String, endsAt: String, expiryPolicy: String, displayName: String?) async throws -> Envelope<GroupSummary>
+    func createGroup(name: String, endsAt: String?, expiryPolicy: String, displayName: String?) async throws -> Envelope<GroupSummary>
     func listGroups() async throws -> Envelope<ListGroupsResponse>
     func getGroup(groupId: String) async throws -> Envelope<GroupDetail>
-    func updateGroup(groupId: String, name: String?, endsAt: String?) async throws -> Envelope<GroupSummary>
+    func updateGroup(groupId: String, name: String?, endsAt: EndsAtChange) async throws -> Envelope<GroupSummary>
     func deleteGroup(groupId: String) async throws
     func joinGroup(code: String, displayName: String?) async throws -> Envelope<GroupSummary>
     func rotateGroupCode(groupId: String) async throws -> Envelope<RotateGroupCodeResponse>

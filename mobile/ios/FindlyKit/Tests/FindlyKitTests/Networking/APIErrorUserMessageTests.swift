@@ -62,12 +62,48 @@ struct APIErrorUserMessageTests {
         #expect(error.userFacingMessage.lowercased().contains("tomorrow"))
     }
 
-    @Test func limitExceeded_otherLimits_keepTheGenericMessage() {
+    @Test func limitExceeded_unknownLimit_keepsTheGenericMessage() {
         let error = APIError.server(
-            APIErrorBody(code: .limitExceeded, message: "x", details: ["limit": .string("maxDevices")], requestId: "r1"),
+            APIErrorBody(code: .limitExceeded, message: "x", details: ["limit": .string("someFutureLimit")], requestId: "r1"),
             httpStatus: 402
         )
         #expect(error.userFacingMessage == "You've reached a plan limit.")
+    }
+
+    private func limitError(_ limit: String) -> APIError {
+        APIError.server(
+            APIErrorBody(code: .limitExceeded, message: "raw debug text", details: ["limit": .string(limit)], requestId: "r1"),
+            httpStatus: 402
+        )
+    }
+
+    /// specs/005 §2.5 item 7 — verbatim; the generic "plan limit" copy MUST NOT be shown for a
+    /// group limit (field report 2026-10-12).
+    @Test func limitExceeded_maxOwnedGroups_005Item7Verbatim() {
+        #expect(limitError("maxOwnedGroups").userFacingMessage == "You already have the maximum number of active groups you created. End or delete one first.")
+    }
+
+    @Test func limitExceeded_maxJoinedGroups_005Item7Verbatim() {
+        #expect(limitError("maxJoinedGroups").userFacingMessage == "You're already in the maximum number of active groups you joined. Leave one first.")
+    }
+
+    @Test func limitExceeded_maxGroupDurationDays_005Item7Verbatim() {
+        #expect(limitError("maxGroupDurationDays").userFacingMessage == "That end date is further out than your plan allows.")
+    }
+
+    /// Mirrors Android's `ApiErrorUserMessage.kt` per-limit copy (I66 scope).
+    @Test func limitExceeded_otherPlanLimits_mirrorAndroidCopy() {
+        #expect(limitError("maxDevices").userFacingMessage == "You've reached your device limit for this plan.")
+        #expect(limitError("maxGeofences").userFacingMessage == "You've reached your geofence limit for this plan.")
+        #expect(limitError("locateRequestsPerDay").userFacingMessage == "You've reached today's locate-request limit.")
+        #expect(limitError("minSyncIntervalMinutes").userFacingMessage == "That sync interval isn't available on your plan.")
+    }
+
+    @Test func limitExceeded_noGroupLimit_everShowsTheGenericMessage() {
+        for limit in ["maxOwnedGroups", "maxJoinedGroups", "maxGroupDurationDays"] {
+            #expect(limitError(limit).userFacingMessage != "You've reached a plan limit.")
+            #expect(!limitError(limit).userFacingMessage.contains("raw debug text"))
+        }
     }
 
     @Test func limitExceeded_noDetails_keepsTheGenericMessage() {

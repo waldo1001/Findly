@@ -20,7 +20,7 @@ public struct GroupDetailScreen: View {
     // lifetime instead of silently discarding the one `.task` observes.
     @StateObject private var viewModel: GroupDetailViewModel
     @State private var editedName: String = ""
-    @State private var extendedEndsAt: Date = Date().addingTimeInterval(24 * 3600)
+    @State private var extendedEndsAt: Date = GroupEndsAtBounds.defaultEndsAt()
     /// Every owner mutation the spec (003 §12.2/004 §3.4) requires a confirm step for
     /// (rename/extend/end-now/rotate/kick/delete) funnels through this single pending-action +
     /// `.confirmationDialog`, rather than one boolean flag per action.
@@ -30,15 +30,19 @@ public struct GroupDetailScreen: View {
     private let joinLinkHost: String
     private let onSelectMap: () -> Void
     private let onExit: () -> Void
+    /// `limits.maxGroupDurationDays` (001 §9) — `nil` = no cap / unknown (server stays authoritative).
+    private let maxGroupDurationDays: Int?
 
     public init(
         viewModel: @autoclosure @escaping () -> GroupDetailViewModel,
         joinLinkHost: String = AppConfig.defaultJoinLinkHost,
+        maxGroupDurationDays: Int? = nil,
         onSelectMap: @escaping () -> Void,
         onExit: @escaping () -> Void
     ) {
         _viewModel = StateObject(wrappedValue: viewModel())
         self.joinLinkHost = joinLinkHost
+        self.maxGroupDurationDays = maxGroupDurationDays
         self.onSelectMap = onSelectMap
         self.onExit = onExit
     }
@@ -74,6 +78,7 @@ public struct GroupDetailScreen: View {
         switch pending {
         case .rename: await viewModel.rename(name: editedName)
         case .extend: await viewModel.extend(endsAt: extendedEndsAt)
+        case .removeEndDate: await viewModel.removeEndDate()
         case .endNow: await viewModel.endNow()
         case .rotateCode: await viewModel.rotateCode()
         case .kick(let userId, _): await viewModel.kick(userId: userId)
@@ -192,6 +197,24 @@ public struct GroupDetailScreen: View {
         }
     }
 
+    /// "Set an end date" for an open-ended group, "Reactivate" for `ended` (grace), else "Extend".
+    private func setEndDateTitle(_ detail: GroupDetail) -> String {
+        if detail.endsAt == nil { return "Set an end date" }
+        return detail.state == "ended" ? "Reactivate" : "Extend"
+    }
+
+    @ViewBuilder
+    private var endDatePicker: some View {
+        let lower = GroupEndsAtBounds.lowerBound()
+        if let upper = GroupEndsAtBounds.upperBound(maxGroupDurationDays: maxGroupDurationDays) {
+            DatePicker("New end date", selection: $extendedEndsAt, in: lower...upper, displayedComponents: [.date, .hourAndMinute])
+                .tint(theme.colors.primary)
+        } else {
+            DatePicker("New end date", selection: $extendedEndsAt, in: lower..., displayedComponents: [.date, .hourAndMinute])
+                .tint(theme.colors.primary)
+        }
+    }
+
     /// PATCH-shaped controls (rename/extend/end-now) are hidden once `archived` — the server
     /// rejects PATCH there (`410 GROUP_EXPIRED`, 001 §12.4). Rotate only makes sense while `active`
     /// (the code row is gone otherwise, 005 §2.3). Kick/delete stay available in every state.
@@ -205,10 +228,16 @@ public struct GroupDetailScreen: View {
                 FindlyButton("Rename", style: .secondary) {
                     pendingConfirmation = .rename(newName: editedName)
                 }
-                DatePicker("New end date", selection: $extendedEndsAt, displayedComponents: [.date, .hourAndMinute])
-                    .tint(theme.colors.primary)
-                FindlyButton(detail.state == "ended" ? "Reactivate" : "Extend", style: .secondary) {
+                // 005 §2.5 items 5–6 — the picker has the same bounds as creation: now + 1 h, and
+                // `maxGroupDurationDays` as the upper bound only when the plan has a cap.
+                endDatePicker
+                FindlyButton(setEndDateTitle(detail), style: .secondary) {
                     pendingConfirmation = .extend
+                }
+                if detail.endsAt != nil {
+                    FindlyButton("Remove end date", style: .secondary) {
+                        pendingConfirmation = .removeEndDate
+                    }
                 }
                 FindlyButton("End group now", style: .secondary) {
                     pendingConfirmation = .endNow
@@ -232,6 +261,7 @@ public struct GroupDetailScreen: View {
 private enum PendingConfirmation: Identifiable, Equatable {
     case rename(newName: String)
     case extend
+    case removeEndDate
     case endNow
     case rotateCode
     case kick(userId: String, displayName: String)
@@ -241,6 +271,7 @@ private enum PendingConfirmation: Identifiable, Equatable {
         switch self {
         case .rename: return "rename"
         case .extend: return "extend"
+        case .removeEndDate: return "removeEndDate"
         case .endNow: return "endNow"
         case .rotateCode: return "rotateCode"
         case .kick(let userId, _): return "kick-\(userId)"
@@ -252,6 +283,7 @@ private enum PendingConfirmation: Identifiable, Equatable {
         switch self {
         case .rename: return "Rename"
         case .extend: return "Confirm"
+        case .removeEndDate: return "Remove end date"
         case .endNow: return "End group"
         case .rotateCode: return "Rotate"
         case .kick: return "Remove"
@@ -263,6 +295,8 @@ private enum PendingConfirmation: Identifiable, Equatable {
         switch self {
         case .rename(let newName): return "Rename this group to \"\(newName)\"?"
         case .extend: return "Change this group's end date?"
+        // 005 §2.5 item 5 — the same warning text as the create screen.
+        case .removeEndDate: return GroupNoEndDateCopy.warning
         case .endNow: return "End this group now? Members will lose access immediately."
         case .rotateCode: return "Rotate the join code? The current code will stop working immediately."
         case .kick(_, let displayName): return "Remove \(displayName) from this group?"

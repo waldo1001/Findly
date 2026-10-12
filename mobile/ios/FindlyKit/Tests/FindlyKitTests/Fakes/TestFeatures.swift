@@ -15,6 +15,18 @@ enum TestFeatures {
         Envelope(data: data, features: free)
     }
 
+    /// I66 — a fixture for asserting the group date picker's horizon comes from `features`.
+    static func envelope<T: Decodable>(_ data: T, maxGroupDurationDays: Int?) -> Envelope<T> {
+        let l = free.limits
+        let limits = PlanLimits(
+            maxDevices: l.maxDevices, maxGeofences: l.maxGeofences, historyDays: l.historyDays,
+            minSyncIntervalMinutes: l.minSyncIntervalMinutes, locateRequestsPerDay: l.locateRequestsPerDay,
+            maxOwnedGroups: l.maxOwnedGroups, maxJoinedGroups: l.maxJoinedGroups, maxGroupMembers: l.maxGroupMembers,
+            maxGroupDurationDays: maxGroupDurationDays, groupGraceDays: l.groupGraceDays
+        )
+        return Envelope(data: data, features: Features(subscriptionStatus: free.subscriptionStatus, limits: limits, flags: free.flags))
+    }
+
     /// specs/010-app-shell-and-screen-ux.md §4.2 — a fixture for asserting the sync-interval
     /// dropdown's floor comes from `features`, not a call-site literal.
     static func envelope<T: Decodable>(_ data: T, minSyncIntervalMinutes: Int) -> Envelope<T> {
@@ -22,7 +34,7 @@ enum TestFeatures {
         limits = PlanLimits(
             maxDevices: limits.maxDevices, maxGeofences: limits.maxGeofences, historyDays: limits.historyDays,
             minSyncIntervalMinutes: minSyncIntervalMinutes, locateRequestsPerDay: limits.locateRequestsPerDay,
-            maxActiveGroups: limits.maxActiveGroups, maxGroupMembers: limits.maxGroupMembers,
+            maxOwnedGroups: limits.maxOwnedGroups, maxJoinedGroups: limits.maxJoinedGroups, maxGroupMembers: limits.maxGroupMembers,
             maxGroupDurationDays: limits.maxGroupDurationDays, groupGraceDays: limits.groupGraceDays
         )
         let features = Features(subscriptionStatus: free.subscriptionStatus, limits: limits, flags: free.flags)

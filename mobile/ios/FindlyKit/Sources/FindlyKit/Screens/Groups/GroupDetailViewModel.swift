@@ -34,9 +34,13 @@ public final class GroupDetailViewModel: ObservableObject {
     private let apiClient: FindlyAPIClient
     public let groupId: String
 
-    public init(apiClient: FindlyAPIClient, groupId: String) {
+    /// Injected clock (default: the system clock) so `endNow()`'s instant is deterministic in tests.
+    private let now: () -> Date
+
+    public init(apiClient: FindlyAPIClient, groupId: String, now: @escaping () -> Date = Date.init) {
         self.apiClient = apiClient
         self.groupId = groupId
+        self.now = now
     }
 
     public var isOwner: Bool {
@@ -61,21 +65,31 @@ public final class GroupDetailViewModel: ObservableObject {
     /// Owner-only (001 §12.4) — `endsAt` untouched.
     public func rename(name: String) async {
         await mutateSummary { client in
-            try await client.updateGroup(groupId: self.groupId, name: name, endsAt: nil)
+            try await client.updateGroup(groupId: self.groupId, name: name, endsAt: .unchanged)
         }
     }
 
     /// Owner-only (001 §12.4). Extending a `grace`-state (`ended`) group reactivates it (005 §2.2).
     public func extend(endsAt: Date) async {
         await mutateSummary { client in
-            try await client.updateGroup(groupId: self.groupId, name: nil, endsAt: Self.iso8601Formatter.string(from: endsAt))
+            try await client.updateGroup(groupId: self.groupId, name: nil, endsAt: .set(Self.iso8601Formatter.string(from: endsAt)))
         }
     }
 
-    /// Owner-only convenience — `endsAt <= now + 5 min` means "end the group now" (001 §12.4).
+    /// Owner-only convenience — `now < endsAt <= now + 5 min` means "end the group now" (001 §12.4).
+    /// Sends now + 60 s (as Android does): `endsAt` must be strictly in the future on arrival, so
+    /// plain `now` would already be in the past and be refused with 400.
     public func endNow() async {
         await mutateSummary { client in
-            try await client.updateGroup(groupId: self.groupId, name: nil, endsAt: Self.iso8601Formatter.string(from: Date()))
+            try await client.updateGroup(groupId: self.groupId, name: nil, endsAt: .set(Self.iso8601Formatter.string(from: self.now().addingTimeInterval(60))))
+        }
+    }
+
+    /// Owner-only (001 §12.4, 005 §2.5 item 5) — `PATCH endsAt: null`. On an `ended` (grace) group
+    /// this also reactivates it, subject to the server's `maxOwnedGroups` check.
+    public func removeEndDate() async {
+        await mutateSummary { client in
+            try await client.updateGroup(groupId: self.groupId, name: nil, endsAt: .clear)
         }
     }
 

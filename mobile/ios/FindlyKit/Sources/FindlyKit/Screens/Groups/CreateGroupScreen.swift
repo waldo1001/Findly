@@ -12,10 +12,15 @@ public struct CreateGroupScreen: View {
     // `onChange(of: created)` below fires `onCreated` from) lives on.
     @StateObject private var viewModel: CreateGroupViewModel
     @State private var name: String = ""
-    @State private var endsAt: Date = Date().addingTimeInterval(24 * 3600)
+    @State private var endsAt: Date = GroupEndsAtBounds.defaultEndsAt()
+    /// 005 §2.5 item 1 — never preselected; the default stays a dated group (now + 24 h).
+    @State private var noEndDate = false
     @State private var expiryPolicy: GroupExpiryPolicy = .delete
     @State private var displayName: String
     private let onCreated: (GroupSummary) -> Void
+    /// `limits.maxGroupDurationDays` from the groups-list envelope (001 §9): `nil` = no cap (or the
+    /// limits aren't known yet — the server stays authoritative either way, 001 §12.1).
+    private let maxGroupDurationDays: Int?
 
     /// [prefillDisplayName] seeds the display-name field when this screen is reached from the
     /// profile-less first-run flow (`HomeScreen`'s `.profileless` branch, I17) — same "enter it
@@ -23,8 +28,10 @@ public struct CreateGroupScreen: View {
     public init(
         viewModel: @autoclosure @escaping () -> CreateGroupViewModel,
         prefillDisplayName: String = "",
+        maxGroupDurationDays: Int? = nil,
         onCreated: @escaping (GroupSummary) -> Void
     ) {
+        self.maxGroupDurationDays = maxGroupDurationDays
         _viewModel = StateObject(wrappedValue: viewModel())
         self._displayName = State(initialValue: prefillDisplayName)
         self.onCreated = onCreated
@@ -64,18 +71,45 @@ public struct CreateGroupScreen: View {
                     ErrorStateView(message: message)
                 }
                 FindlyTextField("Group name", text: $name, placeholder: "Festival crew")
-                DatePicker("Ends", selection: $endsAt, displayedComponents: [.date, .hourAndMinute])
-                    .tint(theme.colors.primary)
+                FindlyToggleRow(title: "No end date", isOn: $noEndDate)
+                if noEndDate {
+                    FindlyWarningNote(lead: GroupNoEndDateCopy.warningTitle, body: GroupNoEndDateCopy.warningBody)
+                } else {
+                    endsAtPicker
+                }
                 policyPicker
                 Text(expiryPolicy.policyCopy)
                     .font(theme.typography.bodyMedium.font)
                     .foregroundColor(theme.colors.onSurface.opacity(0.7))
+                if noEndDate {
+                    Text(GroupNoEndDateCopy.policyNote)
+                        .font(theme.typography.labelSmall.font)
+                        .foregroundColor(theme.onSurfaceMuted)
+                }
                 FindlyTextField("Your name for this group", text: $displayName, placeholder: "Eric")
                 FindlyButton("Create group") {
-                    Task { await viewModel.createGroup(name: name, endsAt: endsAt, expiryPolicy: expiryPolicy, displayName: displayName) }
+                    Task {
+                        await viewModel.createGroup(
+                            name: name, endsAt: noEndDate ? nil : endsAt, expiryPolicy: expiryPolicy, displayName: displayName
+                        )
+                    }
                 }
             }
             .padding(.horizontal, theme.spacing.xl)
+        }
+    }
+
+    /// 005 §2.5 item 6 / 004 amendment — bounded below by now + 1 h, and above by
+    /// `maxGroupDurationDays` only when the plan has a cap (`nil` = open-ended partial range).
+    @ViewBuilder
+    private var endsAtPicker: some View {
+        let lower = GroupEndsAtBounds.lowerBound()
+        if let upper = GroupEndsAtBounds.upperBound(maxGroupDurationDays: maxGroupDurationDays) {
+            DatePicker("Ends", selection: $endsAt, in: lower...upper, displayedComponents: [.date, .hourAndMinute])
+                .tint(theme.colors.primary)
+        } else {
+            DatePicker("Ends", selection: $endsAt, in: lower..., displayedComponents: [.date, .hourAndMinute])
+                .tint(theme.colors.primary)
         }
     }
 

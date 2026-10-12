@@ -13,6 +13,10 @@ public final class GroupsListViewModel: ObservableObject {
     }
 
     @Published public private(set) var state: State = .loading
+    /// The caller's plan limits from the most recent `GET /groups` envelope (001 §9) — handed to the
+    /// create screen so its end-date picker is bounded by `maxGroupDurationDays` without a second
+    /// round trip (mirrors Android's `GroupsListStateHolder` → `CreateGroupStateHolder`).
+    @Published public private(set) var limits: PlanLimits?
     private let apiClient: FindlyAPIClient
 
     public init(apiClient: FindlyAPIClient) {
@@ -23,6 +27,7 @@ public final class GroupsListViewModel: ObservableObject {
         state = .loading
         do {
             let envelope = try await apiClient.listGroups()
+            limits = envelope.features.limits
             state = .loaded(envelope.data.groups)
         } catch {
             state = .error(userFacingMessage(for: error))

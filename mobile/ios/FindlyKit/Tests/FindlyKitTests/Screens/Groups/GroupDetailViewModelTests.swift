@@ -82,7 +82,7 @@ struct GroupDetailViewModelTests {
         api.updateGroupHandler = { groupId, name, endsAt in
             #expect(groupId == "grp_1")
             #expect(name == "Festival crew 2026")
-            #expect(endsAt == nil)
+            #expect(endsAt == .unchanged)
             return TestFeatures.envelope(GroupSummary(
                 groupId: "grp_1", name: "Festival crew 2026", endsAt: "2026-08-02T22:00:00Z", expiryPolicy: "delete",
                 state: "active", role: "owner", memberCount: 2, code: "7F3K9QRZ", createdAt: nil
@@ -108,7 +108,7 @@ struct GroupDetailViewModelTests {
         let newEndsAt = ISO8601DateFormatter().date(from: "2026-08-03T22:00:00Z")!
         api.updateGroupHandler = { groupId, name, endsAt in
             #expect(name == nil)
-            #expect(endsAt == "2026-08-03T22:00:00Z")
+            #expect(endsAt == .set("2026-08-03T22:00:00Z"))
             return TestFeatures.envelope(GroupSummary(
                 groupId: "grp_1", name: "Festival crew", endsAt: "2026-08-03T22:00:00Z", expiryPolicy: "delete",
                 state: "active", role: "owner", memberCount: 2, code: "7F3K9QRZ", createdAt: nil
@@ -124,6 +124,73 @@ struct GroupDetailViewModelTests {
             return
         }
         #expect(detail.state == "active", "extending a grace-state group reactivates it (005 §2.2)")
+    }
+
+    /// I66 (005 §2.5 item 5, 001 §12.4): "Remove end date" is `PATCH endsAt: null`, i.e. `.clear`.
+    @Test func removeEndDate_sendsClear_andRendersNilEndsAt() async {
+        let api = FakeAPIClient()
+        api.getGroupHandler = { _ in TestFeatures.envelope(self.makeDetail()) }
+        api.updateGroupHandler = { groupId, name, endsAt in
+            #expect(groupId == "grp_1")
+            #expect(name == nil)
+            #expect(endsAt == .clear)
+            return TestFeatures.envelope(GroupSummary(
+                groupId: "grp_1", name: "Festival crew", endsAt: nil, expiryPolicy: "delete",
+                state: "active", role: "owner", memberCount: 2, code: "7F3K9QRZ", createdAt: nil
+            ))
+        }
+        let viewModel = GroupDetailViewModel(apiClient: api, groupId: "grp_1")
+        await viewModel.load()
+
+        await viewModel.removeEndDate()
+
+        guard case .loaded(let detail) = viewModel.state else {
+            Issue.record("expected .loaded state")
+            return
+        }
+        #expect(detail.endsAt == nil)
+        #expect(detail.members?.count == 2)
+        #expect(api.updateGroupCalls.count == 1)
+    }
+
+    @Test func removeEndDate_maxOwnedGroupsRefusal_surfacesPerLimitCopy() async {
+        let api = FakeAPIClient()
+        api.getGroupHandler = { _ in TestFeatures.envelope(self.makeDetail(state: "ended")) }
+        api.updateGroupHandler = { _, _, _ in
+            throw APIError.server(
+                APIErrorBody(code: .limitExceeded, message: "x", details: ["limit": .string("maxOwnedGroups")], requestId: "r1"),
+                httpStatus: 402
+            )
+        }
+        let viewModel = GroupDetailViewModel(apiClient: api, groupId: "grp_1")
+        await viewModel.load()
+
+        await viewModel.removeEndDate()
+
+        #expect(viewModel.lastActionError == "You already have the maximum number of active groups you created. End or delete one first.")
+    }
+
+    /// 001 §12.4: `endsAt` must be > now when it arrives, and `> now && <= now + 5 min` means "end
+    /// now". Sending `now` exactly is already in the past on arrival (400), so the client sends
+    /// now + 60 s (same as Android).
+    @Test func endNow_sendsNowPlus60Seconds() async {
+        let api = FakeAPIClient()
+        api.getGroupHandler = { _ in TestFeatures.envelope(self.makeDetail()) }
+        api.updateGroupHandler = { _, _, _ in
+            TestFeatures.envelope(GroupSummary(
+                groupId: "grp_1", name: "Festival crew", endsAt: "2026-08-02T12:01:00Z", expiryPolicy: "delete",
+                state: "active", role: "owner", memberCount: 2, code: "7F3K9QRZ", createdAt: nil
+            ))
+        }
+        let fixedNow = ISO8601DateFormatter().date(from: "2026-08-02T12:00:00Z")!
+        let viewModel = GroupDetailViewModel(apiClient: api, groupId: "grp_1", now: { fixedNow })
+        await viewModel.load()
+
+        await viewModel.endNow()
+
+        #expect(api.updateGroupCalls.count == 1)
+        #expect(api.updateGroupCalls[0].name == nil)
+        #expect(api.updateGroupCalls[0].endsAt == .set("2026-08-02T12:01:00Z"))
     }
 
     @Test func rotateCode_updatesCodeButPreservesRoster() async {
