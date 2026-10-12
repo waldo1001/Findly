@@ -395,6 +395,76 @@ struct RequestBuildingTests {
         #expect(envelope.data.createdAt == "2026-07-21T10:00:00Z")
     }
 
+    @Test func createGroup_noEndDate_sendsExplicitNullKey() async throws {
+        let client = makeClient()
+        MockURLProtocol.requestHandler = { request in
+            let body = try self.bodyJSON(request)
+            #expect(body.keys.contains("endsAt"), "001 §12.1: endsAt is REQUIRED as a key; a missing key is a 400")
+            #expect(body["endsAt"] is NSNull)
+            return (jsonResponse(url: request.url!, status: 201), envelopeJSON(data: """
+            { "groupId": "grp_n", "name": "Family+", "endsAt": null, "expiryPolicy": "delete", "state": "active",
+              "role": "owner", "memberCount": 1, "code": "7F3K9QRZ", "createdAt": "2026-07-21T10:00:00Z" }
+            """))
+        }
+        let envelope = try await client.createGroup(name: "Family+", endsAt: nil, expiryPolicy: "delete", displayName: nil)
+        #expect(envelope.data.endsAt == nil)
+    }
+
+    @Test func updateGroup_clear_sendsExplicitNullAndOmitsName() async throws {
+        let client = makeClient()
+        MockURLProtocol.requestHandler = { request in
+            let body = try self.bodyJSON(request)
+            #expect(body.keys.contains("endsAt"))
+            #expect(body["endsAt"] is NSNull)
+            #expect(body["name"] == nil)
+            return (jsonResponse(url: request.url!, status: 200), envelopeJSON(data: """
+            { "groupId": "grp_x", "name": "Festival crew", "endsAt": null,
+              "expiryPolicy": "delete", "state": "active", "role": "owner", "memberCount": 1, "code": "7F3K9QRZ" }
+            """))
+        }
+        let envelope = try await client.updateGroup(groupId: "grp_x", name: nil, endsAt: .clear)
+        #expect(envelope.data.endsAt == nil)
+    }
+
+    @Test func updateGroup_unchanged_omitsEndsAtKey() async throws {
+        let client = makeClient()
+        MockURLProtocol.requestHandler = { request in
+            let body = try self.bodyJSON(request)
+            #expect(!body.keys.contains("endsAt"), "absent key = unchanged (001 §12.4)")
+            #expect(body["name"] as? String == "Renamed")
+            return (jsonResponse(url: request.url!, status: 200), envelopeJSON(data: """
+            { "groupId": "grp_x", "name": "Renamed", "endsAt": "2026-08-03T22:00:00Z",
+              "expiryPolicy": "delete", "state": "active", "role": "owner", "memberCount": 1, "code": "7F3K9QRZ" }
+            """))
+        }
+        _ = try await client.updateGroup(groupId: "grp_x", name: "Renamed", endsAt: .unchanged)
+    }
+
+    @Test func getGroup_nullEndsAt_decodes() async throws {
+        let client = makeClient()
+        MockURLProtocol.requestHandler = { request in
+            (jsonResponse(url: request.url!, status: 200), envelopeJSON(data: """
+            { "groupId": "grp_x", "name": "Family+", "endsAt": null,
+              "expiryPolicy": "delete", "state": "active", "role": "member", "memberCount": 2,
+              "code": "7F3K9QRZ", "createdAt": "2026-07-21T10:00:00Z", "members": [] }
+            """))
+        }
+        let envelope = try await client.getGroup(groupId: "grp_x")
+        #expect(envelope.data.endsAt == nil)
+    }
+
+    @Test func listGroups_nullEndsAt_decodes() async throws {
+        let client = makeClient()
+        MockURLProtocol.requestHandler = { request in
+            (jsonResponse(url: request.url!, status: 200), envelopeJSON(data: """
+            { "groups": [ { "groupId": "grp_x", "name": "Family+", "endsAt": null,
+              "expiryPolicy": "delete", "state": "active", "role": "owner", "memberCount": 7, "code": "7F3K9QRZ" } ] }
+            """))
+        }
+        let envelope = try await client.listGroups()
+        #expect(envelope.data.groups[0].endsAt == nil)
+    }
+
     @Test func listGroups_buildsRequest() async throws {
         let client = makeClient()
         MockURLProtocol.requestHandler = { request in
@@ -454,7 +524,7 @@ struct RequestBuildingTests {
               "expiryPolicy": "delete", "state": "active", "role": "owner", "memberCount": 1, "code": "7F3K9QRZ" }
             """))
         }
-        let envelope = try await client.updateGroup(groupId: "grp_x", name: nil, endsAt: "2026-08-03T22:00:00Z")
+        let envelope = try await client.updateGroup(groupId: "grp_x", name: nil, endsAt: .set("2026-08-03T22:00:00Z"))
         #expect(envelope.data.endsAt == "2026-08-03T22:00:00Z")
     }
 

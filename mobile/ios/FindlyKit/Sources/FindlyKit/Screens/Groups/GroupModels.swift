@@ -59,7 +59,9 @@ public enum GroupStateChip {
 /// `endsAt`"). Pure and testable; never crashes on an unparseable string (defensive — the server
 /// is the source of truth for the ISO 8601 shape, 001 §1.4).
 public enum GroupCountdown {
-    public static func text(from endsAtISO8601: String, now: Date = Date()) -> String {
+    /// `nil` = a group without an end date (005 §2.5 item 4) → "No end date", never empty/"Ended".
+    public static func text(from endsAtISO8601: String?, now: Date = Date()) -> String {
+        guard let endsAtISO8601 else { return GroupNoEndDateCopy.label }
         guard let endsAt = parse(endsAtISO8601) else { return "" }
         let interval = endsAt.timeIntervalSince(now)
         guard interval > 0 else { return "Ended" }
@@ -92,4 +94,50 @@ public enum GroupCountdown {
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         return formatter
     }()
+}
+
+/// specs/005-temporary-groups.md §2.5 items 2–4 — the normative copy for groups without an end
+/// date, reproduced verbatim so no screen paraphrases it.
+public enum GroupNoEndDateCopy {
+    /// Item 4 — wherever the end date or countdown normally shows.
+    public static let label = "No end date"
+    /// Item 2 — the bold lead-in of the warning...
+    public static let warningTitle = "This group has no end date."
+    /// ...and its body.
+    public static let warningBody = "Everyone in it keeps seeing each other's live location until you end or delete the group, or they leave it."
+    public static let warning = "\(warningTitle) \(warningBody)"
+    /// Item 3 — one line under the policy promise.
+    public static let policyNote = "Applies only if you set an end date later."
+}
+
+/// specs/005 §2.5 item 6, 001 §12.1 — the end-date picker's range: lower bound now + 1 h always;
+/// an upper bound only when `limits.maxGroupDurationDays` is non-nil (nil = no cap → partial range).
+public enum GroupEndsAtBounds {
+    public static func lowerBound(now: Date = Date()) -> Date {
+        now.addingTimeInterval(3600)
+    }
+
+    public static func upperBound(now: Date = Date(), maxGroupDurationDays: Int?) -> Date? {
+        maxGroupDurationDays.map { now.addingTimeInterval(TimeInterval($0) * 86400) }
+    }
+
+    /// For `DatePicker(in:)`, which takes a `PartialRangeFrom` or a `ClosedRange`: both are
+    /// type-erased here into a single predicate-bearing value.
+    public static func range(now: Date = Date(), maxGroupDurationDays: Int?) -> GroupEndsAtRange {
+        GroupEndsAtRange(lower: lowerBound(now: now), upper: upperBound(now: now, maxGroupDurationDays: maxGroupDurationDays))
+    }
+
+    /// The dated default stays now + 24 h (005 §2.5 item 1).
+    public static func defaultEndsAt(now: Date = Date()) -> Date {
+        now.addingTimeInterval(24 * 3600)
+    }
+}
+
+public struct GroupEndsAtRange: Equatable {
+    public let lower: Date
+    public let upper: Date?
+
+    public func contains(_ date: Date) -> Bool {
+        date >= lower && (upper.map { date <= $0 } ?? true)
+    }
 }

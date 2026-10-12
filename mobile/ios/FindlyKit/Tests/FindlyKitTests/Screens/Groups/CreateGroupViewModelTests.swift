@@ -158,13 +158,51 @@ struct CreateGroupViewModelTests {
         }
     }
 
+    /// I66 (005 §2.5 item 1/3 + 001 §12.1): "No end date" is a `nil` Date, forwarded as nil so the
+    /// wire request carries `"endsAt":null`.
+    @Test func createGroup_noEndDate_forwardsNilEndsAt() async {
+        let api = FakeAPIClient()
+        api.createGroupHandler = { name, endsAtString, expiryPolicy, displayName in
+            TestFeatures.envelope(GroupSummary(
+                groupId: "grp_1", name: name, endsAt: nil, expiryPolicy: expiryPolicy,
+                state: "active", role: "owner", memberCount: 1, code: "7F3K9QRZ", createdAt: "2026-07-21T10:00:00Z"
+            ))
+        }
+        let viewModel = CreateGroupViewModel(apiClient: api)
+
+        await viewModel.createGroup(name: "Family+", endsAt: nil, expiryPolicy: .grace, displayName: "Eric")
+
+        #expect(api.createGroupCalls.count == 1)
+        #expect(api.createGroupCalls[0].endsAt == nil)
+        guard case .created(let group) = viewModel.state else {
+            Issue.record("expected .created state, got \(viewModel.state)")
+            return
+        }
+        #expect(group.endsAt == nil)
+    }
+
+    @Test func createGroup_maxGroupDurationDaysRefusal_namesTheDateLimit_notAGroupCount() async {
+        let api = FakeAPIClient()
+        api.createGroupHandler = { _, _, _, _ in
+            throw APIError.server(
+                APIErrorBody(code: .limitExceeded, message: "limit", details: ["limit": .string("maxGroupDurationDays")], requestId: "r1"),
+                httpStatus: 402
+            )
+        }
+        let viewModel = CreateGroupViewModel(apiClient: api)
+
+        await viewModel.createGroup(name: "Crew", endsAt: Date().addingTimeInterval(86400 * 365), expiryPolicy: .delete, displayName: "Eric")
+
+        #expect(viewModel.state == .error("That end date is further out than your plan allows."))
+    }
+
     @Test func createGroup_serverError_setsErrorState() async {
         // displayName is non-blank, so this never probes getMyFamily (see
         // createGroup_nonBlankDisplayName_neverProbesProfile above).
         let api = FakeAPIClient()
         api.createGroupHandler = { _, _, _, _ in
             throw APIError.server(
-                APIErrorBody(code: .limitExceeded, message: "limit", details: ["limit": .string("maxActiveGroups")], requestId: "r1"),
+                APIErrorBody(code: .limitExceeded, message: "limit", details: ["limit": .string("maxOwnedGroups")], requestId: "r1"),
                 httpStatus: 402
             )
         }

@@ -160,9 +160,9 @@ final class FakeAPIClient: FindlyAPIClient {
 
     // MARK: - §12 Groups
 
-    private(set) var createGroupCalls: [(name: String, endsAt: String, expiryPolicy: String, displayName: String?)] = []
-    var createGroupHandler: (String, String, String, String?) async throws -> Envelope<GroupSummary> = { _, _, _, _ in fatalError("not configured") }
-    func createGroup(name: String, endsAt: String, expiryPolicy: String, displayName: String?) async throws -> Envelope<GroupSummary> {
+    private(set) var createGroupCalls: [(name: String, endsAt: String?, expiryPolicy: String, displayName: String?)] = []
+    var createGroupHandler: (String, String?, String, String?) async throws -> Envelope<GroupSummary> = { _, _, _, _ in fatalError("not configured") }
+    func createGroup(name: String, endsAt: String?, expiryPolicy: String, displayName: String?) async throws -> Envelope<GroupSummary> {
         createGroupCalls.append((name, endsAt, expiryPolicy, displayName))
         return try await createGroupHandler(name, endsAt, expiryPolicy, displayName)
     }
@@ -181,9 +181,9 @@ final class FakeAPIClient: FindlyAPIClient {
         return try await getGroupHandler(groupId)
     }
 
-    private(set) var updateGroupCalls: [(groupId: String, name: String?, endsAt: String?)] = []
-    var updateGroupHandler: (String, String?, String?) async throws -> Envelope<GroupSummary> = { _, _, _ in fatalError("not configured") }
-    func updateGroup(groupId: String, name: String?, endsAt: String?) async throws -> Envelope<GroupSummary> {
+    private(set) var updateGroupCalls: [(groupId: String, name: String?, endsAt: EndsAtChange)] = []
+    var updateGroupHandler: (String, String?, EndsAtChange) async throws -> Envelope<GroupSummary> = { _, _, _ in fatalError("not configured") }
+    func updateGroup(groupId: String, name: String?, endsAt: EndsAtChange) async throws -> Envelope<GroupSummary> {
         updateGroupCalls.append((groupId, name, endsAt))
         return try await updateGroupHandler(groupId, name, endsAt)
     }

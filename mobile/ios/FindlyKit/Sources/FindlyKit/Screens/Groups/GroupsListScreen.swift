@@ -13,17 +13,20 @@ public struct GroupsListScreen: View {
     private let onSelectGroup: (String) -> Void
     private let onCreateGroup: () -> Void
     private let onJoinGroup: () -> Void
+    private let onLimitsLoaded: (PlanLimits) -> Void
 
     public init(
         viewModel: @autoclosure @escaping () -> GroupsListViewModel,
         onSelectGroup: @escaping (String) -> Void,
         onCreateGroup: @escaping () -> Void,
-        onJoinGroup: @escaping () -> Void
+        onJoinGroup: @escaping () -> Void,
+        onLimitsLoaded: @escaping (PlanLimits) -> Void = { _ in }
     ) {
         _viewModel = StateObject(wrappedValue: viewModel())
         self.onSelectGroup = onSelectGroup
         self.onCreateGroup = onCreateGroup
         self.onJoinGroup = onJoinGroup
+        self.onLimitsLoaded = onLimitsLoaded
     }
 
     public var body: some View {
@@ -33,6 +36,9 @@ public struct GroupsListScreen: View {
         }
         .background(theme.colors.surfaceVariant)
         .task { await viewModel.load() }
+        .onChange(of: viewModel.limits) { limits in
+            if let limits { onLimitsLoaded(limits) }
+        }
     }
 
     @ViewBuilder

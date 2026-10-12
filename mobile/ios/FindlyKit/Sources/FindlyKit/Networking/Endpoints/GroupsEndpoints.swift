@@ -5,16 +5,33 @@ import Foundation
 
 /// §12.1 request. `displayName` is REQUIRED only when the caller has no profile yet (§1.5.3
 /// bootstrap) — optional otherwise, defaulting server-side to the profile's own.
+///
+/// **`endsAt` is REQUIRED as a key** (001 §12.1, amended 2026-10-12): `nil` means "no end date" and
+/// MUST go out as `"endsAt":null`. Swift's synthesized `Encodable` uses `encodeIfPresent` and would
+/// drop the key (the backend answers a missing key with `400 VALIDATION_FAILED`), hence the
+/// hand-written `encode(to:)`. `displayName` keeps omit-when-nil semantics.
 public struct CreateGroupRequest: Encodable, Equatable {
     public let name: String
-    public let endsAt: String
+    public let endsAt: String?
     public let expiryPolicy: String
     public let displayName: String?
-    public init(name: String, endsAt: String, expiryPolicy: String, displayName: String? = nil) {
+    public init(name: String, endsAt: String?, expiryPolicy: String, displayName: String? = nil) {
         self.name = name
         self.endsAt = endsAt
         self.expiryPolicy = expiryPolicy
         self.displayName = displayName
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case name, endsAt, expiryPolicy, displayName
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(name, forKey: .name)
+        try container.encode(endsAt, forKey: .endsAt) // `encode` (not `encodeIfPresent`): nil → null
+        try container.encode(expiryPolicy, forKey: .expiryPolicy)
+        try container.encodeIfPresent(displayName, forKey: .displayName)
     }
 }
 
@@ -25,7 +42,8 @@ public struct CreateGroupRequest: Encodable, Equatable {
 public struct GroupSummary: Decodable, Equatable {
     public let groupId: String
     public let name: String
-    public let endsAt: String
+    /// `nil` = no end date (005 §2.5, 001 §12.1 amended 2026-10-12).
+    public let endsAt: String?
     public let expiryPolicy: String
     public let state: String
     public let role: String
@@ -52,7 +70,8 @@ public struct GroupMember: Decodable, Equatable {
 public struct GroupDetail: Decodable, Equatable {
     public let groupId: String
     public let name: String
-    public let endsAt: String
+    /// `nil` = no end date (005 §2.5).
+    public let endsAt: String?
     public let expiryPolicy: String
     public let state: String
     public let role: String
@@ -64,13 +83,41 @@ public struct GroupDetail: Decodable, Equatable {
 
 /// §12.4 request — at least one field (server-enforced; not duplicated client-side, matching
 /// [UpdateMemberRequest]/[UpdateDeviceRequest], neither of which validate this either).
+///
+/// `endsAt` is tri-state on the wire (001 §12.4): an absent key leaves it unchanged, a string sets
+/// it, and an explicit `null` removes the end date — see [EndsAtChange].
 public struct UpdateGroupRequest: Encodable, Equatable {
     public let name: String?
-    public let endsAt: String?
-    public init(name: String? = nil, endsAt: String? = nil) {
+    public let endsAt: EndsAtChange
+    public init(name: String? = nil, endsAt: EndsAtChange = .unchanged) {
         self.name = name
         self.endsAt = endsAt
     }
+
+    private enum CodingKeys: String, CodingKey {
+        case name, endsAt
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(name, forKey: .name)
+        switch endsAt {
+        case .unchanged: break
+        case .clear: try container.encodeNil(forKey: .endsAt)
+        case .set(let iso): try container.encode(iso, forKey: .endsAt)
+        }
+    }
+}
+
+/// The three states of a `PATCH /groups/{id}` `endsAt` (001 §12.4, 005 §2.5): `Optional<String>`
+/// cannot express "absent" vs "null", so the intent is explicit.
+public enum EndsAtChange: Equatable, Sendable {
+    /// Key omitted — the end date is left alone (rename).
+    case unchanged
+    /// `"endsAt": null` — remove the end date ("Remove end date").
+    case clear
+    /// `"endsAt": "<ISO 8601 UTC>"` — set / extend / end now.
+    case set(String)
 }
 
 /// §12.6 request. `displayName` becomes the caller's **per-group** display name (005 §1) — same
@@ -117,7 +164,7 @@ public struct GroupLatestLocationsResponse: Decodable, Equatable {
 extension URLSessionAPIClient {
     /// Bootstraps a profile if the caller has none (§1.5.3) — `displayName` is REQUIRED then,
     /// optional otherwise (defaults server-side to the profile's).
-    public func createGroup(name: String, endsAt: String, expiryPolicy: String, displayName: String?) async throws -> Envelope<GroupSummary> {
+    public func createGroup(name: String, endsAt: String?, expiryPolicy: String, displayName: String?) async throws -> Envelope<GroupSummary> {
         try await send(method: .post, path: "groups", body: CreateGroupRequest(name: name, endsAt: endsAt, expiryPolicy: expiryPolicy, displayName: displayName))
     }
 
@@ -133,8 +180,8 @@ extension URLSessionAPIClient {
         try await send(method: .get, path: "groups/\(groupId)")
     }
 
-    /// Owner-only; at least one of `name`/`endsAt` must be non-`nil` (§12.4, server-enforced).
-    public func updateGroup(groupId: String, name: String?, endsAt: String?) async throws -> Envelope<GroupSummary> {
+    /// Owner-only; at least one of `name`/`endsAt` must be changed (§12.4, server-enforced).
+    public func updateGroup(groupId: String, name: String?, endsAt: EndsAtChange) async throws -> Envelope<GroupSummary> {
         try await send(method: .patch, path: "groups/\(groupId)", body: UpdateGroupRequest(name: name, endsAt: endsAt))
     }
 

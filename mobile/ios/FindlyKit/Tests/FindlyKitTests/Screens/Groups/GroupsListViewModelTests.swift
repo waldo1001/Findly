@@ -37,6 +37,30 @@ struct GroupsListViewModelTests {
         ]))
     }
 
+    /// I66 — the create screen is bounded by `limits.maxGroupDurationDays`, taken from the most
+    /// recent `GET /groups` response (no second round trip), as Android's `CreateGroupStateHolder`.
+    @Test func load_success_exposesPlanLimitsFromTheEnvelope() async {
+        let api = FakeAPIClient()
+        api.listGroupsHandler = { TestFeatures.envelope(ListGroupsResponse(groups: []), maxGroupDurationDays: 30) }
+        let viewModel = GroupsListViewModel(apiClient: api)
+        #expect(viewModel.limits == nil)
+
+        await viewModel.load()
+
+        #expect(viewModel.limits?.maxGroupDurationDays == 30)
+    }
+
+    @Test func load_success_nullDuration_meansNoCap() async {
+        let api = FakeAPIClient()
+        api.listGroupsHandler = { TestFeatures.envelope(ListGroupsResponse(groups: [])) }
+        let viewModel = GroupsListViewModel(apiClient: api)
+
+        await viewModel.load()
+
+        #expect(viewModel.limits != nil)
+        #expect(viewModel.limits?.maxGroupDurationDays == nil)
+    }
+
     @Test func load_emptyList_isNotAnError() async {
         // A family-less brand-new user's first `GET /groups` — must resolve to `.loaded([])`, the
         // screen's job to render as a friendly non-dead-end empty state, not `.error`.

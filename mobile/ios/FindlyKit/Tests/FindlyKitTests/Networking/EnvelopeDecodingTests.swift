@@ -77,11 +77,32 @@ struct EnvelopeDecodingTests {
         struct Empty: Decodable {}
         let envelope = try decoder.decode(Envelope<Empty>.self, from: json)
 
-        #expect(envelope.features.limits.maxActiveGroups == nil)
+        #expect(envelope.features.limits.maxOwnedGroups == nil)
         #expect(envelope.features.limits.maxGroupMembers == nil)
         #expect(envelope.features.limits.maxGroupDurationDays == nil)
         #expect(envelope.features.limits.groupGraceDays == nil)
         #expect(envelope.features.flags.groups == false)
+    }
+
+    /// 001 §9 (amended 2026-10-12): `maxGroupDurationDays: null` means "no cap" and must decode as
+    /// nil next to populated sibling fields; the retired `maxActiveGroups` is simply ignored.
+    @Test func decodesFeatures_nullGroupDuration_isNoCap() throws {
+        let json = """
+        { "data": {}, "features": { "subscriptionStatus": "free",
+                      "limits": { "maxDevices": 10, "maxGeofences": 20, "historyDays": 90,
+                                  "minSyncIntervalMinutes": 5, "locateRequestsPerDay": 100,
+                                  "maxOwnedGroups": 5, "maxJoinedGroups": 5, "maxGroupMembers": 200,
+                                  "maxGroupDurationDays": null, "groupGraceDays": 7 },
+                      "flags": { "pushToLocate": true, "geofencing": true, "historyReplay": true, "groups": true } } }
+        """.data(using: .utf8)!
+
+        struct Empty: Decodable {}
+        let envelope = try decoder.decode(Envelope<Empty>.self, from: json)
+
+        #expect(envelope.features.limits.maxGroupDurationDays == nil)
+        #expect(envelope.features.limits.maxOwnedGroups == 5)
+        #expect(envelope.features.limits.maxJoinedGroups == 5)
+        #expect(envelope.features.limits.maxGroupMembers == 200)
     }
 
     /// The 001 §9 example with every group-era field populated.
@@ -90,7 +111,7 @@ struct EnvelopeDecodingTests {
         { "data": {}, "features": { "subscriptionStatus": "free",
                       "limits": { "maxDevices": 10, "maxGeofences": 20, "historyDays": 90,
                                   "minSyncIntervalMinutes": 5, "locateRequestsPerDay": 100,
-                                  "maxActiveGroups": 5, "maxGroupMembers": 50,
+                                  "maxOwnedGroups": 5, "maxJoinedGroups": 4, "maxGroupMembers": 50,
                                   "maxGroupDurationDays": 30, "groupGraceDays": 7 },
                       "flags": { "pushToLocate": true, "geofencing": true, "historyReplay": true, "groups": true } } }
         """.data(using: .utf8)!
@@ -98,7 +119,8 @@ struct EnvelopeDecodingTests {
         struct Empty: Decodable {}
         let envelope = try decoder.decode(Envelope<Empty>.self, from: json)
 
-        #expect(envelope.features.limits.maxActiveGroups == 5)
+        #expect(envelope.features.limits.maxOwnedGroups == 5)
+        #expect(envelope.features.limits.maxJoinedGroups == 4)
         #expect(envelope.features.limits.maxGroupMembers == 50)
         #expect(envelope.features.limits.maxGroupDurationDays == 30)
         #expect(envelope.features.limits.groupGraceDays == 7)

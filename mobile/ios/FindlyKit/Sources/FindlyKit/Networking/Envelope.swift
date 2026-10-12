@@ -27,14 +27,18 @@ public struct PlanLimits: Decodable, Equatable {
     /// warning when this was tried) — so decode-from-JSON relies solely on the type being
     /// `Optional` (`decodeIfPresent`), and the `= nil` default for *direct* Swift construction
     /// lives on the explicit initializer below instead.
-    public let maxActiveGroups: Int?
+    /// 001 §9 (amended 2026-10-12, 000 §D21): caps over the caller's *active* groups, owned and
+    /// joined separately (`maxActiveGroups` is retired).
+    public let maxOwnedGroups: Int?
+    public let maxJoinedGroups: Int?
     public let maxGroupMembers: Int?
+    /// `nil` = no cap on a dated `endsAt` (001 §9, amended 2026-10-12).
     public let maxGroupDurationDays: Int?
     public let groupGraceDays: Int?
 
     public init(
         maxDevices: Int, maxGeofences: Int, historyDays: Int, minSyncIntervalMinutes: Int,
-        locateRequestsPerDay: Int, maxActiveGroups: Int? = nil, maxGroupMembers: Int? = nil,
+        locateRequestsPerDay: Int, maxOwnedGroups: Int? = nil, maxJoinedGroups: Int? = nil, maxGroupMembers: Int? = nil,
         maxGroupDurationDays: Int? = nil, groupGraceDays: Int? = nil
     ) {
         self.maxDevices = maxDevices
@@ -42,7 +46,8 @@ public struct PlanLimits: Decodable, Equatable {
         self.historyDays = historyDays
         self.minSyncIntervalMinutes = minSyncIntervalMinutes
         self.locateRequestsPerDay = locateRequestsPerDay
-        self.maxActiveGroups = maxActiveGroups
+        self.maxOwnedGroups = maxOwnedGroups
+        self.maxJoinedGroups = maxJoinedGroups
         self.maxGroupMembers = maxGroupMembers
         self.maxGroupDurationDays = maxGroupDurationDays
         self.groupGraceDays = groupGraceDays

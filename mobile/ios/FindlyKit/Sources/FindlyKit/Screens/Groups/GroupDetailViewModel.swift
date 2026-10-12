@@ -61,22 +61,37 @@ public final class GroupDetailViewModel: ObservableObject {
     /// Owner-only (001 §12.4) — `endsAt` untouched.
     public func rename(name: String) async {
         await mutateSummary { client in
-            try await client.updateGroup(groupId: self.groupId, name: name, endsAt: nil)
+            try await client.updateGroup(groupId: self.groupId, name: name, endsAt: .unchanged)
         }
     }
 
     /// Owner-only (001 §12.4). Extending a `grace`-state (`ended`) group reactivates it (005 §2.2).
     public func extend(endsAt: Date) async {
         await mutateSummary { client in
-            try await client.updateGroup(groupId: self.groupId, name: nil, endsAt: Self.iso8601Formatter.string(from: endsAt))
+            try await client.updateGroup(groupId: self.groupId, name: nil, endsAt: .set(Self.iso8601Formatter.string(from: endsAt)))
         }
     }
 
     /// Owner-only convenience — `endsAt <= now + 5 min` means "end the group now" (001 §12.4).
     public func endNow() async {
         await mutateSummary { client in
-            try await client.updateGroup(groupId: self.groupId, name: nil, endsAt: Self.iso8601Formatter.string(from: Date()))
+            try await client.updateGroup(groupId: self.groupId, name: nil, endsAt: .set(Self.iso8601Formatter.string(from: Date())))
         }
+    }
+
+    /// Owner-only (001 §12.4, 005 §2.5 item 5) — `PATCH endsAt: null`. On an `ended` (grace) group
+    /// this also reactivates it, subject to the server's `maxOwnedGroups` check.
+    public func removeEndDate() async {
+        await mutateSummary { client in
+            try await client.updateGroup(groupId: self.groupId, name: nil, endsAt: .clear)
+        }
+    }
+
+    /// `false` for a group without an end date (005 §2.5) — "Remove end date" is only offered when
+    /// there is one to remove.
+    public var hasEndDate: Bool {
+        if case .loaded(let detail) = state { return detail.endsAt != nil }
+        return false
     }
 
     /// Owner-only (001 §12.7) — the old code stops working instantly.

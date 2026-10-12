@@ -91,6 +91,9 @@ struct RootView: View {
     // bootstrap success" rule); the ordinary path keeps its existing "go to the new group's detail"
     // behavior. Same "remembered local state" pattern as `pendingGroupBootstrapDisplayName` above.
     @State private var groupBootstrapReturnsToOnboarding = false
+    /// I66 — the caller's plan limits from the last `GET /groups` envelope, so the create screen's
+    /// end-date picker is bounded by `maxGroupDurationDays` (005 §2.5 item 6).
+    @State private var groupPlanLimits: PlanLimits?
 
     /// specs/009-device-runtime.md §7 — owns the disclosure/prompt/banner ordering. `@StateObject`,
     /// not `@ObservedObject`: this view is reconstructed on every navigation (see this type's top
@@ -449,12 +452,14 @@ struct RootView: View {
                         pendingGroupBootstrapDisplayName = ""
                         groupBootstrapReturnsToOnboarding = false
                         coordinator.showGroupJoin()
-                    }
+                    },
+                    onLimitsLoaded: { limits in groupPlanLimits = limits }
                 )
             case .createGroup:
                 CreateGroupScreen(
                     viewModel: CreateGroupViewModel(apiClient: apiClient),
                     prefillDisplayName: pendingGroupBootstrapDisplayName,
+                    maxGroupDurationDays: groupPlanLimits?.maxGroupDurationDays,
                     onCreated: { group in
                         if groupBootstrapReturnsToOnboarding {
                             // specs/010 §2.2 — reached from Onboarding: reset to the Family Map
@@ -480,6 +485,7 @@ struct RootView: View {
                 GroupDetailScreen(
                     viewModel: GroupDetailViewModel(apiClient: apiClient, groupId: groupId),
                     joinLinkHost: joinLinkHost,
+                    maxGroupDurationDays: groupPlanLimits?.maxGroupDurationDays,
                     onSelectMap: { coordinator.showGroupMap(groupId: groupId) },
                     // specs/004 §2.5: unwind to the groups list rather than pushing a second copy
                     // of it — pushing would leave this just-left group sitting behind it, so back

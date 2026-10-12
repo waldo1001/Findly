@@ -54,8 +54,63 @@ struct GroupStateChipTests {
     }
 }
 
+struct GroupNoEndDateCopyTests {
+
+    @Test func warning_matches005Section2_5Item2Verbatim() {
+        #expect(GroupNoEndDateCopy.warningTitle == "This group has no end date.")
+        #expect(GroupNoEndDateCopy.warningBody == "Everyone in it keeps seeing each other's live location until you end or delete the group, or they leave it.")
+        #expect(GroupNoEndDateCopy.warning == "This group has no end date. Everyone in it keeps seeing each other's live location until you end or delete the group, or they leave it.")
+    }
+
+    @Test func policyNote_matches005Section2_5Item3Verbatim() {
+        #expect(GroupNoEndDateCopy.policyNote == "Applies only if you set an end date later.")
+    }
+
+    @Test func listLabel_isNoEndDate() {
+        #expect(GroupNoEndDateCopy.label == "No end date")
+    }
+}
+
+/// 005 §2.5 item 6 — lower bound now+1h always; upper bound only when the plan caps the horizon.
+struct GroupEndsAtBoundsTests {
+    private let now = Date(timeIntervalSince1970: 1_800_000_000)
+
+    @Test func lowerBound_isNowPlusOneHour() {
+        #expect(GroupEndsAtBounds.lowerBound(now: now) == now.addingTimeInterval(3600))
+    }
+
+    @Test func upperBound_nilWhenUncapped() {
+        #expect(GroupEndsAtBounds.upperBound(now: now, maxGroupDurationDays: nil) == nil)
+    }
+
+    @Test func upperBound_nowPlusDaysWhenCapped() {
+        #expect(GroupEndsAtBounds.upperBound(now: now, maxGroupDurationDays: 30) == now.addingTimeInterval(30 * 86400))
+    }
+
+    @Test func range_uncapped_isPartialFromLowerBound() {
+        let range = GroupEndsAtBounds.range(now: now, maxGroupDurationDays: nil)
+        #expect(range.contains(now.addingTimeInterval(400 * 86400)))
+        #expect(!range.contains(now.addingTimeInterval(1800)))
+    }
+
+    @Test func range_capped_excludesBeyondHorizon() {
+        let range = GroupEndsAtBounds.range(now: now, maxGroupDurationDays: 30)
+        #expect(range.contains(now.addingTimeInterval(29 * 86400)))
+        #expect(!range.contains(now.addingTimeInterval(31 * 86400)))
+        #expect(!range.contains(now.addingTimeInterval(1800)))
+    }
+
+    @Test func defaultEndsAt_isNowPlus24h() {
+        #expect(GroupEndsAtBounds.defaultEndsAt(now: now) == now.addingTimeInterval(86400))
+    }
+}
+
 struct GroupCountdownTests {
     private let iso = ISO8601DateFormatter()
+
+    @Test func text_nilEndsAt_isNoEndDate() {
+        #expect(GroupCountdown.text(from: nil) == "No end date")
+    }
 
     @Test func text_daysAndHoursRemaining() {
         let now = Date(timeIntervalSince1970: 1_700_000_000)
