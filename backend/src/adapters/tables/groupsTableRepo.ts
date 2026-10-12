@@ -15,6 +15,15 @@ import type {
 
 const META_ROW_KEY = "meta";
 const MEMBER_PREFIX = "member:";
+// updateGroupMeta's guarded-Replace retry budget when clearing endsAt (same bound and idiom as
+// usersTableRepo.clearFamilyMembership / the Usage increment loop).
+const MAX_RETRIES = 3;
+
+// `endsAt` is nullable (002 §2.10, 005 §2.5) and Table Storage has no null type: a null is
+// stored as an ABSENT property, so an absent/null value reads back as `null`.
+function readEndsAt(entity: Record<string, unknown>): string | null {
+  return entity.endsAt != null ? String(entity.endsAt) : null;
+}
 
 function isNotFound(err: unknown): boolean {
   return err instanceof RestError && err.statusCode === 404;
@@ -34,7 +43,8 @@ export class TableGroupRepo implements GroupRepo {
       name: meta.name,
       ownerUserId: meta.ownerUserId,
       createdAt: meta.createdAt,
-      endsAt: meta.endsAt,
+      // Omit the property for a group without an end date — never write an explicit null.
+      ...(meta.endsAt !== null ? { endsAt: meta.endsAt } : {}),
       expiryPolicy: meta.expiryPolicy,
       code: meta.code,
     });
@@ -48,7 +58,7 @@ export class TableGroupRepo implements GroupRepo {
         name: String(entity.name),
         ownerUserId: String(entity.ownerUserId),
         createdAt: String(entity.createdAt),
-        endsAt: String(entity.endsAt),
+        endsAt: readEndsAt(entity),
         expiryPolicy: entity.expiryPolicy as GroupExpiryPolicy,
         code: String(entity.code),
         etag: entity.etag,
@@ -105,17 +115,56 @@ export class TableGroupRepo implements GroupRepo {
     groupId: string,
     patch: Partial<Pick<GroupMeta, "name" | "endsAt" | "code">>,
   ): Promise<GroupMeta> {
-    await this.client.updateEntity({ partitionKey: groupId, rowKey: META_ROW_KEY, ...patch }, "Merge");
+    if (patch.endsAt === null) {
+      await this.clearEndsAt(groupId, patch);
+    } else {
+      await this.client.updateEntity({ partitionKey: groupId, rowKey: META_ROW_KEY, ...patch }, "Merge");
+    }
     const entity = await this.client.getEntity(groupId, META_ROW_KEY);
     return {
       groupId,
       name: String(entity.name),
       ownerUserId: String(entity.ownerUserId),
       createdAt: String(entity.createdAt),
-      endsAt: String(entity.endsAt),
+      endsAt: readEndsAt(entity),
       expiryPolicy: entity.expiryPolicy as GroupExpiryPolicy,
       code: String(entity.code),
     };
+  }
+
+  /**
+   * Removes the end date. A Merge cannot do this: the SDK drops null-valued properties from the
+   * payload, so the old date would silently survive (the B21 trap). Instead: read, then an
+   * ETag-guarded Replace carrying every column except `endsAt` (plus any name/code in the same
+   * patch), retried on a concurrent write. If the Groups meta schema ever gains a column, add
+   * it to the Replace payload here too — Replace drops anything not explicitly included.
+   */
+  private async clearEndsAt(
+    groupId: string,
+    patch: Partial<Pick<GroupMeta, "name" | "endsAt" | "code">>,
+  ): Promise<void> {
+    for (let attempt = 0; attempt < MAX_RETRIES; attempt += 1) {
+      const entity = await this.client.getEntity(groupId, META_ROW_KEY);
+      try {
+        await this.client.updateEntity(
+          {
+            partitionKey: groupId,
+            rowKey: META_ROW_KEY,
+            name: patch.name ?? String(entity.name),
+            ownerUserId: String(entity.ownerUserId),
+            createdAt: String(entity.createdAt),
+            expiryPolicy: entity.expiryPolicy as GroupExpiryPolicy,
+            code: patch.code ?? String(entity.code),
+          },
+          "Replace",
+          { etag: entity.etag },
+        );
+        return;
+      } catch (err) {
+        if (isPreconditionFailed(err) && attempt < MAX_RETRIES - 1) continue;
+        throw err; // exhausted (or not found): the caller asked for an owner-visible change.
+      }
+    }
   }
 
   async deleteGroupMeta(groupId: string): Promise<void> {

@@ -46,7 +46,7 @@ interface SeededGroup {
 
 async function seedGroup(
   deps: SweepGroupsDeps,
-  overrides: Partial<GroupMeta> & { endsAt: string; expiryPolicy: GroupMeta["expiryPolicy"] },
+  overrides: Partial<GroupMeta> & { endsAt: string | null; expiryPolicy: GroupMeta["expiryPolicy"] },
   opts: { extraMembers?: number; withLocation?: boolean } = {},
 ): Promise<SeededGroup> {
   const groupId = testGroupId();
@@ -233,6 +233,33 @@ describe("integration/groupSweeper — bucket walk + physical deletion against r
     });
     // The group itself is untouched — only its index row moved.
     expect(await deps.groupRepo.getGroupMeta(seeded.meta.groupId)).not.toBeNull();
+  }, 30_000);
+
+  it("stale expiry row of a group whose end date was removed (REAL Table Storage endsAt absent -> null): only the row is deleted, the live group is untouched (005 §2.5, 002 §4.1 step 2)", async () => {
+    const now = new Date("2026-07-21T10:00:00Z");
+    const deps = buildRealDeps(now);
+    // Start dated, then remove the end date through the real adapter (guarded Replace) — the
+    // sweeper must read the genuinely-absent property as null, whatever the policy.
+    const seeded = await seedGroup(
+      deps,
+      { endsAt: "2026-07-20T00:00:00Z", expiryPolicy: "archive" },
+      { extraMembers: 1, withLocation: true },
+    );
+    const staleBucket = "2026-07-20";
+    await seedExpiryRow(deps, staleBucket, seeded.meta.groupId);
+    await deps.groupRepo.updateGroupMeta(seeded.meta.groupId, { endsAt: null });
+
+    const result = await sweepGroups(deps);
+
+    expect(result.staleRowsRemoved).toContain(seeded.meta.groupId);
+    expect(result.archived).not.toContain(seeded.meta.groupId);
+    expect(result.hardDeleted).not.toContain(seeded.meta.groupId);
+    expect(result.errors).toEqual([]);
+    expect(await findRow(deps, staleBucket, seeded.meta.groupId)).toBeUndefined();
+    expect((await deps.groupRepo.getGroupMeta(seeded.meta.groupId))?.endsAt).toBeNull();
+    expect(await deps.groupRepo.listMembers(seeded.meta.groupId)).toHaveLength(2);
+    expect(await deps.groupCodeRepo.getCode(seeded.meta.code)).not.toBeNull();
+    expect(await deps.groupLastKnownRepo.listByGroup(seeded.meta.groupId)).toHaveLength(1);
   }, 30_000);
 
   it("SECURITY: TOCTOU race — a concurrent owner PATCH-extend landing between the sweeper's read and its delete is detected via a REAL ETag conflict, and the row is skipped, not deleted", async () => {
