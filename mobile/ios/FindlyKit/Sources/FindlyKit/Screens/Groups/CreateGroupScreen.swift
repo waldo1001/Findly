@@ -81,9 +81,11 @@ public struct CreateGroupScreen: View {
                 Text(expiryPolicy.policyCopy)
                     .font(theme.typography.bodyMedium.font)
                     .foregroundColor(theme.colors.onSurface.opacity(0.7))
-                Text(GroupNoEndDateCopy.policyNote)
-                    .font(theme.typography.labelSmall.font)
-                    .foregroundColor(theme.colors.onSurface.opacity(0.7))
+                if noEndDate {
+                    Text(GroupNoEndDateCopy.policyNote)
+                        .font(theme.typography.labelSmall.font)
+                        .foregroundColor(theme.onSurfaceMuted)
+                }
                 FindlyTextField("Your name for this group", text: $displayName, placeholder: "Eric")
                 FindlyButton("Create group") {
                     Task {
@@ -120,7 +122,7 @@ public struct CreateGroupScreen: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(theme.spacing.md)
             .background(theme.colors.warning.opacity(0.18))
-            .overlay(RoundedRectangle(cornerRadius: 8).stroke(theme.colors.warning, lineWidth: 1))
+            .clipShape(RoundedRectangle(cornerRadius: theme.corner.sm))
             .accessibilityElement(children: .combine)
     }
 

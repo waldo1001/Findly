@@ -87,13 +87,6 @@ public final class GroupDetailViewModel: ObservableObject {
         }
     }
 
-    /// `false` for a group without an end date (005 §2.5) — "Remove end date" is only offered when
-    /// there is one to remove.
-    public var hasEndDate: Bool {
-        if case .loaded(let detail) = state { return detail.endsAt != nil }
-        return false
-    }
-
     /// Owner-only (001 §12.7) — the old code stops working instantly.
     public func rotateCode() async {
         guard case .loaded(let detail) = state else { return }

@@ -170,19 +170,6 @@ struct GroupDetailViewModelTests {
         #expect(viewModel.lastActionError == "You already have the maximum number of active groups you created. End or delete one first.")
     }
 
-    @Test func hasEndDate_reflectsLoadedEndsAt() async {
-        let api = FakeAPIClient()
-        api.getGroupHandler = { _ in
-            TestFeatures.envelope(GroupDetail(
-                groupId: "grp_1", name: "Family+", endsAt: nil, expiryPolicy: "delete", state: "active", role: "owner",
-                memberCount: 1, code: "7F3K9QRZ", createdAt: "2026-07-21T10:00:00Z", members: []
-            ))
-        }
-        let viewModel = GroupDetailViewModel(apiClient: api, groupId: "grp_1")
-        await viewModel.load()
-        #expect(viewModel.hasEndDate == false)
-    }
-
     @Test func rotateCode_updatesCodeButPreservesRoster() async {
         let api = FakeAPIClient()
         api.getGroupHandler = { _ in TestFeatures.envelope(self.makeDetail()) }

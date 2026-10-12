@@ -87,19 +87,6 @@ struct GroupEndsAtBoundsTests {
         #expect(GroupEndsAtBounds.upperBound(now: now, maxGroupDurationDays: 30) == now.addingTimeInterval(30 * 86400))
     }
 
-    @Test func range_uncapped_isPartialFromLowerBound() {
-        let range = GroupEndsAtBounds.range(now: now, maxGroupDurationDays: nil)
-        #expect(range.contains(now.addingTimeInterval(400 * 86400)))
-        #expect(!range.contains(now.addingTimeInterval(1800)))
-    }
-
-    @Test func range_capped_excludesBeyondHorizon() {
-        let range = GroupEndsAtBounds.range(now: now, maxGroupDurationDays: 30)
-        #expect(range.contains(now.addingTimeInterval(29 * 86400)))
-        #expect(!range.contains(now.addingTimeInterval(31 * 86400)))
-        #expect(!range.contains(now.addingTimeInterval(1800)))
-    }
-
     @Test func defaultEndsAt_isNowPlus24h() {
         #expect(GroupEndsAtBounds.defaultEndsAt(now: now) == now.addingTimeInterval(86400))
     }

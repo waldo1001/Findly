@@ -188,6 +188,12 @@ struct RootView: View {
                 onNotNow: { permissionFlow.declineDisclosure() }
             )
             .environment(\.theme, colorScheme == .dark ? .dark : .light)
+        // I66 — plan limits are per-session: drop them whenever the app lands on sign-in (every
+        // sign-out / end-of-session path routes there), so a different user signing in within the
+        // same process never sees the previous user's picker cap.
+        .onChange(of: coordinator.route) { route in
+            if route == .signIn { groupPlanLimits = nil }
+        }
             // The cover is presented outside the main hierarchy, so it does not inherit the back
             // action — but clear it explicitly for the same reason `GeofenceEditorView` does
             // (specs/004 §2.5): a back chevron here would navigate the app behind the cover.

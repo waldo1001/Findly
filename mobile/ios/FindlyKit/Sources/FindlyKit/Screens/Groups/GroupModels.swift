@@ -121,23 +121,8 @@ public enum GroupEndsAtBounds {
         maxGroupDurationDays.map { now.addingTimeInterval(TimeInterval($0) * 86400) }
     }
 
-    /// For `DatePicker(in:)`, which takes a `PartialRangeFrom` or a `ClosedRange`: both are
-    /// type-erased here into a single predicate-bearing value.
-    public static func range(now: Date = Date(), maxGroupDurationDays: Int?) -> GroupEndsAtRange {
-        GroupEndsAtRange(lower: lowerBound(now: now), upper: upperBound(now: now, maxGroupDurationDays: maxGroupDurationDays))
-    }
-
     /// The dated default stays now + 24 h (005 §2.5 item 1).
     public static func defaultEndsAt(now: Date = Date()) -> Date {
         now.addingTimeInterval(24 * 3600)
-    }
-}
-
-public struct GroupEndsAtRange: Equatable {
-    public let lower: Date
-    public let upper: Date?
-
-    public func contains(_ date: Date) -> Bool {
-        date >= lower && (upper.map { date <= $0 } ?? true)
     }
 }
