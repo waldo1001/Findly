@@ -65,6 +65,13 @@ private fun ComponentGallery(modifier: Modifier = Modifier) {
             FindlyStatusChip(label = "Code: ABC123", tone = FindlyStatusTone.Success)
         }
 
+        FindlySectionHeader(title = "Warning note")
+        FindlyWarningNote(
+            lead = "This group has no end date.",
+            body = "Everyone in it keeps seeing each other's live location until you end or delete the group, or they leave it.",
+        )
+        FindlyWarningNote(body = "A warning without a bold lead.")
+
         FindlySectionHeader(title = "Map marker bubbles")
         FindlyMapMarkerBubble(label = "Noor", state = FindlyMapMarkerState.Online)
         FindlyMapMarkerBubble(label = "Sam", state = FindlyMapMarkerState.Stale, staleAgeText = "24m")
@@ -137,7 +144,7 @@ private fun ComponentGallery(modifier: Modifier = Modifier) {
     }
 }
 
-@Preview(name = "Component gallery — light", showBackground = true, heightDp = 3200)
+@Preview(name = "Component gallery — light", showBackground = true, heightDp = 3500)
 @Composable
 private fun ComponentGalleryLightPreview() {
     FindlyTheme(darkTheme = false) {
@@ -145,7 +152,7 @@ private fun ComponentGalleryLightPreview() {
     }
 }
 
-@Preview(name = "Component gallery — dark", showBackground = true, heightDp = 3200)
+@Preview(name = "Component gallery — dark", showBackground = true, heightDp = 3500)
 @Composable
 private fun ComponentGalleryDarkPreview() {
     FindlyTheme(darkTheme = true) {

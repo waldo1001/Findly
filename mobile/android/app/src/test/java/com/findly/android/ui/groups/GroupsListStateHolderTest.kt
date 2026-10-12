@@ -38,7 +38,8 @@ class GroupsListStateHolderTest {
         assertEquals(1, state.groups.size)
         assertEquals("Festival crew", state.groups.single().name)
         assertTrue(state.hasFamily)
-        assertEquals(5, state.limits?.maxActiveGroups)
+        assertEquals(5, state.limits?.maxOwnedGroups)
+        assertEquals(5, state.limits?.maxJoinedGroups)
     }
 
     @Test

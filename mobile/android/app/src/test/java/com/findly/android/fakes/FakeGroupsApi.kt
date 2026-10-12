@@ -16,7 +16,7 @@ import kotlinx.coroutines.CompletableDeferred
  * (specs/003-android-client.md §12.2, §14/§16). */
 class FakeGroupsApi : GroupsApi {
 
-    data class CreateGroupCall(val name: String, val endsAt: String, val expiryPolicy: String, val displayName: String?)
+    data class CreateGroupCall(val name: String, val endsAt: String?, val expiryPolicy: String, val displayName: String?)
 
     val createGroupCalls = mutableListOf<CreateGroupCall>()
     val getGroupCalls = mutableListOf<String>()
@@ -46,7 +46,7 @@ class FakeGroupsApi : GroupsApi {
 
     override suspend fun createGroup(
         name: String,
-        endsAt: String,
+        endsAt: String?,
         expiryPolicy: String,
         displayName: String?,
     ): ApiResult<GroupDto> {
@@ -110,24 +110,33 @@ class FakeGroupsApi : GroupsApi {
     }
 }
 
-fun sampleGroupDto(role: String = "owner"): GroupDto = GroupDto(
+fun sampleGroupDto(
+    role: String = "owner",
+    endsAt: String? = "2026-08-02T22:00:00Z",
+    state: String = "active",
+): GroupDto = GroupDto(
     groupId = "grp_9J2Kq7Lm3NpR5sTvWxYz",
     name = "Festival crew",
-    endsAt = "2026-08-02T22:00:00Z",
+    endsAt = endsAt,
     expiryPolicy = "delete",
-    state = "active",
+    state = state,
     role = role,
     memberCount = 1,
     code = "7F3K9QRZ",
     createdAt = "2026-07-21T10:00:00Z",
 )
 
-fun sampleGroupDetailDto(role: String = "owner", members: List<GroupMemberDto>? = null): GroupDetailDto = GroupDetailDto(
+fun sampleGroupDetailDto(
+    role: String = "owner",
+    members: List<GroupMemberDto>? = null,
+    endsAt: String? = "2026-08-02T22:00:00Z",
+    state: String = "active",
+): GroupDetailDto = GroupDetailDto(
     groupId = "grp_9J2Kq7Lm3NpR5sTvWxYz",
     name = "Festival crew",
-    endsAt = "2026-08-02T22:00:00Z",
+    endsAt = endsAt,
     expiryPolicy = "delete",
-    state = "active",
+    state = state,
     role = role,
     memberCount = 1,
     code = "7F3K9QRZ",

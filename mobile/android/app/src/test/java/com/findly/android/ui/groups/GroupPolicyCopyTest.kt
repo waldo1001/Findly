@@ -40,4 +40,19 @@ class GroupPolicyCopyTest {
     fun `all three policies are exposed for a picker`() {
         assertEquals(listOf("delete", "grace", "archive"), GroupPolicyCopy.ALL_POLICIES)
     }
+
+    @Test
+    fun `no-end-date warning and policy note are verbatim from 005 2_5 items 2 and 3`() {
+        assertEquals("This group has no end date.", GroupPolicyCopy.NO_END_DATE_WARNING_LEAD)
+        assertEquals(
+            "Everyone in it keeps seeing each other's live location until you end or delete the group, or they leave it.",
+            GroupPolicyCopy.NO_END_DATE_WARNING_BODY,
+        )
+        assertEquals(
+            "This group has no end date. Everyone in it keeps seeing each other's live location " +
+                "until you end or delete the group, or they leave it.",
+            GroupPolicyCopy.NO_END_DATE_WARNING,
+        )
+        assertEquals("Applies only if you set an end date later.", GroupPolicyCopy.NO_END_DATE_POLICY_NOTE)
+    }
 }

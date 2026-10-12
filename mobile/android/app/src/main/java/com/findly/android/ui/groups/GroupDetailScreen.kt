@@ -15,7 +15,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -24,7 +27,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
@@ -49,6 +54,8 @@ import java.time.Instant
 private sealed class PendingGroupAction {
     data class Rename(val newName: String) : PendingGroupAction()
     data class Extend(val endsAtIso: String, val label: String) : PendingGroupAction()
+    data class SetEndDate(val endsAtMillis: Long, val label: String) : PendingGroupAction()
+    data object RemoveEndDate : PendingGroupAction()
     data object Rotate : PendingGroupAction()
     data class Kick(val userId: String, val displayName: String) : PendingGroupAction()
     data object Delete : PendingGroupAction()
@@ -108,6 +115,8 @@ fun GroupDetailRoute(
         joinLinkHost = joinLinkHost,
         onRename = viewModel::rename,
         onExtend = viewModel::updateEndsAt,
+        onSetEndDate = viewModel::setEndDate,
+        onRemoveEndDate = viewModel::removeEndDate,
         onRotateCode = viewModel::rotateCode,
         onKickMember = viewModel::kickMember,
         onDeleteGroup = viewModel::deleteGroup,
@@ -126,6 +135,8 @@ fun GroupDetailScreen(
     modifier: Modifier = Modifier,
     onRename: (String) -> Unit = {},
     onExtend: (String) -> Unit = {},
+    onRemoveEndDate: () -> Unit = {},
+    onSetEndDate: (endsAtMillis: Long) -> Unit = {},
     onRotateCode: () -> Unit = {},
     onKickMember: (String) -> Unit = {},
     onDeleteGroup: () -> Unit = {},
@@ -136,6 +147,9 @@ fun GroupDetailScreen(
     val context = LocalContext.current
     var pendingAction by remember { mutableStateOf<PendingGroupAction?>(null) }
     var renameDraft by remember { mutableStateOf("") }
+    var showEndDatePicker by remember { mutableStateOf(false) }
+    var endHour by remember { mutableStateOf("22") }
+    var endMinute by remember { mutableStateOf("00") }
 
     Column(modifier = modifier.fillMaxSize()) {
         FindlyTopBar(title = if (state is GroupDetailUiState.Content) state.name else "Group")
@@ -246,6 +260,21 @@ fun GroupDetailScreen(
                                         onClick = { pendingAction = PendingGroupAction.Rotate },
                                     )
                                 }
+                                // 005 §2.5 item 5: "Set an end date" also works from a no-end group.
+                                FindlyButton(
+                                    text = "Set an end date",
+                                    enabled = !state.isMutating && state.state != "archived",
+                                    style = FindlyButtonStyle.Secondary,
+                                    onClick = { showEndDatePicker = true },
+                                )
+                                if (state.canRemoveEndDate) {
+                                    FindlyButton(
+                                        text = "Remove end date",
+                                        enabled = !state.isMutating,
+                                        style = FindlyButtonStyle.Secondary,
+                                        onClick = { pendingAction = PendingGroupAction.RemoveEndDate },
+                                    )
+                                }
                                 FindlyButton(
                                     text = "End group now",
                                     enabled = !state.isMutating,
@@ -316,6 +345,54 @@ fun GroupDetailScreen(
         }
     }
 
+    if (showEndDatePicker && !LocalAppLocked.current) {
+        val pickerState = rememberDatePickerState()
+        DatePickerDialog(
+            onDismissRequest = { showEndDatePicker = false },
+            confirmButton = {
+                FindlyButton(
+                    text = "OK",
+                    onClick = {
+                        pickerState.selectedDateMillis?.let { picked ->
+                            // Confirm first so the user sees the resolved UTC instant; bounds
+                            // (1 h floor, plan cap) are enforced in GroupDetailStateHolder.setEndDate.
+                            val millis = combineDateAndTime(picked, endHour.toIntOrNull() ?: 0, endMinute.toIntOrNull() ?: 0)
+                            pendingAction = PendingGroupAction.SetEndDate(
+                                millis,
+                                "set this group's end to ${Instant.ofEpochMilli(millis)} (UTC)",
+                            )
+                        }
+                        showEndDatePicker = false
+                    },
+                )
+            },
+            dismissButton = { FindlyButton(text = "Cancel", onClick = { showEndDatePicker = false }, style = FindlyButtonStyle.Secondary) },
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(FindlyTheme.spacing.sm)) {
+                DatePicker(state = pickerState)
+                Row(
+                    modifier = Modifier.padding(horizontal = FindlyTheme.spacing.md),
+                    horizontalArrangement = Arrangement.spacedBy(FindlyTheme.spacing.sm),
+                ) {
+                    FindlyTextField(
+                        value = endHour,
+                        onValueChange = { if (it.length <= 2) endHour = it.filter(Char::isDigit) },
+                        label = "Hour (0-23, UTC)",
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.weight(1f),
+                    )
+                    FindlyTextField(
+                        value = endMinute,
+                        onValueChange = { if (it.length <= 2) endMinute = it.filter(Char::isDigit) },
+                        label = "Minute (0-59)",
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+            }
+        }
+    }
+
     val action = pendingAction
     if (action != null && !LocalAppLocked.current) {
         GroupActionConfirmDialog(
@@ -324,6 +401,8 @@ fun GroupDetailScreen(
                 when (action) {
                     is PendingGroupAction.Rename -> onRename(action.newName)
                     is PendingGroupAction.Extend -> onExtend(action.endsAtIso)
+                    is PendingGroupAction.SetEndDate -> onSetEndDate(action.endsAtMillis)
+                    is PendingGroupAction.RemoveEndDate -> onRemoveEndDate()
                     is PendingGroupAction.Rotate -> onRotateCode()
                     is PendingGroupAction.Kick -> onKickMember(action.userId)
                     is PendingGroupAction.Delete -> onDeleteGroup()
@@ -344,6 +423,9 @@ private fun GroupActionConfirmDialog(
     val message = when (action) {
         is PendingGroupAction.Rename -> "Rename this group to \"${action.newName}\"?"
         is PendingGroupAction.Extend -> "Are you sure you want to ${action.label}?"
+        is PendingGroupAction.SetEndDate -> "Are you sure you want to ${action.label}?"
+        // 005 §2.5 item 5: the same warning text as the create screen.
+        is PendingGroupAction.RemoveEndDate -> "Remove the end date? ${GroupPolicyCopy.NO_END_DATE_WARNING}"
         is PendingGroupAction.Rotate -> "Rotate the join code? The old code will stop working immediately."
         is PendingGroupAction.Kick -> "Remove ${action.displayName} from this group?"
         is PendingGroupAction.Delete -> "Delete this group? Everything — members, positions, the join code — is removed immediately and cannot be undone."

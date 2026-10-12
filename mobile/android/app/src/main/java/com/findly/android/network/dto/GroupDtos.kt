@@ -1,15 +1,23 @@
 package com.findly.android.network.dto
 
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonPrimitive
 
 // 001-api-contract.md §12 — Groups (temporary; product model in specs/005-temporary-groups.md).
 
 /** §12.1 request. `displayName` is REQUIRED only when the caller has no profile yet (§1.5.3
- * bootstrap) — optional otherwise, defaulting server-side to the profile's own (001 §12.1). */
+ * bootstrap) — optional otherwise, defaulting server-side to the profile's own (001 §12.1).
+ *
+ * [endsAt] is `null` for a group without an end date (005 §2.5) and deliberately has **no default
+ * value**: `FindlyJson` has `encodeDefaults = false`, so a defaulted `null` would be dropped from
+ * the wire and the backend answers 400 for a missing `endsAt` key (an omission must never silently
+ * create a group that runs forever). Without a default the key is always serialized. */
 @Serializable
 data class CreateGroupRequestDto(
     val name: String,
-    val endsAt: String,
+    val endsAt: String?,
     val expiryPolicy: String,
     val displayName: String? = null,
 )
@@ -22,7 +30,8 @@ data class CreateGroupRequestDto(
 data class GroupDto(
     val groupId: String,
     val name: String,
-    val endsAt: String,
+    /** `null` = no end date (005 §2.5). */
+    val endsAt: String?,
     val expiryPolicy: String,
     val state: String,
     val role: String,
@@ -53,7 +62,8 @@ data class GroupMemberDto(
 data class GroupDetailDto(
     val groupId: String,
     val name: String,
-    val endsAt: String,
+    /** `null` = no end date (005 §2.5). */
+    val endsAt: String?,
     val expiryPolicy: String,
     val state: String,
     val role: String,
@@ -64,16 +74,29 @@ data class GroupDetailDto(
 )
 
 /** §12.4 request — at least one field. [requireAtLeastOneField] enforces this client-side before
- * the call is made, mirroring [UpdateMemberRequestDto]/[UpdateDeviceRequestDto]. */
+ * the call is made, mirroring [UpdateMemberRequestDto]/[UpdateDeviceRequestDto].
+ *
+ * **Absent vs. present-null (001 §12.4):** an absent `endsAt` key leaves the end date unchanged, a
+ * key present with `null` removes it (005 §2.5). A plain `String?` cannot express both, and with
+ * `encodeDefaults = false` a defaulted null is never sent. So [endsAt] is a [JsonElement]?:
+ * Kotlin `null` (the default) = key omitted; [JsonNull] = key sent as JSON `null`; a
+ * [JsonPrimitive] string = an ISO instant. Build instances with [rename], [setEndsAt] and
+ * [removeEndDate] rather than the constructor. */
 @Serializable
 data class UpdateGroupRequestDto(
     val name: String? = null,
-    val endsAt: String? = null,
+    val endsAt: JsonElement? = null,
 ) {
     fun requireAtLeastOneField(): UpdateGroupRequestDto = apply {
         require(name != null || endsAt != null) {
             "UpdateGroupRequestDto requires at least one of name/endsAt (001 §12.4)"
         }
+    }
+
+    companion object {
+        fun rename(name: String) = UpdateGroupRequestDto(name = name)
+        fun setEndsAt(endsAtIso: String) = UpdateGroupRequestDto(endsAt = JsonPrimitive(endsAtIso))
+        fun removeEndDate() = UpdateGroupRequestDto(endsAt = JsonNull)
     }
 }
 

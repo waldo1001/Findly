@@ -32,6 +32,7 @@ class GroupDetailStateHolder(
     private val groupId: String,
     private val groupsApi: GroupsApi,
     scope: CoroutineScope,
+    private val clock: () -> Long = System::currentTimeMillis,
 ) {
     private val _state = MutableStateFlow<GroupDetailUiState>(GroupDetailUiState.Loading)
     val state: StateFlow<GroupDetailUiState> = _state.asStateFlow()
@@ -43,19 +44,46 @@ class GroupDetailStateHolder(
     suspend fun load() {
         _state.value = GroupDetailUiState.Loading
         when (val result = groupsApi.getGroup(groupId)) {
-            is ApiResult.Success -> _state.value = result.data.toUi()
+            is ApiResult.Success -> _state.value = result.data.toUi(result.features?.limits?.maxGroupDurationDays)
             is ApiResult.Failure -> _state.value = result.error.toDetailState()
         }
     }
 
     /** §12.4 — owner-only; name only. */
-    suspend fun rename(name: String) = mutateGroup { groupsApi.updateGroup(groupId, UpdateGroupRequestDto(name = name)) }
+    suspend fun rename(name: String) = mutateGroup { groupsApi.updateGroup(groupId, UpdateGroupRequestDto.rename(name)) }
 
     /** §12.4 — owner-only; `endsAt` only. Extending a `grace`-state group reactivates it (005
      * §2.2); as a convenience, `endsAt ≤ now + 5 min` ends the group now (both server-side rules,
      * nothing special needed here). */
     suspend fun updateEndsAt(endsAtIso: String) =
-        mutateGroup { groupsApi.updateGroup(groupId, UpdateGroupRequestDto(endsAt = endsAtIso)) }
+        mutateGroup { groupsApi.updateGroup(groupId, UpdateGroupRequestDto.setEndsAt(endsAtIso)) }
+
+    /** The "Set an end date" picker's entry point (005 §2.5 items 5-6): validates [endsAtMillis]
+     * with the same rules as the create screen ([validateEndsAt]: at least now + 1 h, at most the
+     * plan cap when non-null) before any network call; a failure sets `mutationError`. Without this
+     * floor a time within 5 min of now would silently end the group (001 §12.4's convenience). The
+     * floor is deliberately NOT on [updateEndsAt], which "End group now" calls with now + 60 s. */
+    suspend fun setEndDate(endsAtMillis: Long) {
+        val current = _state.value as? GroupDetailUiState.Content ?: return
+        if (current.isOwner) {
+            val problem = validateEndsAt(endsAtMillis, clock(), current.maxGroupDurationDays)
+            if (problem != null) {
+                _state.value = current.copy(mutationError = problem)
+                return
+            }
+        }
+        updateEndsAt(java.time.Instant.ofEpochMilli(endsAtMillis).toString())
+    }
+
+    /** §12.4 `{"endsAt": null}` — owner-only "Remove end date" on a dated `active`/`ended` group
+     * (005 §2.5 item 5). On an `ended` group it also reactivates (subject to the server's
+     * `maxOwnedGroups` check). An owner whose [GroupDetailUiState.Content.canRemoveEndDate] is false
+     * returns without a call; a non-owner gets the standard not-owner error via [mutateGroup]. */
+    suspend fun removeEndDate() {
+        val current = _state.value as? GroupDetailUiState.Content ?: return
+        if (current.isOwner && !current.canRemoveEndDate) return
+        mutateGroup { groupsApi.updateGroup(groupId, UpdateGroupRequestDto.removeEndDate()) }
+    }
 
     private suspend fun mutateGroup(call: suspend () -> ApiResult<GroupDto>) {
         val current = _state.value as? GroupDetailUiState.Content ?: return
@@ -142,7 +170,7 @@ class GroupDetailStateHolder(
     }
 }
 
-private fun GroupDetailDto.toUi(): GroupDetailUiState.Content = GroupDetailUiState.Content(
+private fun GroupDetailDto.toUi(maxGroupDurationDays: Int?): GroupDetailUiState.Content = GroupDetailUiState.Content(
     groupId = groupId,
     name = name,
     endsAt = endsAt,
@@ -153,6 +181,7 @@ private fun GroupDetailDto.toUi(): GroupDetailUiState.Content = GroupDetailUiSta
     code = code,
     createdAt = createdAt,
     members = members?.map { it.toUi() },
+    maxGroupDurationDays = maxGroupDurationDays,
 )
 
 private fun GroupMemberDto.toUi(): GroupMemberUi = GroupMemberUi(

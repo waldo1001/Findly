@@ -289,7 +289,7 @@ class FindlyApiClient(
 
     override suspend fun createGroup(
         name: String,
-        endsAt: String,
+        endsAt: String?,
         expiryPolicy: String,
         displayName: String?,
     ): ApiResult<GroupDto> =

@@ -16,7 +16,8 @@ fun defaultFeatures(
     historyDays: Int = 90,
     minSyncIntervalMinutes: Int = 5,
     locateRequestsPerDay: Int = 100,
-    maxActiveGroups: Int? = null,
+    maxOwnedGroups: Int? = null,
+    maxJoinedGroups: Int? = null,
     maxGroupMembers: Int? = null,
     maxGroupDurationDays: Int? = null,
     groupGraceDays: Int? = null,
@@ -29,7 +30,8 @@ fun defaultFeatures(
         historyDays = historyDays,
         minSyncIntervalMinutes = minSyncIntervalMinutes,
         locateRequestsPerDay = locateRequestsPerDay,
-        maxActiveGroups = maxActiveGroups,
+        maxOwnedGroups = maxOwnedGroups,
+        maxJoinedGroups = maxJoinedGroups,
         maxGroupMembers = maxGroupMembers,
         maxGroupDurationDays = maxGroupDurationDays,
         groupGraceDays = groupGraceDays,
@@ -40,12 +42,14 @@ fun defaultFeatures(
 /** A5 convenience: the same fixture with the specs/005 §4 free-plan group limits populated and
  * `flags.groups = true` — the shape a groups-screen test normally wants. */
 fun groupsFeatures(
-    maxActiveGroups: Int = 5,
+    maxOwnedGroups: Int = 5,
+    maxJoinedGroups: Int = 5,
     maxGroupMembers: Int = 50,
-    maxGroupDurationDays: Int = 30,
+    maxGroupDurationDays: Int? = 30,
     groupGraceDays: Int = 7,
 ): Features = defaultFeatures(
-    maxActiveGroups = maxActiveGroups,
+    maxOwnedGroups = maxOwnedGroups,
+    maxJoinedGroups = maxJoinedGroups,
     maxGroupMembers = maxGroupMembers,
     maxGroupDurationDays = maxGroupDurationDays,
     groupGraceDays = groupGraceDays,

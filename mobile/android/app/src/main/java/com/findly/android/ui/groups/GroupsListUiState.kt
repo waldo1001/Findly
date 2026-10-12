@@ -7,7 +7,8 @@ import com.findly.android.ui.onboarding.OnboardingVariant
 data class GroupSummaryUi(
     val groupId: String,
     val name: String,
-    val endsAt: String,
+    /** `null` = no end date (005 §2.5). */
+    val endsAt: String?,
     val expiryPolicy: String,
     val state: String,
     val role: String,

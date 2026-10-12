@@ -11,12 +11,16 @@ import java.time.Instant
  */
 object GroupCountdownFormatter {
 
-    /** Renders the time remaining until [endsAtIso], relative to [nowIso]. `"Ended"` once
+    /** What a `null` `endsAt` renders as (005 §2.5 item 4). */
+    const val NO_END_DATE = "No end date"
+
+    /** Renders the time remaining until [endsAtIso] (`null` = [NO_END_DATE]), relative to [nowIso]. `"Ended"` once
      * [nowIso] is at or past [endsAtIso] — this is a display label only, never the authoritative
      * `state` (005 §2.2 owns that; a group can still be `"active"` server-side for a few seconds
      * after this flips to `"Ended"` on-device due to clock granularity, which is harmless — the
      * next `refresh()` reconciles it). */
-    fun format(endsAtIso: String, nowIso: String): String {
+    fun format(endsAtIso: String?, nowIso: String): String {
+        if (endsAtIso == null) return NO_END_DATE // 005 §2.5 item 4: never empty, "Ended" or a crash
         val endsAt = Instant.parse(endsAtIso)
         val now = Instant.parse(nowIso)
         val remaining = Duration.between(now, endsAt)

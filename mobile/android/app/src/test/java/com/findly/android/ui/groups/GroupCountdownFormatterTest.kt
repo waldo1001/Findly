@@ -31,4 +31,9 @@ class GroupCountdownFormatterTest {
         assertEquals("Ended", GroupCountdownFormatter.format("2026-07-20T10:00:00Z", now))
         assertEquals("Ended", GroupCountdownFormatter.format(now, now))
     }
+
+    @Test
+    fun `null endsAt renders No end date, never Ended or a crash (005 2_5 item 4)`() {
+        assertEquals("No end date", GroupCountdownFormatter.format(null, now))
+    }
 }
