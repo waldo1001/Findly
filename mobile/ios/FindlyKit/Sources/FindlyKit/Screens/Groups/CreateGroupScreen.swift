@@ -73,7 +73,7 @@ public struct CreateGroupScreen: View {
                 FindlyTextField("Group name", text: $name, placeholder: "Festival crew")
                 FindlyToggleRow(title: "No end date", isOn: $noEndDate)
                 if noEndDate {
-                    noEndDateWarning
+                    FindlyWarningNote(lead: GroupNoEndDateCopy.warningTitle, body: GroupNoEndDateCopy.warningBody)
                 } else {
                     endsAtPicker
                 }
@@ -111,19 +111,6 @@ public struct CreateGroupScreen: View {
             DatePicker("Ends", selection: $endsAt, in: lower..., displayedComponents: [.date, .hourAndMinute])
                 .tint(theme.colors.primary)
         }
-    }
-
-    /// 005 §2.5 item 2 — the design system's warning style (`colors.warning`, as `ErrorStateView`/
-    /// `PermissionBannerView` use it), directly under the choice and before the Create button.
-    private var noEndDateWarning: some View {
-        (Text(GroupNoEndDateCopy.warningTitle).bold() + Text(" " + GroupNoEndDateCopy.warningBody))
-            .font(theme.typography.bodyMedium.font)
-            .foregroundColor(theme.colors.onSurface)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(theme.spacing.md)
-            .background(theme.colors.warning.opacity(0.18))
-            .clipShape(RoundedRectangle(cornerRadius: theme.corner.sm))
-            .accessibilityElement(children: .combine)
     }
 
     private var policyPicker: some View {
