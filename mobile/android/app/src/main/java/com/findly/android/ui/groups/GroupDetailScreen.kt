@@ -54,6 +54,7 @@ import java.time.Instant
 private sealed class PendingGroupAction {
     data class Rename(val newName: String) : PendingGroupAction()
     data class Extend(val endsAtIso: String, val label: String) : PendingGroupAction()
+    data class SetEndDate(val endsAtMillis: Long, val label: String) : PendingGroupAction()
     data object RemoveEndDate : PendingGroupAction()
     data object Rotate : PendingGroupAction()
     data class Kick(val userId: String, val displayName: String) : PendingGroupAction()
@@ -353,10 +354,12 @@ fun GroupDetailScreen(
                     text = "OK",
                     onClick = {
                         pickerState.selectedDateMillis?.let { picked ->
-                            // Bounded by GroupDetailStateHolder.setEndDate (1 h floor, plan cap):
-                            // a failure surfaces as mutationError, never as a silent "end now".
-                            onSetEndDate(
-                                combineDateAndTime(picked, endHour.toIntOrNull() ?: 0, endMinute.toIntOrNull() ?: 0),
+                            // Confirm first so the user sees the resolved UTC instant; bounds
+                            // (1 h floor, plan cap) are enforced in GroupDetailStateHolder.setEndDate.
+                            val millis = combineDateAndTime(picked, endHour.toIntOrNull() ?: 0, endMinute.toIntOrNull() ?: 0)
+                            pendingAction = PendingGroupAction.SetEndDate(
+                                millis,
+                                "set this group's end to ${Instant.ofEpochMilli(millis)} (UTC)",
                             )
                         }
                         showEndDatePicker = false
@@ -398,6 +401,7 @@ fun GroupDetailScreen(
                 when (action) {
                     is PendingGroupAction.Rename -> onRename(action.newName)
                     is PendingGroupAction.Extend -> onExtend(action.endsAtIso)
+                    is PendingGroupAction.SetEndDate -> onSetEndDate(action.endsAtMillis)
                     is PendingGroupAction.RemoveEndDate -> onRemoveEndDate()
                     is PendingGroupAction.Rotate -> onRotateCode()
                     is PendingGroupAction.Kick -> onKickMember(action.userId)
@@ -419,6 +423,7 @@ private fun GroupActionConfirmDialog(
     val message = when (action) {
         is PendingGroupAction.Rename -> "Rename this group to \"${action.newName}\"?"
         is PendingGroupAction.Extend -> "Are you sure you want to ${action.label}?"
+        is PendingGroupAction.SetEndDate -> "Are you sure you want to ${action.label}?"
         // 005 §2.5 item 5: the same warning text as the create screen.
         is PendingGroupAction.RemoveEndDate -> "Remove the end date? ${GroupPolicyCopy.NO_END_DATE_WARNING}"
         is PendingGroupAction.Rotate -> "Rotate the join code? The old code will stop working immediately."
