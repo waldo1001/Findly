@@ -373,7 +373,7 @@ dependencies {
     // is now re-pinned at 2026.06.01 — the version this maps-compose release actually forces —
     // and backed by a `strictly` constraint (same block) so a future conflicting demand fails the
     // build loudly instead of silently winning highest-wins resolution the way this one did.
-    implementation("com.google.maps.android:maps-compose:8.4.0")
+    implementation("com.google.maps.android:maps-compose:9.0.1")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
