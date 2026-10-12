@@ -96,14 +96,16 @@ fun FindlyNavDrawer(
     // The no-`drawerState` ModalDrawerSheet overload (used below) does not install Material3's own
     // back handling (verified in material3 1.4.0 bytecode: only the drawerState overload calls
     // DrawerPredictiveBackHandler), so system back closes the open drawer here instead (A65).
-    BackHandler(enabled = drawerState.isOpen) { scope.launch { drawerState.close() } }
+    // Same expression as the gesture gate: also covers the drawer while it animates open.
+    val open = drawerState.isOpen || drawerState.targetValue == DrawerValue.Open
+    BackHandler(enabled = open) { scope.launch { drawerState.close() } }
     ModalNavigationDrawer(
         drawerState = drawerState,
         modifier = modifier,
         // 010 §1.2 (amended 2026-10-12): a closed drawer takes no drag, so the map pans freely; the
         // open (or opening) drawer stays swipe- and scrim-dismissable.
         gesturesEnabled = FindlyNavDrawerGestures.enabled(
-            isOpen = drawerState.isOpen || drawerState.targetValue == DrawerValue.Open,
+            isOpen = open,
         ),
         drawerContent = {
             ModalDrawerSheet(drawerContainerColor = FindlyTheme.colors.surface) {
