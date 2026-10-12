@@ -20,8 +20,10 @@ data class PlanLimits(
     val historyDays: Int,
     val minSyncIntervalMinutes: Int,
     val locateRequestsPerDay: Int,
-    val maxActiveGroups: Int? = null,
+    val maxOwnedGroups: Int? = null,
+    val maxJoinedGroups: Int? = null,
     val maxGroupMembers: Int? = null,
+    /** `null` = no cap on a dated end date (001 §9, amended 2026-10-12). */
     val maxGroupDurationDays: Int? = null,
     val groupGraceDays: Int? = null,
     /** specs/008-privacy-endpoints.md §3 / 001-api-contract.md §13.1 — quota for `GET /export`. */
@@ -43,7 +45,8 @@ fun FeaturesDto.toDomain(): Features = Features(
         historyDays = limits.historyDays,
         minSyncIntervalMinutes = limits.minSyncIntervalMinutes,
         locateRequestsPerDay = limits.locateRequestsPerDay,
-        maxActiveGroups = limits.maxActiveGroups,
+        maxOwnedGroups = limits.maxOwnedGroups,
+        maxJoinedGroups = limits.maxJoinedGroups,
         maxGroupMembers = limits.maxGroupMembers,
         maxGroupDurationDays = limits.maxGroupDurationDays,
         groupGraceDays = limits.groupGraceDays,

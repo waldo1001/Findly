@@ -51,7 +51,8 @@ class FeaturesMapperTest {
 
         val domain = dto.toDomain()
 
-        assertEquals(null, domain.limits.maxActiveGroups)
+        assertEquals(null, domain.limits.maxOwnedGroups)
+        assertEquals(null, domain.limits.maxJoinedGroups)
         assertEquals(null, domain.limits.maxGroupMembers)
         assertEquals(null, domain.limits.maxGroupDurationDays)
         assertEquals(null, domain.limits.groupGraceDays)
@@ -105,7 +106,8 @@ class FeaturesMapperTest {
                 historyDays = 90,
                 minSyncIntervalMinutes = 5,
                 locateRequestsPerDay = 100,
-                maxActiveGroups = 5,
+                maxOwnedGroups = 5,
+                maxJoinedGroups = 4,
                 maxGroupMembers = 50,
                 maxGroupDurationDays = 30,
                 groupGraceDays = 7,
@@ -115,7 +117,8 @@ class FeaturesMapperTest {
 
         val domain = dto.toDomain()
 
-        assertEquals(5, domain.limits.maxActiveGroups)
+        assertEquals(5, domain.limits.maxOwnedGroups)
+        assertEquals(4, domain.limits.maxJoinedGroups)
         assertEquals(50, domain.limits.maxGroupMembers)
         assertEquals(30, domain.limits.maxGroupDurationDays)
         assertEquals(7, domain.limits.groupGraceDays)

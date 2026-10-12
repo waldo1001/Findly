@@ -40,10 +40,14 @@ class ApiErrorUserMessageTest {
     }
 
     @Test
-    fun `LIMIT_EXCEEDED maps the two group-era limit keys to friendly messages`() {
+    fun `LIMIT_EXCEEDED names the group limit that was hit (005 2_5 item 7)`() {
         assertEquals(
-            "You've reached your active-group limit for this plan.",
-            ApiError.LimitExceeded("maxActiveGroups", rawServerMessage, "r_1").userMessage(),
+            "You already have the maximum number of active groups you created. End or delete one first.",
+            ApiError.LimitExceeded("maxOwnedGroups", rawServerMessage, "r_1").userMessage(),
+        )
+        assertEquals(
+            "You're already in the maximum number of active groups you joined. Leave one first.",
+            ApiError.LimitExceeded("maxJoinedGroups", rawServerMessage, "r_1").userMessage(),
         )
         assertEquals(
             "That end date is further out than your plan allows.",

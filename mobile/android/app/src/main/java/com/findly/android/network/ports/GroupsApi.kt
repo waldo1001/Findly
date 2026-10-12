@@ -15,7 +15,7 @@ interface GroupsApi {
      * optional otherwise (defaults server-side to the profile's). */
     suspend fun createGroup(
         name: String,
-        endsAt: String,
+        endsAt: String?,
         expiryPolicy: String,
         displayName: String? = null,
     ): ApiResult<GroupDto>

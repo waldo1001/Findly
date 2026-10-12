@@ -3,6 +3,7 @@ package com.findly.android.network
 import com.findly.android.fakes.FakeAuthProvider
 import com.findly.android.network.dto.UpdateGroupRequestDto
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.json.JsonPrimitive
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import org.junit.After
@@ -104,6 +105,26 @@ class GroupsClientTest {
             val recorded = server.takeRequest()
             assertTrue(!recorded.body.readUtf8().contains("displayName"))
         }
+
+    @Test
+    fun `createGroup with no end date sends endsAt null on the wire and decodes a null endsAt response`() = runTest {
+        server.enqueue(
+            MockResponse().setResponseCode(201).setBody(
+                """
+                {"data":{"groupId":"grp_1","name":"Standing crew","endsAt":null,
+                          "expiryPolicy":"grace","state":"active","role":"owner","memberCount":1,
+                          "code":"7F3K9QRZ","createdAt":"2026-07-21T10:00:00Z"},
+                 $featuresJson}
+                """.trimIndent(),
+            ),
+        )
+
+        val result = client.createGroup(name = "Standing crew", endsAt = null, expiryPolicy = "grace")
+
+        assertTrue(result is ApiResult.Success)
+        assertNull((result as ApiResult.Success).data.endsAt)
+        assertTrue(server.takeRequest().body.readUtf8().contains("\"endsAt\":null"))
+    }
 
     // ------------------------------------------------------------------
     // 12.2 List my groups
@@ -216,7 +237,7 @@ class GroupsClientTest {
 
         val result = client.updateGroup(
             "grp_1",
-            UpdateGroupRequestDto(name = "Festival crew 2026", endsAt = "2026-08-03T22:00:00Z"),
+            UpdateGroupRequestDto(name = "Festival crew 2026", endsAt = JsonPrimitive("2026-08-03T22:00:00Z")),
         )
 
         assertTrue(result is ApiResult.Success)
@@ -227,6 +248,24 @@ class GroupsClientTest {
         val recorded = server.takeRequest()
         assertEquals("PATCH", recorded.method)
         assertEquals("/v1/groups/grp_1", recorded.path)
+    }
+
+    @Test
+    fun `updateGroup remove-end-date sends exactly endsAt null, and a rename sends no endsAt`() = runTest {
+        val body = """
+            {"data":{"groupId":"grp_1","name":"Festival crew","endsAt":null,
+                      "expiryPolicy":"delete","state":"active","role":"owner","memberCount":7,
+                      "code":"7F3K9QRZ"},
+             $featuresJson}
+        """.trimIndent()
+        server.enqueue(MockResponse().setResponseCode(200).setBody(body))
+        server.enqueue(MockResponse().setResponseCode(200).setBody(body))
+
+        client.updateGroup("grp_1", UpdateGroupRequestDto.removeEndDate())
+        client.updateGroup("grp_1", UpdateGroupRequestDto.rename("New"))
+
+        assertEquals("{\"endsAt\":null}", server.takeRequest().body.readUtf8())
+        assertEquals("{\"name\":\"New\"}", server.takeRequest().body.readUtf8())
     }
 
     // ------------------------------------------------------------------
