@@ -5,7 +5,7 @@
   "description": "Findly — submits the newest processed iOS build for App Review via the App Store Connect API (docs/store-readiness.md §5, I60). Zero runtime dependencies.",
   "main": "dist/cli.js",
   "engines": {
-    "node": ">=24"
+    "node": "^24.22.1 || >=26.12.1"
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
