@@ -32,10 +32,10 @@ cat > /tmp/lifecycle.json <<'EOF'
 EOF
 az storage account management-policy create --account-name $STORAGE -g $RG --policy @/tmp/lifecycle.json
 
-# Consumption Function App, Node 20, system-assigned managed identity
+# Consumption Function App, Node 24, system-assigned managed identity
 az functionapp create -n $FUNCAPP -g $RG -s $STORAGE \
   --consumption-plan-location $LOCATION \
-  --runtime node --runtime-version 20 --functions-version 4 \
+  --runtime node --runtime-version 24 --functions-version 4 \
   --assign-identity '[system]'
 
 # Managed identity → data-plane roles on the storage account (specs/002 §1)

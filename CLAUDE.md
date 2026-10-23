@@ -1,6 +1,6 @@
 # Findly — project instructions
 
-Private family location-tracking app: Android (Kotlin) + iOS (Swift) + Azure Functions backend (TypeScript, Node 20, v4 model) + Table/Blob Storage (no database server) + FCM HTTP v1 push + Firebase Auth. Cost target: a few euros/month.
+Private family location-tracking app: Android (Kotlin) + iOS (Swift) + Azure Functions backend (TypeScript, Node 24, v4 model) + Table/Blob Storage (no database server) + FCM HTTP v1 push + Firebase Auth. Cost target: a few euros/month.
 
 ## Non-negotiable process
 

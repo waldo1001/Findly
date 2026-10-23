@@ -1,6 +1,6 @@
 # Findly — backend
 
-Azure Functions (consumption), TypeScript, Node 20, **v4 programming model**. The wire contract is [`specs/001-api-contract.md`](../specs/001-api-contract.md); storage layouts are [`specs/002-storage-schema.md`](../specs/002-storage-schema.md). Nothing here may diverge from those specs — fix the spec first.
+Azure Functions (consumption), TypeScript, Node 24, **v4 programming model**. The wire contract is [`specs/001-api-contract.md`](../specs/001-api-contract.md); storage layouts are [`specs/002-storage-schema.md`](../specs/002-storage-schema.md). Nothing here may diverge from those specs — fix the spec first.
 
 ## Layout (hexagonal)
 
