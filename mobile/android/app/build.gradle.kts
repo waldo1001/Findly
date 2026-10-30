@@ -285,10 +285,10 @@ dependencies {
     implementation("androidx.compose.ui:ui-graphics")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
-    implementation("androidx.navigation:navigation-compose:2.8.5")
+    implementation("androidx.navigation:navigation-compose:2.10.2")
 
     // Periodic/foreground-service scheduling (specs/009-device-runtime.md §3).
-    implementation("androidx.work:work-runtime-ktx:2.10.0")
+    implementation("androidx.work:work-runtime-ktx:2.12.0")
 
     // A10 (specs/009 §2): durable fix-queue storage, replacing the A1 in-memory placeholder
     // (specs/003 §10.4) behind the unchanged FixQueueStore interface (queue/room/).
@@ -297,7 +297,7 @@ dependencies {
     ksp("androidx.room:room-compiler:2.8.4")
 
     // A10 (specs/009 §1): FusedLocationProviderClient-backed real fix capture (location/).
-    implementation("com.google.android.gms:play-services-location:21.3.0")
+    implementation("com.google.android.gms:play-services-location:21.4.0")
 
     // Real Firebase Auth (specs/003 §7, H1) — FirebaseAuthProvider's only consumer.
     implementation(platform("com.google.firebase:firebase-bom:34.17.0"))
@@ -373,7 +373,11 @@ dependencies {
     // is now re-pinned at 2026.06.01 — the version this maps-compose release actually forces —
     // and backed by a `strictly` constraint (same block) so a future conflicting demand fails the
     // build loudly instead of silently winning highest-wins resolution the way this one did.
-    implementation("com.google.maps.android:maps-compose:8.4.0")
+    //
+    // 9.0.1 (Dependabot #28): 9.0.0's only breaking change swaps the transitive android-maps-ktx
+    // for android-maps-utils; nothing in app/src imports maps-ktx directly, and the compose-bom
+    // `strictly` constraint above still resolves (a conflicting BOM demand would fail the build).
+    implementation("com.google.maps.android:maps-compose:9.0.1")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
