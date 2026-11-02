@@ -292,9 +292,9 @@ dependencies {
 
     // A10 (specs/009 §2): durable fix-queue storage, replacing the A1 in-memory placeholder
     // (specs/003 §10.4) behind the unchanged FixQueueStore interface (queue/room/).
-    implementation("androidx.room:room-runtime:2.8.4")
-    implementation("androidx.room:room-ktx:2.8.4")
-    ksp("androidx.room:room-compiler:2.8.4")
+    implementation("androidx.room:room-runtime:2.8.5")
+    implementation("androidx.room:room-ktx:2.8.5")
+    ksp("androidx.room:room-compiler:2.8.5")
 
     // A10 (specs/009 §1): FusedLocationProviderClient-backed real fix capture (location/).
     implementation("com.google.android.gms:play-services-location:21.4.0")
