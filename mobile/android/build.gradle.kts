@@ -19,5 +19,5 @@ plugins {
     // Maven Central (newest 2.3.12). KSP 2.3.10's release notes carry a fix specifically for
     // Kotlin 2.4.0, and CI's `./gradlew test` + `assembleRelease` ran `:app:kspDebugKotlin` clean
     // against 2.4.20. Dependabot bumps this line on its own schedule.
-    id("com.google.devtools.ksp") version "2.3.10" apply false
+    id("com.google.devtools.ksp") version "2.3.12" apply false
 }
