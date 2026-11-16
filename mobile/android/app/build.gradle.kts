@@ -245,42 +245,36 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.11.0")
     implementation("androidx.activity:activity-compose:1.9.3")
 
-    // A17: was pinned at 2025.09.01, but that pin was never honoured — maps-compose (below)
-    // declares its own compose-bom and Gradle's highest-wins BOM resolution let it silently
-    // override this one project-wide, since before A16 even bumped maps-compose. See the
-    // maps-compose block below (search "A16 review round 1") for the full mechanism and the
-    // measured before/after numbers. Re-pinning here at 2026.06.01 — the version already in
-    // force per `gradle :app:dependencies --configuration debugRuntimeClasspath` (maps-compose
-    // 8.4.0 itself declares `platform("androidx.compose:compose-bom:2026.06.01")`) — makes the
-    // declaration match reality today: the compose-bom-managed core artifacts (ui/foundation/
-    // animation/runtime) still land on 1.11.4, verified before/after on both debugRuntimeClasspath
-    // and releaseRuntimeClasspath.
-    //
-    // A17 code review round 1 (Major, fixed): a plain `implementation(platform(...))` BOM import
-    // is unenforced — it only contributes a candidate to Gradle's highest-wins resolution, it does
-    // not clamp. Verified directly against the pre-fix commit: the stale 2025.09.01 pin resolved
-    // silently to 2026.06.01 with `BUILD SUCCESSFUL` and no warning, which is the exact silent
-    // override this task exists to fix. Re-pinning at today's resolved value (above) alone would
-    // have repeated that same silent-override failure mode the next time any dependency asks for a
-    // newer compose-bom. The `strictly` constraint below makes that loud instead: any node in the
-    // graph demanding a compose-bom outside this exact version now fails resolution with an
-    // explicit conflict, rather than quietly winning. Verified this actually enforces (not just
-    // documents) by temporarily lowering the strictly value below what maps-compose demands and
-    // confirming the build failed with a version-conflict error before restoring the value below,
-    // which matches the platform() import above and therefore does not move any resolved version.
+    // Compose BOM (A17, corrected by A69). maps-compose declares its own compose-bom, so the BOM
+    // this app resolves is whatever Gradle's highest-wins resolution picks among the app's own
+    // platform(...) line below, the `strictly` constraint below, and maps-compose's request.
+    // Since A17, a `strictly` constraint pins the BOM. What it really does (verified with
+    // `./gradlew :app:dependencyInsight --configuration releaseRuntimeClasspath --dependency
+    // androidx.compose:compose-bom`, both debug and release):
+    //   - it FAILS the build when it conflicts with a first-level declaration, i.e. when the
+    //     platform(...) line below names a different version than the strictly value;
+    //   - it does NOT fail on a conflicting TRANSITIVE request: that request is silently
+    //     downgraded to the strictly value (A69: maps-compose 9.0.1 asked for 2026.09.00 and got
+    //     2026.06.01 with BUILD SUCCESSFUL, so maps-compose ran on an older Compose than it was
+    //     built against).
+    // The rule that follows: keep the strictly value and the platform(...) line EQUAL, and keep
+    // both >= what maps-compose requires. Every compose-bom bump, including Dependabot's, must
+    // change both lines in the same diff or android-build fails. After a maps-compose bump,
+    // re-run the dependencyInsight command above: a `compose-bom:X -> Y` line with X different
+    // from Y means the pin is below what maps-compose asks for and must be raised (the
+    // `{strictly Y} -> Y` line is the pin itself and is fine).
     constraints {
         implementation("androidx.compose:compose-bom") {
-            version { strictly("2026.06.01") }
+            version { strictly("2026.09.00") }
             because(
-                "maps-compose declares its own compose-bom, and Gradle's highest-wins BOM " +
-                    "resolution silently overrode the plain implementation(platform(...)) pin " +
-                    "above before this constraint existed (A17). `strictly` turns a future " +
-                    "conflicting compose-bom demand into a build failure instead of a silent " +
-                    "version bump."
+                "Keep equal to the platform(...) line below and >= the compose-bom that " +
+                    "maps-compose requires (A17, A69). strictly fails on a conflict with a " +
+                    "first-level declaration but silently downgrades a transitive request, " +
+                    "so the pin must never sit below what maps-compose asks for."
             )
         }
     }
-    implementation(platform("androidx.compose:compose-bom:2026.06.01"))
+    implementation(platform("androidx.compose:compose-bom:2026.09.00"))
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-graphics")
     implementation("androidx.compose.ui:ui-tooling-preview")
@@ -369,14 +363,14 @@ dependencies {
     // just the map screens); the pin's own silent-override behavior is a separate, pre-existing
     // issue tracked as its own follow-up task, not something A16 fixes.
     //
-    // A17: the follow-up above landed. The compose-bom pin (above, search "implementation(platform")
-    // is now re-pinned at 2026.06.01 — the version this maps-compose release actually forces —
-    // and backed by a `strictly` constraint (same block) so a future conflicting demand fails the
-    // build loudly instead of silently winning highest-wins resolution the way this one did.
+    // A17/A69: the compose-bom pin above (search "implementation(platform") is kept at, or above,
+    // the compose-bom this maps-compose release requires (2026.09.00 for 9.0.1, per its Gradle
+    // module metadata). A `strictly` constraint silently downgrades a transitive request, so
+    // the old 2026.06.01 pin made 9.0.1 run on an older Compose than it was built against
+    // (A69); the pin now equals the request, so the downgrade is gone.
     //
     // 9.0.1 (Dependabot #28): 9.0.0's only breaking change swaps the transitive android-maps-ktx
-    // for android-maps-utils; nothing in app/src imports maps-ktx directly, and the compose-bom
-    // `strictly` constraint above still resolves (a conflicting BOM demand would fail the build).
+    // for android-maps-utils; nothing in app/src imports maps-ktx directly.
     implementation("com.google.maps.android:maps-compose:9.0.1")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
