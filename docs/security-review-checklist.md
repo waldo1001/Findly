@@ -66,6 +66,15 @@ Scope of review: the task's full diff (`git diff <merge-base>..<branch>`), all *
   `build.gradle.kts` diff still checks compose-bom in the alerts tab like any other dependency.
   Dependabot security-update PRs for compose-bom are suppressed by the same `ignore` (they would
   fail on `strictly` anyway), so an open alert on it can only be closed by a hand-made bump.
+  A69 raised the pin to 2026.09.00, which is what `maps-compose` 9.0.1 requires, and the exclusion
+  stays permanently: a Dependabot BOM bump could only fail `android-build` on the `strictly`
+  conflict and hold the auto-merging group red. `strictly` fails only on a conflict with a
+  first-level declaration and silently downgrades a transitive request, so the review step for
+  any BOM bump or `maps-compose` bump is the no-downgrade proof: run
+  `./gradlew :app:dependencyInsight --configuration debugRuntimeClasspath --dependency
+  androidx.compose:compose-bom` and the same for `releaseRuntimeClasspath`; no
+  `compose-bom:X -> Y` line with X different from Y may remain (the `{strictly Y} -> Y` line is
+  the pin itself and is fine).
   For any diff touching `mobile/android/app/build.gradle.kts` or `mobile/android/build.gradle.kts`:
   open the repo's **Security → Dependabot alerts** tab and check
   for an open HIGH/CRITICAL alert on a dependency the diff touches (added, bumped, or left
