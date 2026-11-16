@@ -30,17 +30,22 @@ updates:
         update-types:
           - "minor"
           - "patch"
-    # The Compose BOM is a deliberate, hand-made bump, never a Dependabot one. mobile/android/app/
-    # build.gradle.kts pins it twice: `implementation(platform("androidx.compose:compose-bom:X"))`
-    # and a `constraints { ... strictly("X") }` block (A17). Dependabot can only rewrite the first,
-    # so every bump it proposes conflicts with the `strictly` value and fails android-build, which
-    # also keeps the whole android-minor-patch group red (PR #39, 2026-11-16). Raising Compose also
-    # needs someone to launch the app, which CI does not do. Whoever raises the `strictly` pin:
-    # change both lines together, and delete this ignore entry in the same PR (or keep it on
-    # purpose and say so here). Vulnerability alerts for compose-bom are unaffected: they come from
-    # the graph submitted by .github/workflows/android-dependency-graph.yml, not from this file.
-    # Dependabot security-update PRs for compose-bom are suppressed too (they would fail on
-    # `strictly` anyway), so an alert on it means a hand-made bump.
+    # The Compose BOM is excluded on purpose, permanently (A69 raised the pin to 2026.09.00 and
+    # kept this entry). mobile/android/app/build.gradle.kts pins it twice:
+    # `implementation(platform("androidx.compose:compose-bom:X"))` and a
+    # `constraints { ... strictly("X") }` block (A17). Dependabot can only rewrite the first, so
+    # every BOM bump it proposed would conflict with the `strictly` value, fail android-build and
+    # hold the whole android-minor-patch group red each time a new BOM ships; the group is meant
+    # to auto-merge when green. Raising the BOM is therefore always a hand-made change: edit the
+    # platform(...) line and the `strictly` value together, then re-run
+    # `./gradlew :app:dependencyInsight --configuration debugRuntimeClasspath --dependency
+    # androidx.compose:compose-bom` (and the same for releaseRuntimeClasspath): no
+    # `compose-bom:X -> Y` line with X different from Y may remain (the `{strictly Y} -> Y`
+    # line is the pin itself and is fine). Vulnerability alerts for
+    # compose-bom are unaffected: they come from the graph submitted by
+    # .github/workflows/android-dependency-graph.yml, not from this file. Dependabot
+    # security-update PRs for compose-bom are suppressed too (they would fail on `strictly`
+    # anyway), so an alert on it means a hand-made bump.
     ignore:
       - dependency-name: "androidx.compose:compose-bom"
     labels:
