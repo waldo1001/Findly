@@ -359,9 +359,10 @@ dependencies {
     // pin (since raised, see A69 above). That override predates A16: at 7.0.0 the pin was
     // already being forced up to compose-bom 2025.12.00 (androidx.compose.ui/foundation/
     // animation/runtime all resolving 1.10.0), verified directly by re-running
-    // `gradle :app:dependencies` against the pre-A16 build file. At 8.4.0 it goes further — compose-bom 2026.06.01, with those same artifacts
-    // resolving 1.11.4 — verified the same way against this file as committed. Both numbers
-    // independently re-confirmed, not copied from the review. Accepted as a conscious
+    // `gradle :app:dependencies` against the pre-A16 build file. At 8.4.0 it goes further -
+    // compose-bom 2026.06.01, with those same artifacts resolving 1.11.4 - verified the same
+    // way against this file as committed. Both numbers independently re-confirmed, not copied
+    // from the review. Accepted as a conscious
     // consequence of this bump (every Compose screen in the app now compiles against 1.11.4, not
     // just the map screens); the pin's own silent-override behavior is a separate, pre-existing
     // issue tracked as its own follow-up task, not something A16 fixes.
