@@ -55,10 +55,20 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
-      # A1 (specs/003-android-client.md §13.4) deliberately did not commit gradlew /
-      # gradle-wrapper.jar — no JDK/Gradle toolchain existed in that sandbox to produce a
-      # verified one. `gradle-version` installs Gradle directly instead of relying on a
-      # committed wrapper; the step below then generates the wrapper for any later local use.
+      # A71: the build runs the COMMITTED Gradle wrapper (mobile/android/gradlew, whose Gradle
+      # version is gradle-wrapper.properties), so CI always builds with the Gradle version the
+      # repo declares and every Dependabot wrapper bump is built here before it merges. A1
+      # (specs/003-android-client.md §13.4) once left the wrapper out of the repo and installed a
+      # fixed Gradle here instead (`gradle-version`) and regenerated the wrapper; that is gone,
+      # because it let the CI Gradle drift from the declared one. setup-gradle therefore has no
+      # `gradle-version` input: without one it assumes the project uses the wrapper.
+      # Security (docs/security-review-checklist.md §2): CI executes the committed
+      # gradle-wrapper.jar, which a Dependabot PR can change. setup-gradle validates every wrapper
+      # jar in the workspace against Gradle's published checksums in its setup step, before any
+      # `./gradlew` call below, and fails the job on an unknown jar. `validate-wrappers` defaults
+      # to true in v6 (gradle/actions setup-gradle/action.yml at v6; docs/setup-gradle.md, "Gradle
+      # Wrapper validation"), so it is deliberately not set here. Never add `validate-wrappers:
+      # false`.
       # A20: v6 (unlike v4) defaults `cache-provider` to "enhanced" — a proprietary caching
       # backend (gradle-actions-caching) that routes build/cache data through Gradle's own
       # service rather than GitHub's, a third-party data-egress path this workflow didn't
@@ -71,11 +81,7 @@ jobs:
       # input exists at all — caching was unconditionally open-source).
       - uses: gradle/actions/setup-gradle@v6
         with:
-          gradle-version: "9.8.1"
           cache-provider: basic
-      - name: generate Gradle wrapper
-        working-directory: mobile/android
-        run: gradle wrapper --gradle-version 9.8.1 --distribution-type bin
       # A14 (docs/implementation-handoff.md, mobile/android/app/build.gradle.kts): compileSdk/
       # targetSdk 37 needs the `platforms;android-37.0` SDK component. AGP *can* auto-download
       # missing components on demand (verified locally — see A14's report), but that path is

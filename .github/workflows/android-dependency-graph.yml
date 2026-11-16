@@ -55,6 +55,11 @@ jobs:
       # androidx.fragment:fragment at their real resolved versions — this workflow could not be
       # run end-to-end from a local checkout (it needs the real GitHub Dependency Submission API),
       # so the submit half is unverified here; only the generate half was.
+      # A71: no `gradle-version` input: the job runs the committed wrapper (`./gradlew`), so the
+      # Gradle version is the one in gradle-wrapper.properties, the same as android.yml builds
+      # with. Wrapper-jar checksum validation (the committed jar is executed here, and this job
+      # holds `contents: write`) is on by default in v6 (`validate-wrappers`, see android.yml for
+      # the citation) and runs in this step, before `./gradlew`; do not disable it.
       # A20: pinned to v6 (see android.yml for the full v4->v6 rationale). `dependency-graph:
       # generate-and-submit` is unchanged in v6.3.0's action.yml (still a valid enum value,
       # `contents: write` still the documented required permission per gradle/actions'
@@ -66,7 +71,6 @@ jobs:
       # the same MIT-licensed, open-source caching v4 always used.
       - uses: gradle/actions/setup-gradle@v6
         with:
-          gradle-version: "9.8.1"
           cache-provider: basic
           dependency-graph: generate-and-submit
       # H1 (specs/003 §13): the google-services plugin needs app/google-services.json present to
@@ -100,9 +104,8 @@ jobs:
       # Deliberately the release runtime classpath, not debug: it's what actually ships to users
       # (debug-only tooling like ui-tooling/ui-test-manifest never reaches Play Store), and it's
       # the smallest task that fully resolves the graph without needing a signing config (unlike
-      # assembleRelease, this doesn't compile or package anything). No wrapper is generated here
-      # (unlike android.yml) — this job only needs the standalone `gradle` binary setup-gradle
-      # already installs, not a project-local ./gradlew.
+      # assembleRelease, this doesn't compile or package anything). Runs the committed wrapper,
+      # like android.yml (A71).
       - name: resolve dependencies (setup-gradle submits the graph after this succeeds)
         working-directory: mobile/android
-        run: gradle :app:dependencies --configuration releaseRuntimeClasspath
+        run: ./gradlew :app:dependencies --configuration releaseRuntimeClasspath
