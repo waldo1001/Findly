@@ -39,6 +39,8 @@ updates:
     # change both lines together, and delete this ignore entry in the same PR (or keep it on
     # purpose and say so here). Vulnerability alerts for compose-bom are unaffected: they come from
     # the graph submitted by .github/workflows/android-dependency-graph.yml, not from this file.
+    # Dependabot security-update PRs for compose-bom are suppressed too (they would fail on
+    # `strictly` anyway), so an alert on it means a hand-made bump.
     ignore:
       - dependency-name: "androidx.compose:compose-bom"
     labels:

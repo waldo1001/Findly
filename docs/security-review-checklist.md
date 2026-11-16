@@ -64,16 +64,17 @@ Scope of review: the task's full diff (`git diff <merge-base>..<branch>`), all *
   re-justify the ignore entry in the same diff. The exclusion does not hide advisories: Dependabot
   alerts come from the submitted dependency graph, not from `dependabot.yml`, so a reviewer of a
   `build.gradle.kts` diff still checks compose-bom in the alerts tab like any other dependency.
+  Dependabot security-update PRs for compose-bom are suppressed by the same `ignore` (they would
+  fail on `strictly` anyway), so an open alert on it can only be closed by a hand-made bump.
   For any diff touching `mobile/android/app/build.gradle.kts` or `mobile/android/build.gradle.kts`:
   open the repo's **Security → Dependabot alerts** tab and check
   for an open HIGH/CRITICAL alert on a dependency the diff touches (added, bumped, or left
   unchanged); do not merge without an explicit, reported reason if one exists. A blank alert list
   is only meaningful if Dependabot alerts are actually turned on for the repo (**Settings → Code
-  security and analysis → Dependabot alerts**) — as of A18 they were **off** repo-wide (confirmed
-  via `gh api repos/waldo1001/Findly --jq .security_and_analysis`), which is a one-time, human,
-  account-settings action no task in this repo has performed yet; until it happens, an empty alert
-  list means "nobody has looked," not "nothing is wrong," and this bullet cannot be executed as
-  written.
+  security and analysis → Dependabot alerts**). They were off at A18 and are on now: verified
+  2026-11-16 with `gh api repos/waldo1001/Findly/vulnerability-alerts`, which returns 204 when
+  alerts are enabled and 404 when they are not (`.security_and_analysis` does not report this
+  setting). Re-run that check if an alert list looks suspiciously empty.
 - **Not adopted for A18, don't conflate with the above:** Gradle dependency
   **locking/verification** (`gradle --write-verification-metadata`) proves an artifact is
   byte-identical to what was fetched before — supply-chain *integrity* — it does not check
