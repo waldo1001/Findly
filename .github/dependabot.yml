@@ -40,7 +40,8 @@ updates:
     # platform(...) line and the `strictly` value together, then re-run
     # `./gradlew :app:dependencyInsight --configuration debugRuntimeClasspath --dependency
     # androidx.compose:compose-bom` (and the same for releaseRuntimeClasspath): no
-    # `compose-bom:X -> Y` line with X different from Y may remain. Vulnerability alerts for
+    # `compose-bom:X -> Y` line with X different from Y may remain (the `{strictly Y} -> Y`
+    # line is the pin itself and is fine). Vulnerability alerts for
     # compose-bom are unaffected: they come from the graph submitted by
     # .github/workflows/android-dependency-graph.yml, not from this file. Dependabot
     # security-update PRs for compose-bom are suppressed too (they would fail on `strictly`
