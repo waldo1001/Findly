@@ -56,20 +56,16 @@ Scope of review: the task's full diff (`git diff <merge-base>..<branch>`), all *
   un-built. Minor and patch bumps arrive as one grouped PR and
   `.github/workflows/dependabot-auto-merge.yml` enables GitHub auto-merge on it: GitHub merges it
   only when every required check on `main` is green, a major bump is never auto-merged, and a red
-  grouped PR waits for a human. **`androidx.compose:compose-bom` is a special case.**
-  `app/build.gradle.kts` pins it twice: `implementation(platform("androidx.compose:compose-bom:X"))`
-  and a `constraints { ... strictly("X") }` block (A17). Dependabot proposes BOM bumps like any
-  other dependency, but it can only rewrite the `platform(...)` line, so **every compose-bom bump
-  must change both lines together or `android-build` fails** (a mismatch is a resolution
-  conflict); fix the `strictly` value by hand on the Dependabot branch. The pin must also stay
-  at or above the compose-bom that `maps-compose` requires: `strictly` fails only on a conflict
-  with a first-level declaration and silently downgrades a transitive request (A69), so after
-  any `maps-compose` bump run `./gradlew :app:dependencyInsight --configuration
-  releaseRuntimeClasspath --dependency androidx.compose:compose-bom` and treat any
-  line of the form `compose-bom:X -> Y` with X different from Y as a defect (a `{strictly Y} -> Y` line is the pin itself and is fine). A Compose alert is fixed by a BOM bump, never by
-  dismissing it: Dependabot alerts come from the submitted dependency graph, not from
-  `dependabot.yml`, so a reviewer of a `build.gradle.kts` diff checks compose-bom in the alerts
-  tab like any other dependency.
+  grouped PR waits for a human. **`androidx.compose:compose-bom` is excluded** (an `ignore` entry in
+  `.github/dependabot.yml`): `app/build.gradle.kts` pins it with a `strictly` constraint (A17) that
+  Dependabot cannot rewrite, so every BOM bump it proposed failed `android-build` and held the whole
+  group red (PR #39). A Compose BOM bump is therefore always a deliberate, human-made change: raise
+  the `platform(...)` line and the `strictly` value together, launch the app, and remove or
+  re-justify the ignore entry in the same diff. The exclusion does not hide advisories: Dependabot
+  alerts come from the submitted dependency graph, not from `dependabot.yml`, so a reviewer of a
+  `build.gradle.kts` diff still checks compose-bom in the alerts tab like any other dependency.
+  Dependabot security-update PRs for compose-bom are suppressed by the same `ignore` (they would
+  fail on `strictly` anyway), so an open alert on it can only be closed by a hand-made bump.
   For any diff touching `mobile/android/app/build.gradle.kts` or `mobile/android/build.gradle.kts`:
   open the repo's **Security → Dependabot alerts** tab and check
   for an open HIGH/CRITICAL alert on a dependency the diff touches (added, bumped, or left
