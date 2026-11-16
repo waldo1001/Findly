@@ -258,8 +258,9 @@ dependencies {
     //     2026.06.01 with BUILD SUCCESSFUL, so maps-compose ran on an older Compose than it was
     //     built against).
     // The rule that follows: keep the strictly value and the platform(...) line EQUAL, and keep
-    // both >= what maps-compose requires. Every compose-bom bump, including Dependabot's, must
-    // change both lines in the same diff or android-build fails. After a maps-compose bump,
+    // both >= what maps-compose requires. Every compose-bom bump must change both lines in the
+    // same diff or android-build fails; Dependabot cannot do that, so compose-bom is excluded in
+    // .github/dependabot.yml and BOM bumps are hand-made. After a maps-compose bump,
     // re-run the dependencyInsight command above: a `compose-bom:X -> Y` line with X different
     // from Y means the pin is below what maps-compose asks for and must be raised (the
     // `{strictly Y} -> Y` line is the pin itself and is fine).
@@ -353,7 +354,7 @@ dependencies {
     // A16 review round 1 (Major, fixed): this bump is not maps-only — maps-compose declares its
     // own compose-bom, and Gradle's highest-wins resolution elevates the *entire* app's Compose
     // toolkit to it, overriding the explicit `platform("androidx.compose:compose-bom:2025.09.01")`
-    // pin below. That override predates A16: at 7.0.0 the pin was already being forced up to
+    // pin (since raised, see A69 above). That override predates A16: at 7.0.0 the pin was already being forced up to
     // compose-bom 2025.12.00 (androidx.compose.ui/foundation/animation/runtime all resolving
     // 1.10.0), verified directly by re-running `gradle :app:dependencies` against the pre-A16
     // build file. At 8.4.0 it goes further — compose-bom 2026.06.01, with those same artifacts
