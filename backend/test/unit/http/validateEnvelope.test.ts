@@ -1,4 +1,4 @@
-// specs/001 §10 (VALIDATION_FAILED) / §5.1 — characterisation of the exact envelope that
+// specs/001 §10 (VALIDATION_FAILED) / §5.1 - characterisation of the exact envelope that
 // parseOrThrow (src/http/validate.ts) produces for EVERY request schema's failure path.
 //
 // B40 guard: these tests were written GREEN against zod 3 and must stay green UNCHANGED

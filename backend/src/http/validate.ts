@@ -23,13 +23,14 @@ function maxUnits(max: number): (value: string) => boolean {
 const uuidString = () => z.guid();
 
 // zod 4's `z.iso.datetime()` rejects the minute-precision form "2026-07-05T10:00Z" that zod
-// 3.25 accepted. Only the missing ":00" seconds are re-added before re-checking, so the
-// calendar/offset/Z rules stay zod's own.
+// 3.25 accepted. The second probe re-adds the missing ":00" seconds before the Z; it can
+// only succeed for exactly "<date>THH:MMZ" (anything else stays invalid with ":00" added),
+// and the calendar/offset/Z rules stay zod's own.
 const isoDatetime = z.iso.datetime();
 function utcDatetimeString() {
-  return z.string().refine(
-    (value) => isoDatetime.safeParse(value).success || (/T\d{2}:\d{2}Z$/.test(value) && isoDatetime.safeParse(value.replace(/Z$/, ":00Z")).success),
-  );
+  return z
+    .string()
+    .refine((value) => isoDatetime.safeParse(value).success || isoDatetime.safeParse(value.replace(/Z$/, ":00Z")).success);
 }
 
 // specs/001 §1.4 (B29) — displayName/geofenceName are normalized server-side at every write

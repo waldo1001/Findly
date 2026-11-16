@@ -1,4 +1,4 @@
-// specs/002 §3.3 / 001 §10 — B40 characterisation of the cursor schemas' accept/reject
+// specs/002 §3.3 / 001 §10 - B40 characterisation of the cursor schemas' accept/reject
 // decisions (src/domain/history/cursor.ts), written GREEN on zod 3 and kept UNCHANGED across
 // the zod 4 migration. Every rejection surfaces as VALIDATION_FAILED, details.fields ["cursor"],
 // whatever the underlying zod issue is; only the accept/reject boundary can drift.
