@@ -230,7 +230,7 @@ dependencies {
     // MainActivity's registerForActivityResult usage. The direct dependency below still wins the
     // highest-version resolution over that 1.1.0 pin, so the lint check stays satisfied (verified by
     // lintDebug). 1.8.9 is the latest stable release (1.9.0 is still alpha/rc).
-    implementation("androidx.fragment:fragment:1.8.9")
+    implementation("androidx.fragment:fragment:1.9.1")
 
     // A63 (specs/010 section 1.4): BiometricPrompt with BIOMETRIC_WEAK or DEVICE_CREDENTIAL, the app
     // lock's authenticator. 1.1.0 is the latest *stable* release (1.2.x/1.4.x are alpha only as of
@@ -238,7 +238,7 @@ dependencies {
     // dependency audit.
     implementation("androidx.biometric:biometric:1.1.0")
 
-    implementation("androidx.core:core-ktx:1.19.0")
+    implementation("androidx.core:core-ktx:1.19.1")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.11.0")
     implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.11.0")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.11.0")
@@ -280,7 +280,7 @@ dependencies {
             )
         }
     }
-    implementation(platform("androidx.compose:compose-bom:2026.06.01"))
+    implementation(platform("androidx.compose:compose-bom:2026.09.00"))
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-graphics")
     implementation("androidx.compose.ui:ui-tooling-preview")
@@ -292,9 +292,9 @@ dependencies {
 
     // A10 (specs/009 §2): durable fix-queue storage, replacing the A1 in-memory placeholder
     // (specs/003 §10.4) behind the unchanged FixQueueStore interface (queue/room/).
-    implementation("androidx.room:room-runtime:2.8.4")
-    implementation("androidx.room:room-ktx:2.8.4")
-    ksp("androidx.room:room-compiler:2.8.4")
+    implementation("androidx.room:room-runtime:2.8.5")
+    implementation("androidx.room:room-ktx:2.8.5")
+    ksp("androidx.room:room-compiler:2.8.5")
 
     // A10 (specs/009 §1): FusedLocationProviderClient-backed real fix capture (location/).
     implementation("com.google.android.gms:play-services-location:21.4.0")
@@ -314,9 +314,9 @@ dependencies {
     // interface-per-endpoint testing story.
     implementation("com.squareup.retrofit2:retrofit:3.0.0")
     implementation("com.jakewharton.retrofit:retrofit2-kotlinx-serialization-converter:1.0.0")
-    implementation("com.squareup.okhttp3:okhttp:5.5.0")
-    implementation("com.squareup.okhttp3:logging-interceptor:5.5.0")
-    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.0")
+    implementation("com.squareup.okhttp3:okhttp:5.5.1")
+    implementation("com.squareup.okhttp3:logging-interceptor:5.5.1")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.13.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
 
     // A6 (specs/007-public-join-links.md §4/§7, specs/003-android-client.md §12.3): on-device QR
@@ -325,7 +325,7 @@ dependencies {
     // join code to a third party (a networked QR-image service would be a spec violation); the
     // only new dependency this task adds (see ui/groups/GroupQrCodeGenerator.kt's doc for the full
     // justification, reviewed per docs/security-review-checklist.md §4).
-    implementation("com.google.zxing:core:3.5.3")
+    implementation("com.google.zxing:core:3.5.4")
 
     // A12/A16 (specs/003-android-client.md §12): the real Google Maps tile renderer behind the
     // MapRenderer seam (GoogleMapRenderer replaces PlaceholderMapRenderer at AppContainer's
@@ -384,7 +384,7 @@ dependencies {
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.11.0")
-    testImplementation("com.squareup.okhttp3:mockwebserver:5.5.0")
+    testImplementation("com.squareup.okhttp3:mockwebserver:5.5.1")
     // A11 code-review fix: real Room.Migration(1, 2) verification (FindlyDatabaseMigrationTest)
     // needs an actual SQLite engine to run against on plain JVM (no Robolectric/instrumentation,
     // specs/003-android-client.md §14) - Room's bundled driver (BundledSQLiteDriver) provides
