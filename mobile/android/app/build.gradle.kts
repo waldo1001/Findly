@@ -251,27 +251,29 @@ dependencies {
     // Since A17, a `strictly` constraint pins the BOM. What it really does (verified with
     // `./gradlew :app:dependencyInsight --configuration releaseRuntimeClasspath --dependency
     // androidx.compose:compose-bom`, both debug and release):
-    //   - it FAILS the build when it conflicts with a first-level declaration, i.e. when the
-    //     platform(...) line below names a different version than the strictly value;
+    //   - it FAILS the build only when the platform(...) line below names a HIGHER version than
+    //     the strictly value (that is what broke Dependabot PR #39); a platform(...) line LOWER
+    //     than the strictly value is silently upgraded to the strictly value, no failure;
     //   - it does NOT fail on a conflicting TRANSITIVE request: that request is silently
     //     downgraded to the strictly value (A69: maps-compose 9.0.1 asked for 2026.09.00 and got
     //     2026.06.01 with BUILD SUCCESSFUL, so maps-compose ran on an older Compose than it was
     //     built against).
-    // The rule that follows: keep the strictly value and the platform(...) line EQUAL, and keep
-    // both >= what maps-compose requires. Every compose-bom bump must change both lines in the
-    // same diff or android-build fails; Dependabot cannot do that, so compose-bom is excluded in
-    // .github/dependabot.yml and BOM bumps are hand-made. After a maps-compose bump,
-    // re-run the dependencyInsight command above: a `compose-bom:X -> Y` line with X different
-    // from Y means the pin is below what maps-compose asks for and must be raised (the
-    // `{strictly Y} -> Y` line is the pin itself and is fine).
+    // The convention that follows: change the strictly value and the platform(...) line together,
+    // keep them EQUAL, and keep both >= what maps-compose requires. Dependabot can only rewrite
+    // the platform(...) line, so compose-bom is excluded in .github/dependabot.yml and BOM bumps
+    // are hand-made. After a maps-compose bump, re-run the dependencyInsight command above: a
+    // `compose-bom:X -> Y` line with X different from Y means the pin is below what
+    // maps-compose asks for and must be raised (the `{strictly Y} -> Y` line is the pin itself
+    // and is fine).
     constraints {
         implementation("androidx.compose:compose-bom") {
             version { strictly("2026.09.00") }
             because(
                 "Keep equal to the platform(...) line below and >= the compose-bom that " +
-                    "maps-compose requires (A17, A69). strictly fails on a conflict with a " +
-                    "first-level declaration but silently downgrades a transitive request, " +
-                    "so the pin must never sit below what maps-compose asks for."
+                    "maps-compose requires (A17, A69). strictly fails the build only when the " +
+                    "platform(...) line names a higher version, silently upgrades a lower one " +
+                    "and silently downgrades a transitive request, so the pin must never sit " +
+                    "below what maps-compose asks for."
             )
         }
     }
@@ -354,10 +356,10 @@ dependencies {
     // A16 review round 1 (Major, fixed): this bump is not maps-only — maps-compose declares its
     // own compose-bom, and Gradle's highest-wins resolution elevates the *entire* app's Compose
     // toolkit to it, overriding the explicit `platform("androidx.compose:compose-bom:2025.09.01")`
-    // pin (since raised, see A69 above). That override predates A16: at 7.0.0 the pin was already being forced up to
-    // compose-bom 2025.12.00 (androidx.compose.ui/foundation/animation/runtime all resolving
-    // 1.10.0), verified directly by re-running `gradle :app:dependencies` against the pre-A16
-    // build file. At 8.4.0 it goes further — compose-bom 2026.06.01, with those same artifacts
+    // pin (since raised, see A69 above). That override predates A16: at 7.0.0 the pin was
+    // already being forced up to compose-bom 2025.12.00 (androidx.compose.ui/foundation/
+    // animation/runtime all resolving 1.10.0), verified directly by re-running
+    // `gradle :app:dependencies` against the pre-A16 build file. At 8.4.0 it goes further — compose-bom 2026.06.01, with those same artifacts
     // resolving 1.11.4 — verified the same way against this file as committed. Both numbers
     // independently re-confirmed, not copied from the review. Accepted as a conscious
     // consequence of this bump (every Compose screen in the app now compiles against 1.11.4, not
