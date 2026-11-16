@@ -60,6 +60,8 @@ Both must return an explicit **"approve"** or a findings list — silence is not
 
 ## Notes
 
+- **Read "Start here" at the top of `docs/implementation-handoff.md` first.** It records how this skill actually ran on 2026-11-16 where it differs from the text below: PR-based merging because `main` requires CI checks (so §3.5's local `git merge` and backend-only integration gate do not apply as written), CI `android-build` as the gate for Android rows (no JDK 17 on the dev Mac), and why a bare `/dev-loop` is the wrong invocation right now.
+
 - Two backend tasks may touch the same files (`src/http`, `src/ports`); worktree isolation + sequential merging with the integration gate is the conflict strategy — do not pre-serialize tasks just because overlap is possible.
 - If the user interrupts mid-wave, the backlog table's `in-progress`/`review` markers plus surviving branches are the resume state (§2.2).
 - Never lower mutation thresholds, never skip the review gate, never merge with a red integration gate — no exceptions, including "just this once".
