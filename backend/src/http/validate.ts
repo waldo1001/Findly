@@ -5,6 +5,33 @@ import { z } from "zod";
 import { normalizeDisplayText } from "../domain/text/normalizeDisplayText";
 import { AppError } from "./errors";
 
+// B40 (zod 3 -> 4) - three zod 4 defaults differ from the zod 3 behaviour the clients and the
+// validateEnvelope.test.ts / cursorSchemaPins.test.ts pins were written against. Each helper
+// below keeps the zod 3 accept/reject decision exactly; none of them changes the error
+// envelope. Dropping one is a (documented-in-the-report) wire decision, not a refactor.
+
+// zod 4's string `.max()` counts Unicode code points; zod 3 counted UTF-16 code units
+// (`String.prototype.length`). `.min(1)` is unaffected (empty is empty in both), so only the
+// upper bound needs the explicit unit count. The refinement adds a single issue on the same
+// path, exactly like the zod 3 `too_big` issue it replaces.
+function maxUnits(max: number): (value: string) => boolean {
+  return (value) => value.length <= max;
+}
+
+// zod 4's `z.string().uuid()` enforces the RFC 9562 version/variant nibbles; zod 3 accepted
+// any 8-4-4-4-12 hex shape. `z.guid()` is the zod 4 name for that permissive check.
+const uuidString = () => z.guid();
+
+// zod 4's `z.iso.datetime()` rejects the minute-precision form "2026-07-05T10:00Z" that zod
+// 3.25 accepted. Only the missing ":00" seconds are re-added before re-checking, so the
+// calendar/offset/Z rules stay zod's own.
+const isoDatetime = z.iso.datetime();
+function utcDatetimeString() {
+  return z.string().refine(
+    (value) => isoDatetime.safeParse(value).success || (/T\d{2}:\d{2}Z$/.test(value) && isoDatetime.safeParse(value.replace(/Z$/, ":00Z")).success),
+  );
+}
+
 // specs/001 §1.4 (B29) — displayName/geofenceName are normalized server-side at every write
 // BEFORE their length bound is checked: strip bidi controls/newlines/C0/C1 controls, then
 // trim (src/domain/text/normalizeDisplayText.ts — pure, exhaustively unit-tested there).
@@ -17,31 +44,31 @@ import { AppError } from "./errors";
 // gap this task exists to close (the length-only check was already applied everywhere, but
 // nothing normalized first) — a per-use-case call is one omission away from repeating it.
 function normalizedTextSchema(maxLength: number) {
-  return z.string().transform(normalizeDisplayText).pipe(z.string().min(1).max(maxLength));
+  return z.string().transform(normalizeDisplayText).pipe(z.string().min(1).refine(maxUnits(maxLength)));
 }
 
 // specs/001 §5.1/§10 — array indices use BRACKET notation (e.g. "fixes[3].recordedAt"),
 // not dot-joined ("fixes.3.recordedAt"): a numeric segment appends as `[N]` with no
 // leading dot; a named segment appends as `.name`, except when it's the first segment.
-function formatFieldPath(path: (string | number)[]): string {
+function formatFieldPath(path: readonly PropertyKey[]): string {
   if (path.length === 0) return "(root)";
   let formatted = "";
   path.forEach((segment, index) => {
     if (typeof segment === "number") {
       formatted += `[${segment}]`;
     } else if (index === 0) {
-      formatted += segment;
+      formatted += String(segment);
     } else {
-      formatted += `.${segment}`;
+      formatted += `.${String(segment)}`;
     }
   });
   return formatted;
 }
 
-export function parseOrThrow<S extends z.ZodTypeAny>(schema: S, input: unknown): z.infer<S> {
+export function parseOrThrow<S extends z.ZodType>(schema: S, input: unknown): z.infer<S> {
   const result = schema.safeParse(input);
   if (!result.success) {
-    const fields = result.error.issues.map((issue) => formatFieldPath(issue.path as (string | number)[]));
+    const fields = result.error.issues.map((issue) => formatFieldPath(issue.path));
     throw new AppError("VALIDATION_FAILED", "request failed schema validation", { fields });
   }
   return result.data;
@@ -50,20 +77,20 @@ export function parseOrThrow<S extends z.ZodTypeAny>(schema: S, input: unknown):
 // specs/001 §3.1 — familyName 1-50 chars; displayName 1-30 chars after normalization
 // (§1.4/B29, normalizedTextSchema above).
 export const createFamilyRequestSchema = z.object({
-  familyName: z.string().min(1).max(50),
+  familyName: z.string().min(1).refine(maxUnits(50)),
   displayName: normalizedTextSchema(30),
 });
 export type CreateFamilyRequest = z.infer<typeof createFamilyRequestSchema>;
 
 // specs/001 §4.1 — deviceId/platform/model/appVersion required; rest optional.
 export const registerDeviceRequestSchema = z.object({
-  deviceId: z.string().uuid(),
+  deviceId: uuidString(),
   platform: z.enum(["android", "ios"]),
-  model: z.string().min(1).max(60),
+  model: z.string().min(1).refine(maxUnits(60)),
   appVersion: z.string().min(1),
   pushToken: z.string().min(1).optional(),
   locationPushToken: z.string().min(1).optional(),
-  deviceName: z.string().min(1).max(40).optional(),
+  deviceName: z.string().min(1).refine(maxUnits(40)).optional(),
 });
 export type RegisterDeviceRequest = z.infer<typeof registerDeviceRequestSchema>;
 
@@ -71,7 +98,7 @@ export type RegisterDeviceRequest = z.infer<typeof registerDeviceRequestSchema>;
 // (§1.4), so `.uuid()` alone already rejects every Table Storage RowKey-forbidden character
 // — no extra regex needed (contrast memberUserIdParamSchema, whose userId is free-form).
 export const deviceIdParamSchema = z.object({
-  deviceId: z.string().uuid(),
+  deviceId: uuidString(),
 });
 export type DeviceIdParam = z.infer<typeof deviceIdParamSchema>;
 
@@ -88,7 +115,7 @@ export const patchDeviceSettingsRequestSchema = z
       .refine((value) => SYNC_INTERVAL_MINUTES_OPTIONS.has(value))
       .optional(),
     trackingEnabled: z.boolean().optional(),
-    deviceName: z.string().min(1).max(40).optional(),
+    deviceName: z.string().min(1).refine(maxUnits(40)).optional(),
     pushToken: z.string().min(1).optional(),
     staleNudgeEnabled: z.boolean().optional(),
   })
@@ -105,8 +132,8 @@ export type PatchDeviceSettingsRequest = z.infer<typeof patchDeviceSettingsReque
 // specs/001 §5.1 / §1.4 — one location fix. `fixes` array length (1-100) is enforced by
 // the domain (LOCATION_BATCH_TOO_LARGE / VALIDATION_FAILED are distinct codes, §10), not here.
 export const locationFixSchema = z.object({
-  fixId: z.string().uuid(),
-  recordedAt: z.string().datetime(),
+  fixId: uuidString(),
+  recordedAt: utcDatetimeString(),
   lat: z.number().min(-90).max(90),
   lon: z.number().min(-180).max(180),
   accuracyM: z.number().min(0).max(10000),
@@ -121,7 +148,7 @@ export type LocationFixRequest = z.infer<typeof locationFixSchema>;
 // specs/001 §5.1 — batchId + at least one fix (empty batch -> VALIDATION_FAILED here;
 // the >100 cap is a separate pre-check in the domain, see above).
 export const reportLocationsRequestSchema = z.object({
-  batchId: z.string().uuid(),
+  batchId: uuidString(),
   fixes: z.array(locationFixSchema).min(1),
 });
 export type ReportLocationsRequest = z.infer<typeof reportLocationsRequestSchema>;
@@ -167,7 +194,7 @@ export const memberUserIdParamSchema = z.object({
   userId: z
     .string()
     .min(1)
-    .max(128)
+    .refine(maxUnits(128))
     .regex(ALLOWED_TABLE_KEY_CHARS, "userId contains characters forbidden in a Table Storage key"),
 });
 export type MemberUserIdParam = z.infer<typeof memberUserIdParamSchema>;
@@ -179,7 +206,7 @@ export const groupIdParamSchema = z.object({
   groupId: z
     .string()
     .min(1)
-    .max(128)
+    .refine(maxUnits(128))
     .regex(ALLOWED_TABLE_KEY_CHARS, "groupId contains characters forbidden in a Table Storage key"),
 });
 export type GroupIdParam = z.infer<typeof groupIdParamSchema>;
@@ -190,10 +217,10 @@ export type GroupIdParam = z.infer<typeof groupIdParamSchema>;
 // minSyncIntervalMinutes' plan floor. displayName is optional here too: "required only when
 // bootstrapping a profile" needs the profile lookup, also domain-level (001 §12.1/§1.5.3).
 export const createGroupRequestSchema = z.object({
-  name: z.string().min(1).max(50),
+  name: z.string().min(1).refine(maxUnits(50)),
   // The KEY is required (z.nullable() alone rejects `undefined`): `null` = no end date
   // (005 §2.5), and an omission must never silently create a group that runs forever (001 §12.1).
-  endsAt: z.string().datetime().nullable(),
+  endsAt: utcDatetimeString().nullable(),
   expiryPolicy: z.enum(["delete", "grace", "archive"]),
   displayName: normalizedTextSchema(30).optional(),
 });
@@ -211,7 +238,7 @@ export const joinGroupRequestSchema = z.object({
   code: z
     .string()
     .min(1)
-    .max(16)
+    .refine(maxUnits(16))
     .regex(ALLOWED_TABLE_KEY_CHARS, "code contains characters forbidden in a Table Storage key"),
   displayName: normalizedTextSchema(30).optional(),
 });
@@ -223,9 +250,9 @@ export type JoinGroupRequest = z.infer<typeof joinGroupRequestSchema>;
 // check (patchGroup.ts), not expressible here.
 export const patchGroupRequestSchema = z
   .object({
-    name: z.string().min(1).max(50).optional(),
+    name: z.string().min(1).refine(maxUnits(50)).optional(),
     // A key present with `null` removes the end date (005 §2.5); an absent key leaves it unchanged.
-    endsAt: z.string().datetime().nullable().optional(),
+    endsAt: utcDatetimeString().nullable().optional(),
   })
   .refine((data) => data.name !== undefined || data.endsAt !== undefined, {
     message: "at least one field (name or endsAt) is required",
@@ -238,7 +265,7 @@ export type PatchGroupRequest = z.infer<typeof patchGroupRequestSchema>;
 export const createLocateRequestRequestSchema = z
   .object({
     targetUserId: z.string().min(1).optional(),
-    targetDeviceId: z.string().uuid().optional(),
+    targetDeviceId: uuidString().optional(),
   })
   .refine(
     (body) => (body.targetUserId !== undefined ? 1 : 0) + (body.targetDeviceId !== undefined ? 1 : 0) === 1,
@@ -293,7 +320,7 @@ export const geofenceEntryRequestSchema = z.object({
   lat: z.number().min(-90).max(90),
   lon: z.number().min(-180).max(180),
   radiusM: z.number().min(100).max(5000),
-  icon: z.string().max(30),
+  icon: z.string().refine(maxUnits(30)),
   notifyOnEnter: z.boolean(),
   notifyOnExit: z.boolean(),
 });
@@ -310,10 +337,10 @@ export type ReplaceGeofencesRequest = z.infer<typeof replaceGeofencesRequestSche
 // specs/001 §7.3 — one reported geofence transition. eventId/geofenceId format match the
 // same conventions as §1.4; transition is "enter" | "exit".
 export const geofenceEventRequestSchema = z.object({
-  eventId: z.string().uuid(),
+  eventId: uuidString(),
   geofenceId: z.string().regex(GEOFENCE_ID_REGEX),
   transition: z.enum(["enter", "exit"]),
-  recordedAt: z.string().datetime(),
+  recordedAt: utcDatetimeString(),
 });
 export type GeofenceEventRequest = z.infer<typeof geofenceEventRequestSchema>;
 
@@ -332,7 +359,7 @@ export const exportQuerySchema = z.object({
   userId: z
     .string()
     .min(1)
-    .max(128)
+    .refine(maxUnits(128))
     .regex(ALLOWED_TABLE_KEY_CHARS, "userId contains characters forbidden in a Table Storage key")
     .optional(),
 });
