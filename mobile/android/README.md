@@ -26,7 +26,7 @@ cd mobile/android
 ./gradlew build    # full compile
 ```
 
-Gradle (Kotlin DSL), AGP 9.2.0, Kotlin 2.3.0, Gradle 9.4.1, JDK 17. `gradlew`/`gradle-wrapper.jar` are **not** committed — this repo's dev/CI sandboxes had no JDK/Gradle toolchain to produce a verified wrapper jar. CI (`.github/workflows/android.yml`) installs Gradle directly (`gradle/actions/setup-gradle` with a pinned `gradle-version`) and runs `gradle wrapper --gradle-version 9.4.1 --distribution-type bin` to generate it before every build; do the same locally the first time (`gradle wrapper --gradle-version 9.4.1 --distribution-type bin`, requires a local Gradle install) — after that `./gradlew` works normally. A9 verified `./gradlew test`/`assembleDebug` this way against a real local toolchain; the generated wrapper files were deliberately **not** committed (same reasoning as above still holds — see A8/A12/A13 for the same pattern).
+Gradle (Kotlin DSL), AGP 9.2.0, Kotlin 2.3.0, JDK 17. `gradlew` and `gradle/wrapper/gradle-wrapper.jar` **are committed**; the Gradle version is whatever `gradle/wrapper/gradle-wrapper.properties` says (see that file, it is not repeated here). Locally and in CI always use `./gradlew`, never a separately installed `gradle`. CI (`.github/workflows/android.yml` and `android-dependency-graph.yml`) runs the committed `./gradlew`, so it builds with exactly that version; `gradle/actions/setup-gradle` validates the wrapper jar checksum before the build. A wrapper bump arrives as a Dependabot PR and is built by CI like any other change (A71).
 
 ## Shape (implemented — see specs/003 §3 for the full package tree)
 
