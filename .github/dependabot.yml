@@ -30,6 +30,17 @@ updates:
         update-types:
           - "minor"
           - "patch"
+    # The Compose BOM is a deliberate, hand-made bump, never a Dependabot one. mobile/android/app/
+    # build.gradle.kts pins it twice: `implementation(platform("androidx.compose:compose-bom:X"))`
+    # and a `constraints { ... strictly("X") }` block (A17). Dependabot can only rewrite the first,
+    # so every bump it proposes conflicts with the `strictly` value and fails android-build, which
+    # also keeps the whole android-minor-patch group red (PR #39, 2026-11-16). Raising Compose also
+    # needs someone to launch the app, which CI does not do. Whoever raises the `strictly` pin:
+    # change both lines together, and delete this ignore entry in the same PR (or keep it on
+    # purpose and say so here). Vulnerability alerts for compose-bom are unaffected: they come from
+    # the graph submitted by .github/workflows/android-dependency-graph.yml, not from this file.
+    ignore:
+      - dependency-name: "androidx.compose:compose-bom"
     labels:
       - "dependencies"
       - "android"
