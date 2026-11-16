@@ -60,21 +60,30 @@ Scope of review: the task's full diff (`git diff <merge-base>..<branch>`), all *
   `.github/dependabot.yml`): `app/build.gradle.kts` pins it with a `strictly` constraint (A17) that
   Dependabot cannot rewrite, so every BOM bump it proposed failed `android-build` and held the whole
   group red (PR #39). A Compose BOM bump is therefore always a deliberate, human-made change: raise
-  the `platform(...)` line and the `strictly` value together, launch the app, and remove or
-  re-justify the ignore entry in the same diff. The exclusion does not hide advisories: Dependabot
+  the `platform(...)` line and the `strictly` value together and launch the app. The exclusion does not hide advisories: Dependabot
   alerts come from the submitted dependency graph, not from `dependabot.yml`, so a reviewer of a
   `build.gradle.kts` diff still checks compose-bom in the alerts tab like any other dependency.
   Dependabot security-update PRs for compose-bom are suppressed by the same `ignore` (they would
   fail on `strictly` anyway), so an open alert on it can only be closed by a hand-made bump.
   A69 raised the pin to 2026.09.00, which is what `maps-compose` 9.0.1 requires, and the exclusion
   stays permanently: a Dependabot BOM bump could only fail `android-build` on the `strictly`
-  conflict and hold the auto-merging group red. `strictly` fails only on a conflict with a
-  first-level declaration and silently downgrades a transitive request, so the review step for
-  any BOM bump or `maps-compose` bump is the no-downgrade proof: run
-  `./gradlew :app:dependencyInsight --configuration debugRuntimeClasspath --dependency
-  androidx.compose:compose-bom` and the same for `releaseRuntimeClasspath`; no
-  `compose-bom:X -> Y` line with X different from Y may remain (the `{strictly Y} -> Y` line is
-  the pin itself and is fine).
+  conflict and hold the auto-merging group red. `strictly` fails the build only when the
+  `platform(...)` line names a higher version than the `strictly` value (PR #39); a lower
+  `platform(...)` line is silently upgraded to the `strictly` value, and a conflicting transitive
+  request (such as `maps-compose`'s) is silently downgraded to it. The convention is therefore to
+  change both lines together and keep them equal; the review step for any BOM bump or
+  `maps-compose` bump is the no-downgrade proof, run on both classpaths:
+
+  ```
+  cd mobile/android
+  ./gradlew -q :app:dependencyInsight --configuration debugRuntimeClasspath --dependency androidx.compose:compose-bom
+  ./gradlew -q :app:dependencyInsight --configuration releaseRuntimeClasspath --dependency androidx.compose:compose-bom
+  ```
+
+  No `compose-bom:X -> Y` line with X different from Y may remain (the `{strictly Y} -> Y` line is
+  the pin itself and is fine). The proof needs `local.properties` with `sdk.dir` (or
+  `ANDROID_HOME`) and network access; it only resolves configurations, so it runs on any JDK (the
+  JDK 17 toolchain is needed only for `test` and `assembleDebug`).
   For any diff touching `mobile/android/app/build.gradle.kts` or `mobile/android/build.gradle.kts`:
   open the repo's **Security → Dependabot alerts** tab and check
   for an open HIGH/CRITICAL alert on a dependency the diff touches (added, bumped, or left
