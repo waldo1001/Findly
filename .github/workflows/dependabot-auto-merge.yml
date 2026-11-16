@@ -1,0 +1,65 @@
+name: dependabot-auto-merge
+
+# Turns on GitHub auto-merge for Dependabot's minor and patch version-update PRs, so a green bump
+# merges by itself and a red one waits for a human. Before this, every Dependabot PR waited for a
+# manual merge: the five opened on 2026-11-02 were still open two weeks later, four of them green.
+#
+# What merges it, and when: this job only ENABLES auto-merge on the PR. GitHub performs the merge,
+# and only once every required status check on main (branch protection: test, mutation,
+# android-build, ios-package, ios-build, with "require branches to be up to date") has passed on the
+# PR's head. A red or pending check means no merge. Nothing here bypasses branch protection.
+#
+# What it never merges: a major version bump (semver-major), anything not opened by Dependabot, and
+# any PR from a fork.
+#
+# Trigger is `pull_request`, never `pull_request_target` (docs/security-review-checklist.md section 2):
+# Dependabot's branches live in this repository, and this job checks out and executes no PR code at
+# all. It reads Dependabot's own metadata and makes one API call.
+#
+# Permissions, with the reason the checklist asks for: `pull-requests: write` to enable auto-merge on
+# the PR, `contents: write` because the merge that auto-merge performs is attributed to this token.
+# No secrets are used, no `id-token`. Both scopes are confined to this one workflow.
+#
+# Known consequence, by GitHub's design: a merge made through the workflow's GITHUB_TOKEN does not
+# start new workflow runs. So the push to main that the auto-merge produces does NOT run android.yml
+# (no internal-track publish for that commit) and does NOT run android-dependency-graph.yml. Both
+# run again on the next ordinary push that touches mobile/android. The bump was built and tested on
+# the PR itself, on top of an up-to-date main, before GitHub merged it.
+#
+# One-time repo setting this needs: Settings > General > Pull Requests > "Allow auto-merge". Until
+# that is on, the last step fails visibly on each Dependabot PR and nothing is merged.
+on:
+  pull_request:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  auto-merge:
+    # Unique job name, same reason as android-build: status checks are matched by job name.
+    name: dependabot-auto-merge
+    # The PR author, not github.actor: a human who pushes to or re-runs a Dependabot PR must not
+    # change who this job thinks opened it. The repository check keeps forks out.
+    if: >-
+      github.event.pull_request.user.login == 'dependabot[bot]' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - name: Read Dependabot metadata
+        id: meta
+        # Third-party action: pinned to a full commit SHA (checklist section 2, action pinning).
+        uses: dependabot/fetch-metadata@25dd0e34f4fe68f24cc83900b1fe3fe149efef98 # v3.1.0
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Enable auto-merge for a minor or patch bump
+        # For a grouped PR `update-type` is the highest bump in the group, so one major in the
+        # group keeps the whole PR manual.
+        if: >-
+          steps.meta.outputs.update-type == 'version-update:semver-minor' ||
+          steps.meta.outputs.update-type == 'version-update:semver-patch'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: gh pr merge --auto --merge "$PR_URL"

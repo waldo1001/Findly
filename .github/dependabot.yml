@@ -20,6 +20,16 @@ updates:
     # Single-developer, hobby-scale project (CLAUDE.md: "a few euros/month" cost target, one
     # developer): a handful of open PRs at a time is reviewable, a flood is not.
     open-pull-requests-limit: 5
+    # One PR a week for everything that is a minor or patch bump, instead of one PR per artifact
+    # (2026-11-02 opened five at once and all five sat unmerged for two weeks). A major bump is
+    # left out of the group on purpose: it stays its own PR and a human merges it.
+    # .github/workflows/dependabot-auto-merge.yml turns on GitHub auto-merge for the grouped PR,
+    # so it merges by itself once every required check on main is green, and never before.
+    groups:
+      android-minor-patch:
+        update-types:
+          - "minor"
+          - "patch"
     labels:
       - "dependencies"
       - "android"

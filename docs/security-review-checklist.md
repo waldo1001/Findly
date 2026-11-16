@@ -53,7 +53,10 @@ Scope of review: the task's full diff (`git diff <merge-base>..<branch>`), all *
   `releaseRuntimeClasspath`) to GitHub on every push to `main`; `.github/dependabot.yml` opens
   weekly version-update PRs for `mobile/android`, each gated through the existing `android`
   workflow's `./gradlew test` + `assembleDebug` like any other PR — a version bump is never merged
-  un-built. For any diff touching `mobile/android/app/build.gradle.kts` or
+  un-built. Minor and patch bumps arrive as one grouped PR and
+  `.github/workflows/dependabot-auto-merge.yml` enables GitHub auto-merge on it: GitHub merges it
+  only when every required check on `main` is green, a major bump is never auto-merged, and a red
+  grouped PR waits for a human. For any diff touching `mobile/android/app/build.gradle.kts` or
   `mobile/android/build.gradle.kts`: open the repo's **Security → Dependabot alerts** tab and check
   for an open HIGH/CRITICAL alert on a dependency the diff touches (added, bumped, or left
   unchanged); do not merge without an explicit, reported reason if one exists. A blank alert list
