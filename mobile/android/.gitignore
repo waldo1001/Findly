@@ -2,9 +2,9 @@
 .gradle/
 build/
 local.properties
-# Not committed: this repo's dev/CI sandboxes had no verified JDK/Gradle toolchain to produce a
-# trustworthy wrapper jar (mobile/android/README.md's Build section). Generate locally with
-# `gradle wrapper --gradle-version 9.4.1 --distribution-type bin` when you have one.
+# The Gradle wrapper (gradlew, gradle/wrapper/*) IS committed and deliberately not ignored; its
+# Gradle version is in gradle/wrapper/gradle-wrapper.properties (mobile/android/README.md's
+# Build section).
 
 # IDE
 .idea/
