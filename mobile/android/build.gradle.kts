@@ -8,7 +8,7 @@
 // 9.0" — kotl.in/gradle/agp-built-in-kotlin). The Compose/serialization Kotlin compiler
 // sub-plugins are unaffected and still applied the same way.
 plugins {
-    id("com.android.application") version "9.5.1" apply false
+    id("com.android.application") version "9.5.2" apply false
     id("org.jetbrains.kotlin.plugin.compose") version "2.4.21" apply false
     id("org.jetbrains.kotlin.plugin.serialization") version "2.4.21" apply false
     // H1 (specs/003 §13): reads app/google-services.json to configure the real Firebase project.
@@ -19,5 +19,5 @@ plugins {
     // Maven Central (newest 2.3.12). KSP 2.3.10's release notes carry a fix specifically for
     // Kotlin 2.4.0, and CI's `./gradlew test` + `assembleRelease` ran `:app:kspDebugKotlin` clean
     // against 2.4.20. Dependabot bumps this line on its own schedule.
-    id("com.google.devtools.ksp") version "2.3.13" apply false
+    id("com.google.devtools.ksp") version "2.3.14" apply false
 }
